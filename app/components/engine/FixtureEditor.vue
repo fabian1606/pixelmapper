@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureNode from './FixtureNode.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
+import { useHistory } from './composables/use-history';
+import { MoveFixtureCommand } from './commands/move-fixture-command';
 
 interface Props {
   fixtures: Fixture[];
@@ -25,6 +27,7 @@ const WORLD_HEIGHT   = 3000;
 
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel } = useCamera();
+const history = useHistory();
 
 const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove, onMouseUp } =
   useSelection(
@@ -32,6 +35,9 @@ const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove,
     () => WORLD_WIDTH,
     () => WORLD_HEIGHT,
     viewportToWorld,
+    (before, after) => {
+      history.execute(new MoveFixtureCommand(props.fixtures, before, after));
+    },
   );
 
 // ─── Viewport ref (for bounding rect) ────────────────────────────────────────
@@ -64,10 +70,25 @@ function getFixtureScreenPos(f: Fixture) {
   return worldToViewport(f.fixturePosition.x * WORLD_WIDTH, f.fixturePosition.y * WORLD_HEIGHT);
 }
 
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+function handleKeyDown(e: KeyboardEvent) {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+
+  if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); history.undo(); fixtureCanvas.value?.draw(); }
+  if (e.key === 'z' &&  e.shiftKey) { e.preventDefault(); history.redo(); fixtureCanvas.value?.draw(); }
+  if (e.key === 'y')                { e.preventDefault(); history.redo(); fixtureCanvas.value?.draw(); }
+}
+
 onMounted(() => {
   // Center camera on the world area (0-WORLD_WIDTH)
   camera.x = (props.width - WORLD_WIDTH * camera.scale) / 2;
   camera.y = (props.height - WORLD_HEIGHT * camera.scale) / 2;
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
 });
 
 // ─── Event delegation ────────────────────────────────────────────────────────
@@ -123,6 +144,7 @@ function handleMouseUp() {
         :radius="(fixture.fixtureSize?.x ?? 1) * FIXTURE_RADIUS * camera.scale"
         :is-selected="selectedIds.has(fixture.id)"
         :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
+        :show-labels="camera.scale > 1.2"
         :style="{
           left: `${getFixtureScreenPos(fixture).x}px`,
           top:  `${getFixtureScreenPos(fixture).y}px`,

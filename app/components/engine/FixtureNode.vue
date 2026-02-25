@@ -6,6 +6,7 @@ interface Props {
   radius?: number;
   isDragging?: boolean;
   isSelected?: boolean;
+  showLabels?: boolean;
 }
 
 interface Emits {
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
   radius: 18,
   isDragging: false,
   isSelected: false,
+  showLabels: true,
 });
 
 const emit = defineEmits<Emits>();
@@ -31,7 +33,7 @@ const emit = defineEmits<Emits>();
     }"
     @mousedown.prevent.stop="emit('dragstart', $event)"
   >
-    <span class="fixture-label">{{ fixture.id }}</span>
+    <div v-if="showLabels" class="fixture-label">{{ fixture.name }}</div>
   </div>
 </template>
 
@@ -64,10 +66,16 @@ const emit = defineEmits<Emits>();
 }
 
 .fixture-label {
-  font-size: 9px;
-  font-family: monospace;
-  color: rgba(255, 255, 255, 0.8);
+  position: absolute;
+  top: 120%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  font-size: 15px;
+  font-family: Inter, sans-serif;
+  color: #adadade6;
   pointer-events: none;
-  text-shadow: 0 0 4px rgba(0, 0, 0, 1);
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 </style>

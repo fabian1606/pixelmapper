@@ -14,6 +14,7 @@ export interface FixtureSize {
 
 export class Fixture {
   id: string | number;
+  name: string;
   channels: Channel[];
 
   /**
@@ -29,12 +30,13 @@ export class Fixture {
   /**
    * The beams of this fixture. Each beam has a local offset relative to `fixturePosition`.
    * For simple single-LED fixtures, this is always one Beam at 0|0.
-   * Complex fixtures (e.g., multi-pixel LED bars) may have many beams.
+   * Complex fixtures (e.g., multi-pixel LED bars) have many beams.
    */
   beams: Beam[];
 
   constructor(id: string | number, channels: Channel[] = []) {
     this.id = id;
+    this.name = `Fixture ${id}`;
     this.channels = channels;
     this.fixturePosition = { x: 0, y: 0 };
     this.fixtureSize = { x: 1, y: 1 };

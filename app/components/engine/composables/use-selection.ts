@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Point } from './use-camera';
+import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
 
 export type Interaction =
   | { type: 'idle' }
@@ -20,19 +21,24 @@ function toNormalized(px: number, max: number): number {
 /**
  * Manages multi-selection (marquee + shift-click) and group drag logic.
  *
- * @param getFixtures  Getter for the fixtures array.
- * @param getWidth     Getter for the world width in pixels.
- * @param getHeight    Getter for the world height in pixels.
- * @param toWorld      Converts viewport-space x/y to world-space (from useCamera).
+ * @param getFixtures       Getter for the fixtures array.
+ * @param getWidth          Getter for the world width in pixels.
+ * @param getHeight         Getter for the world height in pixels.
+ * @param toWorld           Converts viewport-space x/y to world-space (from useCamera).
+ * @param onDragComplete    Called at drag end with before/after snapshots for history.
  */
 export function useSelection(
   getFixtures: () => Fixture[],
   getWidth: () => number,
   getHeight: () => number,
   toWorld: (vx: number, vy: number) => Point,
+  onDragComplete?: (before: FixturePositionSnapshot[], after: FixturePositionSnapshot[]) => void,
 ) {
   const selectedIds = ref<Set<string | number>>(new Set());
   const interaction = ref<Interaction>({ type: 'idle' });
+
+  // Captures positions at drag-start so we can build an undo-able command later
+  let beforeSnapshot: FixturePositionSnapshot[] = [];
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
     if ((event.target as HTMLElement).closest('.fixture-node')) return;
@@ -55,9 +61,13 @@ export function useSelection(
     const startPositions = new Map<string | number, Point>();
     const w = getWidth();
     const h = getHeight();
+
+    // Capture BEFORE positions for undo history
+    beforeSnapshot = [];
     for (const f of getFixtures()) {
       if (selectedIds.value.has(f.id)) {
         startPositions.set(f.id, { x: f.fixturePosition.x * w, y: f.fixturePosition.y * h });
+        beforeSnapshot.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
       }
     }
     interaction.value = { type: 'drag', startWorld: world, startPositions };
@@ -87,6 +97,7 @@ export function useSelection(
 
   function onMouseUp() {
     const iv = interaction.value;
+
     if (iv.type === 'marquee') {
       const minX = Math.min(iv.start.x, iv.end.x);
       const maxX = Math.max(iv.start.x, iv.end.x);
@@ -101,7 +112,21 @@ export function useSelection(
         if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) hit.add(f.id);
       }
       selectedIds.value = hit;
+    } else if (iv.type === 'drag' && beforeSnapshot.length > 0 && onDragComplete) {
+      // Capture AFTER positions and notify parent for history recording
+      const afterSnapshot: FixturePositionSnapshot[] = beforeSnapshot.map(snap => {
+        const f = getFixtures().find(f => f.id === snap.id);
+        return { id: snap.id, x: f?.fixturePosition.x ?? snap.x, y: f?.fixturePosition.y ?? snap.y };
+      });
+
+      // Only record if something actually moved
+      const didMove = beforeSnapshot.some(
+        (b, i) => b.x !== afterSnapshot.at(i)?.x || b.y !== afterSnapshot.at(i)?.y,
+      );
+      if (didMove) onDragComplete(beforeSnapshot, afterSnapshot);
+      beforeSnapshot = [];
     }
+
     interaction.value = { type: 'idle' };
   }
 

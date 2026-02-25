@@ -25,6 +25,11 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
   const col = i % COLS;
   
   const fixture = new Fixture(i, [new RedChannel(), new GreenChannel(), new BlueChannel(), new DimmerChannel()]);
+  if (i === 0) fixture.name = 'Front Left';
+  if (i === 9) fixture.name = 'Front Right';
+  if (i === 30) fixture.name = 'Back Left';
+  if (i === 39) fixture.name = 'Back Right';
+
   fixture.fixturePosition = {
     x: startX + col * stepX,
     y: startY + row * stepY,

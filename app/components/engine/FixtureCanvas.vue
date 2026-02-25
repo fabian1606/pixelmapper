@@ -36,27 +36,29 @@ function draw() {
   const { x: camX, y: camY, scale } = props.camera;
 
   // 1. Procedural Infinite Grid
-  // We draw dots only within the viewport area
-  ctx.beginPath();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
-  
-  const startX = Math.floor((-camX / scale) / DOT_SPACING) * DOT_SPACING;
-  const startY = Math.floor((-camY / scale) / DOT_SPACING) * DOT_SPACING;
-  const endX   = startX + (props.viewportWidth / scale) + DOT_SPACING * 2;
-  const endY   = startY + (props.viewportHeight / scale) + DOT_SPACING * 2;
+  // We draw dots only within the viewport area and only if zoomed in enough
+  if (scale > 0.4) {
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    
+    const startX = Math.floor((-camX / scale) / DOT_SPACING) * DOT_SPACING;
+    const startY = Math.floor((-camY / scale) / DOT_SPACING) * DOT_SPACING;
+    const endX   = startX + (props.viewportWidth / scale) + DOT_SPACING * 2;
+    const endY   = startY + (props.viewportHeight / scale) + DOT_SPACING * 2;
 
-  for (let gx = startX; gx <= endX; gx += DOT_SPACING) {
-    for (let gy = startY; gy <= endY; gy += DOT_SPACING) {
-      // Convert world grid point to screen space
-      const sx = gx * scale + camX;
-      const sy = gy * scale + camY;
-      
-      // Draw tiny dot
-      ctx.moveTo(sx, sy);
-      ctx.arc(sx, sy, 1.2 * scale, 0, Math.PI * 2);
+    for (let gx = startX; gx <= endX; gx += DOT_SPACING) {
+      for (let gy = startY; gy <= endY; gy += DOT_SPACING) {
+        // Convert world grid point to screen space
+        const sx = gx * scale + camX;
+        const sy = gy * scale + camY;
+        
+        // Draw tiny dot
+        ctx.moveTo(sx, sy);
+        ctx.arc(sx, sy, 1.2 * scale, 0, Math.PI * 2);
+      }
     }
+    ctx.fill();
   }
-  ctx.fill();
 
   // 2. Fixture Rendering with Frustum Culling
   // We don't use ctx.setTransform for fixtures to avoid blurry text/lines, 
