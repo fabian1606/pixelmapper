@@ -1,5 +1,7 @@
 export type ChannelType = 'RED' | 'GREEN' | 'BLUE' | 'DIMMER' | 'PAN' | 'TILT' | 'STROBE' | 'CUSTOM';
 
+export type EffectDirection = 'FORWARD' | 'BACKWARD' | 'CENTER_OUT' | 'OUTSIDE_IN' | 'SPATIAL_X' | 'SPATIAL_Y' | 'SPATIAL_RADIAL';
+
 export interface EffectContext {
   /**
    * Continuous time value in milliseconds.
@@ -12,11 +14,19 @@ export interface EffectContext {
   index: number;
 
   /**
-   * Reserved for future spatial coordinates (X, Y, Z).
+   * The total numbers of fixtures in the engine.
    */
-  x?: number;
-  y?: number;
-  z?: number;
+  fixtureCount: number;
+
+  /**
+   * The physical X position of the fixture in normalized world space (0.0 - 1.0).
+   */
+  x: number;
+
+  /**
+   * The physical Y position of the fixture in normalized world space (0.0 - 1.0).
+   */
+  y: number;
 }
 
 export interface Effect {
@@ -24,6 +34,11 @@ export interface Effect {
    * The channel type this effect applies to (e.g., 'RED', 'DIMMER').
    */
   targetChannel?: ChannelType;
+
+  /**
+   * The direction the effect propagates across the fixtures.
+   */
+  direction?: EffectDirection;
 
   /**
    * The strength (amplitude) of the effect to apply around the base value (usually 0 to 255).
@@ -41,8 +56,8 @@ export interface Effect {
   update?(deltaTime: number): void;
 
   /**
-   * Renders the effect value for a given context.
-   * Expected to return a relative value to be added to the base value.
+   * Renders the raw effect wave for a given context.
+   * Expected to return a normalized shape value between -1 and 1.
    * @param context The current context the effect is being rendered for.
    */
   render(context: EffectContext): number;

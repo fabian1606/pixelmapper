@@ -43,20 +43,37 @@ export class EffectEngine {
       const context: EffectContext = {
         time: timeMs,
         index: i,
+        fixtureCount: fixtures.length,
+        x: fixture.fixturePosition.x,
+        y: fixture.fixturePosition.y,
       };
 
       // Evaluate each effect and combine the results via additive blending.
       for (const effect of this.effects) {
-        const renderValue = effect.render(context);
+        const waveValue = effect.render(context); // Expects -1 to 1
 
         // If the effect specifies a target channel, apply it to those specific channels 
         if (effect.targetChannel) {
           const targetChannels = fixture.getChannelsByType(effect.targetChannel);
           for (const channel of targetChannels) {
-            const combined = channel.value + renderValue;
-            channel.value = Math.min(Math.max(Math.round(combined), 0), 255);
+            // Determine maximum and minimum achievable values based on strength
+            const targetMax = Math.min(channel.baseValue + effect.strength, 255);
+            const targetMin = Math.max(channel.baseValue - effect.strength, 0);
+
+            // Map the expected [-1, 1] wave shape to the [targetMin, targetMax] range
+            const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
+
+            // Calculate relative offset it contributes
+            const offset = mappedValue - channel.baseValue;
+
+            channel.value += offset;
           }
         }
+      }
+
+      // Clamp values strictly to 0-255 after all effects are applied
+      for (const channel of fixture.channels) {
+        channel.value = Math.min(Math.max(Math.round(channel.value), 0), 255);
       }
     }
   }
