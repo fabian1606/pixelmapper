@@ -22,3 +22,6 @@ logs
 .env
 .env.*
 !.env.example
+
+# Open Fixture Library clone (local data source, not committed)
+ofl-data/

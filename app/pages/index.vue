@@ -3,20 +3,25 @@ import { ref, onMounted, onUnmounted, watchEffect, shallowRef, computed } from '
 import { SineEffect } from '~/utils/engine/effects/sine-effect';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
-import { RedChannel, GreenChannel, BlueChannel, DimmerChannel } from '~/utils/engine/core/channel';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
+import DeleteConfirmDialog from '~/components/engine/DeleteConfirmDialog.vue';
 import FixtureEditor from '~/components/engine/FixtureEditor.vue';
 import FixtureSidebar from '~/components/engine/FixtureSidebar.vue';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { GroupNodesCommand, UngroupNodesCommand } from '~/components/engine/commands/group-command';
+import { DeleteNodesCommand } from '~/components/engine/commands/delete-node-command';
+import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
+import AddFixtureDialog from '~/components/engine/AddFixtureDialog.vue';
+import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuShortcut
+  ContextMenuShortcut,
 } from '@/components/ui/context-menu';
-import { useHistory } from '~/components/engine/composables/use-history';
-import { GroupNodesCommand, UngroupNodesCommand } from '~/components/engine/commands/group-command';
+
 
 const COLS = 5;
 const ROWS = 4;
@@ -34,7 +39,7 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
   const row = Math.floor(i / COLS);
   const col = i % COLS;
   
-  const fixture = new Fixture(i, [new RedChannel(), new GreenChannel(), new BlueChannel(), new DimmerChannel()]);
+  const fixture = Fixture.createRGBFixture(i);
   if (i === 0) fixture.name = 'Front Left';
   if (i === 9) fixture.name = 'Front Right';
   if (i === 30) fixture.name = 'Back Left';
@@ -164,6 +169,33 @@ const hasSelectedGroup = computed(() => {
 });
 
 let nextGroupId = 1;
+let nextFixtureId = fixtureCount;
+
+const addDialogOpen = ref(false);
+
+function handleAddOflFixtures(fixtures: Fixture[]) {
+  // 1. Prepare fixtures (assign IDs and positions)
+  fixtures.forEach((f, i) => {
+    f.id = `ofl-${nextFixtureId++}`;
+    // Spread them out slightly if multiple
+    f.fixturePosition = { 
+      x: 0.5 + (i * 0.02), 
+      y: 0.5 + (i * 0.02) 
+    };
+  });
+
+  // 2. Execute history command
+  const command = new AddFixturesCommand(sceneNodes.value, fixtures);
+  history.execute(command);
+  
+  // 3. Select the new fixtures
+  const next = new Set(selectedIds.value);
+  for (const f of fixtures) {
+    next.add(f.id);
+  }
+  selectedIds.value = next;
+}
+
 
 function handleGroup() {
   if (selectedIds.value.size === 0) return;
@@ -212,31 +244,72 @@ function handleUngroupSelected() {
   }
 }
 
-function handleKeyDown(e: KeyboardEvent) {
-  const ctrl = e.ctrlKey || e.metaKey;
-  if (!ctrl) return;
-  if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); history.undo(); }
-  if (e.key === 'z' &&  e.shiftKey) { e.preventDefault(); history.redo(); }
-  if (e.key === 'y')                { e.preventDefault(); history.redo(); }
-  if (e.key.toLowerCase() === 'g' && !e.shiftKey) { e.preventDefault(); handleGroup(); }
-  if (e.key.toLowerCase() === 'g' && e.shiftKey) { e.preventDefault(); handleUngroupSelected(); }
+const deleteDialogOpen = ref(false);
+const nodesPendingDelete = ref<SceneNode[]>([]);
+
+function handleDeleteNode(node: SceneNode) {
+  nodesPendingDelete.value = [node];
+  deleteDialogOpen.value = true;
 }
 
-onMounted(() => { 
-  window.addEventListener('keydown', handleKeyDown);
-  animFrameId = requestAnimationFrame(renderLoop); 
-});
+function handleDeleteSelected() {
+  if (selectedIds.value.size === 0) return;
 
-onUnmounted(() => { 
-  window.removeEventListener('keydown', handleKeyDown);
-  cancelAnimationFrame(animFrameId); 
-});
+  const nodesToDelete: SceneNode[] = [];
+  
+  function findTopLevelSelected(nodes: SceneNode[]) {
+    for (const node of nodes) {
+      if (selectedIds.value.has(node.id)) {
+        nodesToDelete.push(node);
+      } else if (node instanceof FixtureGroup) {
+        findTopLevelSelected(node.children);
+      }
+    }
+  }
+  
+  findTopLevelSelected(sceneNodes.value);
+  
+  if (nodesToDelete.length === 0) return;
+
+  nodesPendingDelete.value = nodesToDelete;
+  deleteDialogOpen.value = true;
+}
+
+function confirmDelete() {
+  if (nodesPendingDelete.value.length === 0) return;
+
+  const command = new DeleteNodesCommand(sceneNodes.value, nodesPendingDelete.value);
+  history.execute(command);
+  
+  // Clear selection
+  selectedIds.value = new Set();
+  nodesPendingDelete.value = [];
+}
+
+// ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
+useShortcuts([
+  // History
+  { key: 'z',      ctrl: true,                label: 'Undo',            handler: () => history.undo() },
+  { key: 'z',      ctrl: true, shift: true,   label: 'Redo',            handler: () => history.redo() },
+  { key: 'y',      ctrl: true,                label: 'Redo',            handler: () => history.redo() },
+  // Scene operations
+  { key: 'g',      ctrl: true,                label: 'Group',           handler: handleGroup },
+  { key: 'g',      ctrl: true, shift: true,   label: 'Ungroup',         handler: handleUngroupSelected },
+  // Deletion — only when something is selected
+  { key: 'Delete',    label: 'Delete Selected', handler: handleDeleteSelected },
+  { key: 'Backspace', label: 'Delete Selected', handler: handleDeleteSelected },
+  // Add fixture
+  { key: 'a',      shift: true,               label: 'Add Fixture',     handler: () => { addDialogOpen.value = true; } },
+]);
+
+onMounted(() =>  { animFrameId = requestAnimationFrame(renderLoop); });
+onUnmounted(() => { cancelAnimationFrame(animFrameId); });
 </script>
 
 <template>
   <SidebarProvider>
     <div class="flex h-screen w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
-      <FixtureSidebar 
+      <FixtureSidebar
         class="shrink-0"
         :nodes="sceneNodes"
         :selected-ids="selectedIds"
@@ -244,19 +317,23 @@ onUnmounted(() => {
         @group="handleGroup"
         @ungroup="handleUngroup"
         @zoom-to="handleZoomTo"
+        @request-add-fixture="addDialogOpen = true"
+        @delete-node="handleDeleteNode"
       />
       <main class="flex-1 relative">
         <ContextMenu>
           <ContextMenuTrigger as-child>
-            <div class="w-full h-full">
-              <FixtureEditor 
+              <FixtureEditor
                 ref="fixtureEditor"
                 v-model:selected-ids="selectedIds"
-                :fixtures="flatFixtures" 
-                :colors="fixtureColors" 
+                :fixtures="flatFixtures"
+                :colors="fixtureColors"
                 class="w-full h-full"
+                @delete-fixture="handleDeleteNode"
+                @delete-selected="handleDeleteSelected"
+                @group="handleGroup"
+                @ungroup="handleUngroup"
               />
-            </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem @click="handleGroup">
@@ -267,9 +344,26 @@ onUnmounted(() => {
               Ungroup
               <ContextMenuShortcut>⇧⌘G</ContextMenuShortcut>
             </ContextMenuItem>
+            <ContextMenuSeparator v-if="selectedIds.size > 0" />
+            <ContextMenuItem v-if="selectedIds.size > 0" class="text-destructive focus:text-destructive" @click="handleDeleteSelected">
+              Delete
+              <ContextMenuShortcut>Del</ContextMenuShortcut>
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       </main>
     </div>
   </SidebarProvider>
+
+  <DeleteConfirmDialog
+    v-model:open="deleteDialogOpen"
+    :node-name="nodesPendingDelete[0]?.name || ''"
+    :count="nodesPendingDelete.length"
+    @confirm="confirmDelete"
+  />
+
+  <AddFixtureDialog 
+    v-model:open="addDialogOpen" 
+    @add="handleAddOflFixtures"
+  />
 </template>

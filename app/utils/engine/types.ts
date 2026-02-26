@@ -1,4 +1,5 @@
-export type ChannelType = 'RED' | 'GREEN' | 'BLUE' | 'DIMMER' | 'PAN' | 'TILT' | 'STROBE' | 'CUSTOM';
+export type ChannelType = 'RED' | 'GREEN' | 'BLUE' | 'WHITE' | 'WARM_WHITE' | 'COOL_WHITE' | 'AMBER' | 'UV' | 'DIMMER' | 'PAN' | 'TILT' | 'STROBE' | 'CUSTOM';
+
 
 export type EffectDirection = 'FORWARD' | 'BACKWARD' | 'CENTER_OUT' | 'OUTSIDE_IN' | 'SPATIAL_X' | 'SPATIAL_Y' | 'SPATIAL_RADIAL';
 

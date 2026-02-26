@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false });
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SpatialVector } from '~/utils/engine/types';
@@ -20,6 +21,10 @@ interface Props {
 
 interface Emits {
   (e: 'spatialChange', fixture: Fixture, vector: SpatialVector): void;
+  (e: 'deleteFixture', fixture: Fixture): void;
+  (e: 'delete-selected'): void;
+  (e: 'group'): void;
+  (e: 'ungroup', group: FixtureGroup): void;
 }
 
 const props = defineProps<Props>();
@@ -57,11 +62,19 @@ onUnmounted(() => {
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel, centerOn } = useCamera();
 const history = useHistory();
+function handleDeleteRequest(fixture: Fixture) {
+  // If the fixture is part of the current selection, delete the entire selection
+  if (selectedIds.value.has(fixture.id)) {
+    emit('delete-selected');
+  } else {
+    emit('deleteFixture', fixture);
+  }
+}
 
 // ─── Zoom to Node ────────────────────────────────────────────────────────────
 function zoomTo(node: SceneNode) {
   let avgPos = { x: 0, y: 0 };
-  
+
   if (node instanceof FixtureGroup) {
     const groupFixtures = node.getAllFixtures();
     if (groupFixtures.length === 0) return;
@@ -72,7 +85,6 @@ function zoomTo(node: SceneNode) {
     avgPos.y = (node as Fixture).fixturePosition.y;
   }
 
-  // Zoom in a bit if we're zoomed far out
   if (camera.scale < 1.0) {
     camera.scale = 1.0;
   }
@@ -170,7 +182,6 @@ function handleWindowMouseMove(e: MouseEvent) {
   const r = viewportEl.value?.getBoundingClientRect();
   if (!r) return;
 
-  // Convert viewport mouse to world coordinates
   const vx = e.clientX - r.left;
   const vy = e.clientY - r.top;
   const wx = (vx - camera.x) / camera.scale;
@@ -210,6 +221,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
 <template>
   <div
     ref="viewportEl"
+    v-bind="$attrs"
     class="viewport"
     @wheel.prevent="handleWheel"
     @mousedown="handleMouseDown"
@@ -286,6 +298,9 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
           transform: 'translate(-50%, -50%)',
         }"
         @dragstart="handleDragStart($event, fixture)"
+        @delete="handleDeleteRequest"
+        @group="emit('group')"
+        @ungroup="g => emit('ungroup', g)"
       />
     </template>
   </div>
@@ -300,7 +315,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
   overflow: hidden;
   cursor: crosshair;
   user-select: none;
-  outline: none; /* remove focus ring from tabindex */
+  outline: none;
 }
 
 .gradient-svg {

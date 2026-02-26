@@ -1,5 +1,8 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false });
 import type { Fixture } from '~/utils/engine/core/fixture';
+import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
+import FixtureContextMenu from './FixtureContextMenu.vue';
 
 interface Props {
   fixture: Fixture;
@@ -11,6 +14,9 @@ interface Props {
 
 interface Emits {
   (e: 'dragstart', event: MouseEvent): void;
+  (e: 'delete', fixture: Fixture): void;
+  (e: 'group'): void;
+  (e: 'ungroup', group: FixtureGroup): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -24,17 +30,28 @@ const emit = defineEmits<Emits>();
 </script>
 
 <template>
-  <div
-    class="fixture-node"
-    :class="{ 'is-dragging': isDragging, 'is-selected': isSelected }"
-    :style="{
-      width:  `${radius * 2}px`,
-      height: `${radius * 2}px`,
-    }"
-    @mousedown.prevent.stop="emit('dragstart', $event)"
+  <FixtureContextMenu
+    :node="fixture as unknown as SceneNode"
+    :can-delete="true"
+    :can-group="true"
+    :can-ungroup="!!fixture.parent"
+    @delete="emit('delete', fixture)"
+    @group="emit('group')"
+    @ungroup="emit('ungroup', fixture.parent!)"
   >
-    <div v-if="showLabels" class="fixture-label">{{ fixture.name }}</div>
-  </div>
+    <div
+      class="fixture-node"
+      v-bind="$attrs"
+      :class="{ 'is-dragging': isDragging, 'is-selected': isSelected }"
+      :style="{
+        width:  `${radius * 2}px`,
+        height: `${radius * 2}px`,
+      }"
+      @mousedown.prevent.stop="emit('dragstart', $event)"
+    >
+      <div v-if="showLabels" class="fixture-label">{{ fixture.name }}</div>
+    </div>
+  </FixtureContextMenu>
 </template>
 
 <style scoped>

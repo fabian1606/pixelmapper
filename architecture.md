@@ -112,6 +112,32 @@ export class SawEffect extends BaseOscillatorEffect {
 - Positions are normalized (0–1), making them resolution-independent.
 - The updated positions are immediately used by spatial direction modes (SPATIAL_X/Y/RADIAL) in the next render frame.
 
+### Context Menu System
+
+`FixtureContextMenu.vue` is the single shared context menu wrapper used by every interactive node.
+- Accepts capability flags (`canZoom`, `canGroup`, `canUngroup`, `canDelete`) to control which items appear.
+- Default slot is used as the `ContextMenuTrigger`, so any element can be wrapped.
+- Internally renders `DeleteConfirmDialog` on delete requests.
+- Used by `FixtureNode` (2D canvas), `FixtureSidebarNode` (sidebar), and `FixtureGroup` nodes.
+
+### Delete Flow
+
+1. User right-clicks a fixture → context menu shows **Delete** with `Del` shortcut label.
+2. Alternatively, user presses `Del` or `Backspace` while a fixture is selected in the 2D editor.
+3. `DeleteConfirmDialog` is shown with the fixture name and an undo hint.
+4. On confirm, `DeleteNodeCommand` is executed via `useHistory()` → supports undo with `Cmd+Z`.
+
+---
+
+## Fixture Library (OFL)
+
+The system integrates with the **Open Fixture Library (OFL)** to provide a vast database of standardized fixture definitions.
+
+- **Local Data Source:** A shallow clone of the OFL repository exists at `ofl-data/` (gitignored).
+- **Server API:** Nuxt server routes (`/api/fixtures`) browse and serve the local JSON definitions.
+- **Fixture Factory:** `createFixtureFromOfl` translates OFL definitions into internal `Fixture` and `Channel` structures, mapping capabilities and colors to the internal engine types.
+- **Library Browser:** A grouped accordion UI in a global dialog allows users to search, select, and configure fixtures (Universe, DMX Address, Mode) before adding them to the scene.
+
 ---
 
 ## Directory Layout
@@ -130,10 +156,14 @@ app/utils/engine/
 
 app/components/engine/
 ├── FixtureSidebar.vue          # Figma-style sidebar layer hierarchy
-├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures with Context Menu
+├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures; uses FixtureContextMenu
+├── FixtureContextMenu.vue      # Unified context menu; capability flags control visible items
+├── DeleteConfirmDialog.vue     # AlertDialog confirmation before deleting a node
 ├── commands/
-│   ├── move-fixture-command.ts # History command for dragging fixtures
-│   └── group-command.ts        # History commands for grouping/ungrouping
+│   ├── move-fixture-command.ts  # History command for dragging fixtures
+│   ├── group-command.ts         # History commands for grouping/ungrouping
+│   ├── rename-command.ts        # History command for renaming a node
+│   └── delete-node-command.ts   # History command for deleting a fixture or group (undo-able)
 └── FixtureEditor.vue           # 2D drag-and-drop fixture positioning UI
 ```
 

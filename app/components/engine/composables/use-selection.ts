@@ -83,25 +83,40 @@ export function useSelection(
 
     if (!targetNode) return;
 
+    // ── Compute the effective selection locally ────────────────────────────────
+    // We must NOT re-read selectedIds.value after writing to it: since selectedIds
+    // is backed by a defineModel customRef, the write enqueues a parent emit but
+    // the local value may still be stale on the very next synchronous read.
+    // Using a plain local Set guarantees startPositions reflects the NEW selection.
+    let effectiveSelectedIds: Set<string | number>;
+
     if (event.shiftKey) {
       const next = new Set(selectedIds.value);
       next.has(targetNode.id) ? next.delete(targetNode.id) : next.add(targetNode.id);
-      selectedIds.value = next;
+      effectiveSelectedIds = next;
     } else if (!selectedIds.value.has(targetNode.id)) {
-      selectedIds.value = new Set([targetNode.id]);
+      // Fixture is not yet selected — switch selection to it
+      effectiveSelectedIds = new Set([targetNode.id]);
+    } else {
+      // Already selected — keep current selection (multi-drag)
+      effectiveSelectedIds = new Set(selectedIds.value);
     }
+
+    // Propagate to the model ref (notifies parent + canvas)
+    selectedIds.value = effectiveSelectedIds;
 
     const startPositions = new Map<string | number, Point>();
     const w = getWidth();
     const h = getHeight();
 
-    // Capture BEFORE positions for undo history
+    // Capture BEFORE positions for undo history — use effectiveSelectedIds so
+    // we always capture the NEWLY selected fixtures, not a potentially stale read.
     beforeSnapshot = [];
     for (const f of getFixtures()) {
       let isSelected = false;
       let c: SceneNode | null = f as unknown as SceneNode;
       while (c) {
-        if (selectedIds.value.has(c.id)) { isSelected = true; break; }
+        if (effectiveSelectedIds.has(c.id)) { isSelected = true; break; }
         c = c.parent;
       }
 
@@ -153,7 +168,7 @@ export function useSelection(
           const path: SceneNode[] = [];
           let curr: SceneNode | null = f as unknown as SceneNode;
           while (curr) { path.unshift(curr); curr = curr.parent; }
-          hit.add(path[0].id);
+          if (path[0]) hit.add(path[0].id);
         }
       }
       selectedIds.value = hit;

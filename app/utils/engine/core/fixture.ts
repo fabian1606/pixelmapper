@@ -1,5 +1,5 @@
 import type { ChannelType, SpatialVector } from '../types';
-import { type Channel, RedChannel, GreenChannel, BlueChannel, DimmerChannel } from './channel';
+import type { Channel } from './channel';
 import { Beam } from './beam';
 
 export interface FixturePosition {
@@ -25,11 +25,16 @@ export class Fixture {
    * Spatial effect configuration for this fixture.
    * Defines the gradient-style vector (origin, direction, magnitude)
    * that controls how the effect propagates across the stage.
-   * Lazily initialized as the fixture's own world position.
    */
   spatialConfig: SpatialVector;
 
   beams: Beam[];
+
+  /**
+   * Optional reference to the OFL fixture key this fixture was created from.
+   * Format: "manufacturer-key/fixture-key" (e.g. "generic/rgb-fader").
+   */
+  oflKey?: string;
 
   constructor(id: string | number, channels: Channel[] = []) {
     this.id = id;
@@ -73,36 +78,36 @@ export class Fixture {
     const colorChannels = this.channels.filter(c => c.role === 'COLOR');
     const dimmerChannels = this.channels.filter(c => c.role === 'DIMMER');
 
-    // Determine dimmer multiplier (0.0 – 1.0). If no dimmer, assume full brightness.
     const dimmerMultiplier = dimmerChannels.length > 0
       ? dimmerChannels.reduce((sum, d) => sum + d.value, 0) / (dimmerChannels.length * 255)
       : 1.0;
 
-    // Additively mix all color channels, scaled by their current value / 255.
     let r = 0, g = 0, b = 0;
     for (const ch of colorChannels) {
       const factor = ch.value / 255;
-      // Parse the hex colorValue to extract RGB components
       const hex = ch.colorValue.replace('#', '');
       r += parseInt(hex.substring(0, 2), 16) * factor;
       g += parseInt(hex.substring(2, 4), 16) * factor;
       b += parseInt(hex.substring(4, 6), 16) * factor;
     }
 
-    // Apply dimmer and clamp to 0-255
     const clamp = (v: number) => Math.min(255, Math.max(0, Math.round(v * dimmerMultiplier)));
     return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(b)})`;
   }
 
   /**
-   * Factory method: Creates a generic RGB fixture with a Dimmer.
+   * Factory method: Creates a generic DRGB fixture (Dimmer + R + G + B).
+   * Uses plain Channel objects aligned with the OFL format.
+   * Maps to OFL fixture "generic/drgb-fader".
    */
   static createRGBFixture(id: number | string): Fixture {
-    return new Fixture(id, [
-      new RedChannel(),
-      new GreenChannel(),
-      new BlueChannel(),
-      new DimmerChannel(),
+    const fixture = new Fixture(id, [
+      { type: 'RED', value: 0, baseValue: 0, role: 'COLOR', colorValue: '#FF0000' },
+      { type: 'GREEN', value: 0, baseValue: 0, role: 'COLOR', colorValue: '#00FF00' },
+      { type: 'BLUE', value: 0, baseValue: 0, role: 'COLOR', colorValue: '#0000FF' },
+      { type: 'DIMMER', value: 255, baseValue: 255, role: 'DIMMER', colorValue: '#FFFFFF' },
     ]);
+    fixture.oflKey = 'generic/drgb-fader';
+    return fixture;
   }
 }

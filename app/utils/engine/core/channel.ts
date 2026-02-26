@@ -2,50 +2,29 @@ import type { ChannelType } from '../types';
 
 /**
  * Describes how the channel contributes to the fixture's visual output.
- * - COLOR: The channel represents a specific light color (e.g., red, green, blue).
+ * - COLOR: The channel represents a specific light color (e.g., red, green, blue, white, amber).
  * - DIMMER: The channel scales all COLOR channels (0 = off, 255 = full).
  * - NONE: The channel has no color contribution (e.g., Pan, Tilt, Strobe).
  */
 export type ChannelRole = 'COLOR' | 'DIMMER' | 'NONE';
 
+/**
+ * Represents a single DMX channel of a fixture.
+ * Channels are created as plain objects (no subclasses) via the OFL fixture factory.
+ */
 export interface Channel {
+  /** The OFL-aligned channel type (e.g. RED, GREEN, DIMMER, PAN). */
   type: ChannelType;
+  /** Current DMX output value (0–255), written each frame by the EffectEngine. */
   value: number;
+  /** The resting value effects oscillate around. */
   baseValue: number;
-  /** The role of this channel in final color computation. */
+  /** How this channel contributes to the fixture's visual color computation. */
   role: ChannelRole;
-  /** The hex color this channel contributes when at full value (only relevant for role=COLOR). */
+  /**
+   * The peak hue of this channel as a hex color string.
+   * Only meaningful when role === 'COLOR' or role === 'DIMMER'.
+   * Examples: '#FF0000' (red), '#FFFFFF' (white/dimmer).
+   */
   colorValue: string;
-}
-
-export class RedChannel implements Channel {
-  type: ChannelType = 'RED';
-  value: number = 0;
-  baseValue: number = 0;
-  role: ChannelRole = 'COLOR';
-  colorValue: string = '#FF0000';
-}
-
-export class GreenChannel implements Channel {
-  type: ChannelType = 'GREEN';
-  value: number = 0;
-  baseValue: number = 0;
-  role: ChannelRole = 'COLOR';
-  colorValue: string = '#00FF00';
-}
-
-export class BlueChannel implements Channel {
-  type: ChannelType = 'BLUE';
-  value: number = 0;
-  baseValue: number = 0;
-  role: ChannelRole = 'COLOR';
-  colorValue: string = '#0000FF';
-}
-
-export class DimmerChannel implements Channel {
-  type: ChannelType = 'DIMMER';
-  value: number = 255;
-  baseValue: number = 255;
-  role: ChannelRole = 'DIMMER';
-  colorValue: string = '#FFFFFF';
 }
