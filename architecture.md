@@ -14,9 +14,19 @@ The Effect Engine computes per-frame DMX channel values (0–255) for all connec
 
 ### Core Concepts
 
+#### FixtureGroup
+A `FixtureGroup` is a logical container that can hold `Fixture`s or other `FixtureGroup`s, forming a hierarchy (similar to Figma layers).
+- **`id`** — Unique identifier.
+- **`name`** — Display name (e.g., "New Group").
+- **`children: SceneNode[]`** — The nested nodes within this group.
+- **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
+- **`getAllFixtures()`** — Recursively extracts all child fixtures for rendering limitelessly nested groups.
+
 #### Fixture
 A `Fixture` is the top-level entity representing a physical light device. It contains:
 - **`id`** — Unique identifier.
+- **`name`** — Display name.
+- **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
 - **`channels: Channel[]`** — The DMX channels this fixture exposes.
 - **`fixturePosition: { x, y }`** — World-space position in normalized 0–1 space (used by the Fixture Editor and spatial effects).
 - **`beams: Beam[]`** — One or more beams. For a simple RGB LED, this is one Beam at `{localX: 0, localY: 0}`. Complex fixtures (moving heads, LED bars) can define multiple beams, each with a local offset from the fixture's world position.
@@ -110,6 +120,7 @@ app/utils/engine/
 ├── types.ts                    # Core types: ChannelType, EffectDirection, Effect interface
 ├── engine.ts                   # EffectEngine controller
 ├── core/
+│   ├── group.ts                # FixtureGroup and SceneNode hierarchy (Figma-style grouping)
 │   ├── channel.ts              # Channel interface, ChannelRole, concrete classes
 │   ├── beam.ts                 # Beam class (local offset within a fixture)
 │   └── fixture.ts              # Fixture class with position, beams, resolveColor()
@@ -118,6 +129,11 @@ app/utils/engine/
     └── sine-effect.ts              # SineEffect implementation
 
 app/components/engine/
+├── FixtureSidebar.vue          # Figma-style sidebar layer hierarchy
+├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures with Context Menu
+├── commands/
+│   ├── move-fixture-command.ts # History command for dragging fixtures
+│   └── group-command.ts        # History commands for grouping/ungrouping
 └── FixtureEditor.vue           # 2D drag-and-drop fixture positioning UI
 ```
 

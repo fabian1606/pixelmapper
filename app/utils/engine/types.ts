@@ -2,6 +2,20 @@ export type ChannelType = 'RED' | 'GREEN' | 'BLUE' | 'DIMMER' | 'PAN' | 'TILT' |
 
 export type EffectDirection = 'FORWARD' | 'BACKWARD' | 'CENTER_OUT' | 'OUTSIDE_IN' | 'SPATIAL_X' | 'SPATIAL_Y' | 'SPATIAL_RADIAL';
 
+/**
+ * Defines the direction and spread of a spatial effect in the Fixture Editor.
+ * All values are normalized (0-1 relative to world width/height).
+ */
+export interface SpatialVector {
+  /** Anchor/origin point of the vector (0-1 normalized) */
+  originX: number;
+  originY: number;
+  /** Direction in radians. 0 = right (+X), π/2 = down (+Y). */
+  angle: number;
+  /** Length of the vector (0-1 normalized). 1.0 = full world-width span. */
+  magnitude: number;
+}
+
 export interface EffectContext {
   /**
    * Continuous time value in milliseconds.

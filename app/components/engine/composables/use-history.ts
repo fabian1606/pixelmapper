@@ -11,8 +11,19 @@ export interface Command {
   undo(): void;
 }
 
+// ─── Module-level singleton state ────────────────────────────────────────────
+// Defined once at module scope so ALL callers of useHistory() share the
+// same stack — regardless of which component or composable calls it.
+const MAX_SIZE = 100;
+const past = ref<Command[]>([]);
+const future = ref<Command[]>([]);
+
 /**
- * Generic undo/redo history stack.
+ * Global undo/redo history stack (singleton).
+ *
+ * All components and composables that call useHistory() share the same past/future
+ * arrays. This means MoveFixtureCommand recorded inside FixtureEditor and
+ * GroupNodesCommand recorded inside index.vue all live in the same timeline.
  *
  * Usage:
  *   const history = useHistory();
@@ -20,13 +31,9 @@ export interface Command {
  *   history.undo();                                // step back
  *   history.redo();                                // step forward
  */
-export function useHistory(maxSize = 100) {
-  const past = ref<Command[]>([]);
-  const future = ref<Command[]>([]);
-
+export function useHistory() {
   const canUndo = computed(() => past.value.length > 0);
   const canRedo = computed(() => future.value.length > 0);
-
   const lastDescription = computed(() => past.value.at(-1)?.description ?? null);
 
   /**
@@ -36,7 +43,7 @@ export function useHistory(maxSize = 100) {
   function execute(command: Command) {
     command.execute();
     past.value.push(command);
-    if (past.value.length > maxSize) past.value.shift();
+    if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
   }
 

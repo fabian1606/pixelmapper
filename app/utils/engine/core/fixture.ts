@@ -1,4 +1,4 @@
-import type { ChannelType } from '../types';
+import type { ChannelType, SpatialVector } from '../types';
 import { type Channel, RedChannel, GreenChannel, BlueChannel, DimmerChannel } from './channel';
 import { Beam } from './beam';
 
@@ -16,22 +16,19 @@ export class Fixture {
   id: string | number;
   name: string;
   channels: Channel[];
+  parent: import('./group').FixtureGroup | null = null;
 
-  /**
-   * The world-space position of this fixture (normalized 0-1 by default, editable in the Fixture Editor).
-   */
   fixturePosition: FixturePosition;
-
-  /**
-   * The world-space size of this fixture (normalized 0-1 by default, editable in the Fixture Editor).
-   */
   fixtureSize: FixtureSize;
 
   /**
-   * The beams of this fixture. Each beam has a local offset relative to `fixturePosition`.
-   * For simple single-LED fixtures, this is always one Beam at 0|0.
-   * Complex fixtures (e.g., multi-pixel LED bars) have many beams.
+   * Spatial effect configuration for this fixture.
+   * Defines the gradient-style vector (origin, direction, magnitude)
+   * that controls how the effect propagates across the stage.
+   * Lazily initialized as the fixture's own world position.
    */
+  spatialConfig: SpatialVector;
+
   beams: Beam[];
 
   constructor(id: string | number, channels: Channel[] = []) {
@@ -40,6 +37,12 @@ export class Fixture {
     this.channels = channels;
     this.fixturePosition = { x: 0, y: 0 };
     this.fixtureSize = { x: 1, y: 1 };
+    this.spatialConfig = {
+      originX: 0.5,
+      originY: 0.5,
+      angle: 0,
+      magnitude: 0.2,
+    };
     this.beams = [new Beam('beam-0', 0, 0)];
   }
 

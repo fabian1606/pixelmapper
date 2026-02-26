@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Point } from './use-camera';
 import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
+import type { SceneNode } from '~/utils/engine/core/group';
 
 export type Interaction =
   | { type: 'idle' }
@@ -33,9 +34,13 @@ export function useSelection(
   getHeight: () => number,
   toWorld: (vx: number, vy: number) => Point,
   onDragComplete?: (before: FixturePositionSnapshot[], after: FixturePositionSnapshot[]) => void,
+  externalSelectedIds?: import('vue').Ref<Set<string | number>>
 ) {
-  const selectedIds = ref<Set<string | number>>(new Set());
+  const selectedIds = externalSelectedIds ?? ref<Set<string | number>>(new Set());
   const interaction = ref<Interaction>({ type: 'idle' });
+
+  let lastClickId: string | number | null = null;
+  let lastClickTime = 0;
 
   // Captures positions at drag-start so we can build an undo-able command later
   let beforeSnapshot: FixturePositionSnapshot[] = [];
@@ -50,12 +55,40 @@ export function useSelection(
   function onDragStart(event: MouseEvent, fixture: Fixture, rect: DOMRect) {
     const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
 
+    const now = performance.now();
+    const isDoubleClick = (lastClickId === fixture.id && now - lastClickTime < 300);
+    lastClickId = fixture.id;
+    lastClickTime = now;
+
+    const path: SceneNode[] = [];
+    let curr: SceneNode | null = fixture as unknown as SceneNode;
+    while (curr) {
+      path.unshift(curr);
+      curr = curr.parent;
+    }
+
+    let targetNode = path[0];
+    if (!targetNode) return;
+
+    const selectedIndex = path.findIndex(n => selectedIds.value.has(n.id));
+
+    if (selectedIndex !== -1) {
+      if (isDoubleClick && selectedIndex < path.length - 1) {
+        targetNode = path[selectedIndex + 1] as SceneNode;
+        lastClickId = null; // reset to avoid triple click jump
+      } else {
+        targetNode = path[selectedIndex] as SceneNode;
+      }
+    }
+
+    if (!targetNode) return;
+
     if (event.shiftKey) {
       const next = new Set(selectedIds.value);
-      next.has(fixture.id) ? next.delete(fixture.id) : next.add(fixture.id);
+      next.has(targetNode.id) ? next.delete(targetNode.id) : next.add(targetNode.id);
       selectedIds.value = next;
-    } else if (!selectedIds.value.has(fixture.id)) {
-      selectedIds.value = new Set([fixture.id]);
+    } else if (!selectedIds.value.has(targetNode.id)) {
+      selectedIds.value = new Set([targetNode.id]);
     }
 
     const startPositions = new Map<string | number, Point>();
@@ -65,7 +98,14 @@ export function useSelection(
     // Capture BEFORE positions for undo history
     beforeSnapshot = [];
     for (const f of getFixtures()) {
-      if (selectedIds.value.has(f.id)) {
+      let isSelected = false;
+      let c: SceneNode | null = f as unknown as SceneNode;
+      while (c) {
+        if (selectedIds.value.has(c.id)) { isSelected = true; break; }
+        c = c.parent;
+      }
+
+      if (isSelected) {
         startPositions.set(f.id, { x: f.fixturePosition.x * w, y: f.fixturePosition.y * h });
         beforeSnapshot.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
       }
@@ -109,19 +149,31 @@ export function useSelection(
       for (const f of getFixtures()) {
         const wx = f.fixturePosition.x * w;
         const wy = f.fixturePosition.y * h;
-        if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) hit.add(f.id);
+        if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
+          const path: SceneNode[] = [];
+          let curr: SceneNode | null = f as unknown as SceneNode;
+          while (curr) { path.unshift(curr); curr = curr.parent; }
+          hit.add(path[0].id);
+        }
       }
       selectedIds.value = hit;
     } else if (iv.type === 'drag' && beforeSnapshot.length > 0 && onDragComplete) {
       // Capture AFTER positions and notify parent for history recording
       const afterSnapshot: FixturePositionSnapshot[] = beforeSnapshot.map(snap => {
         const f = getFixtures().find(f => f.id === snap.id);
-        return { id: snap.id, x: f?.fixturePosition.x ?? snap.x, y: f?.fixturePosition.y ?? snap.y };
+        return {
+          id: snap.id,
+          x: f ? f.fixturePosition.x : snap.x,
+          y: f ? f.fixturePosition.y : snap.y
+        };
       });
 
       // Only record if something actually moved
       const didMove = beforeSnapshot.some(
-        (b, i) => b.x !== afterSnapshot.at(i)?.x || b.y !== afterSnapshot.at(i)?.y,
+        (b, i) => {
+          const after = afterSnapshot[i];
+          return after && (b.x !== after.x || b.y !== after.y);
+        }
       );
       if (didMove) onDragComplete(beforeSnapshot, afterSnapshot);
       beforeSnapshot = [];
