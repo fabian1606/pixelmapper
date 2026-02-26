@@ -40,9 +40,9 @@ function toggleTab(tab: 'fixtures' | 'presets') {
   <div class="flex h-full border-r border-border bg-sidebar">
     <!-- Main Sidebar Panel -->
     <Sidebar v-if="activeTab" class="w-64 border-r border-border bg-sidebar" collapsible="none">
-      <SidebarHeader class="h-12 flex items-center px-4 border-b border-border bg-sidebar">
-        <span class="font-semibold text-xs tracking-wider uppercase text-muted-foreground">
-          {{ activeTab === 'fixtures' ? 'Stage Layers' : 'Presets' }}
+      <SidebarHeader class="h-12 flex items-start px-4 border-b border-border bg-sidebar">
+        <span class="flex items-center h-full font-semibold text-xs tracking-wider uppercase text-muted-foreground">
+          {{ activeTab === 'fixtures' ? 'Fixtues' : 'Presets' }}
         </span>
       </SidebarHeader>
       <SidebarContent class="p-2 bg-sidebar">

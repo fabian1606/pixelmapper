@@ -115,7 +115,7 @@ defineExpose({ draw });
 <template>
   <canvas
     ref="canvasEl"
-    class="fixture-canvas"
+    class="fixture-canvas rounded-none"
     :width="viewportWidth"
     :height="viewportHeight"
   />

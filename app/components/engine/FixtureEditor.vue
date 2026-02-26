@@ -22,16 +22,37 @@ interface Emits {
   (e: 'spatialChange', fixture: Fixture, vector: SpatialVector): void;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  width:  680,
-  height: 420,
-});
-
+const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
 const FIXTURE_RADIUS = 18;
 const WORLD_WIDTH    = 3000;
 const WORLD_HEIGHT   = 3000;
+
+// ─── Responsive Sizing ───────────────────────────────────────────────────────
+const viewportEl = ref<HTMLElement | null>(null);
+const editorWidth = ref(props.width || 800);
+const editorHeight = ref(props.height || 600);
+
+let resizeObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  if (viewportEl.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        editorWidth.value = width;
+        editorHeight.value = height;
+        fixtureCanvas.value?.draw();
+      }
+    });
+    resizeObserver.observe(viewportEl.value);
+  }
+});
+
+onUnmounted(() => {
+  resizeObserver?.disconnect();
+});
 
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel, centerOn } = useCamera();
@@ -56,7 +77,7 @@ function zoomTo(node: SceneNode) {
     camera.scale = 1.0;
   }
 
-  centerOn(avgPos.x * WORLD_WIDTH, avgPos.y * WORLD_HEIGHT, props.width, props.height);
+  centerOn(avgPos.x * WORLD_WIDTH, avgPos.y * WORLD_HEIGHT, editorWidth.value, editorHeight.value);
 }
 
 defineExpose({ zoomTo });
@@ -76,7 +97,6 @@ const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove,
   );
 
 // ─── Refs ─────────────────────────────────────────────────────────────────────
-const viewportEl    = ref<HTMLElement | null>(null);
 const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
 
 function rect(): DOMRect {
@@ -109,8 +129,8 @@ function isFixtureVisible(f: Fixture): boolean {
   const r      = (f.fixtureSize?.x ?? 1) * FIXTURE_RADIUS * camera.scale;
   const margin = r + 20;
   return (
-    pos.x + margin >= 0 && pos.x - margin <= props.width &&
-    pos.y + margin >= 0 && pos.y - margin <= props.height
+    pos.x + margin >= 0 && pos.x - margin <= editorWidth.value &&
+    pos.y + margin >= 0 && pos.y - margin <= editorHeight.value
   );
 }
 
@@ -191,7 +211,6 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
   <div
     ref="viewportEl"
     class="viewport"
-    :style="{ width: `${width}px`, height: `${height}px` }"
     @wheel.prevent="handleWheel"
     @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
@@ -207,8 +226,8 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       :camera="camera"
       :world-width="WORLD_WIDTH"
       :world-height="WORLD_HEIGHT"
-      :viewport-width="width"
-      :viewport-height="height"
+      :viewport-width="editorWidth"
+      :viewport-height="editorHeight"
     />
 
     <!--
@@ -219,7 +238,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
     -->
     <template v-if="selectedFixture">
       <!-- SVG line connects origin to endpoint -->
-      <svg class="gradient-svg" :width="width" :height="height">
+      <svg class="gradient-svg" :width="editorWidth" :height="editorHeight">
         <line
           :x1="getOriginViewportPos(selectedFixture).x"
           :y1="getOriginViewportPos(selectedFixture).y"

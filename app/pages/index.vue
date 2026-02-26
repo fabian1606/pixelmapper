@@ -223,14 +223,11 @@ function handleKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => { 
-  updateSize();
-  window.addEventListener('resize', updateSize);
   window.addEventListener('keydown', handleKeyDown);
   animFrameId = requestAnimationFrame(renderLoop); 
 });
 
 onUnmounted(() => { 
-  window.removeEventListener('resize', updateSize);
   window.removeEventListener('keydown', handleKeyDown);
   cancelAnimationFrame(animFrameId); 
 });
@@ -257,9 +254,7 @@ onUnmounted(() => {
                 v-model:selected-ids="selectedIds"
                 :fixtures="flatFixtures" 
                 :colors="fixtureColors" 
-                :width="windowWidth" 
-                :height="windowHeight" 
-                class="border-none rounded-none w-full h-full"
+                class="w-full h-full"
               />
             </div>
           </ContextMenuTrigger>
