@@ -59,5 +59,13 @@ export function useCamera() {
     }
   }
 
-  return { camera, viewportToWorld, worldToViewport, onWheel };
+  /**
+   * Centers the camera on a specific world position.
+   */
+  function centerOn(wx: number, wy: number, viewportWidth: number, viewportHeight: number) {
+    camera.x = viewportWidth / 2 - wx * camera.scale;
+    camera.y = viewportHeight / 2 - wy * camera.scale;
+  }
+
+  return { camera, viewportToWorld, worldToViewport, onWheel, centerOn };
 }

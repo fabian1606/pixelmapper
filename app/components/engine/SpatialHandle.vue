@@ -24,7 +24,7 @@ const emit = defineEmits<Emits>();
 .spatial-handle {
   position: absolute;
   transform: translate(-50%, -50%);
-  cursor: crosshair;
+  cursor: grab;
   z-index: 20;
   transition: box-shadow 0.1s;
 }
@@ -34,27 +34,31 @@ const emit = defineEmits<Emits>();
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: rgba(255, 200, 50, 0.15);
-  border: 2px solid rgba(255, 200, 50, 0.9);
-  box-shadow: 0 0 10px rgba(255, 200, 50, 0.4);
+  background: var(--primary);
+  opacity: 0.15;
+  border: 2px solid var(--primary);
+  box-shadow: 0 0 10px var(--primary);
+  cursor: grab;
 }
 
 .spatial-handle--endpoint:hover {
-  background: rgba(255, 200, 50, 0.35);
-  box-shadow: 0 0 18px rgba(255, 200, 50, 0.7);
+  background: var(--primary);
+  opacity: 0.35;
+  box-shadow: 0 0 18px var(--primary);
 }
 
 /* ── Origin handle: diamond / square rotated 45° ─────────────────────── */
 .spatial-handle--origin {
   width: 10px;
   height: 10px;
-  background: rgba(255, 200, 50, 0.85);
+  background: var(--primary);
+  opacity: 0.85;
   border: 1.5px solid rgba(0, 0, 0, 0.5);
-  box-shadow: 0 0 8px rgba(255, 200, 50, 0.5);
+  box-shadow: 0 0 8px var(--primary);
   transform: translate(-50%, -50%) rotate(45deg);
 }
 
 .spatial-handle--origin:hover {
-  box-shadow: 0 0 14px rgba(255, 200, 50, 0.8);
+  box-shadow: 0 0 14px var(--primary);
 }
 </style>

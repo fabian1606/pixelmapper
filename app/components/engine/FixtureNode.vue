@@ -55,13 +55,12 @@ const emit = defineEmits<Emits>();
 }
 
 .fixture-node.is-selected {
-  border-color: rgba(99, 179, 237, 0.9);
-  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.35);
+  border-color: var(--primary);
 }
 
 .fixture-node.is-dragging {
   cursor: grabbing;
-  border-color: rgba(255, 255, 255, 0.9);
+  border-color: var(--primary);
   z-index: 10;
 }
 
@@ -71,9 +70,10 @@ const emit = defineEmits<Emits>();
   left: 50%;
   transform: translateX(-50%);
   margin-top: 4px;
-  font-size: 15px;
-  font-family: Inter, sans-serif;
-  color: #adadade6;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--muted-foreground);
+  opacity: 0.9;
   pointer-events: none;
   white-space: nowrap;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);

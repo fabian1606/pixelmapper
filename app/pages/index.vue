@@ -130,6 +130,12 @@ const updateSize = () => {
   }
 };
 
+const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
+
+function handleZoomTo(node: SceneNode) {
+  fixtureEditor.value?.zoomTo(node);
+}
+
 // Selection / Groups logic
 function handleSelect(id: string | number, multiple: boolean) {
   if (multiple) {
@@ -232,19 +238,22 @@ onUnmounted(() => {
 
 <template>
   <SidebarProvider>
-    <div class="flex h-screen w-screen bg-slate-950 overflow-hidden text-white font-sans m-0 p-0">
+    <div class="flex h-screen w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
       <FixtureSidebar 
+        class="shrink-0"
         :nodes="sceneNodes"
         :selected-ids="selectedIds"
         @select="handleSelect"
         @group="handleGroup"
         @ungroup="handleUngroup"
+        @zoom-to="handleZoomTo"
       />
       <main class="flex-1 relative">
         <ContextMenu>
           <ContextMenuTrigger as-child>
             <div class="w-full h-full">
               <FixtureEditor 
+                ref="fixtureEditor"
                 v-model:selected-ids="selectedIds"
                 :fixtures="flatFixtures" 
                 :colors="fixtureColors" 

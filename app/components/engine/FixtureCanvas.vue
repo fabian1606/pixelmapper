@@ -72,7 +72,7 @@ function draw() {
 
     const glow = ctx.createRadialGradient(wx, wy, r * 0.3, wx, wy, r * 2.2);
     glow.addColorStop(0, color);
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    glow.addColorStop(1, 'rgba(10,10,10,0)');
     ctx.globalAlpha = 0.9;
     ctx.beginPath();
     ctx.arc(wx, wy, r * 2.2, 0, Math.PI * 2);
@@ -95,11 +95,11 @@ function draw() {
     const h = Math.abs(end.y - start.y);
 
     ctx.globalAlpha = 1;
-    ctx.fillStyle   = 'rgba(99, 179, 237, 0.08)';
+    ctx.fillStyle   = 'rgba(251, 191, 36, 0.08)'; // #fbbf24
     ctx.fillRect(x, y, w, h);
 
     const lw = 1 / scale;
-    ctx.strokeStyle = 'rgba(99, 179, 237, 0.75)';
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.75)'; // #fbbf24
     ctx.lineWidth   = lw;
     ctx.setLineDash([4 * lw, 4 * lw]);
     ctx.strokeRect(x, y, w, h);

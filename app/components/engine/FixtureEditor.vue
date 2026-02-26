@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SpatialVector } from '~/utils/engine/types';
-import type { SceneNode } from '~/utils/engine/core/group';
+import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureNode from './FixtureNode.vue';
 import SpatialHandle from './SpatialHandle.vue';
@@ -34,8 +34,32 @@ const WORLD_WIDTH    = 3000;
 const WORLD_HEIGHT   = 3000;
 
 // ─── Composables ─────────────────────────────────────────────────────────────
-const { camera, viewportToWorld, worldToViewport, onWheel } = useCamera();
+const { camera, viewportToWorld, worldToViewport, onWheel, centerOn } = useCamera();
 const history = useHistory();
+
+// ─── Zoom to Node ────────────────────────────────────────────────────────────
+function zoomTo(node: SceneNode) {
+  let avgPos = { x: 0, y: 0 };
+  
+  if (node instanceof FixtureGroup) {
+    const groupFixtures = node.getAllFixtures();
+    if (groupFixtures.length === 0) return;
+    avgPos.x = groupFixtures.reduce((sum: number, f: Fixture) => sum + f.fixturePosition.x, 0) / groupFixtures.length;
+    avgPos.y = groupFixtures.reduce((sum: number, f: Fixture) => sum + f.fixturePosition.y, 0) / groupFixtures.length;
+  } else {
+    avgPos.x = (node as Fixture).fixturePosition.x;
+    avgPos.y = (node as Fixture).fixturePosition.y;
+  }
+
+  // Zoom in a bit if we're zoomed far out
+  if (camera.scale < 1.0) {
+    camera.scale = 1.0;
+  }
+
+  centerOn(avgPos.x * WORLD_WIDTH, avgPos.y * WORLD_HEIGHT, props.width, props.height);
+}
+
+defineExpose({ zoomTo });
 
 const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { default: () => new Set() });
 
@@ -201,7 +225,8 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
           :y1="getOriginViewportPos(selectedFixture).y"
           :x2="getEndViewportPos(selectedFixture).x"
           :y2="getEndViewportPos(selectedFixture).y"
-          stroke="rgba(255,200,50,0.85)"
+          stroke="var(--primary)"
+          style="opacity: 0.85"
           stroke-width="1.5"
         />
       </svg>
@@ -250,7 +275,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
 <style scoped>
 .viewport {
   position: relative;
-  background: #080810;
+  background: #101010;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   overflow: hidden;
