@@ -7,6 +7,7 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import DeleteConfirmDialog from '~/components/engine/DeleteConfirmDialog.vue';
 import FixtureEditor from '~/components/engine/FixtureEditor.vue';
 import FixtureSidebar from '~/components/engine/FixtureSidebar.vue';
+import FixturePropertiesSidebar from '~/components/engine/FixturePropertiesSidebar.vue';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { GroupNodesCommand, UngroupNodesCommand } from '~/components/engine/commands/group-command';
@@ -351,6 +352,7 @@ onUnmounted(() => { cancelAnimationFrame(animFrameId); });
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+        <FixturePropertiesSidebar :selected-ids="selectedIds" :fixtures="flatFixtures" :nodes="sceneNodes" />
       </main>
     </div>
   </SidebarProvider>

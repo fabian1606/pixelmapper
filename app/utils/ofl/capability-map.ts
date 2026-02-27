@@ -85,6 +85,20 @@ export function mapOflCapabilityToChannel(
     case 'ShutterStrobe':
       return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
 
+    case 'WheelSlot':
+    case 'WheelShake': {
+      const wheelName = capability.wheel ?? '';
+      if (wheelName.toLowerCase().includes('color')) {
+        return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+      }
+      return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+    }
+
+    case 'WheelRotation':
+    case 'WheelSlotRotation':
+      // Gobo/color wheel rotation — treat similar to gobo slot
+      return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+
     default:
       return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
   }
@@ -96,6 +110,13 @@ export function mapOflCapabilityToChannel(
  */
 export function resolveOflChannel(channelDef: import('./types').OflChannel): MappedChannel {
   const primaryCap = getPrimaryCapability(channelDef.capability, channelDef.capabilities);
-  const defaultValue = channelDef.defaultValue ?? 0;
+  // OFL allows defaultValue to be a percentage string like '50%' or a plain number
+  const rawDefault = channelDef.defaultValue;
+  let defaultValue = 0;
+  if (typeof rawDefault === 'number') {
+    defaultValue = rawDefault;
+  } else if (typeof rawDefault === 'string' && rawDefault.endsWith('%')) {
+    defaultValue = Math.round((parseFloat(rawDefault) / 100) * 255);
+  }
   return mapOflCapabilityToChannel(primaryCap, defaultValue);
 }

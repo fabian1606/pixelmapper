@@ -67,5 +67,42 @@ export function useCamera() {
     camera.y = viewportHeight / 2 - wy * camera.scale;
   }
 
-  return { camera, viewportToWorld, worldToViewport, onWheel, centerOn };
+  /**
+   * Adjusts scale and translation so that all provided world-space points
+   * fit inside the viewport with the given padding ratio (0–1).
+   */
+  function fitAll(
+    points: Array<{ wx: number; wy: number }>,
+    viewportWidth: number,
+    viewportHeight: number,
+    padding = 0.15,
+  ) {
+    if (points.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const { wx, wy } of points) {
+      if (wx < minX) minX = wx;
+      if (wy < minY) minY = wy;
+      if (wx > maxX) maxX = wx;
+      if (wy > maxY) maxY = wy;
+    }
+
+    const boundsW = maxX - minX || 1;
+    const boundsH = maxY - minY || 1;
+    const padW = viewportWidth * padding;
+    const padH = viewportHeight * padding;
+
+    const scaleX = (viewportWidth - padW * 2) / boundsW;
+    const scaleY = (viewportHeight - padH * 2) / boundsH;
+    const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(scaleX, scaleY)));
+
+    const centerWX = (minX + maxX) / 2;
+    const centerWY = (minY + maxY) / 2;
+
+    camera.scale = newScale;
+    camera.x = viewportWidth / 2 - centerWX * newScale;
+    camera.y = viewportHeight / 2 - centerWY * newScale;
+  }
+
+  return { camera, viewportToWorld, worldToViewport, onWheel, centerOn, fitAll };
 }

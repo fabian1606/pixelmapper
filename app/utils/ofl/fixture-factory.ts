@@ -54,12 +54,17 @@ export function createFixtureFromOfl(
 
     const mapped = resolveOflChannel(channelDef);
 
+    const allCapabilities = channelDef.capabilities ?? (channelDef.capability ? [channelDef.capability] : []);
+
     const channel: Channel = {
       type: mapped.type,
       value: mapped.defaultValue,
       baseValue: mapped.defaultValue,
       role: mapped.role,
       colorValue: mapped.colorValue,
+      oflChannelName: channelKey,
+      oflCapabilities: allCapabilities,
+      oflWheels: oflFixture.wheels ?? {},
     };
 
     channels.push(channel);
@@ -69,7 +74,9 @@ export function createFixtureFromOfl(
   const fixture = new Fixture(id, channels);
   fixture.name = oflFixture.name;
   // Store the OFL metadata for reference
-  (fixture as Fixture & { oflCategories: string[] }).oflCategories = oflFixture.categories;
+  const ext = fixture as Fixture & { oflCategories: string[]; oflShortName: string };
+  ext.oflCategories = oflFixture.categories;
+  ext.oflShortName = oflFixture.shortName ?? oflFixture.name;
 
   return fixture;
 }

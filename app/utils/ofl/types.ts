@@ -85,6 +85,17 @@ export interface OflCapability {
   /** Angle for position channels */
   angleStart?: string;
   angleEnd?: string;
+  /** Speed for wheel/rotation/effect channels */
+  speedStart?: string;
+  speedEnd?: string;
+  /** Effect name/preset for Effect capabilities */
+  effectName?: string;
+  effectPreset?: string;
+  /** Wheel slot for WheelSlot/WheelShake/WheelRotation capabilities */
+  wheel?: string;
+  slotNumber?: number;
+  slotNumberStart?: number;
+  slotNumberEnd?: number;
 }
 
 // ─── Channel ──────────────────────────────────────────────────────────────────
@@ -96,8 +107,8 @@ export interface OflChannel {
    * We only use the coarse (8-bit) channel in phase 1.
    */
   fineChannelAliases?: string[];
-  /** Default DMX value (0-255 for 8-bit, 0-65535 for 16-bit, etc.) */
-  defaultValue?: number;
+  /** Default DMX value (0-255 for 8-bit) — OFL allows percentage strings like '50%' */
+  defaultValue?: number | string;
   /** Highlight DMX value */
   highlightValue?: number;
   /** If true, the channel value should not change during operation */
@@ -176,6 +187,8 @@ export interface OflFixture {
   templateChannels?: Record<string, OflChannel>;
   /** Available operation modes */
   modes: OflMode[];
+  /** Wheel definitions (color wheels, gobo wheels, etc.) */
+  wheels?: Record<string, OflWheel>;
   /** Matrix pixel definition */
   matrix?: OflMatrix;
   /** RDM device identification */
@@ -183,6 +196,19 @@ export interface OflFixture {
     modelId: number;
     softwareVersion?: string;
   };
+}
+
+// ─── Wheels ──────────────────────────────────────────────────────────────────
+
+export interface OflWheelSlot {
+  type: string;           // 'Open' | 'Color' | 'Gobo' | 'Prism' etc.
+  name?: string;          // e.g. 'Yellow', 'Gobo 2'
+  colors?: string[];      // hex color(s), e.g. ['#ffff00']
+  colorTemperature?: string;
+}
+
+export interface OflWheel {
+  slots: OflWheelSlot[];
 }
 
 // ─── Matrix ──────────────────────────────────────────────────────────────────

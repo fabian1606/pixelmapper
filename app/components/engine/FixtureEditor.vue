@@ -40,6 +40,7 @@ const editorWidth = ref(props.width || 800);
 const editorHeight = ref(props.height || 600);
 
 let resizeObserver: ResizeObserver | null = null;
+let initialFitDone = false;
 
 onMounted(() => {
   if (viewportEl.value) {
@@ -48,7 +49,13 @@ onMounted(() => {
         const { width, height } = entry.contentRect;
         editorWidth.value = width;
         editorHeight.value = height;
-        fixtureCanvas.value?.draw();
+        // Fit all fixtures on the very first size measurement
+        if (!initialFitDone && props.fixtures.length > 0) {
+          initialFitDone = true;
+          zoomToFit();
+        } else {
+          fixtureCanvas.value?.draw();
+        }
       }
     });
     resizeObserver.observe(viewportEl.value);
@@ -60,7 +67,7 @@ onUnmounted(() => {
 });
 
 // ─── Composables ─────────────────────────────────────────────────────────────
-const { camera, viewportToWorld, worldToViewport, onWheel, centerOn } = useCamera();
+const { camera, viewportToWorld, worldToViewport, onWheel, centerOn, fitAll } = useCamera();
 const history = useHistory();
 function handleDeleteRequest(fixture: Fixture) {
   // If the fixture is part of the current selection, delete the entire selection
@@ -92,7 +99,17 @@ function zoomTo(node: SceneNode) {
   centerOn(avgPos.x * WORLD_WIDTH, avgPos.y * WORLD_HEIGHT, editorWidth.value, editorHeight.value);
 }
 
-defineExpose({ zoomTo });
+/** Fit all fixtures into the viewport. */
+function zoomToFit() {
+  const points = props.fixtures.map(f => ({
+    wx: f.fixturePosition.x * WORLD_WIDTH,
+    wy: f.fixturePosition.y * WORLD_HEIGHT,
+  }));
+  fitAll(points, editorWidth.value, editorHeight.value);
+  fixtureCanvas.value?.draw();
+}
+
+defineExpose({ zoomTo, zoomToFit });
 
 const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { default: () => new Set() });
 

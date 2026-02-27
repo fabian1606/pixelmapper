@@ -1,501 +1,284 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { SlidersHorizontal, Layers, MapPin, Info, ChevronRight, Zap } from 'lucide-vue-next';
-import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Channel } from '~/utils/engine/core/channel';
+import { ref, computed } from 'vue';
+import { onClickOutside } from '@vueuse/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
-import FixturePropertySheet from './FixturePropertySheet.vue';
+import {
+  Lightbulb,
+  Aperture,
+  Move,
+  Palette
+} from 'lucide-vue-next';
+import type { Fixture } from '~/utils/engine/core/fixture';
+import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
+import type { ChannelType } from '~/utils/engine/types';
+import FixturePropertyControl from './FixturePropertyControl.vue';
+import { provideSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface PropertyRow {
-  label: string;
-  value: string;
-  channel?: Channel;
-  fixtureId?: string | number;
-  category: 'channel' | 'position' | 'meta';
-  color?: string;
+interface Props {
+  selectedIds: Set<string | number>;
+  fixtures: Fixture[];
+  nodes: SceneNode[]; // Need the full scene graph to resolve groups
 }
 
-// ─── Props ───────────────────────────────────────────────────────────────────
+const props = defineProps<Props>();
 
-const props = defineProps<{
-  selectedFixtures: Fixture[];
-  colors: Map<string | number, string>;
-}>();
+// Sidebar close lock: child dropdowns increment this to prevent auto-close
+const { openCount: lockedOpenCount } = provideSidebarLock();
 
-// ─── Sheet overlay state ──────────────────────────────────────────────────────
+// Tabs logic
+const activeTab = ref<string | null>(null);
+const sidebarRef = ref<HTMLElement | null>(null);
 
-const sheetOpen = ref(false);
-const activeRow = ref<PropertyRow | null>(null);
+onClickOutside(sidebarRef, () => {
+  // Don't close the sidebar if a child floating UI (dropdown, popover) is open
+  if (lockedOpenCount.value !== undefined && lockedOpenCount.value > 0) return;
+  activeTab.value = null;
+});
 
-function openSheet(row: PropertyRow) {
-  activeRow.value = row;
-  sheetOpen.value = true;
+function toggleTab(tab: string) {
+  if (activeTab.value === tab) {
+    activeTab.value = null;
+  } else {
+    activeTab.value = tab;
+  }
 }
 
-// ─── Channel type display helpers ──────────────────────────────────────────────
+// Helpers ------------------------------------------------------------------
 
-const CHANNEL_LABELS: Record<string, string> = {
-  RED: 'Red',
-  GREEN: 'Green',
-  BLUE: 'Blue',
-  WHITE: 'White',
-  WARM_WHITE: 'Warm White',
-  COOL_WHITE: 'Cool White',
-  AMBER: 'Amber',
-  UV: 'UV',
-  DIMMER: 'Dimmer',
-  PAN: 'Pan',
-  TILT: 'Tilt',
-  STROBE: 'Strobe',
-  CUSTOM: 'Custom',
-};
-
-function channelLabel(type: string): string {
-  return CHANNEL_LABELS[type] ?? type;
-}
-
-function channelBadgeVariant(role: string): 'default' | 'secondary' | 'outline' {
-  if (role === 'COLOR') return 'default';
-  if (role === 'DIMMER') return 'secondary';
-  return 'outline';
-}
-
-// ─── Computed properties ───────────────────────────────────────────────────────
-
-const isEmpty = computed(() => props.selectedFixtures.length === 0);
-
-const isMulti = computed(() => props.selectedFixtures.length > 1);
-
-/**
- * When multiple fixtures are selected: show aggregated channel types with avg values.
- * When a single fixture is selected: show its channels individually.
- */
-const channelRows = computed<PropertyRow[]>(() => {
-  if (isEmpty.value) return [];
-
-  if (isMulti.value) {
-    // Aggregate common channel types across all fixtures
-    const typeMap = new Map<string, { total: number; count: number; channel: Channel }>();
-    for (const fixture of props.selectedFixtures) {
-      for (const ch of fixture.channels) {
-        const existing = typeMap.get(ch.type);
-        if (existing) {
-          existing.total += ch.value;
-          existing.count++;
-        } else {
-          typeMap.set(ch.type, { total: ch.value, count: 1, channel: ch });
-        }
-      }
+function getSelectedFixtures(): Fixture[] {
+  const result: Fixture[] = [];
+  function traverse(nodes: SceneNode[], inherited = false) {
+    for (const node of nodes) {
+      const selected = inherited || props.selectedIds.has(node.id);
+      if (node instanceof FixtureGroup) traverse(node.children, selected);
+      else if (selected) result.push(node as Fixture);
     }
-    return [...typeMap.entries()].map(([type, { total, count, channel }]) => ({
-      label: channelLabel(type),
-      value: `${Math.round(total / count)} / 255`,
-      channel,
-      category: 'channel' as const,
-      color: channel.role === 'COLOR' ? channel.colorValue : undefined,
-    }));
+  }
+  traverse(props.nodes);
+  return result;
+}
+
+/** Stable fingerprint for a channel.
+ *  - Single-capability channels: fingerprinted by type only, so e.g. a DIMMER
+ *    called "Dimmer" and one called "Intensity" still merge into the same group.
+ *  - Multi-capability channels (color wheels, strobe modes etc.): also include
+ *    capability details so they stay separate from simpler same-type channels.
+ */
+function channelFingerprint(type: ChannelType, fixture: Fixture): string {
+  const ch = fixture.channels.find(c => c.type === type);
+  if (!ch) return type;
+  const caps = ch.oflCapabilities ?? [];
+  // Ignore sub-range details when there is only one (or no) capability
+  if (caps.length <= 1) return type;
+  const capSig = caps.map(c => `${c.type}:${c.dmxRange}`).join('|');
+  return `${type}::${capSig}`;
+}
+
+// Computed tabs visibility -------------------------------------------------
+
+const availableTabs = computed(() => {
+  const fixtures = getSelectedFixtures();
+  if (fixtures.length === 0) return { intensity: 0, beam: 0, position: 0, color: 0, total: 0 };
+
+  let intensityCount = 0, beamCount = 0, positionCount = 0, colorCount = 0;
+
+  for (const f of fixtures) {
+    if (f.channels.some(c => c.type === 'DIMMER' || c.role === 'DIMMER')) intensityCount++;
+    if (f.channels.some(c => (['RED', 'GREEN', 'BLUE', 'WHITE', 'AMBER', 'UV'] as ChannelType[]).includes(c.type) || c.role === 'COLOR')) colorCount++;
+    if (f.channels.some(c => (['PAN', 'TILT'] as ChannelType[]).includes(c.type))) positionCount++;
+    if (f.channels.some(c => c.type === 'STROBE')) beamCount++;
   }
 
-  // Single fixture
-  const fixture = props.selectedFixtures[0];
-  return fixture.channels.map((ch) => ({
-    label: channelLabel(ch.type),
-    value: `${ch.value} / 255`,
-    channel: ch,
-    fixtureId: fixture.id,
-    category: 'channel' as const,
-    color: ch.role === 'COLOR' ? ch.colorValue : undefined,
-  }));
+  return { intensity: intensityCount, beam: beamCount, position: positionCount, color: colorCount, total: fixtures.length };
 });
 
-const metaRows = computed<PropertyRow[]>(() => {
-  if (isEmpty.value) return [];
+const activeTabFixtureCount = computed(() => {
+  if (!activeTab.value) return 0;
+  return (availableTabs.value as Record<string, number>)[activeTab.value] ?? 0;
+});
 
-  if (isMulti.value) {
-    return [
-      {
-        label: 'Selection',
-        value: `${props.selectedFixtures.length} fixtures`,
-        category: 'meta' as const,
-      },
-    ];
+// Channel sections for the active tab ----------------------------------------
+
+/** One channel row inside a section */
+interface ChannelEntry {
+  channelType: ChannelType;
+  fixtures: Fixture[];
+}
+
+/** One visual section with a single label header and 1-N channel rows */
+interface ChannelSection {
+  name: string;    // section label ("Combined", "MH-X25", etc.)
+  showLabel: boolean;
+  entries: ChannelEntry[];
+}
+
+const INTENSITY_TYPES: ChannelType[] = ['DIMMER'];
+const COLOR_TYPES: ChannelType[] = ['RED', 'GREEN', 'BLUE', 'WHITE', 'WARM_WHITE', 'COOL_WHITE', 'AMBER', 'UV', 'COLOR_WHEEL'];
+const POSITION_TYPES: ChannelType[] = ['PAN', 'TILT'];
+const BEAM_TYPES: ChannelType[] = ['STROBE'];
+
+function tabChannelFilter(type: ChannelType): boolean {
+  switch (activeTab.value) {
+    case 'intensity': return INTENSITY_TYPES.includes(type);
+    case 'color':     return COLOR_TYPES.includes(type);
+    case 'position':  return POSITION_TYPES.includes(type);
+    case 'beam':      return BEAM_TYPES.includes(type);
+    default: return false;
   }
+}
 
-  const fixture = props.selectedFixtures[0];
-  return [
-    { label: 'Name', value: fixture.name, category: 'meta' as const },
-    { label: 'ID', value: String(fixture.id), category: 'meta' as const },
-    ...(fixture.oflKey
-      ? [{ label: 'OFL Key', value: fixture.oflKey, category: 'meta' as const }]
-      : []),
+const channelSections = computed((): ChannelSection[] => {
+  const fixtures = getSelectedFixtures();
+  if (fixtures.length === 0) return [];
+
+  const TAB_ORDER: ChannelType[] = [
+    ...INTENSITY_TYPES, ...COLOR_TYPES, ...POSITION_TYPES, ...BEAM_TYPES
   ];
-});
+  const relevantTypes = TAB_ORDER.filter(t =>
+    tabChannelFilter(t) && fixtures.some(f => f.channels.some(c => c.type === t))
+  );
+  if (relevantTypes.length === 0) return [];
 
-const positionRows = computed<PropertyRow[]>(() => {
-  if (isEmpty.value) return [];
+  const getFixtureType = (f: Fixture): string => {
+    const ext = f as Fixture & { oflShortName?: string };
+    return (ext.oflShortName ?? f.name.replace(/\s+\d+$/, '')).trim();
+  };
 
-  if (isMulti.value) {
-    const avgX = props.selectedFixtures.reduce((s, f) => s + f.fixturePosition.x, 0) / props.selectedFixtures.length;
-    const avgY = props.selectedFixtures.reduce((s, f) => s + f.fixturePosition.y, 0) / props.selectedFixtures.length;
-    return [
-      { label: 'Avg X', value: avgX.toFixed(3), category: 'position' as const },
-      { label: 'Avg Y', value: avgY.toFixed(3), category: 'position' as const },
-    ];
+  // Labels are only shown when multiple fixture types are selected
+  const allFixtureTypes = new Set(fixtures.map(getFixtureType));
+  const showLabels = allFixtureTypes.size > 1;
+
+  // Build a flat list of (channelType, fixtures, sectionName) entries
+  const flat: Array<{ channelType: ChannelType; fixtures: Fixture[]; sectionName: string }> = [];
+
+  for (const channelType of relevantTypes) {
+    const fixturesWithCh = fixtures.filter(f => f.channels.some(c => c.type === channelType));
+
+    // Sub-group by fingerprint (handles color wheels with different slot sets)
+    const sigGroups = new Map<string, Fixture[]>();
+    for (const f of fixturesWithCh) {
+      const sig = channelFingerprint(channelType, f);
+      if (!sigGroups.has(sig)) sigGroups.set(sig, []);
+      sigGroups.get(sig)!.push(f);
+    }
+
+    for (const group of sigGroups.values()) {
+      const groupTypes = new Set(group.map(getFixtureType));
+      const sectionName = groupTypes.size > 1 ? 'Combined' : (Array.from(groupTypes)[0] ?? '');
+      flat.push({ channelType, fixtures: group, sectionName });
+    }
   }
 
-  const f = props.selectedFixtures[0];
-  return [
-    { label: 'X', value: f.fixturePosition.x.toFixed(3), category: 'position' as const },
-    { label: 'Y', value: f.fixturePosition.y.toFixed(3), category: 'position' as const },
-    { label: 'Size', value: `${(f.fixtureSize?.x ?? 1).toFixed(2)}x`, category: 'position' as const },
-  ];
-});
+  // Merge consecutive entries with the same sectionName into sections
+  const sections: ChannelSection[] = [];
+  for (const entry of flat) {
+    const last = sections[sections.length - 1];
+    if (last && last.name === entry.sectionName) {
+      last.entries.push({ channelType: entry.channelType, fixtures: entry.fixtures });
+    } else {
+      sections.push({
+        name: entry.sectionName,
+        showLabel: showLabels,
+        entries: [{ channelType: entry.channelType, fixtures: entry.fixtures }],
+      });
+    }
+  }
 
-// ─── "Resolved color" swatch ──────────────────────────────────────────────────
-const resolvedColor = computed<string | null>(() => {
-  if (isEmpty.value || isMulti.value) return null;
-  const id = props.selectedFixtures[0].id;
-  return props.colors.get(id) ?? null;
+  return sections;
 });
 </script>
 
+
+
 <template>
-  <div class="properties-sidebar">
-    <!-- ── Header ───────────────────────────────────────────────────── -->
-    <div class="sidebar-header">
-      <SlidersHorizontal class="size-3.5 text-muted-foreground" />
-      <span class="header-title">Properties</span>
-      <div v-if="!isEmpty && resolvedColor" class="color-swatch" :style="{ background: resolvedColor }" />
-    </div>
-
-    <!-- ── Empty State ───────────────────────────────────────────────── -->
-    <div v-if="isEmpty" class="empty-state">
-      <Zap class="empty-icon" />
-      <p class="empty-title">No Selection</p>
-      <p class="empty-hint">Click a fixture on the canvas or in the scene list to inspect its properties.</p>
-    </div>
-
-    <!-- ── Populated ─────────────────────────────────────────────────── -->
-    <ScrollArea v-else class="sidebar-scroll">
-      <div class="sidebar-content">
-
-        <!-- Meta section -->
-        <section class="prop-section">
-          <div class="section-header">
-            <Info class="size-3 text-muted-foreground/60" />
-            <span>Info</span>
+  <div ref="sidebarRef" class="absolute right-0 top-0 h-full flex pointer-events-none">
+    
+    <!-- Floating Overlay Panel -->
+    <div 
+      class="pointer-events-auto absolute right-14 top-4 bottom-4 w-72 bg-background border border-border shadow-2xl rounded-2xl z-10 overflow-hidden transition-all duration-200 ease-out"
+      :class="[activeTab ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-0 scale-95 pointer-events-none']"
+    >
+      <div v-if="activeTab" class="flex flex-col h-full">
+        <!-- Overlay Header -->
+        <div class="p-4 border-b border-border text-sm font-medium capitalize text-muted-foreground flex items-center justify-between">
+          <span>{{ activeTab }}</span>
+          <span v-if="activeTab && availableTabs.total > 0" class="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full whitespace-nowrap normal-case">
+            {{ activeTabFixtureCount }} of {{ availableTabs.total }} Fixture{{ availableTabs.total === 1 ? '' : 's' }}
+          </span>
+        </div>
+        
+        <!-- Overlay Content -->
+        <ScrollArea class="flex-1 p-4">
+          <div v-if="channelSections.length === 0" class="text-sm text-muted-foreground text-center mt-10">
+            No adjustable properties found.
           </div>
-          <div class="prop-rows">
-            <button
-              v-for="row in metaRows"
-              :key="row.label"
-              class="prop-row"
-              @click="openSheet(row)"
-            >
-              <span class="prop-label">{{ row.label }}</span>
-              <span class="prop-value">{{ row.value }}</span>
-              <ChevronRight class="row-chevron" />
-            </button>
-          </div>
-        </section>
-
-        <Separator class="my-2 opacity-30" />
-
-        <!-- Position section -->
-        <section class="prop-section">
-          <div class="section-header">
-            <MapPin class="size-3 text-muted-foreground/60" />
-            <span>Position</span>
-          </div>
-          <div class="prop-rows">
-            <button
-              v-for="row in positionRows"
-              :key="row.label"
-              class="prop-row"
-              @click="openSheet(row)"
-            >
-              <span class="prop-label">{{ row.label }}</span>
-              <span class="prop-value">{{ row.value }}</span>
-              <ChevronRight class="row-chevron" />
-            </button>
-          </div>
-        </section>
-
-        <Separator class="my-2 opacity-30" />
-
-        <!-- Channels section -->
-        <section class="prop-section">
-          <div class="section-header">
-            <Layers class="size-3 text-muted-foreground/60" />
-            <span>Channels</span>
-            <span class="section-count">{{ channelRows.length }}</span>
-          </div>
-          <div class="prop-rows">
-            <button
-              v-for="row in channelRows"
-              :key="row.label"
-              class="prop-row channel-row"
-              @click="openSheet(row)"
-            >
-              <!-- Color dot for color channels -->
-              <span
-                v-if="row.color"
-                class="channel-dot"
-                :style="{ background: row.color }"
-              />
-              <span v-else class="channel-dot channel-dot--neutral" />
-
-              <span class="prop-label">{{ row.label }}</span>
-
-              <div class="channel-right">
-                <!-- DMX bar -->
-                <div class="dmx-bar-track">
-                  <div
-                    class="dmx-bar-fill"
-                    :style="{
-                      width: `${(row.channel?.value ?? 0) / 255 * 100}%`,
-                      background: row.color ?? 'var(--primary)',
-                    }"
-                  />
-                </div>
-                <span class="prop-value channel-value">{{ row.channel?.value ?? '—' }}</span>
+          <div v-else class="space-y-5">
+            <div v-for="(section, idx) in channelSections" :key="idx">
+              <!-- Section label: only shown when multiple fixture types are selected -->
+              <div v-if="section.showLabel" class="flex items-center gap-2 mb-1.5">
+                <span class="text-[10px] font-mono text-muted-foreground uppercase tracking-wider flex-shrink-0">
+                  {{ section.name }}
+                </span>
+                <div class="h-px bg-border flex-1"></div>
               </div>
 
-              <ChevronRight class="row-chevron" />
-            </button>
+              <!-- Channel rows for this section -->
+              <div class="space-y-0.5">
+                <FixturePropertyControl
+                  v-for="entry in section.entries"
+                  :key="entry.channelType"
+                  :type="entry.channelType"
+                  :fixtures="entry.fixtures"
+                />
+              </div>
+            </div>
           </div>
-        </section>
-
+        </ScrollArea>
       </div>
-    </ScrollArea>
+    </div>
 
-    <!-- ── Property Sheet Overlay ─────────────────────────────────────── -->
-    <FixturePropertySheet
-      v-model:open="sheetOpen"
-      :row="activeRow"
-      :fixtures="selectedFixtures"
-    />
+    <!-- Main Right Icon Bar -->
+    <div class="pointer-events-auto w-12 bg-background border-l border-border flex flex-col items-center py-4 gap-2 z-20">
+      
+      <button
+        v-if="availableTabs.intensity > 0"
+        class="p-2 rounded-md transition-colors"
+        :class="activeTab === 'intensity' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
+        @click="toggleTab('intensity')"
+        title="Intensity Properties"
+      >
+        <Lightbulb class="size-5" />
+      </button>
+
+      <button
+        v-if="availableTabs.beam > 0"
+        class="p-2 rounded-md transition-colors"
+        :class="activeTab === 'beam' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
+        @click="toggleTab('beam')"
+        title="Beam Properties"
+      >
+        <Aperture class="size-5" />
+      </button>
+
+      <button
+        v-if="availableTabs.position > 0"
+        class="p-2 rounded-md transition-colors"
+        :class="activeTab === 'position' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
+        @click="toggleTab('position')"
+        title="Position Properties"
+      >
+        <Move class="size-5" />
+      </button>
+
+      <button
+        v-if="availableTabs.color > 0"
+        class="p-2 rounded-md transition-colors"
+        :class="activeTab === 'color' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
+        @click="toggleTab('color')"
+        title="Color Properties"
+      >
+        <Palette class="size-5" />
+      </button>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.properties-sidebar {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 240px;
-  background: var(--sidebar);
-  border-left: 1px solid var(--border);
-  overflow: hidden;
-}
-
-/* ── Header ──────────────────────────────────────────────────────── */
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 48px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.header-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-  flex: 1;
-}
-
-.color-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,0.15);
-  flex-shrink: 0;
-  box-shadow: 0 0 6px currentColor;
-}
-
-/* ── Empty state ──────────────────────────────────────────────────── */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 40px 20px;
-  text-align: center;
-  flex: 1;
-}
-
-.empty-icon {
-  width: 24px;
-  height: 24px;
-  color: var(--muted-foreground);
-  opacity: 0.3;
-}
-
-.empty-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted-foreground);
-  opacity: 0.6;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.empty-hint {
-  font-size: 10px;
-  color: var(--muted-foreground);
-  opacity: 0.4;
-  line-height: 1.5;
-  max-width: 160px;
-}
-
-/* ── Scroll area ──────────────────────────────────────────────────── */
-.sidebar-scroll {
-  flex: 1;
-  min-height: 0;
-}
-
-.sidebar-content {
-  padding: 10px 0 20px;
-}
-
-/* ── Section ──────────────────────────────────────────────────────── */
-.prop-section {
-  padding: 0 8px;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 6px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-  opacity: 0.6;
-}
-
-.section-count {
-  margin-left: auto;
-  background: var(--accent);
-  color: var(--muted-foreground);
-  font-size: 9px;
-  padding: 0 5px;
-  border-radius: 999px;
-  line-height: 16px;
-}
-
-/* ── Rows ─────────────────────────────────────────────────────────── */
-.prop-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.prop-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.12s ease;
-  text-align: left;
-}
-
-.prop-row:hover {
-  background: var(--accent);
-}
-
-.prop-row:hover .row-chevron {
-  opacity: 0.7;
-  transform: translateX(1px);
-}
-
-.prop-label {
-  font-size: 11px;
-  color: var(--foreground);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prop-value {
-  font-size: 10px;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.row-chevron {
-  width: 10px;
-  height: 10px;
-  color: var(--muted-foreground);
-  opacity: 0.3;
-  flex-shrink: 0;
-  transition: opacity 0.1s ease, transform 0.1s ease;
-}
-
-/* ── Channel rows ──────────────────────────────────────────────────── */
-.channel-row {
-  padding: 7px 8px;
-}
-
-.channel-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 0 5px currentColor;
-}
-
-.channel-dot--neutral {
-  background: var(--muted-foreground);
-  opacity: 0.3;
-  box-shadow: none;
-}
-
-.channel-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-.channel-value {
-  font-size: 10px;
-}
-
-.dmx-bar-track {
-  width: 52px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.dmx-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 0.05s linear;
-  opacity: 0.85;
-}
-</style>

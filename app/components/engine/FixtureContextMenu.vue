@@ -8,7 +8,7 @@ import {
   ContextMenuSeparator,
   ContextMenuShortcut,
 } from '@/components/ui/context-menu';
-import { TrashIcon } from 'lucide-vue-next';
+import { TrashIcon, PencilIcon } from 'lucide-vue-next';
 
 /**
  * Unified context menu for any SceneNode (Fixture or FixtureGroup).
@@ -23,6 +23,7 @@ interface Props {
   canZoom?: boolean;
   canGroup?: boolean;
   canUngroup?: boolean;
+  canRename?: boolean;
   canDelete?: boolean;
 }
 
@@ -30,6 +31,7 @@ interface Emits {
   (e: 'zoomTo', node: SceneNode): void;
   (e: 'group'): void;
   (e: 'ungroup', group: FixtureGroup): void;
+  (e: 'rename'): void;
   (e: 'delete', node: SceneNode): void;
 }
 
@@ -37,6 +39,7 @@ const props = withDefaults(defineProps<Props>(), {
   canZoom: false,
   canGroup: false,
   canUngroup: false,
+  canRename: false,
   canDelete: false,
 });
 
@@ -67,7 +70,12 @@ const emit = defineEmits<Emits>();
         <ContextMenuShortcut>⇧⌘G</ContextMenuShortcut>
       </ContextMenuItem>
 
-      <ContextMenuSeparator v-if="canDelete && (canZoom || canGroup || canUngroup)" />
+      <ContextMenuItem v-if="canRename" @click="emit('rename')">
+        Rename
+        <ContextMenuShortcut>F2</ContextMenuShortcut>
+      </ContextMenuItem>
+
+      <ContextMenuSeparator v-if="canDelete && (canZoom || canGroup || canUngroup || canRename)" />
 
       <ContextMenuItem v-if="canDelete" variant="destructive" @click="emit('delete', node)">
         <TrashIcon />

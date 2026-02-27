@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { ChevronRight, ChevronDown, Spotlight, Folder } from 'lucide-vue-next';
 import { useHistory } from '~/components/engine/composables/use-history';
+import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { RenameNodeCommand } from '~/components/engine/commands/rename-command';
 import FixtureContextMenu from './FixtureContextMenu.vue';
 import {
@@ -39,13 +40,18 @@ function handleSelect(e: MouseEvent) {
   emit('select', props.node.id, e.shiftKey || e.metaKey || e.ctrlKey);
 }
 
+// Tracks when editing started so we can ignore menu-close blur events
+let editStartTime = 0;
+
 function startEditing() {
   editName.value = props.node.name;
   isEditing.value = true;
-  nextTick(() => {
+  editStartTime = Date.now();
+  // Delay focus so the context menu has fully closed before we steal focus
+  setTimeout(() => {
     inputEl.value?.focus();
     inputEl.value?.select();
-  });
+  }, 50);
 }
 
 function saveRename() {
@@ -57,9 +63,20 @@ function saveRename() {
   isEditing.value = false;
 }
 
+// Guard: ignore blur events that fire within 300ms of startEditing (context menu close side-effect)
+function onInputBlur() {
+  if (Date.now() - editStartTime < 300) return;
+  saveRename();
+}
+
 function cancelEditing() {
   isEditing.value = false;
 }
+
+// F2 triggers rename only when this node is the single selection
+useShortcuts([
+  { key: 'F2', label: 'Rename', handler: () => { if (isSelected.value) startEditing(); } },
+]);
 </script>
 
 <template>
@@ -69,9 +86,11 @@ function cancelEditing() {
       :node="node"
       :can-zoom="true"
       :can-group="true"
+      :can-rename="true"
       :can-delete="true"
       @zoom-to="emit('zoomTo', node)"
       @group="emit('group')"
+      @rename="startEditing"
       @delete="emit('delete', node)"
     >
       <SidebarMenuButton :is-active="isSelected" @click="handleSelect">
@@ -83,7 +102,7 @@ function cancelEditing() {
           class="bg-background border border-primary rounded px-1 w-full text-sm outline-none"
           @keydown.enter="saveRename"
           @keydown.esc="cancelEditing"
-          @blur="saveRename"
+          @blur="onInputBlur"
           @click.stop
         />
         <span v-else @dblclick="startEditing">{{ node.name }}</span>
@@ -99,10 +118,12 @@ function cancelEditing() {
         :can-zoom="true"
         :can-group="true"
         :can-ungroup="true"
+        :can-rename="true"
         :can-delete="true"
         @zoom-to="emit('zoomTo', node)"
         @group="emit('group')"
         @ungroup="emit('ungroup', node as FixtureGroup)"
+        @rename="startEditing"
         @delete="emit('delete', node)"
       >
         <SidebarMenuButton :is-active="isSelected" @click="handleSelect">

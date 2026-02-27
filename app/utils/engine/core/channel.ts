@@ -1,4 +1,5 @@
 import type { ChannelType } from '../types';
+import type { OflCapability, OflWheel } from '~/utils/ofl/types';
 
 /**
  * Describes how the channel contributes to the fixture's visual output.
@@ -27,4 +28,13 @@ export interface Channel {
    * Examples: '#FF0000' (red), '#FFFFFF' (white/dimmer).
    */
   colorValue: string;
+  /** Human-readable channel name from the OFL definition (e.g. 'Shutter', 'Dimmer'). */
+  oflChannelName?: string;
+  /** All OFL capabilities for this channel (used to build the capability dropdown). */
+  oflCapabilities?: OflCapability[];
+  /**
+   * All wheel definitions from the fixture this channel belongs to.
+   * Needed to resolve slot names and slot colors for WheelSlot-type capabilities.
+   */
+  oflWheels?: Record<string, OflWheel>;
 }

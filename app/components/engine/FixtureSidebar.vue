@@ -27,27 +27,30 @@ const emit = defineEmits<{
   (e: 'deleteNode', node: SceneNode): void;
 }>();
 
-const activeTab = ref<'fixtures' | 'presets'>('fixtures');
-
+const activeTab = ref<'fixtures' | 'presets' | null>('fixtures');
 
 function toggleTab(tab: 'fixtures' | 'presets') {
-  activeTab.value = tab;
+  activeTab.value = activeTab.value === tab ? null : tab;
 }
 </script>
 
 <template>
   <div class="flex h-full border-r border-border bg-sidebar">
     <!-- Main Sidebar Panel -->
-    <Sidebar class="w-64 border-r border-border bg-sidebar" collapsible="none">
+    <Sidebar
+      v-if="activeTab !== null"
+      class="w-64 border-r border-border bg-sidebar"
+      collapsible="none"
+    >
       <SidebarHeader class="h-12 flex flex-row items-center justify-between px-4 border-b border-border bg-sidebar">
         <span class="font-semibold text-xs tracking-wider uppercase text-muted-foreground">
           {{ activeTab === 'fixtures' ? 'Fixtures' : 'Presets' }}
         </span>
-        
+
         <!-- Add Fixture button in header -->
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           class="size-7 text-muted-foreground hover:text-foreground"
           title="Add Fixture (Shift+A)"
           @click="emit('requestAddFixture')"
@@ -60,17 +63,17 @@ function toggleTab(tab: 'fixtures' | 'presets') {
         <!-- Fixtures tab: scene tree -->
         <SidebarGroup v-if="activeTab === 'fixtures'" class="p-2">
           <SidebarMenu v-if="nodes.length > 0">
-             <FixtureSidebarNode 
-               v-for="node in nodes" 
-               :key="node.id"
-               :node="node" 
-               :selected-ids="selectedIds"
-               @select="(id, mult) => emit('select', id, mult)"
-               @group="emit('group')"
-               @ungroup="g => emit('ungroup', g)"
-               @zoom-to="n => emit('zoomTo', n)"
-               @delete="n => emit('deleteNode', n)"
-             />
+            <FixtureSidebarNode
+              v-for="node in nodes"
+              :key="node.id"
+              :node="node"
+              :selected-ids="selectedIds"
+              @select="(id, mult) => emit('select', id, mult)"
+              @group="emit('group')"
+              @ungroup="g => emit('ungroup', g)"
+              @zoom-to="n => emit('zoomTo', n)"
+              @delete="n => emit('deleteNode', n)"
+            />
           </SidebarMenu>
           <div v-else class="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground opacity-50">
             <Lightbulb class="size-8" />
@@ -92,7 +95,7 @@ function toggleTab(tab: 'fixtures' | 'presets') {
 
     <!-- Activity Bar (Narrow) -->
     <div class="w-12 bg-background flex flex-col items-center py-4 gap-4 border-l border-border">
-      <button 
+      <button
         class="p-2 rounded-md transition-colors"
         :class="activeTab === 'fixtures' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
         @click="toggleTab('fixtures')"
@@ -100,7 +103,7 @@ function toggleTab(tab: 'fixtures' | 'presets') {
       >
         <Lightbulb class="size-5" />
       </button>
-      <button 
+      <button
         class="p-2 rounded-md transition-colors"
         :class="activeTab === 'presets' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
         @click="toggleTab('presets')"
