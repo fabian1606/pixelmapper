@@ -6,7 +6,7 @@ import type { SpatialVector } from '~/utils/engine/types';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureNode from './FixtureNode.vue';
-import SpatialHandle from './SpatialHandle.vue';
+import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
 import { useHistory } from './composables/use-history';
@@ -36,35 +36,19 @@ const WORLD_HEIGHT   = 3000;
 
 // ─── Responsive Sizing ───────────────────────────────────────────────────────
 const viewportEl = ref<HTMLElement | null>(null);
-const editorWidth = ref(props.width || 800);
-const editorHeight = ref(props.height || 600);
+import { useEditorViewport } from './composables/use-editor-viewport';
 
-let resizeObserver: ResizeObserver | null = null;
-let initialFitDone = false;
-
-onMounted(() => {
-  if (viewportEl.value) {
-    resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        editorWidth.value = width;
-        editorHeight.value = height;
-        // Fit all fixtures on the very first size measurement
-        if (!initialFitDone && props.fixtures.length > 0) {
-          initialFitDone = true;
-          zoomToFit();
-        } else {
-          fixtureCanvas.value?.draw();
-        }
-      }
-    });
-    resizeObserver.observe(viewportEl.value);
+const { editorWidth, editorHeight } = useEditorViewport(
+  viewportEl,
+  props.width || 800,
+  props.height || 600,
+  () => {
+    if (props.fixtures.length > 0) zoomToFit();
+  },
+  () => {
+    fixtureCanvas.value?.draw();
   }
-});
-
-onUnmounted(() => {
-  resizeObserver?.disconnect();
-});
+);
 
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel, centerOn, fitAll } = useCamera();
@@ -132,26 +116,6 @@ function rect(): DOMRect {
   return viewportEl.value!.getBoundingClientRect();
 }
 
-// ─── Single selected fixture (gradient handle is only rendered for exactly 1) ──
-const selectedFixture = computed<Fixture | null>(() => {
-  if (selectedIds.value.size !== 1) return null;
-  const id = [...selectedIds.value][0];
-  return props.fixtures.find(f => f.id === id) ?? null;
-});
-
-// ─── Gradient handle viewport positions ───────────────────────────────────────
-function getOriginViewportPos(f: Fixture) {
-  const cfg = f.spatialConfig;
-  return worldToViewport(cfg.originX * WORLD_WIDTH, cfg.originY * WORLD_HEIGHT);
-}
-
-function getEndViewportPos(f: Fixture) {
-  const cfg = f.spatialConfig;
-  const ex = cfg.originX * WORLD_WIDTH  + Math.cos(cfg.angle) * cfg.magnitude * WORLD_WIDTH;
-  const ey = cfg.originY * WORLD_HEIGHT + Math.sin(cfg.angle) * cfg.magnitude * WORLD_WIDTH;
-  return worldToViewport(ex, ey);
-}
-
 // ─── Fixture visibility / screen position ─────────────────────────────────────
 function isFixtureVisible(f: Fixture): boolean {
   const pos    = worldToViewport(f.fixturePosition.x * WORLD_WIDTH, f.fixturePosition.y * WORLD_HEIGHT);
@@ -176,56 +140,14 @@ function isFixtureSelected(f: Fixture): boolean {
   return false;
 }
 
-// ─── Gradient handle drag (window-global for reliable capture) ─────────────────
-type HandleDragType = 'origin' | 'endpoint' | null;
-let spatialDragType: HandleDragType = null;
+// ─── Single selected fixture (gradient handle is only rendered for exactly 1) ──
+const selectedFixture = computed<Fixture | null>(() => {
+  if (selectedIds.value.size !== 1) return null;
+  const id = [...selectedIds.value][0];
+  return props.fixtures.find(f => f.id === id) ?? null;
+});
 
-function handleOriginDragStart(e: MouseEvent) {
-  spatialDragType = 'origin';
-  window.addEventListener('mousemove', handleWindowMouseMove);
-  window.addEventListener('mouseup',   handleWindowMouseUp);
-}
 
-function handleEndpointDragStart(e: MouseEvent) {
-  spatialDragType = 'endpoint';
-  window.addEventListener('mousemove', handleWindowMouseMove);
-  window.addEventListener('mouseup',   handleWindowMouseUp);
-}
-
-function handleWindowMouseMove(e: MouseEvent) {
-  const f = selectedFixture.value;
-  if (!f || !spatialDragType) return;
-
-  const r = viewportEl.value?.getBoundingClientRect();
-  if (!r) return;
-
-  const vx = e.clientX - r.left;
-  const vy = e.clientY - r.top;
-  const wx = (vx - camera.x) / camera.scale;
-  const wy = (vy - camera.y) / camera.scale;
-  const cfg = f.spatialConfig;
-
-  if (spatialDragType === 'origin') {
-    cfg.originX = wx / WORLD_WIDTH;
-    cfg.originY = wy / WORLD_HEIGHT;
-  } else if (spatialDragType === 'endpoint') {
-    const ox = cfg.originX * WORLD_WIDTH;
-    const oy = cfg.originY * WORLD_HEIGHT;
-    const dx = wx - ox;
-    const dy = wy - oy;
-    cfg.angle     = Math.atan2(dy, dx);
-    cfg.magnitude = Math.sqrt(dx * dx + dy * dy) / WORLD_WIDTH;
-  }
-
-  emit('spatialChange', f, { ...f.spatialConfig });
-  fixtureCanvas.value?.draw();
-}
-
-function handleWindowMouseUp() {
-  spatialDragType = null;
-  window.removeEventListener('mousemove', handleWindowMouseMove);
-  window.removeEventListener('mouseup',   handleWindowMouseUp);
-}
 
 // ─── Viewport event delegation ─────────────────────────────────────────────────
 function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
@@ -259,46 +181,18 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       :viewport-height="editorHeight"
     />
 
-    <!--
-      Figma-style gradient handle — only visible when exactly 1 fixture is selected.
-      Two handles:  ① origin (square-ish dot) — drag to reposition the effect center
-                    ② endpoint (circle) — drag to change direction + magnitude
-      Connected by a solid line (SVG).
-    -->
-    <template v-if="selectedFixture">
-      <!-- SVG line connects origin to endpoint -->
-      <svg class="gradient-svg" :width="editorWidth" :height="editorHeight">
-        <line
-          :x1="getOriginViewportPos(selectedFixture).x"
-          :y1="getOriginViewportPos(selectedFixture).y"
-          :x2="getEndViewportPos(selectedFixture).x"
-          :y2="getEndViewportPos(selectedFixture).y"
-          stroke="var(--primary)"
-          style="opacity: 0.85"
-          stroke-width="1.5"
-        />
-      </svg>
-
-      <!-- ① Origin handle -->
-      <SpatialHandle
-        type="origin"
-        :style="{
-          left: `${getOriginViewportPos(selectedFixture).x}px`,
-          top:  `${getOriginViewportPos(selectedFixture).y}px`,
-        }"
-        @dragstart="handleOriginDragStart($event)"
-      />
-
-      <!-- ② Endpoint handle -->
-      <SpatialHandle
-        type="endpoint"
-        :style="{
-          left: `${getEndViewportPos(selectedFixture).x}px`,
-          top:  `${getEndViewportPos(selectedFixture).y}px`,
-        }"
-        @dragstart="handleEndpointDragStart($event)"
-      />
-    </template>
+    <FixtureEditorSpatialControls
+      :viewport-el="viewportEl"
+      :editor-width="editorWidth"
+      :editor-height="editorHeight"
+      :camera="camera"
+      :selected-fixture="selectedFixture"
+      :world-width="WORLD_WIDTH"
+      :world-height="WORLD_HEIGHT"
+      :world-to-viewport="worldToViewport"
+      @spatialChange="(f, v) => emit('spatialChange', f, v)"
+      @redraw="() => fixtureCanvas?.draw()"
+    />
 
     <!-- Fixture interaction shells -->
     <template v-for="fixture in fixtures" :key="fixture.id">

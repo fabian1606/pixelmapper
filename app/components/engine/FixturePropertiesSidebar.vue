@@ -11,12 +11,14 @@ import {
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import type { ChannelType } from '~/utils/engine/types';
-import FixturePropertyControl from './FixturePropertyControl.vue';
+import FixturePropertiesTabBar from './FixturePropertiesTabBar.vue';
+import FixturePropertiesChannelList from './FixturePropertiesChannelList.vue';
 import { provideSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { useHistory } from '~/components/engine/composables/use-history';
-import { SetChannelValuesCommand, createSnapshot, type SnapshotMap } from './commands/set-channel-values-command';
-
+import { type SnapshotMap } from './commands/set-channel-values-command';
+import { useChannelValueHistory } from './composables/use-channel-value-history';
+import { useChannelSections } from './composables/use-channel-sections';
 interface Props {
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
@@ -31,11 +33,12 @@ import ChaserStepsManager from './ChaserStepsManager.vue';
 // Sidebar close lock: child dropdowns increment this to prevent auto-close
 const { openCount: lockedOpenCount } = provideSidebarLock();
 
-const history = useHistory();
-
 // Tabs logic
 const activeTab = ref<ChannelCategoryKey | null>(null);
 const sidebarRef = ref<HTMLElement | null>(null);
+
+const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
+const { tabChannelFilter, channelSections } = useChannelSections(activeTab, getSelectedFixtures);
 
 // Steps Manager reference to access the active chaser configuration
 const stepsManager = ref<InstanceType<typeof ChaserStepsManager> | null>(null);
@@ -58,43 +61,11 @@ function toggleTab(tab: ChannelCategoryKey) {
   }
 }
 
-function snapshotChannels(fixtures: Fixture[]): SnapshotMap {
-  const map: SnapshotMap = new Map();
-  for (const f of fixtures) {
-    for (let i = 0; i < f.channels.length; i++) {
-        const ch = f.channels[i];
-        if (!ch) continue;
-        map.set({ fixture: f, channelIndex: i }, {
-            before: createSnapshot(ch),
-            after: null as any
-        });
-    }
-  }
-  return map;
-}
 
-function commitSnapshots(map: SnapshotMap, description: string) {
-    let changed = false;
-    for (const [ref, state] of map.entries()) {
-        const ch = ref.fixture.channels[ref.channelIndex];
-        if (!ch) continue;
-        state.after = createSnapshot(ch);
-        if (
-            state.before.colorValue !== state.after.colorValue ||
-            JSON.stringify(state.before.stepValues) !== JSON.stringify(state.after.stepValues) ||
-            JSON.stringify(state.before.chaserConfig) !== JSON.stringify(state.after.chaserConfig)
-        ) {
-            changed = true;
-        }
-    }
-    if (changed) {
-        history.execute(new SetChannelValuesCommand(map, description));
-    }
-}
 
 function stopAllOrSelected() {
   const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
-  const snapshots = snapshotChannels(targetFixtures);
+  const snapshots = captureSnapshots(targetFixtures);
   
   for (const f of targetFixtures) {
     for (const ch of f.channels) {
@@ -112,7 +83,7 @@ function stopAllOrSelected() {
 function resetActiveTabGroup() {
   if (!activeTab.value) return;
   const fixtures = getSelectedFixtures();
-  const snapshots = snapshotChannels(fixtures);
+  const snapshots = captureSnapshots(fixtures);
   
   for (const f of fixtures) {
     for (const ch of f.channels) {
@@ -149,21 +120,7 @@ function getSelectedFixtures(): Fixture[] {
   return result;
 }
 
-/** Stable fingerprint for a channel.
- *  - Single-capability channels: fingerprinted by type only, so e.g. a DIMMER
- *    called "Dimmer" and one called "Intensity" still merge into the same group.
- *  - Multi-capability channels (color wheels, strobe modes etc.): also include
- *    capability details so they stay separate from simpler same-type channels.
- */
-function channelFingerprint(type: ChannelType, fixture: Fixture): string {
-  const ch = fixture.channels.find(c => c.type === type);
-  if (!ch) return type;
-  const caps = ch.oflCapabilities ?? [];
-  // Ignore sub-range details when there is only one (or no) capability
-  if (caps.length <= 1) return type;
-  const capSig = caps.map(c => `${c.type}:${c.dmxRange}`).join('|');
-  return `${type}::${capSig}`;
-}
+
 
 // Computed tabs visibility -------------------------------------------------
 
@@ -212,143 +169,7 @@ const stopAllTooltip = computed(() => {
   return 'Stop all functions';
 });
 
-// Channel sections for the active tab ----------------------------------------
 
-/** One channel row inside a section */
-interface ChannelEntry {
-  channelType: ChannelType;
-  /** The exact OFL channel name (e.g. 'Gobo Wheel 1') — used to distinguish
-   *  multiple channels that share the same ChannelType on a fixture. */
-  oflChannelName: string;
-  fixtures: Fixture[];
-}
-
-/** One visual section with a single label header and 1-N channel rows */
-interface ChannelSection {
-  name: string;    // section label ("Combined", "MH-X25", etc.)
-  showLabel: boolean;
-  entries: ChannelEntry[];
-}
-
-function tabChannelFilter(type: ChannelType, role?: string): boolean {
-  if (!activeTab.value) return false;
-  const cat = CHANNEL_CATEGORIES.find(c => c.id === activeTab.value);
-  if (!cat) return false;
-  if (cat.id === 'intensity' && role === 'DIMMER') return true;
-  if (cat.id === 'color' && role === 'COLOR') return true;
-  return cat.types.includes(type);
-}
-
-const channelSections = computed((): ChannelSection[] => {
-  const fixtures = getSelectedFixtures();
-  if (fixtures.length === 0) return [];
-
-  const getFixtureType = (f: Fixture): string => {
-    const ext = f as Fixture & { oflShortName?: string };
-    return (ext.oflShortName ?? f.name.replace(/\s+\d+$/, '')).trim();
-  };
-
-  const allFixtureTypes = new Set(fixtures.map(getFixtureType));
-  const showLabels = allFixtureTypes.size > 1;
-
-  // 1. Collect all unique channels across all selected fixtures in this tab
-  type ChannelKey = string;
-  const allChannels = new Map<ChannelKey, { channelType: ChannelType; oflChannelName: string; fixtures: Fixture[] }>();
-
-  for (const f of fixtures) {
-    const usedKeysInFixture = new Set<string>();
-
-    for (const ch of f.channels) {
-      if (!tabChannelFilter(ch.type, ch.role)) continue;
-      
-      const rawName = ch.oflChannelName ?? ch.type;
-      const normalizedName = rawName.toLowerCase().trim();
-      
-      const caps = ch.oflCapabilities ?? [];
-      let capSig = '';
-      if (caps.length > 1) {
-        capSig = caps.map(c => `${c.type}:${c.dmxRange ? c.dmxRange[0]+'-'+c.dmxRange[1] : ''}`).join('|');
-      }
-      
-      const baseKey = `${ch.type}::${normalizedName}::${capSig}`;
-      
-      let finalKey = baseKey;
-      let dedup = 1;
-      while (usedKeysInFixture.has(finalKey)) {
-        finalKey = `${baseKey}::dedup${dedup++}`;
-      }
-      usedKeysInFixture.add(finalKey);
-      
-      if (!allChannels.has(finalKey)) {
-        allChannels.set(finalKey, { channelType: ch.type, oflChannelName: rawName, fixtures: [] });
-      }
-      allChannels.get(finalKey)!.fixtures.push(f);
-    }
-  }
-
-  // Sort channels by TAB_ORDER, then alphabetically
-  const tabOrderIndex = new Map(TAB_ORDER.map((t, i) => [t, i]));
-  const orderedChannels = [...allChannels.values()].sort((a, b) => {
-    const ai = tabOrderIndex.get(a.channelType) ?? 999;
-    const bi = tabOrderIndex.get(b.channelType) ?? 999;
-    if (ai !== bi) return ai - bi;
-    return a.oflChannelName.localeCompare(b.oflChannelName);
-  });
-
-  // 2. Bucket channels into Combined vs. Specific Models
-  const combinedEntries: ChannelEntry[] = [];
-  const modelEntries = new Map<string, ChannelEntry[]>();
-
-  for (const item of orderedChannels) {
-    // A channel is "Combined" if every selected fixture type has at least one fixture with this channel
-    const itemFixtureTypes = new Set(item.fixtures.map(getFixtureType));
-    
-    if (itemFixtureTypes.size === allFixtureTypes.size) {
-      combinedEntries.push({
-        channelType: item.channelType,
-        oflChannelName: item.oflChannelName,
-        fixtures: item.fixtures
-      });
-    } else {
-      // Otherwise, add it to the section for each fixture model that has it
-      for (const modelName of itemFixtureTypes) {
-        if (!modelEntries.has(modelName)) modelEntries.set(modelName, []);
-        
-        // Only include the fixtures of *this* model
-        const fixturesOfModel = item.fixtures.filter(f => getFixtureType(f) === modelName);
-        
-        modelEntries.get(modelName)!.push({
-          channelType: item.channelType,
-          oflChannelName: item.oflChannelName,
-          fixtures: fixturesOfModel
-        });
-      }
-    }
-  }
-
-  // 3. Assemble final sections
-  const sections: ChannelSection[] = [];
-  
-  if (combinedEntries.length > 0) {
-    sections.push({
-      name: showLabels ? 'Combined' : '',
-      showLabel: showLabels,
-      entries: combinedEntries
-    });
-  }
-
-  // Add model-specific sections (sorted alphabetically by model name)
-  const sortedModels = [...modelEntries.keys()].sort((a, b) => a.localeCompare(b));
-  for (const modelName of sortedModels) {
-    sections.push({
-      name: modelName,
-      showLabel: true, // Always show labels for specific models if we reached this code
-      entries: modelEntries.get(modelName)!
-    });
-  }
-
-  return sections;
-});
 </script>
 
 <template>
@@ -391,65 +212,23 @@ const channelSections = computed((): ChannelSection[] => {
         
         <!-- Overlay Content (Faders) -->
         <ScrollArea v-show="!stepsManager || stepsManager.layerMode === 'steps'" class="flex-1 min-h-0 p-4">
-          <div v-if="channelSections.length === 0" class="text-sm text-muted-foreground text-center mt-10">
-            No adjustable properties found.
-          </div>
-          <div v-else class="space-y-5">
-            <div v-for="(section, idx) in channelSections" :key="idx">
-              <!-- Section label: only shown when multiple fixture types are selected -->
-              <div v-if="section.showLabel" class="flex items-center gap-2 mb-1.5">
-                <span class="text-[10px] font-mono text-muted-foreground uppercase tracking-wider flex-shrink-0">
-                  {{ section.name }}
-                </span>
-                <div class="h-px bg-border flex-1"></div>
-              </div>
-
-              <!-- Channel rows for this section -->
-              <div class="space-y-0.5">
-                <FixturePropertyControl
-                  v-for="entry in section.entries"
-                  :key="`${entry.channelType}:${entry.oflChannelName}`"
-                  :type="entry.channelType"
-                  :oflChannelName="entry.oflChannelName"
-                  :fixtures="entry.fixtures"
-                  :active-step="stepsManager?.activeChaserConfig?.activeEditStep ?? 0"
-                  @before-change="handleBeforeChange"
-                />
-              </div>
-            </div>
-          </div>
+          <FixturePropertiesChannelList
+            :channel-sections="channelSections"
+            :active-step="stepsManager?.activeChaserConfig?.activeEditStep ?? 0"
+            @before-change="handleBeforeChange"
+          />
         </ScrollArea>
       </div>
     </div>
 
     <!-- Main Right Icon Bar -->
-    <div class="pointer-events-auto w-12 bg-background border-l border-border flex flex-col items-center py-4 gap-2 z-20">
-      <button
-        v-for="cat in CHANNEL_CATEGORIES"
-        :key="cat.id"
-        v-show="availableTabs[cat.id] > 0"
-        class="p-2 rounded-md transition-colors relative"
-        :class="activeTab === cat.id ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
-        @click="toggleTab(cat.id)"
-        :title="cat.label + ' Properties'"
-      >
-        <span 
-          v-if="modifiedCategories.has(cat.id)" 
-          class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
-          :class="activeTab === cat.id ? 'bg-primary' : 'bg-muted-foreground'"
-        ></span>
-        <component :is="cat.icon" class="size-5" />
-      </button>
-
-      <div class="flex-1"></div>
-
-      <button
-        class="p-2 rounded-md transition-colors text-muted-foreground hover:text-red-500 hover:bg-muted"
-        @click="stopAllOrSelected"
-        :title="stopAllTooltip"
-      >
-        <OctagonX class="size-5" />
-      </button>
-    </div>
+    <FixturePropertiesTabBar
+      :available-tabs="availableTabs as any"
+      :modified-categories="modifiedCategories"
+      :active-tab="activeTab"
+      :stop-all-tooltip="stopAllTooltip"
+      @toggle-tab="toggleTab"
+      @stop-all-or-selected="stopAllOrSelected"
+    />
   </div>
 </template>

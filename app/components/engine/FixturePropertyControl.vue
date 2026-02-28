@@ -4,16 +4,13 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelType } from '~/utils/engine/types';
 import type { OflCapability, OflWheel, OflWheelSlot } from '~/utils/ofl/types';
 import { getIconForChannel } from '~/utils/engine/channel-categories';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { useHistory } from '~/components/engine/composables/use-history';
-import { SetChannelValuesCommand, createSnapshot, type SnapshotMap } from './commands/set-channel-values-command';
+import { useChannelValueHistory } from './composables/use-channel-value-history';
+import { useChannelCapabilities } from './composables/use-channel-capabilities';
+import { type SnapshotMap } from './commands/set-channel-values-command';
+import FixturePropertyControlBox from './FixturePropertyControlBox.vue';
+import FixturePropertyControlDropdown from './FixturePropertyControlDropdown.vue';
 
 const props = defineProps<{
   type: ChannelType;
@@ -76,164 +73,24 @@ const role      = computed(() => representativeChannel.value?.role ?? 'NONE');
 const channelLabel = computed(() => props.oflChannelName ?? representativeChannel.value?.oflChannelName ?? props.type);
 const channelIcon  = computed(() => getIconForChannel(props.type, role.value));
 
-// ─── Wheel slot resolution ─────────────────────────────────────────────────────
-
-const oflWheels = computed<Record<string, OflWheel>>(
-  () => representativeChannel.value?.oflWheels ?? {}
-);
-
-/** Given a capability with a wheel name + slotNumber, resolve the OflWheelSlot. */
-function resolveSlot(cap: OflCapability): OflWheelSlot | null {
-  const wheelName = cap.wheel;
-  if (!wheelName) return null;
-  const wheel = oflWheels.value[wheelName];
-  if (!wheel) return null;
-  const slotIdx = (cap.slotNumber ?? 1) - 1; // OFL slots are 1-based
-  return wheel.slots[slotIdx] ?? null;
-}
-
-// ─── OFL Capabilities ─────────────────────────────────────────────────────────
-
-const capabilities = computed<OflCapability[]>(() =>
-  representativeChannel.value?.oflCapabilities ?? []
-);
-
-const activeCapability = computed<OflCapability | null>(() => {
-  const caps = capabilities.value;
-  if (caps.length === 0) return null;
-  if (caps.length === 1) return caps[0] ?? null;
-  return caps.find(cap => {
-    if (!cap.dmxRange) return false;
-    return rawValue.value >= cap.dmxRange[0] && rawValue.value <= cap.dmxRange[1];
-  }) ?? caps[0] ?? null;
-});
-
-/** Human-readable label for a capability, using resolved wheel slot names. */
-function capabilityLabel(cap: OflCapability): string {
-  if (cap.comment) return cap.comment;
-  if (cap.shutterEffect) return cap.shutterEffect;
-  if (cap.effectName) return cap.effectName;
-  if (cap.effectPreset) return cap.effectPreset;
-
-  // WheelSlot / WheelShake: resolve from the wheel definition
-  if (cap.type === 'WheelSlot' || cap.type === 'WheelShake') {
-    // Range (between two slots)
-    if (cap.slotNumberStart !== undefined && cap.slotNumberEnd !== undefined) {
-      const wheelName = cap.wheel ?? '';
-      const wheel = oflWheels.value[wheelName];
-      if (wheel) {
-        const a = wheel.slots[(cap.slotNumberStart - 1)] ?.name ?? `Slot ${cap.slotNumberStart}`;
-        const b = wheel.slots[(cap.slotNumberEnd - 1)]?.name ?? `Slot ${cap.slotNumberEnd}`;
-        return `${a} → ${b}`;
-      }
-      return `Slot ${cap.slotNumberStart}–${cap.slotNumberEnd}`;
-    }
-    // Single slot
-    const slot = resolveSlot(cap);
-    if (slot) return slot.name ?? slot.type;
-    if (cap.slotNumber !== undefined) return `Slot ${cap.slotNumber}`;
-  }
-
-  if (cap.type === 'WheelRotation' || cap.type === 'WheelSlotRotation') {
-    const dir = cap.speedStart?.includes('CW') ? 'CW' : cap.speedStart?.includes('CCW') ? 'CCW' : '';
-    return dir ? `Rotation ${dir}` : 'Rotation';
-  }
-
-  if (cap.speedStart && cap.speedEnd) return `${cap.speedStart} → ${cap.speedEnd}`;
-  return cap.type;
-}
-
-/** Color hex for the currently active wheel slot (for COLOR_WHEEL only). */
-const activeSlotColor = computed<string | null>(() => {
-  if (props.type !== 'COLOR_WHEEL') return null;
-  const cap = activeCapability.value;
-  if (!cap) return null;
-  const slot = resolveSlot(cap);
-  return slot?.colors?.[0] ?? null;
-});
-
-const activeCapabilityLabel = computed(() =>
-  activeCapability.value ? capabilityLabel(activeCapability.value) : props.type.toLowerCase()
-);
+const {
+  capabilities,
+  activeCapability,
+  resolveSlot,
+  capabilityLabel,
+  activeSlotColor,
+  activeCapabilityLabel
+} = useChannelCapabilities(representativeChannel, rawValue, props.type);
 
 // ─── Drag to change value ─────────────────────────────────────────────────────
 const isDragging   = ref(false);
 const dragStartX   = ref(0);
 const dragStartVal = ref(0);
 
-// Visual box style
-const containerStyle = computed(() => {
-  if (role.value === 'COLOR') {
-    return { boxShadow: `inset 0 0 0 2px ${colorValue.value}80` };
-  }
-  if (role.value === 'DIMMER') {
-    return { boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.3)' };
-  }
-  return { boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)' };
-});
 
-const rectStyle = computed(() => {
-  if (props.type === 'COLOR_WHEEL') {
-    // Show the actual current slot colour, or fall back to conic gradient
-    if (activeSlotColor.value) {
-      return { backgroundColor: activeSlotColor.value };
-    }
-    return {
-      background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
-      opacity: 0.8,
-    };
-  }
-  if (role.value === 'COLOR') {
-    return { backgroundColor: colorValue.value, opacity: rawValue.value / 255 };
-  }
-  if (role.value === 'DIMMER') {
-    return { backgroundColor: '#ffffff', opacity: rawValue.value / 255 };
-  }
-  return {};
-});
 
-// ─── History Snapshots ────────────────────────────────────────────────────────
-const history = useHistory();
+const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
 let currentDragSnapshots: SnapshotMap | null = null;
-
-function captureSnapshots(): SnapshotMap {
-  const map: SnapshotMap = new Map();
-  // Snapshot all channels on these fixtures because `emit('before-change')` 
-  // might synchronize category states across other channels.
-  for (const f of props.fixtures) {
-    for (let i = 0; i < f.channels.length; i++) {
-      const ch = f.channels[i];
-      if (!ch) continue;
-      map.set({ fixture: f, channelIndex: i }, {
-        before: createSnapshot(ch),
-        after: null as any
-      });
-    }
-  }
-  return map;
-}
-
-function finishSnapshots(map: SnapshotMap, description: string) {
-  let changed = false;
-  for (const [ref, state] of map.entries()) {
-    const ch = ref.fixture.channels[ref.channelIndex];
-    if (!ch) continue;
-    state.after = createSnapshot(ch);
-    
-    // Quick diff to see if anything actually changed
-    if (
-      state.before.colorValue !== state.after.colorValue ||
-      JSON.stringify(state.before.stepValues) !== JSON.stringify(state.after.stepValues) ||
-      JSON.stringify(state.before.chaserConfig) !== JSON.stringify(state.after.chaserConfig)
-    ) {
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    history.execute(new SetChannelValuesCommand(map, description));
-  }
-}
 
 function handleValueChange(newVal: number) {
   const clamped = Math.max(0, Math.min(255, Math.round(newVal)));
@@ -243,7 +100,7 @@ function handleValueChange(newVal: number) {
   const isSingleClick = !isDragging.value;
   let singleClickSnapshots: SnapshotMap | null = null;
   if (isSingleClick) {
-    singleClickSnapshots = captureSnapshots();
+    singleClickSnapshots = captureSnapshots(props.fixtures);
   }
 
   rawValue.value = clamped;
@@ -291,7 +148,7 @@ function handleValueChange(newVal: number) {
 
   // If this was a single click, the change is fully complete. Commit history.
   if (isSingleClick && singleClickSnapshots) {
-    finishSnapshots(singleClickSnapshots, `Set ${channelLabel.value}`);
+    commitSnapshots(singleClickSnapshots, `Set ${channelLabel.value}`);
   }
 }
 
@@ -303,7 +160,7 @@ function startDrag(e: MouseEvent) {
   dragStartVal.value = rawValue.value;
 
   // Snapshot before drag starts
-  currentDragSnapshots = captureSnapshots();
+  currentDragSnapshots = captureSnapshots(props.fixtures);
 
   window.addEventListener('mousemove', onDrag);
   window.addEventListener('mouseup', stopDrag);
@@ -324,7 +181,7 @@ function stopDrag(e: MouseEvent) {
 
   // Commit history
   if (currentDragSnapshots) {
-    finishSnapshots(currentDragSnapshots, `Drag ${channelLabel.value}`);
+    commitSnapshots(currentDragSnapshots, `Drag ${channelLabel.value}`);
     currentDragSnapshots = null;
   }
 }
@@ -344,33 +201,16 @@ function onDropdownOpenChange(open: boolean) {
 <template>
   <div class="flex items-center gap-3 w-full py-2">
     <!-- Visual Value Box -->
-    <div
-      class="relative w-12 h-12 flex-shrink-0 rounded-xl overflow-hidden flex items-center justify-center cursor-ew-resize"
-      :class="role !== 'NONE' ? 'bg-white/5' : 'bg-muted/40 text-muted-foreground'"
-      :style="containerStyle"
-      @mousedown="startDrag"
-    >
-      <!-- Inset hover ring -->
-      <div
-        class="absolute inset-0 rounded-xl pointer-events-none hover-inset-ring"
-        :class="isDragging ? 'dragging-ring' : ''"
-      />
-
-      <!-- Color / dimmer / color-wheel fill -->
-      <div
-        v-if="role !== 'NONE'"
-        class="absolute inset-0 transition-all duration-150"
-        :style="rectStyle"
-      />
-
-      <!-- Icon overlay for non-color channels or color wheels -->
-      <component
-        :is="channelIcon"
-        v-if="type === 'COLOR_WHEEL' || role === 'NONE'"
-        class="w-6 h-6 relative z-10 drop-shadow"
-        :style="type === 'COLOR_WHEEL' ? { color: activeSlotColor ? 'white' : 'rgba(255,255,255,0.7)' } : undefined"
-      />
-    </div>
+    <FixturePropertyControlBox
+      :type="type"
+      :role="role"
+      :colorValue="colorValue"
+      :rawValue="rawValue"
+      :channelIcon="channelIcon"
+      :activeSlotColor="activeSlotColor"
+      :isDragging="isDragging"
+      @dragstart="startDrag"
+    />
 
     <!-- Labels -->
     <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
@@ -380,46 +220,16 @@ function onDropdownOpenChange(open: boolean) {
       </div>
 
       <!-- Capability sublabel — dropdown trigger -->
-      <DropdownMenu @update:open="onDropdownOpenChange">
-        <DropdownMenuTrigger as-child>
-          <button
-            class="text-xs text-muted-foreground hover:text-foreground text-left truncate flex items-center gap-1 w-fit rounded-sm transition-colors focus:outline-none"
-            :title="activeCapabilityLabel"
-          >
-            <span class="truncate max-w-[140px]">{{ activeCapabilityLabel }}</span>
-            <span v-if="capabilities.length > 1" class="text-[10px] opacity-40 flex-shrink-0">▼</span>
-          </button>
-        </DropdownMenuTrigger>
-
-        <DropdownMenuContent :align="'start'" class="w-56 max-h-64 overflow-y-auto">
-          <template v-if="capabilities.length > 1">
-            <DropdownMenuItem
-              v-for="(cap, i) in capabilities"
-              :key="i"
-              class="text-xs gap-2"
-              :class="activeCapability === cap ? 'bg-accent/60' : ''"
-              @click="cap.dmxRange && handleValueChange(cap.dmxRange[0])"
-            >
-              <!-- Slot color swatch for color wheel -->
-              <div
-                v-if="type === 'COLOR_WHEEL' && resolveSlot(cap)?.colors?.[0]"
-                class="w-3 h-3 rounded-sm flex-shrink-0"
-                :style="{ backgroundColor: resolveSlot(cap)?.colors?.[0] }"
-              />
-              <span class="flex-1">{{ capabilityLabel(cap) }}</span>
-              <span v-if="cap.dmxRange" class="text-muted-foreground ml-1 font-mono text-[10px] flex-shrink-0">
-                {{ cap.dmxRange[0] }}
-              </span>
-            </DropdownMenuItem>
-          </template>
-          <template v-else>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem class="text-xs" @click="handleValueChange(0)">Off (0)</DropdownMenuItem>
-            <DropdownMenuItem class="text-xs" @click="handleValueChange(127)">Half (127)</DropdownMenuItem>
-            <DropdownMenuItem class="text-xs" @click="handleValueChange(255)">Full (255)</DropdownMenuItem>
-          </template>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <FixturePropertyControlDropdown
+        :type="type"
+        :capabilities="capabilities"
+        :activeCapability="activeCapability"
+        :activeCapabilityLabel="activeCapabilityLabel"
+        :resolveSlot="resolveSlot"
+        :capabilityLabel="capabilityLabel"
+        @update:open="onDropdownOpenChange"
+        @select-value="handleValueChange"
+      />
     </div>
 
     <!-- Editable value number -->
@@ -438,11 +248,4 @@ function onDropdownOpenChange(open: boolean) {
   </div>
 </template>
 
-<style scoped>
-.hover-inset-ring:hover {
-  box-shadow: inset 0 0 0 1.5px hsl(var(--primary) / 0.5);
-}
-.dragging-ring {
-  box-shadow: inset 0 0 0 1.5px hsl(var(--primary) / 0.8) !important;
-}
-</style>
+
