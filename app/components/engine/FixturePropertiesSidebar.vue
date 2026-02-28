@@ -14,6 +14,8 @@ import type { ChannelType } from '~/utils/engine/types';
 import FixturePropertyControl from './FixturePropertyControl.vue';
 import { provideSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { SetChannelValuesCommand, createSnapshot, type SnapshotMap } from './commands/set-channel-values-command';
 
 interface Props {
   selectedIds: Set<string | number>;
@@ -28,6 +30,8 @@ import ChaserStepsManager from './ChaserStepsManager.vue';
 
 // Sidebar close lock: child dropdowns increment this to prevent auto-close
 const { openCount: lockedOpenCount } = provideSidebarLock();
+
+const history = useHistory();
 
 // Tabs logic
 const activeTab = ref<ChannelCategoryKey | null>(null);
@@ -54,8 +58,44 @@ function toggleTab(tab: ChannelCategoryKey) {
   }
 }
 
+function snapshotChannels(fixtures: Fixture[]): SnapshotMap {
+  const map: SnapshotMap = new Map();
+  for (const f of fixtures) {
+    for (let i = 0; i < f.channels.length; i++) {
+        const ch = f.channels[i];
+        if (!ch) continue;
+        map.set({ fixture: f, channelIndex: i }, {
+            before: createSnapshot(ch),
+            after: null as any
+        });
+    }
+  }
+  return map;
+}
+
+function commitSnapshots(map: SnapshotMap, description: string) {
+    let changed = false;
+    for (const [ref, state] of map.entries()) {
+        const ch = ref.fixture.channels[ref.channelIndex];
+        if (!ch) continue;
+        state.after = createSnapshot(ch);
+        if (
+            state.before.colorValue !== state.after.colorValue ||
+            JSON.stringify(state.before.stepValues) !== JSON.stringify(state.after.stepValues) ||
+            JSON.stringify(state.before.chaserConfig) !== JSON.stringify(state.after.chaserConfig)
+        ) {
+            changed = true;
+        }
+    }
+    if (changed) {
+        history.execute(new SetChannelValuesCommand(map, description));
+    }
+}
+
 function stopAllOrSelected() {
   const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
+  const snapshots = snapshotChannels(targetFixtures);
+  
   for (const f of targetFixtures) {
     for (const ch of f.channels) {
       if (ch.stepValues.some(v => v !== 0) || ch.chaserConfig) {
@@ -65,11 +105,15 @@ function stopAllOrSelected() {
       }
     }
   }
+  
+  commitSnapshots(snapshots, 'Stop All');
 }
 
 function resetActiveTabGroup() {
   if (!activeTab.value) return;
   const fixtures = getSelectedFixtures();
+  const snapshots = snapshotChannels(fixtures);
+  
   for (const f of fixtures) {
     for (const ch of f.channels) {
       if (tabChannelFilter(ch.type, ch.role)) {
@@ -79,6 +123,8 @@ function resetActiveTabGroup() {
       }
     }
   }
+  
+  commitSnapshots(snapshots, `Reset ${activeTab.value}`);
 }
 
 // ─── Category sync ────────────────────────────────────────────────────────────

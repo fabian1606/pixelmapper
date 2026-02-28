@@ -12,6 +12,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { SetChannelValuesCommand, createSnapshot, type SnapshotMap } from './commands/set-channel-values-command';
 
 const props = defineProps<{
   type: ChannelType;
@@ -190,8 +192,60 @@ const rectStyle = computed(() => {
   return {};
 });
 
+// ─── History Snapshots ────────────────────────────────────────────────────────
+const history = useHistory();
+let currentDragSnapshots: SnapshotMap | null = null;
+
+function captureSnapshots(): SnapshotMap {
+  const map: SnapshotMap = new Map();
+  // Snapshot all channels on these fixtures because `emit('before-change')` 
+  // might synchronize category states across other channels.
+  for (const f of props.fixtures) {
+    for (let i = 0; i < f.channels.length; i++) {
+      const ch = f.channels[i];
+      if (!ch) continue;
+      map.set({ fixture: f, channelIndex: i }, {
+        before: createSnapshot(ch),
+        after: null as any
+      });
+    }
+  }
+  return map;
+}
+
+function finishSnapshots(map: SnapshotMap, description: string) {
+  let changed = false;
+  for (const [ref, state] of map.entries()) {
+    const ch = ref.fixture.channels[ref.channelIndex];
+    if (!ch) continue;
+    state.after = createSnapshot(ch);
+    
+    // Quick diff to see if anything actually changed
+    if (
+      state.before.colorValue !== state.after.colorValue ||
+      JSON.stringify(state.before.stepValues) !== JSON.stringify(state.after.stepValues) ||
+      JSON.stringify(state.before.chaserConfig) !== JSON.stringify(state.after.chaserConfig)
+    ) {
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    history.execute(new SetChannelValuesCommand(map, description));
+  }
+}
+
 function handleValueChange(newVal: number) {
   const clamped = Math.max(0, Math.min(255, Math.round(newVal)));
+  
+  // If not dragging, we are in a single-click/input scenario.
+  // We must snapshot before the change occurs.
+  const isSingleClick = !isDragging.value;
+  let singleClickSnapshots: SnapshotMap | null = null;
+  if (isSingleClick) {
+    singleClickSnapshots = captureSnapshots();
+  }
+
   rawValue.value = clamped;
 
   // Allow parent to sync category state across all fixtures before we write the specific channel
@@ -234,6 +288,11 @@ function handleValueChange(newVal: number) {
     }
   }
   emit('change', clamped);
+
+  // If this was a single click, the change is fully complete. Commit history.
+  if (isSingleClick && singleClickSnapshots) {
+    finishSnapshots(singleClickSnapshots, `Set ${channelLabel.value}`);
+  }
 }
 
 function startDrag(e: MouseEvent) {
@@ -242,6 +301,10 @@ function startDrag(e: MouseEvent) {
   isDragging.value = true;
   dragStartX.value = e.clientX;
   dragStartVal.value = rawValue.value;
+
+  // Snapshot before drag starts
+  currentDragSnapshots = captureSnapshots();
+
   window.addEventListener('mousemove', onDrag);
   window.addEventListener('mouseup', stopDrag);
 }
@@ -258,6 +321,12 @@ function stopDrag(e: MouseEvent) {
   isDragging.value = false;
   window.removeEventListener('mousemove', onDrag);
   window.removeEventListener('mouseup', stopDrag);
+
+  // Commit history
+  if (currentDragSnapshots) {
+    finishSnapshots(currentDragSnapshots, `Drag ${channelLabel.value}`);
+    currentDragSnapshots = null;
+  }
 }
 
 onUnmounted(() => {

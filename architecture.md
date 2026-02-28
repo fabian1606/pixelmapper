@@ -127,6 +127,14 @@ export class SawEffect extends BaseOscillatorEffect {
 3. `DeleteConfirmDialog` is shown with the fixture name and an undo hint.
 4. On confirm, `DeleteNodeCommand` is executed via `useHistory()` → supports undo with `Cmd+Z`.
 
+### Property Changes Flow
+Channel values (faders, capability dropdowns, stepValues, base colors, and chaser configs) are mutated through the UI.
+To support `Cmd+Z`, the system uses `SetChannelValuesCommand`:
+1. Before a change (e.g. `mousedown` on a fader or entering a number), a deep copy of the `ChannelSnapshot` is taken for all affected fixture channels.
+2. The user interacts and freely mutates the live object.
+3. On completion (e.g. `mouseup`), a post-change snapshot is captured.
+4. If there's a difference, the `SetChannelValuesCommand` is pushed to `useHistory()`.
+
 ---
 
 ## Fixture Library (OFL)
@@ -163,7 +171,8 @@ app/components/engine/
 │   ├── move-fixture-command.ts  # History command for dragging fixtures
 │   ├── group-command.ts         # History commands for grouping/ungrouping
 │   ├── rename-command.ts        # History command for renaming a node
-│   └── delete-node-command.ts   # History command for deleting a fixture or group (undo-able)
+│   ├── delete-node-command.ts   # History command for deleting a fixture or group (undo-able)
+│   └── set-channel-values-command.ts # History command for undoing channel mutations (drag, dropdowns, etc)
 └── FixtureEditor.vue           # 2D drag-and-drop fixture positioning UI
 ```
 
