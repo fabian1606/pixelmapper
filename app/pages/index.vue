@@ -81,14 +81,10 @@ const globalBases = ref<Record<string, number>>({
   DIMMER: 255,
 });
 
-// SineEffect for some motion
-const sine = new SineEffect();
-sine.speed = 0.005;
-sine.strength = 100;
-sine.fanning = 0.5;
-sine.targetChannel = 'GREEN';
-sine.direction = 'FORWARD';
-engine.addEffect(sine);
+
+
+import { provide } from 'vue';
+provide('effectEngine', engine);
 
 // Sync base values — only apply to channels that have not been programmed
 // (i.e. channels where stepValues[0] is still default/zero and no chaser is set)

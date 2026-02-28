@@ -75,7 +75,8 @@ All time-based oscillator effects extend `BaseOscillatorEffect`. Subclasses only
 | `strength` | Amplitude in DMX units (0–255). |
 | `fanning` | Per-fixture phase offset multiplier. |
 | `direction` | How phase offset is calculated across fixtures. |
-| `targetChannel` | Which channel type to apply the effect to. |
+| `targetChannels` | Array of channel types to apply the effect to. |
+| `targetFixtureIds` | Optional array of fixture IDs to restrict the effect to. Used heavily by the Modifiers UI. |
 
 #### Direction Modes
 | Mode | Behavior |

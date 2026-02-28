@@ -71,9 +71,15 @@ export interface EffectContext {
 
 export interface Effect {
   /**
-   * The channel type this effect applies to (e.g., 'RED', 'DIMMER').
+   * The channel types this effect applies to (e.g., ['RED', 'DIMMER']).
    */
-  targetChannel?: ChannelType;
+  targetChannels: ChannelType[];
+
+  /**
+   * Optional array of fixture IDs this effect should be restricted to.
+   * If missing, applies to all fixtures.
+   */
+  targetFixtureIds?: (string | number)[];
 
   /**
    * The direction the effect propagates across the fixtures.

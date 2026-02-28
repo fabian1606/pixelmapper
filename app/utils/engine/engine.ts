@@ -1,7 +1,9 @@
 import type { Effect, EffectContext } from '~/utils/engine/types';
 import type { Fixture } from './core/fixture';
+import type { Channel } from './core/channel';
+import { reactive } from 'vue';
 export class EffectEngine {
-  private effects: Effect[] = [];
+  public effects = reactive<Effect[]>([]);
 
   /**
    * Register a new effect with the engine
@@ -14,7 +16,7 @@ export class EffectEngine {
    * Remove all effects
    */
   public clearEffects() {
-    this.effects = [];
+    this.effects.splice(0, this.effects.length);
   }
 
   /**
@@ -82,12 +84,17 @@ export class EffectEngine {
 
       // Evaluate each effect and combine the results via additive blending.
       for (const effect of this.effects) {
+        // Skip fixtures not targeted by this effect
+        if (effect.targetFixtureIds && !effect.targetFixtureIds.includes(fixture.id)) {
+          continue;
+        }
+
         const waveValue = effect.render(context); // Expects -1 to 1
 
-        // If the effect specifies a target channel, apply it to those specific channels 
-        if (effect.targetChannel) {
-          const targetChannels = fixture.getChannelsByType(effect.targetChannel);
-          for (const channel of targetChannels) {
+        // Apply effect to all target channel types
+        if (effect.targetChannels && effect.targetChannels.length > 0) {
+          const matchingChannels = fixture.channels.filter((c: Channel) => effect.targetChannels.includes(c.type));
+          for (const channel of matchingChannels) {
             // Determine maximum and minimum achievable values based on strength
             const targetMax = Math.min(channel.currentBaseValue + effect.strength, 255);
             const targetMin = Math.max(channel.currentBaseValue - effect.strength, 0);

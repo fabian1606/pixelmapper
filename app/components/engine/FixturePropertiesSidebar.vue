@@ -29,6 +29,11 @@ const props = defineProps<Props>();
 
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
 import ChaserStepsManager from './ChaserStepsManager.vue';
+import { inject } from 'vue';
+import type { EffectEngine } from '~/utils/engine/engine';
+
+// Effect Engine for modifying modifiers on edits
+const effectEngine = inject<EffectEngine>('effectEngine');
 
 // Sidebar close lock: child dropdowns increment this to prevent auto-close
 const { openCount: lockedOpenCount } = provideSidebarLock();
@@ -102,7 +107,7 @@ function resetActiveTabGroup() {
 // When the user touches a fader, sync all category channels from the richest fixture
 // to any blank fixtures in the selection BEFORE the specific value is written.
 function handleBeforeChange(fixtures: Fixture[]) {
-  syncCategoryBeforeEdit(fixtures, (type, role) => tabChannelFilter(type, role));
+  syncCategoryBeforeEdit(fixtures, (type, role) => tabChannelFilter(type, role), effectEngine);
 }
 
 // Helpers ------------------------------------------------------------------

@@ -58,9 +58,7 @@ const effectParams = ref({
   direction: 'FORWARD' as any,
 });
 
-// SineEffect
-const sine = new SineEffect();
-engine.addEffect(sine);
+
 
 // Sync reactive params → effect instance
 watchEffect(() => {
@@ -74,11 +72,6 @@ watchEffect(() => {
     }
   }
 
-  sine.speed = effectParams.value.speed;
-  sine.strength = effectParams.value.strength;
-  sine.fanning = effectParams.value.fanning;
-  sine.targetChannel = effectParams.value.targetChannel;
-  sine.direction = effectParams.value.direction;
 });
 
 // Reactive color map — updated every frame, consumed by FixtureEditor

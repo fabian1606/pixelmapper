@@ -1,7 +1,8 @@
 import type { Effect, EffectContext, ChannelType, EffectDirection } from "../types";
 
 export abstract class BaseOscillatorEffect implements Effect {
-  public targetChannel?: ChannelType;
+  public targetChannels: ChannelType[] = [];
+  public targetFixtureIds?: (string | number)[];
   public direction: EffectDirection = 'FORWARD';
   public strength: number = 100;
 
