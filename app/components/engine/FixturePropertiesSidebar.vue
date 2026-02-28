@@ -98,9 +98,9 @@ function stopAllOrSelected() {
   
   for (const f of targetFixtures) {
     for (const ch of f.channels) {
-      if (ch.stepValues.some(v => v !== 0) || ch.chaserConfig) {
-        ch.stepValues = [0];
-        ch.value = 0;
+      if (ch.stepValues.some(v => v !== (ch.defaultValue ?? 0)) || ch.chaserConfig) {
+        ch.stepValues = [ch.defaultValue ?? 0];
+        ch.value = ch.defaultValue ?? 0;
         ch.chaserConfig = undefined;
       }
     }
@@ -117,8 +117,8 @@ function resetActiveTabGroup() {
   for (const f of fixtures) {
     for (const ch of f.channels) {
       if (tabChannelFilter(ch.type, ch.role)) {
-        ch.stepValues = [0];
-        ch.value = 0;
+        ch.stepValues = [ch.defaultValue ?? 0];
+        ch.value = ch.defaultValue ?? 0;
         ch.chaserConfig = undefined;
       }
     }
@@ -190,7 +190,7 @@ const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
   
   for (const fixture of fixtures) {
     for (const channel of fixture.channels) {
-      const isProgrammed = channel.chaserConfig || channel.stepValues.some(v => v !== 0);
+      const isProgrammed = channel.chaserConfig || channel.stepValues.some(v => v !== (channel.defaultValue ?? 0));
       if (isProgrammed) {
         // Find which category this channel belongs to
         for (const cat of CHANNEL_CATEGORIES) {

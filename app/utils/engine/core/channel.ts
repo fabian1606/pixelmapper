@@ -39,6 +39,8 @@ export interface Channel {
   colorValue: string;
   /** Human-readable channel name from the OFL definition (e.g. 'Shutter', 'Dimmer'). */
   oflChannelName?: string;
+  /** Default DMX value (0-255) from OFL, used for resetting channels when 'Stop All' is pressed. */
+  defaultValue: number;
   /** All OFL capabilities for this channel (used to build the capability dropdown). */
   oflCapabilities?: OflCapability[];
   /**

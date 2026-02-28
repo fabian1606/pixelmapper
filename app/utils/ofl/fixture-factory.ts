@@ -63,6 +63,7 @@ export function createFixtureFromOfl(
       currentBaseValue: mapped.defaultValue,
       role: mapped.role,
       colorValue: mapped.colorValue,
+      defaultValue: mapped.defaultValue,
       oflChannelName: channelKey,
       oflCapabilities: allCapabilities,
       oflWheels: oflFixture.wheels ?? {},
