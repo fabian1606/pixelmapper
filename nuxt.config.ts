@@ -15,4 +15,11 @@ export default defineNuxtConfig({
     classSuffix: '',
     preference: 'dark',
   },
+  nitro: {
+    vercel: {
+      config: {
+        includeFiles: ['ofl-data/fixtures/**']
+      }
+    }
+  }
 })
