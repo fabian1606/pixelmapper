@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { OctagonX, ListOrdered } from 'lucide-vue-next';
 import {
   CHANNEL_CATEGORIES,
   TAB_ORDER,
@@ -53,6 +54,32 @@ function toggleTab(tab: ChannelCategoryKey) {
   }
 }
 
+function stopAllOrSelected() {
+  const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
+  for (const f of targetFixtures) {
+    for (const ch of f.channels) {
+      if (ch.stepValues.some(v => v !== 0) || ch.chaserConfig) {
+        ch.stepValues = [0];
+        ch.value = 0;
+        ch.chaserConfig = undefined;
+      }
+    }
+  }
+}
+
+function resetActiveTabGroup() {
+  if (!activeTab.value) return;
+  const fixtures = getSelectedFixtures();
+  for (const f of fixtures) {
+    for (const ch of f.channels) {
+      if (tabChannelFilter(ch.type, ch.role)) {
+        ch.stepValues = [0];
+        ch.value = 0;
+        ch.chaserConfig = undefined;
+      }
+    }
+  }
+}
 
 // ─── Category sync ────────────────────────────────────────────────────────────
 // When the user touches a fader, sync all category channels from the richest fixture
@@ -129,6 +156,14 @@ const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
     }
   }
   return modified;
+});
+
+const stopAllTooltip = computed(() => {
+  const fixtures = getSelectedFixtures();
+  if (fixtures.length > 0) {
+    return `Stop functions of ${fixtures.length} fixtures`;
+  }
+  return 'Stop all functions';
 });
 
 // Channel sections for the active tab ----------------------------------------
@@ -270,8 +305,6 @@ const channelSections = computed((): ChannelSection[] => {
 });
 </script>
 
-
-
 <template>
   <div ref="sidebarRef" class="absolute right-0 top-0 h-full flex pointer-events-none">
     
@@ -284,9 +317,21 @@ const channelSections = computed((): ChannelSection[] => {
         <!-- Overlay Header -->
         <div class="p-4 border-b border-border text-sm font-medium capitalize text-muted-foreground flex items-center justify-between">
           <span>{{ activeTab }}</span>
-          <span v-if="activeTab && availableTabs.total > 0" class="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full whitespace-nowrap normal-case">
-            {{ activeTabFixtureCount }} of {{ availableTabs.total }} Fixture{{ availableTabs.total === 1 ? '' : 's' }}
-          </span>
+          <div class="flex items-center gap-2">
+            <span v-if="activeTab && availableTabs.total > 0" class="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full whitespace-nowrap normal-case">
+              {{ activeTabFixtureCount }} of {{ availableTabs.total }} Fixture{{ availableTabs.total === 1 ? '' : 's' }}
+            </span>
+            <button
+               v-if="activeTab"
+               @click="resetActiveTabGroup"
+               class="p-1 rounded transition-colors"
+               :class="!modifiedCategories.has(activeTab) ? 'text-muted-foreground/30 cursor-not-allowed' : 'text-muted-foreground hover:bg-muted hover:text-red-500 hover:opacity-100'"
+               title="Stop this group's functions"
+               :disabled="!modifiedCategories.has(activeTab)"
+            >
+              <OctagonX class="size-4" />
+            </button>
+          </div>
         </div>
 
         <!-- Chaser Steps Manager -->
@@ -298,8 +343,8 @@ const channelSections = computed((): ChannelSection[] => {
           :fixtures="getSelectedFixtures()" 
         />
         
-        <!-- Overlay Content -->
-        <ScrollArea class="flex-1 p-4">
+        <!-- Overlay Content (Faders) -->
+        <ScrollArea v-show="!stepsManager || stepsManager.layerMode === 'steps'" class="flex-1 min-h-0 p-4">
           <div v-if="channelSections.length === 0" class="text-sm text-muted-foreground text-center mt-10">
             No adjustable properties found.
           </div>
@@ -345,11 +390,19 @@ const channelSections = computed((): ChannelSection[] => {
         <span 
           v-if="modifiedCategories.has(cat.id)" 
           class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
-```vue
           :class="activeTab === cat.id ? 'bg-primary' : 'bg-muted-foreground'"
-```
         ></span>
         <component :is="cat.icon" class="size-5" />
+      </button>
+
+      <div class="flex-1"></div>
+
+      <button
+        class="p-2 rounded-md transition-colors text-muted-foreground hover:text-red-500 hover:bg-muted"
+        @click="stopAllOrSelected"
+        :title="stopAllTooltip"
+      >
+        <OctagonX class="size-5" />
       </button>
     </div>
   </div>

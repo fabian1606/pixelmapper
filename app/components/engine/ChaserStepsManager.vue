@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
 import { CHANNEL_CATEGORIES } from '~/utils/engine/channel-categories';
 import type { ChannelChaserConfig, ChannelType } from '~/utils/engine/types';
+import { Trash, Trash2 } from 'lucide-vue-next';
+
+// Layer mode: 'steps' is the default visual editing mode, 'modifiers' hides faders and shows advanced timing (effects)
+const layerMode = ref<'steps'|'modifiers'>('steps');
 
 const props = defineProps<{
   fixtures: Fixture[];
@@ -152,75 +156,93 @@ function updateTiming(key: 'stepDurationMs' | 'fadeDurationMs', value: number) {
   emit('change');
 }
 
-function togglePlay() {
-  const target = activeChaserConfig.value;
-  const targetState = !target.isPlaying;
-  for (const fixture of props.fixtures) {
-    for (const channel of fixture.channels) {
-      if (tabChannelFilter(channel.type, channel.role)) {
-        if (!channel.chaserConfig) channel.chaserConfig = { ...target };
-        channel.chaserConfig.isPlaying = targetState;
-      }
-    }
-  }
-  emit('change');
-}
-
 defineExpose({
   activeChaserConfig,
+  layerMode,
 });
 </script>
 
 <template>
-  <div>
-    <!-- Chaser Steps Manager -->
-    <div v-if="activeChaserConfig" class="px-4 py-3 border-b border-border space-y-3 bg-muted/10 relative group">
-      <button @click="removeChaser" class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity" title="Remove steps">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+  <div class="px-4 py-3 border-b border-border space-y-4 bg-background">
+    
+    <!-- Layer Mode Switch (Always highest level) -->
+    <div class="flex items-center justify-center p-1 bg-muted rounded-lg">
+      <button 
+        @click="layerMode = 'steps'"
+        class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all duration-200"
+        :class="layerMode === 'steps' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+      >
+        Steps
       </button>
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mr-4">Steps</span>
+      <button 
+        @click="layerMode = 'modifiers'"
+        class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all duration-200"
+        :class="layerMode === 'modifiers' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+      >
+        Modifiers
+      </button>
+    </div>
+
+    <!-- Active Chaser Config -->
+    <div v-if="activeChaserConfig" class="space-y-4">
+      
+      <!-- Steps Level -->
+      <div v-if="layerMode === 'steps'" class="space-y-4">
         
-        <div class="flex gap-1 overflow-x-auto flex-1 pb-1">
-          <button
-            v-for="stepIndex in activeChaserConfig.stepsCount"
-            :key="stepIndex"
-            @click="setActiveStep(stepIndex - 1)"
-            class="w-8 h-6 rounded text-xs font-mono flex items-center justify-center transition-colors shrink-0"
-            :class="activeChaserConfig.activeEditStep === stepIndex - 1 ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-foreground'"
-          >
-            {{ stepIndex }}
-          </button>
-          <button
-            @click="addStep"
-            class="w-6 h-6 rounded text-xs font-mono flex items-center justify-center bg-transparent border border-dashed border-border hover:bg-muted/50 text-muted-foreground shrink-0"
-          >
-            +
-          </button>
+        <!-- Timing rows -->
+        <div v-if="activeChaserConfig.stepsCount > 1" class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Speed (ms)</span>
+            <input type="number" :value="activeChaserConfig.stepDurationMs" @input="e => updateTiming('stepDurationMs', Number((e.target as HTMLInputElement).value))" class="w-24 h-7 text-xs bg-background border border-border rounded px-2 focus:ring-1 focus:ring-primary outline-none transition-all text-right" />
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Fade (ms)</span>
+            <input type="number" :value="activeChaserConfig.fadeDurationMs" @input="e => updateTiming('fadeDurationMs', Number((e.target as HTMLInputElement).value))" class="w-24 h-7 text-xs bg-background border border-border rounded px-2 focus:ring-1 focus:ring-primary outline-none transition-all text-right" />
+          </div>
         </div>
+
+        <!-- Steps Row -->
+        <div class="flex items-center justify-between pt-1">
+          <!-- Steps Selection list -->
+          <div class="flex gap-1.5 overflow-x-auto flex-1 items-center pr-4">
+            <button
+              v-for="stepIndex in activeChaserConfig.stepsCount"
+              :key="stepIndex"
+              @click="setActiveStep(stepIndex - 1)"
+              class="w-10 h-8 rounded-md text-sm font-medium flex items-center justify-center transition-all shrink-0"
+              :class="activeChaserConfig.activeEditStep === stepIndex - 1 ? 'bg-accent border-2 border-primary text-primary' : 'bg-muted border-2 border-transparent hover:border-border text-foreground'"
+            >
+              {{ stepIndex }}
+            </button>
+            <button
+              @click="addStep"
+              class="w-8 h-8 rounded-md text-sm font-medium flex items-center justify-center bg-transparent border-2 border-dashed border-border hover:bg-muted/50 text-muted-foreground shrink-0"
+              title="Add Step"
+            >
+              +
+            </button>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button 
+              v-if="activeChaserConfig.stepsCount > 1"
+              @click="deleteActiveStep" 
+              class="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Delete Active Step"
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Chaser config options (only visible if > 1 step) -->
-      <div v-if="activeChaserConfig.stepsCount > 1" class="space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] text-muted-foreground uppercase flex-1">Speed (ms)</span>
-          <input type="number" :value="activeChaserConfig.stepDurationMs" @input="e => updateTiming('stepDurationMs', Number((e.target as HTMLInputElement).value))" class="w-16 h-6 text-xs bg-background border border-border rounded px-1 text-right" />
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] text-muted-foreground uppercase flex-1">Fade (ms)</span>
-          <input type="number" :value="activeChaserConfig.fadeDurationMs" @input="e => updateTiming('fadeDurationMs', Number((e.target as HTMLInputElement).value))" class="w-16 h-6 text-xs bg-background border border-border rounded px-1 text-right" />
-        </div>
-        <div class="flex justify-between items-center mt-1">
-          <button @click="togglePlay" class="text-[10px] font-medium px-2 py-0.5 rounded bg-muted hover:bg-muted/80">
-            {{ activeChaserConfig.isPlaying ? 'Pause' : 'Play' }}
-          </button>
-          <button @click="deleteActiveStep" class="text-[10px] text-destructive hover:underline">
-            Delete Step
-          </button>
-        </div>
+      <!-- Modifiers Level (Advanced) -->
+      <div v-else-if="layerMode === 'modifiers'" class="py-6 text-center border-2 border-dashed border-border/50 rounded-lg">
+        <span class="text-xs text-muted-foreground italic">Modifiers coming soon...</span>
       </div>
+      
     </div>
-    
-    <!-- (Removed manual 'create chaser' button because we implicitly have 1 step minimum!) -->
   </div>
 </template>
