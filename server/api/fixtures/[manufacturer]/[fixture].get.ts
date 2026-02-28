@@ -1,9 +1,4 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type { OflFixture } from '../../../../app/utils/ofl/types';
-
-
-const OFL_FIXTURES_DIR = path.resolve(process.cwd(), 'ofl-data/fixtures');
 
 /**
  * GET /api/fixtures/:manufacturer/:fixture
@@ -29,22 +24,18 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid fixture path' });
   }
 
-  const filePath = path.join(OFL_FIXTURES_DIR, safeManufacturer, `${safeFixture}.json`);
+  // In Nitro storage, the key uses ':' as path separator
+  const storageKey = `${safeManufacturer}:${safeFixture}.json`;
+  const oflFixture = await useStorage('assets:ofl-fixtures').getItem<OflFixture>(storageKey);
 
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const oflFixture = JSON.parse(raw) as OflFixture;
-
-    // Validate it's a real fixture definition, not a redirect
-    if (!oflFixture.availableChannels || !oflFixture.modes) {
-      throw createError({ statusCode: 404, statusMessage: 'Fixture is a redirect or invalid' });
-    }
-
-    return oflFixture;
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw createError({ statusCode: 404, statusMessage: `Fixture not found: ${safeManufacturer}/${safeFixture}` });
-    }
-    throw err;
+  if (!oflFixture) {
+    throw createError({ statusCode: 404, statusMessage: `Fixture not found: ${safeManufacturer}/${safeFixture}` });
   }
+
+  // Validate it's a real fixture definition, not a redirect
+  if (!oflFixture.availableChannels || !oflFixture.modes) {
+    throw createError({ statusCode: 404, statusMessage: 'Fixture is a redirect or invalid' });
+  }
+
+  return oflFixture;
 });

@@ -1,8 +1,6 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type { OflFixture, OflManufacturers, FixtureSummary, ManufacturerSummary } from '../../../app/utils/ofl/types';
 
-const OFL_FIXTURES_DIR = path.resolve(process.cwd(), 'ofl-data/fixtures');
+const storage = () => useStorage('assets:ofl-fixtures');
 
 /**
  * GET /api/fixtures
@@ -10,7 +8,7 @@ const OFL_FIXTURES_DIR = path.resolve(process.cwd(), 'ofl-data/fixtures');
  * Supports two modes:
  * 1. mode=manufacturers (default)
  *    Returns a list of all manufacturers with their fixture counts.
- * 
+ *
  * 2. mode=fixtures
  *    Returns fixture summaries. If manufacturer query is provided, returns ALL fixtures for it.
  *    If search/category is provided, returns filtered results with limit.
@@ -24,33 +22,40 @@ export default defineEventHandler(async (event) => {
   const limit = Math.min(parseInt(String(query.limit ?? '50'), 10), 1000);
   const offset = parseInt(String(query.offset ?? '0'), 10);
 
-  // Load manufacturer display names
-  const manufacturersPath = path.join(OFL_FIXTURES_DIR, 'manufacturers.json');
-  const manufacturersRaw = await fs.readFile(manufacturersPath, 'utf-8');
-  const manufacturers = JSON.parse(manufacturersRaw) as OflManufacturers;
+  const store = storage();
 
-  const entries = await fs.readdir(OFL_FIXTURES_DIR, { withFileTypes: true });
-  const manufacturerKeys = entries
-    .filter(e => e.isDirectory())
-    .map(e => e.name);
+  // Load manufacturer display names
+  const manufacturers = await store.getItem<OflManufacturers>('manufacturers.json') ?? {};
+
+  // Get all keys — format: "manufacturer:fixture.json" OR "manufacturers.json"
+  const allKeys = await store.getKeys();
+
+  // Build a unique set of manufacturer directory names
+  const manufacturerKeysSet = new Set<string>();
+  for (const key of allKeys) {
+    const parts = key.split(':');
+    if (parts.length === 2 && parts[1].endsWith('.json')) {
+      manufacturerKeysSet.add(parts[0]);
+    }
+  }
+  const manufacturerKeys = Array.from(manufacturerKeysSet);
 
   // ─── Mode: Manufacturers ──────────────────────────────────────────────────
   if (mode === 'manufacturers' && !search && !category) {
-    const results: ManufacturerSummary[] = [];
-
-    for (const mfKey of manufacturerKeys) {
-      if (mfKey === 'schema') continue;
-
-      const mfPath = path.join(OFL_FIXTURES_DIR, mfKey);
-      const files = await fs.readdir(mfPath);
-      const jsonFiles = files.filter(f => f.endsWith('.json'));
-
-      results.push({
-        key: mfKey,
-        name: manufacturers[mfKey]?.name ?? mfKey,
-        fixtureCount: jsonFiles.length
-      });
+    const fixtureCountMap = new Map<string, number>();
+    for (const key of allKeys) {
+      const parts = key.split(':');
+      if (parts.length === 2 && parts[1].endsWith('.json')) {
+        const mfKey = parts[0];
+        fixtureCountMap.set(mfKey, (fixtureCountMap.get(mfKey) ?? 0) + 1);
+      }
     }
+
+    const results: ManufacturerSummary[] = manufacturerKeys.map(mfKey => ({
+      key: mfKey,
+      name: (manufacturers as OflManufacturers)[mfKey]?.name ?? mfKey,
+      fixtureCount: fixtureCountMap.get(mfKey) ?? 0,
+    }));
 
     results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
@@ -59,32 +64,24 @@ export default defineEventHandler(async (event) => {
   // ─── Mode: Fixtures (Search or Single Manufacturer) ───────────────────────
   const results: FixtureSummary[] = [];
 
-  // If a specific manufacturer is requested and NO global search, load ONLY that manufacturer
   const targets = (manufacturerFilter && !search && !category)
     ? [manufacturerFilter]
     : manufacturerKeys;
 
   for (const mfKey of targets) {
-    if (mfKey === 'schema') continue;
-
-    // Safety check for filtered list
     if (!manufacturerKeys.includes(mfKey)) continue;
 
-    const mfName = manufacturers[mfKey]?.name ?? mfKey;
-    const mfPath = path.join(OFL_FIXTURES_DIR, mfKey);
-    let files: string[] = [];
-    try {
-      files = await fs.readdir(mfPath);
-    } catch { continue; }
+    const mfName = (manufacturers as OflManufacturers)[mfKey]?.name ?? mfKey;
 
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const fixtureKey = file.replace('.json', '');
-      const fullPath = path.join(mfPath, file);
+    // Get all fixture keys for this manufacturer
+    const mfKeys = allKeys.filter(k => k.startsWith(`${mfKey}:`) && k.endsWith('.json'));
+
+    for (const storageKey of mfKeys) {
+      const fixtureKey = storageKey.replace(`${mfKey}:`, '').replace('.json', '');
 
       try {
-        const raw = await fs.readFile(fullPath, 'utf-8');
-        const fixture = JSON.parse(raw) as OflFixture;
+        const fixture = await store.getItem<OflFixture>(storageKey);
+        if (!fixture) continue;
 
         // Skip redirects
         if (!fixture.availableChannels || !fixture.modes) continue;
@@ -125,8 +122,6 @@ export default defineEventHandler(async (event) => {
 
   results.sort((a, b) => a.name.localeCompare(b.name));
 
-  // For specific manufacturers, we return the whole list (no slice) 
-  // unless a limit/offset was explicitly passed for a search.
   const shouldPaginate = !!(search || category);
   const finalItems = shouldPaginate
     ? results.slice(offset, offset + limit)

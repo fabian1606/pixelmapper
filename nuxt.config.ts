@@ -16,10 +16,11 @@ export default defineNuxtConfig({
     preference: 'dark',
   },
   nitro: {
-    vercel: {
-      config: {
-        includeFiles: ['ofl-data/fixtures/**']
+    serverAssets: [
+      {
+        baseName: 'ofl-fixtures',
+        dir: '../ofl-data/fixtures'
       }
-    }
+    ]
   }
 })
