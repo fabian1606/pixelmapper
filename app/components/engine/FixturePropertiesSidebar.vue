@@ -211,8 +211,9 @@ const stopAllTooltip = computed(() => {
         />
         
         <!-- Overlay Content (Faders) -->
-        <ScrollArea v-show="!stepsManager || stepsManager.layerMode === 'steps'" class="flex-1 min-h-0 p-4">
+        <ScrollArea v-show="!stepsManager || stepsManager.layerMode === 'steps'" class="flex-1 min-h-0">
           <FixturePropertiesChannelList
+            class="p-4"
             :channel-sections="channelSections"
             :active-step="stepsManager?.activeChaserConfig?.activeEditStep ?? 0"
             @before-change="handleBeforeChange"

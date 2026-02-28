@@ -2,6 +2,8 @@
 import type { ChannelSection } from './composables/use-channel-sections';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import FixturePropertyControl from './FixturePropertyControl.vue';
+import FixtureColorPicker from './FixtureColorPicker.vue';
+import FixturePanTiltPad from './FixturePanTiltPad.vue';
 
 defineProps<{
   channelSections: ChannelSection[];
@@ -22,6 +24,18 @@ function handleBeforeChange(fixtures: Fixture[]) {
     No adjustable properties found.
   </div>
   <div v-else class="space-y-5">
+    <div class="space-y-4">
+      <FixtureColorPicker
+        :channel-sections="channelSections"
+        :active-step="activeStep"
+        @before-change="handleBeforeChange"
+      />
+      <FixturePanTiltPad
+        :channel-sections="channelSections"
+        :active-step="activeStep"
+        @before-change="handleBeforeChange"
+      />
+    </div>
     <div v-for="(section, idx) in channelSections" :key="idx">
       <!-- Section label: only shown when multiple fixture types are selected -->
       <div v-if="section.showLabel" class="flex items-center gap-2 mb-1.5">
