@@ -3,7 +3,7 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelType } from '~/utils/engine/types';
 import type { OflCapability, OflWheel, OflWheelSlot } from '~/utils/ofl/types';
-import { Aperture, Disc3 } from 'lucide-vue-next';
+import { getIconForChannel } from '~/utils/engine/channel-categories';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,30 +16,63 @@ import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 const props = defineProps<{
   type: ChannelType;
   fixtures: Fixture[];
+  /** When specified, select the exact channel by name (for same-type disambiguation). */
+  oflChannelName?: string;
+  activeStep: number;
 }>();
 
 const emit = defineEmits<{
   (e: 'change', value: number): void;
+  /** Fired before any value is written, allowing the parent to pre-sync other fixtures */
+  (e: 'before-change', fixtures: Fixture[]): void;
 }>();
 
 const { lock, unlock } = useSidebarLock();
 
 // ─── Representative channel ───────────────────────────────────────────────────
-const representativeChannel = computed(() =>
-  props.fixtures[0]?.channels.find(c => c.type === props.type)
-);
+const representativeChannel = computed(() => {
+  let bestMatch = null;
+  let maxScore = -1;
+  const targetName = props.oflChannelName?.toLowerCase().trim();
 
-const rawValue = ref(representativeChannel.value?.baseValue ?? 0);
+  for (const f of props.fixtures) {
+    let ch = f.channels.find(c => c.type === props.type);
+    if (targetName) {
+      const exactMatch = f.channels.find(
+        c => c.type === props.type && (c.oflChannelName ?? c.type).toLowerCase().trim() === targetName
+      );
+      if (exactMatch) ch = exactMatch;
+    }
 
-watch(() => representativeChannel.value?.baseValue, (newVal) => {
-  if (newVal !== undefined && !isDragging.value) {
-    rawValue.value = newVal;
+    if (ch) {
+      const hasNonZero = ch.stepValues.some(v => v !== 0);
+      const score = (hasNonZero ? 10000 : 0) + ch.stepValues.length;
+      
+      if (score > maxScore) {
+        maxScore = score;
+        bestMatch = ch;
+      }
+    }
   }
+
+  return bestMatch;
 });
+
+const rawValue = ref(representativeChannel.value?.stepValues[props.activeStep] ?? 0);
+
+watch(
+  () => representativeChannel.value?.stepValues[props.activeStep],
+  (newVal) => {
+    if (newVal !== undefined && !isDragging.value) {
+      rawValue.value = newVal;
+    }
+  }
+);
 
 const colorValue = computed(() => representativeChannel.value?.colorValue ?? '#888888');
 const role      = computed(() => representativeChannel.value?.role ?? 'NONE');
-const channelLabel = computed(() => representativeChannel.value?.oflChannelName ?? props.type);
+const channelLabel = computed(() => props.oflChannelName ?? representativeChannel.value?.oflChannelName ?? props.type);
+const channelIcon  = computed(() => getIconForChannel(props.type, role.value));
 
 // ─── Wheel slot resolution ─────────────────────────────────────────────────────
 
@@ -127,6 +160,16 @@ const dragStartX   = ref(0);
 const dragStartVal = ref(0);
 
 // Visual box style
+const containerStyle = computed(() => {
+  if (role.value === 'COLOR') {
+    return { boxShadow: `inset 0 0 0 2px ${colorValue.value}80` };
+  }
+  if (role.value === 'DIMMER') {
+    return { boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.3)' };
+  }
+  return { boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)' };
+});
+
 const rectStyle = computed(() => {
   if (props.type === 'COLOR_WHEEL') {
     // Show the actual current slot colour, or fall back to conic gradient
@@ -151,11 +194,43 @@ function handleValueChange(newVal: number) {
   const clamped = Math.max(0, Math.min(255, Math.round(newVal)));
   rawValue.value = clamped;
 
+  // Allow parent to sync category state across all fixtures before we write the specific channel
+  emit('before-change', props.fixtures);
+
   for (const f of props.fixtures) {
-    const ch = f.channels.find(c => c.type === props.type);
-    if (ch) {
-      ch.baseValue = clamped;
-      ch.value = clamped;
+    let matchedChannels: typeof f.channels = [];
+    
+    if (props.oflChannelName) {
+      const targetName = props.oflChannelName.toLowerCase().trim();
+      matchedChannels = f.channels.filter(c => 
+        c.type === props.type && (c.oflChannelName ?? c.type).toLowerCase().trim() === targetName
+      );
+    } 
+    
+    if (matchedChannels.length === 0) {
+      // Fallback: match all channels of this type if no name specified or exact match fails
+      matchedChannels = f.channels.filter(c => c.type === props.type);
+    }
+    
+    for (const ch of matchedChannels) {
+      while (ch.stepValues.length <= props.activeStep) {
+        ch.stepValues.push(ch.stepValues[ch.stepValues.length - 1] ?? 0);
+      }
+      ch.stepValues[props.activeStep] = clamped;
+
+      // Ensure that adjusting a value on a fixture that didn't have steps yet initializes its chaserConfig
+      // so it actually plays the newly padded sequence.
+      if (!ch.chaserConfig && props.activeStep > 0) {
+         ch.chaserConfig = {
+           stepsCount: props.activeStep + 1,
+           activeEditStep: props.activeStep,
+           isPlaying: true, // Auto-play if we just inherently activated steps
+           stepDurationMs: 1000,
+           fadeDurationMs: 0
+         };
+      } else if (ch.chaserConfig && ch.chaserConfig.stepsCount <= props.activeStep) {
+         ch.chaserConfig.stepsCount = props.activeStep + 1;
+      }
     }
   }
   emit('change', clamped);
@@ -203,7 +278,7 @@ function onDropdownOpenChange(open: boolean) {
     <div
       class="relative w-12 h-12 flex-shrink-0 rounded-xl overflow-hidden flex items-center justify-center cursor-ew-resize"
       :class="role !== 'NONE' ? 'bg-white/5' : 'bg-muted/40 text-muted-foreground'"
-      style="box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);"
+      :style="containerStyle"
       @mousedown="startDrag"
     >
       <!-- Inset hover ring -->
@@ -219,15 +294,13 @@ function onDropdownOpenChange(open: boolean) {
         :style="rectStyle"
       />
 
-      <!-- Disc3 icon overlay for color wheels (on top of the color fill) -->
-      <Disc3
-        v-if="type === 'COLOR_WHEEL'"
+      <!-- Icon overlay for non-color channels or color wheels -->
+      <component
+        :is="channelIcon"
+        v-if="type === 'COLOR_WHEEL' || role === 'NONE'"
         class="w-6 h-6 relative z-10 drop-shadow"
-        :style="{ color: activeSlotColor ? 'white' : 'rgba(255,255,255,0.7)' }"
+        :style="type === 'COLOR_WHEEL' ? { color: activeSlotColor ? 'white' : 'rgba(255,255,255,0.7)' } : undefined"
       />
-
-      <!-- Aperture icon for non-visual channels -->
-      <Aperture v-else-if="role === 'NONE'" class="w-6 h-6 relative z-10" />
     </div>
 
     <!-- Labels -->

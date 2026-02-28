@@ -24,7 +24,11 @@ export class EffectEngine {
    * @param timeMs The current elapsed absolute time in milliseconds.
    * @param deltaTimeMs The time elapsed since the last frame in milliseconds.
    */
-  public render(fixtures: Fixture[], timeMs: number, deltaTimeMs: number): void {
+  public render(
+    fixtures: Fixture[],
+    timeMs: number,
+    deltaTimeMs: number
+  ): void {
     // Update all effects once per frame
     for (const effect of this.effects) {
       if (effect.update) {
@@ -32,10 +36,38 @@ export class EffectEngine {
       }
     }
 
-    // Reset all channels for this frame to their base values (additive blending preparation)
+    // Compute currentBaseValue based on chaser steps
     for (const fixture of fixtures) {
       for (const channel of fixture.channels) {
-        channel.value = channel.baseValue;
+        const chaserState = channel.chaserConfig;
+
+        if (!chaserState || chaserState.stepsCount <= 1 || !chaserState.isPlaying) {
+          // Static / edit mode
+          const activeStep = chaserState?.activeEditStep ?? 0;
+          channel.currentBaseValue = channel.stepValues[activeStep] ?? 0;
+        } else {
+          // Chaser playback mode
+          const cycleTime = chaserState.stepDurationMs * chaserState.stepsCount;
+          const timeInCycle = timeMs % cycleTime;
+          const currentIndex = Math.floor(timeInCycle / chaserState.stepDurationMs);
+          const nextIndex = (currentIndex + 1) % chaserState.stepsCount;
+          const timeInStep = timeInCycle % chaserState.stepDurationMs;
+
+          let factor = 0;
+          if (timeInStep < chaserState.fadeDurationMs && chaserState.fadeDurationMs > 0) {
+            factor = timeInStep / chaserState.fadeDurationMs;
+          } else if (chaserState.fadeDurationMs === 0) {
+            factor = 1; // Snaps immediately if fade is 0
+          } else {
+            factor = 1; // Holding phase
+          }
+
+          const v1 = channel.stepValues[currentIndex] ?? 0;
+          const v2 = channel.stepValues[nextIndex] ?? 0;
+          channel.currentBaseValue = v1 + (v2 - v1) * factor;
+        }
+        // Initialize channel value via additive blending
+        channel.value = channel.currentBaseValue;
       }
     }
 
@@ -57,14 +89,14 @@ export class EffectEngine {
           const targetChannels = fixture.getChannelsByType(effect.targetChannel);
           for (const channel of targetChannels) {
             // Determine maximum and minimum achievable values based on strength
-            const targetMax = Math.min(channel.baseValue + effect.strength, 255);
-            const targetMin = Math.max(channel.baseValue - effect.strength, 0);
+            const targetMax = Math.min(channel.currentBaseValue + effect.strength, 255);
+            const targetMin = Math.max(channel.currentBaseValue - effect.strength, 0);
 
             // Map the expected [-1, 1] wave shape to the [targetMin, targetMax] range
             const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
 
             // Calculate relative offset it contributes
-            const offset = mappedValue - channel.baseValue;
+            const offset = mappedValue - channel.currentBaseValue;
 
             channel.value += offset;
           }

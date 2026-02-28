@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Lightbulb,
-  Aperture,
-  Move,
-  Palette
-} from 'lucide-vue-next';
+  CHANNEL_CATEGORIES,
+  TAB_ORDER,
+  getAvailableCategories
+} from '~/utils/engine/channel-categories';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import type { ChannelType } from '~/utils/engine/types';
 import FixturePropertyControl from './FixturePropertyControl.vue';
 import { provideSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
+import { syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 
 interface Props {
   selectedIds: Set<string | number>;
@@ -22,25 +22,43 @@ interface Props {
 
 const props = defineProps<Props>();
 
+import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
+import ChaserStepsManager from './ChaserStepsManager.vue';
+
 // Sidebar close lock: child dropdowns increment this to prevent auto-close
 const { openCount: lockedOpenCount } = provideSidebarLock();
 
 // Tabs logic
-const activeTab = ref<string | null>(null);
+const activeTab = ref<ChannelCategoryKey | null>(null);
 const sidebarRef = ref<HTMLElement | null>(null);
 
-onClickOutside(sidebarRef, () => {
-  // Don't close the sidebar if a child floating UI (dropdown, popover) is open
-  if (lockedOpenCount.value !== undefined && lockedOpenCount.value > 0) return;
-  activeTab.value = null;
-});
+// Steps Manager reference to access the active chaser configuration
+const stepsManager = ref<InstanceType<typeof ChaserStepsManager> | null>(null);
 
-function toggleTab(tab: string) {
+onClickOutside(
+  sidebarRef,
+  () => {
+    // Don't close the sidebar if a child floating UI (dropdown, popover) is open
+    if (lockedOpenCount.value !== undefined && lockedOpenCount.value > 0) return;
+    activeTab.value = null;
+  },
+  { ignore: ['.viewport'] } // Don't close when clicking or dragging anywhere on the canvas
+);
+
+function toggleTab(tab: ChannelCategoryKey) {
   if (activeTab.value === tab) {
     activeTab.value = null;
   } else {
     activeTab.value = tab;
   }
+}
+
+
+// ─── Category sync ────────────────────────────────────────────────────────────
+// When the user touches a fader, sync all category channels from the richest fixture
+// to any blank fixtures in the selection BEFORE the specific value is written.
+function handleBeforeChange(fixtures: Fixture[]) {
+  syncCategoryBeforeEdit(fixtures, (type, role) => tabChannelFilter(type, role));
 }
 
 // Helpers ------------------------------------------------------------------
@@ -77,24 +95,40 @@ function channelFingerprint(type: ChannelType, fixture: Fixture): string {
 // Computed tabs visibility -------------------------------------------------
 
 const availableTabs = computed(() => {
-  const fixtures = getSelectedFixtures();
-  if (fixtures.length === 0) return { intensity: 0, beam: 0, position: 0, color: 0, total: 0 };
+  return getAvailableCategories(getSelectedFixtures());
+});
 
-  let intensityCount = 0, beamCount = 0, positionCount = 0, colorCount = 0;
-
-  for (const f of fixtures) {
-    if (f.channels.some(c => c.type === 'DIMMER' || c.role === 'DIMMER')) intensityCount++;
-    if (f.channels.some(c => (['RED', 'GREEN', 'BLUE', 'WHITE', 'AMBER', 'UV'] as ChannelType[]).includes(c.type) || c.role === 'COLOR')) colorCount++;
-    if (f.channels.some(c => (['PAN', 'TILT'] as ChannelType[]).includes(c.type))) positionCount++;
-    if (f.channels.some(c => c.type === 'STROBE')) beamCount++;
+// Auto-close the sidebar if the selected fixtures no longer support the active category
+watch(availableTabs, (tabs) => {
+  if (activeTab.value && !tabs[activeTab.value]) {
+    activeTab.value = null;
   }
-
-  return { intensity: intensityCount, beam: beamCount, position: positionCount, color: colorCount, total: fixtures.length };
 });
 
 const activeTabFixtureCount = computed(() => {
   if (!activeTab.value) return 0;
-  return (availableTabs.value as Record<string, number>)[activeTab.value] ?? 0;
+  return availableTabs.value[activeTab.value] ?? 0;
+});
+
+// Calculate which categories have any modified values (programmed)
+const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
+  const modified = new Set<ChannelCategoryKey>();
+  const fixtures = getSelectedFixtures();
+  
+  for (const fixture of fixtures) {
+    for (const channel of fixture.channels) {
+      const isProgrammed = channel.chaserConfig || channel.stepValues.some(v => v !== 0);
+      if (isProgrammed) {
+        // Find which category this channel belongs to
+        for (const cat of CHANNEL_CATEGORIES) {
+          if (cat.id === 'intensity' && channel.role === 'DIMMER') modified.add(cat.id);
+          else if (cat.id === 'color' && channel.role === 'COLOR') modified.add(cat.id);
+          else if (cat.types.includes(channel.type)) modified.add(cat.id);
+        }
+      }
+    }
+  }
+  return modified;
 });
 
 // Channel sections for the active tab ----------------------------------------
@@ -102,6 +136,9 @@ const activeTabFixtureCount = computed(() => {
 /** One channel row inside a section */
 interface ChannelEntry {
   channelType: ChannelType;
+  /** The exact OFL channel name (e.g. 'Gobo Wheel 1') — used to distinguish
+   *  multiple channels that share the same ChannelType on a fixture. */
+  oflChannelName: string;
   fixtures: Fixture[];
 }
 
@@ -112,76 +149,121 @@ interface ChannelSection {
   entries: ChannelEntry[];
 }
 
-const INTENSITY_TYPES: ChannelType[] = ['DIMMER'];
-const COLOR_TYPES: ChannelType[] = ['RED', 'GREEN', 'BLUE', 'WHITE', 'WARM_WHITE', 'COOL_WHITE', 'AMBER', 'UV', 'COLOR_WHEEL'];
-const POSITION_TYPES: ChannelType[] = ['PAN', 'TILT'];
-const BEAM_TYPES: ChannelType[] = ['STROBE'];
-
-function tabChannelFilter(type: ChannelType): boolean {
-  switch (activeTab.value) {
-    case 'intensity': return INTENSITY_TYPES.includes(type);
-    case 'color':     return COLOR_TYPES.includes(type);
-    case 'position':  return POSITION_TYPES.includes(type);
-    case 'beam':      return BEAM_TYPES.includes(type);
-    default: return false;
-  }
+function tabChannelFilter(type: ChannelType, role?: string): boolean {
+  if (!activeTab.value) return false;
+  const cat = CHANNEL_CATEGORIES.find(c => c.id === activeTab.value);
+  if (!cat) return false;
+  if (cat.id === 'intensity' && role === 'DIMMER') return true;
+  if (cat.id === 'color' && role === 'COLOR') return true;
+  return cat.types.includes(type);
 }
 
 const channelSections = computed((): ChannelSection[] => {
   const fixtures = getSelectedFixtures();
   if (fixtures.length === 0) return [];
 
-  const TAB_ORDER: ChannelType[] = [
-    ...INTENSITY_TYPES, ...COLOR_TYPES, ...POSITION_TYPES, ...BEAM_TYPES
-  ];
-  const relevantTypes = TAB_ORDER.filter(t =>
-    tabChannelFilter(t) && fixtures.some(f => f.channels.some(c => c.type === t))
-  );
-  if (relevantTypes.length === 0) return [];
-
   const getFixtureType = (f: Fixture): string => {
     const ext = f as Fixture & { oflShortName?: string };
     return (ext.oflShortName ?? f.name.replace(/\s+\d+$/, '')).trim();
   };
 
-  // Labels are only shown when multiple fixture types are selected
   const allFixtureTypes = new Set(fixtures.map(getFixtureType));
   const showLabels = allFixtureTypes.size > 1;
 
-  // Build a flat list of (channelType, fixtures, sectionName) entries
-  const flat: Array<{ channelType: ChannelType; fixtures: Fixture[]; sectionName: string }> = [];
+  // 1. Collect all unique channels across all selected fixtures in this tab
+  type ChannelKey = string;
+  const allChannels = new Map<ChannelKey, { channelType: ChannelType; oflChannelName: string; fixtures: Fixture[] }>();
 
-  for (const channelType of relevantTypes) {
-    const fixturesWithCh = fixtures.filter(f => f.channels.some(c => c.type === channelType));
+  for (const f of fixtures) {
+    const usedKeysInFixture = new Set<string>();
 
-    // Sub-group by fingerprint (handles color wheels with different slot sets)
-    const sigGroups = new Map<string, Fixture[]>();
-    for (const f of fixturesWithCh) {
-      const sig = channelFingerprint(channelType, f);
-      if (!sigGroups.has(sig)) sigGroups.set(sig, []);
-      sigGroups.get(sig)!.push(f);
-    }
-
-    for (const group of sigGroups.values()) {
-      const groupTypes = new Set(group.map(getFixtureType));
-      const sectionName = groupTypes.size > 1 ? 'Combined' : (Array.from(groupTypes)[0] ?? '');
-      flat.push({ channelType, fixtures: group, sectionName });
+    for (const ch of f.channels) {
+      if (!tabChannelFilter(ch.type, ch.role)) continue;
+      
+      const rawName = ch.oflChannelName ?? ch.type;
+      const normalizedName = rawName.toLowerCase().trim();
+      
+      const caps = ch.oflCapabilities ?? [];
+      let capSig = '';
+      if (caps.length > 1) {
+        capSig = caps.map(c => `${c.type}:${c.dmxRange ? c.dmxRange[0]+'-'+c.dmxRange[1] : ''}`).join('|');
+      }
+      
+      const baseKey = `${ch.type}::${normalizedName}::${capSig}`;
+      
+      let finalKey = baseKey;
+      let dedup = 1;
+      while (usedKeysInFixture.has(finalKey)) {
+        finalKey = `${baseKey}::dedup${dedup++}`;
+      }
+      usedKeysInFixture.add(finalKey);
+      
+      if (!allChannels.has(finalKey)) {
+        allChannels.set(finalKey, { channelType: ch.type, oflChannelName: rawName, fixtures: [] });
+      }
+      allChannels.get(finalKey)!.fixtures.push(f);
     }
   }
 
-  // Merge consecutive entries with the same sectionName into sections
-  const sections: ChannelSection[] = [];
-  for (const entry of flat) {
-    const last = sections[sections.length - 1];
-    if (last && last.name === entry.sectionName) {
-      last.entries.push({ channelType: entry.channelType, fixtures: entry.fixtures });
-    } else {
-      sections.push({
-        name: entry.sectionName,
-        showLabel: showLabels,
-        entries: [{ channelType: entry.channelType, fixtures: entry.fixtures }],
+  // Sort channels by TAB_ORDER, then alphabetically
+  const tabOrderIndex = new Map(TAB_ORDER.map((t, i) => [t, i]));
+  const orderedChannels = [...allChannels.values()].sort((a, b) => {
+    const ai = tabOrderIndex.get(a.channelType) ?? 999;
+    const bi = tabOrderIndex.get(b.channelType) ?? 999;
+    if (ai !== bi) return ai - bi;
+    return a.oflChannelName.localeCompare(b.oflChannelName);
+  });
+
+  // 2. Bucket channels into Combined vs. Specific Models
+  const combinedEntries: ChannelEntry[] = [];
+  const modelEntries = new Map<string, ChannelEntry[]>();
+
+  for (const item of orderedChannels) {
+    // A channel is "Combined" if every selected fixture type has at least one fixture with this channel
+    const itemFixtureTypes = new Set(item.fixtures.map(getFixtureType));
+    
+    if (itemFixtureTypes.size === allFixtureTypes.size) {
+      combinedEntries.push({
+        channelType: item.channelType,
+        oflChannelName: item.oflChannelName,
+        fixtures: item.fixtures
       });
+    } else {
+      // Otherwise, add it to the section for each fixture model that has it
+      for (const modelName of itemFixtureTypes) {
+        if (!modelEntries.has(modelName)) modelEntries.set(modelName, []);
+        
+        // Only include the fixtures of *this* model
+        const fixturesOfModel = item.fixtures.filter(f => getFixtureType(f) === modelName);
+        
+        modelEntries.get(modelName)!.push({
+          channelType: item.channelType,
+          oflChannelName: item.oflChannelName,
+          fixtures: fixturesOfModel
+        });
+      }
     }
+  }
+
+  // 3. Assemble final sections
+  const sections: ChannelSection[] = [];
+  
+  if (combinedEntries.length > 0) {
+    sections.push({
+      name: showLabels ? 'Combined' : '',
+      showLabel: showLabels,
+      entries: combinedEntries
+    });
+  }
+
+  // Add model-specific sections (sorted alphabetically by model name)
+  const sortedModels = [...modelEntries.keys()].sort((a, b) => a.localeCompare(b));
+  for (const modelName of sortedModels) {
+    sections.push({
+      name: modelName,
+      showLabel: true, // Always show labels for specific models if we reached this code
+      entries: modelEntries.get(modelName)!
+    });
   }
 
   return sections;
@@ -206,6 +288,15 @@ const channelSections = computed((): ChannelSection[] => {
             {{ activeTabFixtureCount }} of {{ availableTabs.total }} Fixture{{ availableTabs.total === 1 ? '' : 's' }}
           </span>
         </div>
+
+        <!-- Chaser Steps Manager -->
+        <ChaserStepsManager 
+          v-if="activeTab"
+          auto-close
+          ref="stepsManager"
+          :active-tab="activeTab"
+          :fixtures="getSelectedFixtures()" 
+        />
         
         <!-- Overlay Content -->
         <ScrollArea class="flex-1 p-4">
@@ -226,9 +317,12 @@ const channelSections = computed((): ChannelSection[] => {
               <div class="space-y-0.5">
                 <FixturePropertyControl
                   v-for="entry in section.entries"
-                  :key="entry.channelType"
+                  :key="`${entry.channelType}:${entry.oflChannelName}`"
                   :type="entry.channelType"
+                  :oflChannelName="entry.oflChannelName"
                   :fixtures="entry.fixtures"
+                  :active-step="stepsManager?.activeChaserConfig?.activeEditStep ?? 0"
+                  @before-change="handleBeforeChange"
                 />
               </div>
             </div>
@@ -239,45 +333,23 @@ const channelSections = computed((): ChannelSection[] => {
 
     <!-- Main Right Icon Bar -->
     <div class="pointer-events-auto w-12 bg-background border-l border-border flex flex-col items-center py-4 gap-2 z-20">
-      
       <button
-        v-if="availableTabs.intensity > 0"
-        class="p-2 rounded-md transition-colors"
-        :class="activeTab === 'intensity' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
-        @click="toggleTab('intensity')"
-        title="Intensity Properties"
+        v-for="cat in CHANNEL_CATEGORIES"
+        :key="cat.id"
+        v-show="availableTabs[cat.id] > 0"
+        class="p-2 rounded-md transition-colors relative"
+        :class="activeTab === cat.id ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
+        @click="toggleTab(cat.id)"
+        :title="cat.label + ' Properties'"
       >
-        <Lightbulb class="size-5" />
-      </button>
-
-      <button
-        v-if="availableTabs.beam > 0"
-        class="p-2 rounded-md transition-colors"
-        :class="activeTab === 'beam' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
-        @click="toggleTab('beam')"
-        title="Beam Properties"
-      >
-        <Aperture class="size-5" />
-      </button>
-
-      <button
-        v-if="availableTabs.position > 0"
-        class="p-2 rounded-md transition-colors"
-        :class="activeTab === 'position' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
-        @click="toggleTab('position')"
-        title="Position Properties"
-      >
-        <Move class="size-5" />
-      </button>
-
-      <button
-        v-if="availableTabs.color > 0"
-        class="p-2 rounded-md transition-colors"
-        :class="activeTab === 'color' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
-        @click="toggleTab('color')"
-        title="Color Properties"
-      >
-        <Palette class="size-5" />
+        <span 
+          v-if="modifiedCategories.has(cat.id)" 
+          class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
+```vue
+          :class="activeTab === cat.id ? 'bg-primary' : 'bg-muted-foreground'"
+```
+        ></span>
+        <component :is="cat.icon" class="size-5" />
       </button>
     </div>
   </div>

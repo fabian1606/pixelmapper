@@ -52,14 +52,15 @@ export function createFixtureFromOfl(
 
     if (!channelDef) continue;
 
-    const mapped = resolveOflChannel(channelDef);
+    const mapped = resolveOflChannel(channelDef, channelKey);
 
     const allCapabilities = channelDef.capabilities ?? (channelDef.capability ? [channelDef.capability] : []);
 
     const channel: Channel = {
       type: mapped.type,
       value: mapped.defaultValue,
-      baseValue: mapped.defaultValue,
+      stepValues: [mapped.defaultValue],
+      currentBaseValue: mapped.defaultValue,
       role: mapped.role,
       colorValue: mapped.colorValue,
       oflChannelName: channelKey,

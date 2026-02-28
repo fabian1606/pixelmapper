@@ -1,5 +1,30 @@
-export type ChannelType = 'RED' | 'GREEN' | 'BLUE' | 'WHITE' | 'WARM_WHITE' | 'COOL_WHITE' | 'AMBER' | 'UV' | 'DIMMER' | 'PAN' | 'TILT' | 'STROBE' | 'COLOR_WHEEL' | 'CUSTOM';
+export type ChannelType =
+  // Color
+  | 'RED' | 'GREEN' | 'BLUE' | 'WHITE' | 'WARM_WHITE' | 'COOL_WHITE' | 'AMBER' | 'UV'
+  | 'CYAN' | 'MAGENTA' | 'YELLOW' | 'LIME' | 'INDIGO'
+  | 'COLOR_WHEEL' | 'COLOR_PRESET' | 'COLOR_TEMPERATURE'
+  // Intensity
+  | 'DIMMER'
+  // Position
+  | 'PAN' | 'TILT' | 'PANTILT_SPEED'
+  // Beam
+  | 'STROBE' | 'STROBE_SPEED' | 'STROBE_DURATION'
+  | 'ZOOM' | 'FOCUS' | 'IRIS' | 'FROST' | 'BEAM_ANGLE' | 'BEAM_POSITION'
+  // Shaping (Gobo, Prism, Blades)
+  | 'GOBO_WHEEL' | 'GOBO_SPIN' | 'PRISM' | 'PRISM_ROTATION' | 'BLADE'
+  // Effects & Control
+  | 'EFFECT' | 'EFFECT_SPEED' | 'EFFECT_DURATION' | 'SOUND_SENSITIVITY'
+  | 'ROTATION' | 'SPEED' | 'TIME'
+  // Other
+  | 'FOG' | 'MAINTENANCE' | 'GENERIC' | 'NO_FUNCTION' | 'CUSTOM';
 
+export interface ChannelChaserConfig {
+  stepsCount: number;
+  activeEditStep: number;
+  isPlaying: boolean;
+  stepDurationMs: number;
+  fadeDurationMs: number;
+}
 
 export type EffectDirection = 'FORWARD' | 'BACKWARD' | 'CENTER_OUT' | 'OUTSIDE_IN' | 'SPATIAL_X' | 'SPATIAL_Y' | 'SPATIAL_RADIAL';
 

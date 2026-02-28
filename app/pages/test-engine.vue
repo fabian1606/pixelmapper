@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, watchEffect } from 'vue';
 import { SineEffect } from '~/utils/engine/effects/sine-effect';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
-import { RedChannel, GreenChannel, BlueChannel, DimmerChannel } from '~/utils/engine/core/channel';
+
 import type { ChannelType } from '~/utils/engine/types';
 import FixtureEditor from '~/components/engine/FixtureEditor.vue';
 import { shallowRef } from 'vue';
@@ -24,7 +24,7 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
   const row = Math.floor(i / COLS);
   const col = i % COLS;
   
-  const fixture = new Fixture(i, [new RedChannel(), new GreenChannel(), new BlueChannel(), new DimmerChannel()]);
+  const fixture = Fixture.createRGBFixture(i);
   if (i === 0) fixture.name = 'Front Left';
   if (i === 9) fixture.name = 'Front Right';
   if (i === 30) fixture.name = 'Back Left';
@@ -67,7 +67,10 @@ watchEffect(() => {
   for (const fixture of fixtures) {
     for (const channel of fixture.channels) {
       const base = globalBases.value[channel.type];
-      if (base !== undefined) channel.baseValue = base;
+      if (base !== undefined) {
+        channel.stepValues[0] = base;
+        channel.currentBaseValue = base;
+      }
     }
   }
 

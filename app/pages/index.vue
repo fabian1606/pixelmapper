@@ -90,15 +90,24 @@ sine.targetChannel = 'GREEN';
 sine.direction = 'FORWARD';
 engine.addEffect(sine);
 
-// Sync base values
+// Sync base values — only apply to channels that have not been programmed
+// (i.e. channels where stepValues[0] is still default/zero and no chaser is set)
 watchEffect(() => {
   for (const fixture of flatFixtures.value) {
     for (const channel of fixture.channels) {
       const base = globalBases.value[channel.type];
-      if (base !== undefined) channel.baseValue = base;
+      if (base !== undefined) {
+        // Skip channels that have been explicitly programmed by the user
+        const isProgrammed = channel.chaserConfig || channel.stepValues.some(v => v !== 0);
+        if (!isProgrammed) {
+          channel.stepValues[0] = base;
+          channel.currentBaseValue = base;
+        }
+      }
     }
   }
 });
+
 
 // Reactive color map — updated every frame, consumed by FixtureEditor
 const fixtureColors = shallowRef<Map<string | number, string>>(new Map());

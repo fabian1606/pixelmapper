@@ -18,11 +18,11 @@ const OFL_COLOR_MAP: Record<OflColor, ColorMapping> = {
   'Cold White': { channelType: 'COOL_WHITE', colorValue: '#C0DFFF' },
   Amber: { channelType: 'AMBER', colorValue: '#FFAA00' },
   UV: { channelType: 'UV', colorValue: '#8800FF' },
-  Cyan: { channelType: 'CUSTOM', colorValue: '#00FFFF' },
-  Magenta: { channelType: 'CUSTOM', colorValue: '#FF00FF' },
-  Yellow: { channelType: 'CUSTOM', colorValue: '#FFFF00' },
-  Lime: { channelType: 'CUSTOM', colorValue: '#BFFF00' },
-  Indigo: { channelType: 'CUSTOM', colorValue: '#4B0082' },
+  Cyan: { channelType: 'CYAN', colorValue: '#00FFFF' },
+  Magenta: { channelType: 'MAGENTA', colorValue: '#FF00FF' },
+  Yellow: { channelType: 'YELLOW', colorValue: '#FFFF00' },
+  Lime: { channelType: 'LIME', colorValue: '#BFFF00' },
+  Indigo: { channelType: 'INDIGO', colorValue: '#4B0082' },
 };
 
 // ─── Mapped Channel Result ────────────────────────────────────────────────────
@@ -55,10 +55,11 @@ function getPrimaryCapability(capabilities?: OflCapability, capabilitiesArr?: Of
  */
 export function mapOflCapabilityToChannel(
   capability: OflCapability | undefined,
-  defaultValue: number = 0
+  defaultValue: number = 0,
+  channelName: string = ''
 ): MappedChannel {
   if (!capability) {
-    return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+    return heuristicFallbackMap(channelName, defaultValue);
   }
 
   switch (capability.type) {
@@ -74,6 +75,11 @@ export function mapOflCapabilityToChannel(
       return { type: 'CUSTOM', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
     }
 
+    case 'ColorPreset':
+      return { type: 'COLOR_PRESET', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+    case 'ColorTemperature':
+      return { type: 'COLOR_TEMPERATURE', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+
     case 'Pan':
     case 'PanContinuous':
       return { type: 'PAN', role: 'NONE', colorValue: '#888888', defaultValue };
@@ -82,33 +88,127 @@ export function mapOflCapabilityToChannel(
     case 'TiltContinuous':
       return { type: 'TILT', role: 'NONE', colorValue: '#888888', defaultValue };
 
+    case 'PanTiltSpeed':
+      return { type: 'PANTILT_SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
+
     case 'ShutterStrobe':
       return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'StrobeSpeed':
+      return { type: 'STROBE_SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'StrobeDuration':
+      return { type: 'STROBE_DURATION', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Zoom':
+      return { type: 'ZOOM', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Focus':
+      return { type: 'FOCUS', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Iris':
+    case 'IrisEffect':
+      return { type: 'IRIS', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Frost':
+    case 'FrostEffect':
+      return { type: 'FROST', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'BeamAngle':
+      return { type: 'BEAM_ANGLE', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'BeamPosition':
+      return { type: 'BEAM_POSITION', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Prism':
+      return { type: 'PRISM', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'PrismRotation':
+      return { type: 'PRISM_ROTATION', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'BladeInsertion':
+    case 'BladeRotation':
+    case 'BladeSystemRotation':
+      return { type: 'BLADE', role: 'NONE', colorValue: '#888888', defaultValue };
 
     case 'WheelSlot':
-    case 'WheelShake': {
-      const wheelName = capability.wheel ?? '';
-      if (wheelName.toLowerCase().includes('color')) {
+    case 'WheelShake':
+    case 'WheelRotation':
+    case 'WheelSlotRotation': {
+      // Prefer the explicit wheel name from the capability, otherwise fall back to channel name
+      const wheelName = (capability.wheel ?? channelName).toLowerCase();
+      if (wheelName.includes('color')) {
         return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
       }
-      return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+      if (wheelName.includes('gobo') || wheelName.includes('pattern')) {
+        if (capability.type === 'WheelRotation' || capability.type === 'WheelSlotRotation') {
+          return { type: 'GOBO_SPIN', role: 'NONE', colorValue: '#888888', defaultValue };
+        }
+        return { type: 'GOBO_WHEEL', role: 'NONE', colorValue: '#888888', defaultValue };
+      }
+      // Unknown wheel type — use the channel name heuristic
+      return heuristicFallbackMap(channelName, defaultValue);
     }
 
-    case 'WheelRotation':
-    case 'WheelSlotRotation':
-      // Gobo/color wheel rotation — treat similar to gobo slot
-      return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Effect':
+    case 'EffectParameter':
+      // Fallback heuristics: If OFL just calls it "Effect" but the channel name gives a better hint
+      if (channelName.toLowerCase().includes('macro')) return { type: 'GENERIC', role: 'NONE', colorValue: '#888888', defaultValue };
+      if (channelName.toLowerCase().includes('sparkle')) return { type: 'EFFECT', role: 'NONE', colorValue: '#888888', defaultValue };
+      return { type: 'EFFECT', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'EffectSpeed':
+      return { type: 'EFFECT_SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'EffectDuration':
+      return { type: 'EFFECT_DURATION', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'SoundSensitivity':
+      return { type: 'SOUND_SENSITIVITY', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Rotation':
+      return { type: 'ROTATION', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Speed':
+      return { type: 'SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
+    case 'Time':
+      return { type: 'TIME', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Fog':
+    case 'FogOutput':
+    case 'FogType':
+      return { type: 'FOG', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Maintenance':
+      return { type: 'MAINTENANCE', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'Generic':
+      return { type: 'GENERIC', role: 'NONE', colorValue: '#888888', defaultValue };
+
+    case 'NoFunction':
+      return heuristicFallbackMap(channelName, defaultValue);
 
     default:
-      return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
+      return heuristicFallbackMap(channelName, defaultValue);
   }
+}
+
+/**
+ * Attempts to guess the channel type based purely on the string name
+ * if the capability type is missing or generic (like NoFunction).
+ */
+function heuristicFallbackMap(channelName: string, defaultValue: number): MappedChannel {
+  const name = channelName.toLowerCase();
+
+  if (name.includes('shutter') || name.includes('strobe')) return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('dimmer') || name.includes('intensity')) return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue };
+  if (name.includes('pan')) return { type: 'PAN', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('tilt')) return { type: 'TILT', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('zoom')) return { type: 'ZOOM', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('focus')) return { type: 'FOCUS', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('iris')) return { type: 'IRIS', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('frost')) return { type: 'FROST', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('prism')) return { type: 'PRISM', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('gobo')) return { type: 'GOBO_WHEEL', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('color')) return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+  if (name.includes('macro')) return { type: 'GENERIC', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('control') || name.includes('reset') || name.includes('blackout on move')) return { type: 'MAINTENANCE', role: 'NONE', colorValue: '#888888', defaultValue };
+
+  return { type: 'CUSTOM', role: 'NONE', colorValue: '#888888', defaultValue };
 }
 
 /**
  * Resolves a complete OFL channel definition (with either single capability or capability array)
  * into an internal mapped channel descriptor.
  */
-export function resolveOflChannel(channelDef: import('./types').OflChannel): MappedChannel {
+export function resolveOflChannel(channelDef: import('./types').OflChannel, channelName: string = ''): MappedChannel {
   const primaryCap = getPrimaryCapability(channelDef.capability, channelDef.capabilities);
   // OFL allows defaultValue to be a percentage string like '50%' or a plain number
   const rawDefault = channelDef.defaultValue;
@@ -118,5 +218,5 @@ export function resolveOflChannel(channelDef: import('./types').OflChannel): Map
   } else if (typeof rawDefault === 'string' && rawDefault.endsWith('%')) {
     defaultValue = Math.round((parseFloat(rawDefault) / 100) * 255);
   }
-  return mapOflCapabilityToChannel(primaryCap, defaultValue);
+  return mapOflCapabilityToChannel(primaryCap, defaultValue, channelName);
 }

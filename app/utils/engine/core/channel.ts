@@ -18,8 +18,17 @@ export interface Channel {
   type: ChannelType;
   /** Current DMX output value (0–255), written each frame by the EffectEngine. */
   value: number;
-  /** The resting value effects oscillate around. */
-  baseValue: number;
+  /**
+   * The programmed step values for this channel.
+   * If there is only 1 step, this array has length 1.
+   * Chaser engines interpolate across these steps.
+   */
+  stepValues: number[];
+  /**
+   * The dynamic base value for this frame (interpolated between steps).
+   * Effects are applied additively on top of this.
+   */
+  currentBaseValue: number;
   /** How this channel contributes to the fixture's visual color computation. */
   role: ChannelRole;
   /**
@@ -37,4 +46,9 @@ export interface Channel {
    * Needed to resolve slot names and slot colors for WheelSlot-type capabilities.
    */
   oflWheels?: Record<string, OflWheel>;
+  /**
+   * State and configuration for building sequences natively on this channel.
+   * If undefined, the channel defaults to rendering stepValues[0].
+   */
+  chaserConfig?: import('../types').ChannelChaserConfig;
 }
