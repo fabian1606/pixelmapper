@@ -19,6 +19,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { type SnapshotMap } from './commands/set-channel-values-command';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelSections } from './composables/use-channel-sections';
+import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
 interface Props {
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
@@ -28,7 +29,7 @@ interface Props {
 const props = defineProps<Props>();
 
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
-import ChaserStepsManager from './ChaserStepsManager.vue';
+import CategoryEffectsManager from './CategoryEffectsManager.vue';
 import { inject } from 'vue';
 import type { EffectEngine } from '~/utils/engine/engine';
 
@@ -44,9 +45,10 @@ const sidebarRef = ref<HTMLElement | null>(null);
 
 const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
 const { tabChannelFilter, channelSections } = useChannelSections(activeTab, getSelectedFixtures);
+const commandHistory = useHistory();
 
-// Steps Manager reference to access the active chaser configuration
-const stepsManager = ref<InstanceType<typeof ChaserStepsManager> | null>(null);
+// Category Effects Manager reference to access the active configuration
+const effectsManager = ref<InstanceType<typeof CategoryEffectsManager> | null>(null);
 
 onClickOutside(
   sidebarRef,
@@ -54,11 +56,13 @@ onClickOutside(
     // Don't close the sidebar if a child floating UI (dropdown, popover) is open
     if (lockedOpenCount.value !== undefined && lockedOpenCount.value > 0) return;
     activeTab.value = null;
+    if (effectEngine) effectEngine.activeModifier.value = null;
   },
   { ignore: ['.viewport'] } // Don't close when clicking or dragging anywhere on the canvas
 );
 
 function toggleTab(tab: ChannelCategoryKey) {
+  if (effectEngine) effectEngine.activeModifier.value = null;
   if (activeTab.value === tab) {
     activeTab.value = null;
   } else {
@@ -71,6 +75,8 @@ function toggleTab(tab: ChannelCategoryKey) {
 function stopAllOrSelected() {
   const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
   const snapshots = captureSnapshots(targetFixtures);
+  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  let modifiersChanged = false;
   
   for (const f of targetFixtures) {
     for (const ch of f.channels) {
@@ -80,8 +86,27 @@ function stopAllOrSelected() {
         ch.chaserConfig = undefined;
       }
     }
+
+    if (effectEngine) {
+      for (const effect of effectEngine.effects) {
+        if (effect.targetFixtureIds?.includes(f.id)) {
+           effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
+           modifiersChanged = true;
+        }
+      }
+    }
   }
   
+  if (effectEngine && modifiersChanged && beforeModifiers) {
+      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
+        const eff = effectEngine.effects[i];
+        if (eff && eff.targetFixtureIds?.length === 0) {
+           effectEngine.effects.splice(i, 1);
+        }
+      }
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), 'Stop All Modifiers'));
+  }
+
   commitSnapshots(snapshots, 'Stop All');
 }
 
@@ -89,6 +114,8 @@ function resetActiveTabGroup() {
   if (!activeTab.value) return;
   const fixtures = getSelectedFixtures();
   const snapshots = captureSnapshots(fixtures);
+  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  let modifiersChanged = false;
   
   for (const f of fixtures) {
     for (const ch of f.channels) {
@@ -98,8 +125,27 @@ function resetActiveTabGroup() {
         ch.chaserConfig = undefined;
       }
     }
+
+    if (effectEngine) {
+      for (const effect of effectEngine.effects) {
+         if (effect.targetFixtureIds?.includes(f.id) && effect.targetChannels?.some(t => tabChannelFilter(t))) {
+           effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
+           modifiersChanged = true;
+         }
+      }
+    }
   }
   
+  if (effectEngine && modifiersChanged && beforeModifiers) {
+      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
+        const eff = effectEngine.effects[i];
+        if (eff && eff.targetFixtureIds?.length === 0) {
+           effectEngine.effects.splice(i, 1);
+        }
+      }
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), `Reset ${activeTab.value} Modifiers`));
+  }
+
   commitSnapshots(snapshots, `Reset ${activeTab.value}`);
 }
 
@@ -137,6 +183,7 @@ const availableTabs = computed(() => {
 watch(availableTabs, (tabs) => {
   if (activeTab.value && !tabs[activeTab.value]) {
     activeTab.value = null;
+    if (effectEngine) effectEngine.activeModifier.value = null;
   }
 });
 
@@ -145,7 +192,7 @@ const activeTabFixtureCount = computed(() => {
   return availableTabs.value[activeTab.value] ?? 0;
 });
 
-// Calculate which categories have any modified values (programmed)
+// Calculate which categories have any modified values (programmed) or active modifiers
 const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
   const modified = new Set<ChannelCategoryKey>();
   const fixtures = getSelectedFixtures();
@@ -159,6 +206,19 @@ const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
           if (cat.id === 'intensity' && channel.role === 'DIMMER') modified.add(cat.id);
           else if (cat.id === 'color' && channel.role === 'COLOR') modified.add(cat.id);
           else if (cat.types.includes(channel.type)) modified.add(cat.id);
+        }
+      }
+    }
+
+    if (effectEngine) {
+      for (const effect of effectEngine.effects) {
+        if (effect.targetFixtureIds?.includes(fixture.id)) {
+           for (const t of (effect.targetChannels || [])) {
+              for (const cat of CHANNEL_CATEGORIES) {
+                if (cat.id === 'intensity' && t === 'DIMMER') modified.add(cat.id);
+                else if (cat.types.includes(t)) modified.add(cat.id);
+              }
+           }
         }
       }
     }
@@ -206,24 +266,25 @@ const stopAllTooltip = computed(() => {
           </div>
         </div>
 
-        <!-- Chaser Steps Manager -->
-        <ChaserStepsManager 
-          v-if="activeTab"
-          auto-close
-          ref="stepsManager"
-          :active-tab="activeTab"
-          :fixtures="getSelectedFixtures()" 
-        />
-        
-        <!-- Overlay Content (Faders) -->
-        <ScrollArea v-show="!stepsManager || stepsManager.layerMode === 'steps'" class="flex-1 min-h-0">
-          <FixturePropertiesChannelList
-            class="p-4"
-            :channel-sections="channelSections"
-            :active-step="stepsManager?.activeChaserConfig?.activeEditStep ?? 0"
-            @before-change="handleBeforeChange"
+        <div class="flex-1 min-h-0 flex flex-col">
+          <!-- Category Effects Manager (Steps & Modifiers) -->
+          <CategoryEffectsManager 
+            auto-close
+            ref="effectsManager"
+            :active-tab="activeTab"
+            :fixtures="getSelectedFixtures()" 
           />
-        </ScrollArea>
+          
+          <!-- Overlay Content (Faders) -->
+          <ScrollArea v-show="!effectsManager || effectsManager.layerMode === 'steps'" class="flex-1 min-h-0">
+            <FixturePropertiesChannelList
+              class="p-4"
+              :channel-sections="channelSections"
+              :active-step="effectsManager?.activeChaserConfig?.activeEditStep ?? 0"
+              @before-change="handleBeforeChange"
+            />
+          </ScrollArea>
+        </div>
       </div>
     </div>
 

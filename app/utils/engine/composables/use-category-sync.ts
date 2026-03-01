@@ -1,6 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelType } from '~/utils/engine/types';
 import type { EffectEngine } from '~/utils/engine/engine';
+import { CHANNEL_CATEGORIES } from '~/utils/engine/channel-categories';
 
 interface ChannelFilter {
   (type: ChannelType, role?: string): boolean;
@@ -119,4 +120,14 @@ export function syncCategoryBeforeEdit(fixtures: Fixture[], filter: ChannelFilte
     if (f === source) continue;
     syncCategoryFromSource(f, source, filter, effectEngine, mode);
   }
+}
+
+export function extractTabChannelFilter(props: { activeTab: string }) {
+  return function tabChannelFilter(type: ChannelType, role?: string): boolean {
+    const cat = CHANNEL_CATEGORIES.find((c: any) => c.id === props.activeTab);
+    if (!cat) return false;
+    if (cat.id === 'intensity' && role === 'DIMMER') return true;
+    if (cat.id === 'color' && role === 'COLOR') return true;
+    return cat.types.includes(type);
+  };
 }

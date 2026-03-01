@@ -1,9 +1,11 @@
 import type { Effect, EffectContext } from '~/utils/engine/types';
 import type { Fixture } from './core/fixture';
 import type { Channel } from './core/channel';
-import { reactive } from 'vue';
+import { reactive, ref, type Ref } from 'vue';
+
 export class EffectEngine {
   public effects = reactive<Effect[]>([]);
+  public activeModifier: Ref<Effect | null> = ref(null);
 
   /**
    * Register a new effect with the engine

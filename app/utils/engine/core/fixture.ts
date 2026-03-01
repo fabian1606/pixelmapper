@@ -21,13 +21,6 @@ export class Fixture {
   fixturePosition: FixturePosition;
   fixtureSize: FixtureSize;
 
-  /**
-   * Spatial effect configuration for this fixture.
-   * Defines the gradient-style vector (origin, direction, magnitude)
-   * that controls how the effect propagates across the stage.
-   */
-  spatialConfig: SpatialVector;
-
   beams: Beam[];
 
   /**
@@ -42,12 +35,6 @@ export class Fixture {
     this.channels = channels;
     this.fixturePosition = { x: 0, y: 0 };
     this.fixtureSize = { x: 1, y: 1 };
-    this.spatialConfig = {
-      originX: 0.5,
-      originY: 0.5,
-      angle: 0,
-      magnitude: 0.2,
-    };
     this.beams = [new Beam('beam-0', 0, 0)];
   }
 
@@ -102,10 +89,10 @@ export class Fixture {
    */
   static createRGBFixture(id: number | string): Fixture {
     const fixture = new Fixture(id, [
-      { type: 'RED', value: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#FF0000' },
-      { type: 'GREEN', value: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#00FF00' },
-      { type: 'BLUE', value: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#0000FF' },
-      { type: 'DIMMER', value: 255, stepValues: [255], currentBaseValue: 255, role: 'DIMMER', colorValue: '#FFFFFF' },
+      { type: 'RED', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#FF0000' },
+      { type: 'GREEN', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#00FF00' },
+      { type: 'BLUE', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#0000FF' },
+      { type: 'DIMMER', value: 255, defaultValue: 255, stepValues: [255], currentBaseValue: 255, role: 'DIMMER', colorValue: '#FFFFFF' },
     ]);
     fixture.oflKey = 'generic/drgb-fader';
     return fixture;

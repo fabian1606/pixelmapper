@@ -3,8 +3,12 @@ import type { Effect, EffectContext, ChannelType, EffectDirection } from "../typ
 export abstract class BaseOscillatorEffect implements Effect {
   public targetChannels: ChannelType[] = [];
   public targetFixtureIds?: (string | number)[];
-  public direction: EffectDirection = 'FORWARD';
+  public direction: EffectDirection = 'LINEAR';
+  public originX: number = 0.5;
+  public originY: number = 0.5;
+  public angle: number = 0;
   public strength: number = 100;
+  public reverse: boolean = false;
 
   /**
    * Speed of the oscillator animation.
@@ -23,56 +27,49 @@ export abstract class BaseOscillatorEffect implements Effect {
   }
 
   protected getDirectionalOffset(context: EffectContext): number {
-    const { index, fixtureCount, x, y } = context;
+    const { x, y } = context;
+
+    // All coordinates are normalized [0-1] world space
+    const dx = x - (this.originX ?? 0.5);
+    const dy = y - (this.originY ?? 0.5);
+    const angle = this.angle ?? 0;
 
     switch (this.direction) {
-      case 'FORWARD':
-        return index;
-
-      case 'BACKWARD':
-        return (fixtureCount - 1) - index;
-
-      case 'CENTER_OUT': {
-        const center = (fixtureCount - 1) / 2;
-        return Math.abs(index - center);
+      case 'LINEAR': {
+        // Signed projection along the direction vector (origin → endpoint)
+        return dx * Math.cos(angle) + dy * Math.sin(angle);
       }
-
-      case 'OUTSIDE_IN': {
-        const center = (fixtureCount - 1) / 2;
-        const maxDist = Math.max(center, fixtureCount - 1 - center);
-        return maxDist - Math.abs(index - center);
+      case 'RADIAL': {
+        // Radial distance from origin
+        return Math.sqrt(dx * dx + dy * dy);
       }
-
-      // Spatial: uses world-space coordinates from the Fixture Editor
-      case 'SPATIAL_X':
-        // Phase is driven by the X position (0.0 – 1.0 range, scaled for readability)
-        return x * fixtureCount;
-
-      case 'SPATIAL_Y':
-        return y * fixtureCount;
-
-      case 'SPATIAL_RADIAL': {
-        // Distance from center (0.5, 0.5 in normalized space)
-        const dx = x - 0.5;
-        const dy = y - 0.5;
-        const maxRadius = Math.SQRT2 / 2; // max distance from center to corner in normalized space
-        return (Math.sqrt(dx * dx + dy * dy) / maxRadius) * fixtureCount;
+      case 'SYMMETRICAL': {
+        // Mirrored projection
+        return Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));
       }
-
       default:
-        return index;
+        return dx * Math.cos(angle) + dy * Math.sin(angle);
     }
   }
 
   render(context: EffectContext): number {
-    // Determine mathematical index offset based on direction selection
-    const indexOffset = this.getDirectionalOffset(context);
+    if (this.fanning === 0 || this.direction === 'NONE') {
+      return this.getShape(this.timePhase); // All fixtures perfectly synchronized
+    }
 
-    // Scale offset phase by fanning control
-    const phaseOffset = indexOffset * this.fanning;
+    // Normalized distance of this fixture along the effect direction
+    const dist = this.getDirectionalOffset(context);
 
-    // Retrieve generic concrete shape using the accumulated and directional phase
-    return this.getShape(this.timePhase + phaseOffset);
+    // fanning = one full wavelength in normalized world coords.
+    // phase advances by 2π across one wavelength.
+    const fanning = Math.max(0.0001, this.fanning);
+    let phaseOffset = (dist / fanning) * Math.PI * 2;
+
+    // By default, subtract phaseOffset so waves propagate AWAY from the origin.
+    // If reversed, add phaseOffset so waves propagate TOWARDS the origin.
+    if (this.reverse) phaseOffset = -phaseOffset;
+
+    return this.getShape(this.timePhase - phaseOffset);
   }
 
   /**

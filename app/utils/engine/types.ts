@@ -26,7 +26,7 @@ export interface ChannelChaserConfig {
   fadeDurationMs: number;
 }
 
-export type EffectDirection = 'FORWARD' | 'BACKWARD' | 'CENTER_OUT' | 'OUTSIDE_IN' | 'SPATIAL_X' | 'SPATIAL_Y' | 'SPATIAL_RADIAL';
+export type EffectDirection = 'NONE' | 'LINEAR' | 'RADIAL' | 'SYMMETRICAL';
 
 /**
  * Defines the direction and spread of a spatial effect in the Fixture Editor.
@@ -87,9 +87,29 @@ export interface Effect {
   direction?: EffectDirection;
 
   /**
+   * The X origin for spatial effects (normalized 0-1).
+   */
+  originX?: number;
+
+  /**
+   * The Y origin for spatial effects (normalized 0-1).
+   */
+  originY?: number;
+
+  /**
+   * The angle for spatial effects in radians.
+   */
+  angle?: number;
+
+  /**
    * The strength (amplitude) of the effect to apply around the base value (usually 0 to 255).
    */
   strength: number;
+
+  /**
+   * Reverses the propagation direction of the effect.
+   */
+  reverse?: boolean;
 
   /**
    * Defines how much the phase is offset per fixture. If 0, all fixtures run in sync.

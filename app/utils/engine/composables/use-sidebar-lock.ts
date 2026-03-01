@@ -16,14 +16,23 @@ interface SidebarLock {
  */
 export function provideSidebarLock(): SidebarLock {
   const openCount = ref(0); // initialized to 0, type is Ref<number>
+  let lockTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const api: SidebarLock = {
     openCount,
     lock() {
+      if (lockTimeout) {
+        clearTimeout(lockTimeout);
+        lockTimeout = null;
+      }
       openCount.value++;
     },
     unlock() {
-      openCount.value = Math.max(0, openCount.value - 1);
+      // Delay unlock to allow outside click events to resolve first
+      lockTimeout = setTimeout(() => {
+        openCount.value = Math.max(0, openCount.value - 1);
+        lockTimeout = null;
+      }, 150);
     },
   };
 

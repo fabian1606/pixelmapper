@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ inheritAttrs: false });
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SpatialVector } from '~/utils/engine/types';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
@@ -11,6 +11,10 @@ import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
 import { useHistory } from './composables/use-history';
 import { MoveFixtureCommand } from './commands/move-fixture-command';
+import { inject } from 'vue';
+import type { EffectEngine } from '~/utils/engine/engine';
+import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
+import type { Effect } from '~/utils/engine/types';
 
 interface Props {
   fixtures: Fixture[];
@@ -20,7 +24,6 @@ interface Props {
 }
 
 interface Emits {
-  (e: 'spatialChange', fixture: Fixture, vector: SpatialVector): void;
   (e: 'deleteFixture', fixture: Fixture): void;
   (e: 'delete-selected'): void;
   (e: 'group'): void;
@@ -109,6 +112,13 @@ const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove,
     selectedIdsModel
   );
 
+// Clear the active modifier (and spatial handle) if the user deselects everything
+watch(selectedIdsModel, (newVal) => {
+  if (effectEngine && newVal.size === 0) {
+    effectEngine.activeModifier.value = null;
+  }
+});
+
 // ─── Refs ─────────────────────────────────────────────────────────────────────
 const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
 
@@ -140,14 +150,28 @@ function isFixtureSelected(f: Fixture): boolean {
   return false;
 }
 
-// ─── Single selected fixture (gradient handle is only rendered for exactly 1) ──
-const selectedFixture = computed<Fixture | null>(() => {
-  if (selectedIds.value.size !== 1) return null;
-  const id = [...selectedIds.value][0];
-  return props.fixtures.find(f => f.id === id) ?? null;
-});
+const effectEngine = inject<EffectEngine>('effectEngine');
 
+// Computed so Vue's template reactivity correctly tracks changes to activeModifier.value
+const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
 
+let modifierDragBeforeEffects: Effect[] | null = null;
+
+function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
+  if (!effectEngine) return;
+  if (!modifierDragBeforeEffects) {
+    modifierDragBeforeEffects = cloneEffectsList(effectEngine.effects);
+  }
+  Object.assign(modifier, changes);
+}
+
+function handleModifierDragEnd(modifier: Effect) {
+  if (modifierDragBeforeEffects && effectEngine) {
+    const afterEffects = cloneEffectsList(effectEngine.effects);
+    history.execute(new SetModifiersCommand(effectEngine, modifierDragBeforeEffects, afterEffects, 'Update Spatial Handle'));
+    modifierDragBeforeEffects = null;
+  }
+}
 
 // ─── Viewport event delegation ─────────────────────────────────────────────────
 function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
@@ -182,15 +206,17 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
     />
 
     <FixtureEditorSpatialControls
+      v-if="activeModifier && activeModifier.fanning !== 0"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"
       :camera="camera"
-      :selected-fixture="selectedFixture"
+      :active-modifier="activeModifier"
       :world-width="WORLD_WIDTH"
       :world-height="WORLD_HEIGHT"
       :world-to-viewport="worldToViewport"
-      @spatialChange="(f, v) => emit('spatialChange', f, v)"
+      @modifierChange="handleModifierChange"
+      @modifierDragEnd="handleModifierDragEnd"
       @redraw="() => fixtureCanvas?.draw()"
     />
 
