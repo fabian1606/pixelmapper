@@ -157,6 +157,8 @@ const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null
 
 let modifierDragBeforeEffects: Effect[] | null = null;
 
+const isSpatialDragging = ref(false);
+
 function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
   if (!effectEngine) return;
   if (!modifierDragBeforeEffects) {
@@ -165,7 +167,12 @@ function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
   Object.assign(modifier, changes);
 }
 
+function handleSpatialDragStart(type: 'origin' | 'endpoint') {
+  isSpatialDragging.value = true;
+}
+
 function handleModifierDragEnd(modifier: Effect) {
+  isSpatialDragging.value = false;
   if (modifierDragBeforeEffects && effectEngine) {
     const afterEffects = cloneEffectsList(effectEngine.effects);
     history.execute(new SetModifiersCommand(effectEngine, modifierDragBeforeEffects, afterEffects, 'Update Spatial Handle'));
@@ -205,6 +212,29 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       :viewport-height="editorHeight"
     />
 
+    <!-- Effect Spatial Preview (Rendered behind fixtures, above canvas grid) -->
+    <div
+      v-if="isSpatialDragging && activeModifier && activeModifier.getPreviewCSS"
+      class="absolute left-0 top-0 pointer-events-none transition-opacity duration-200"
+      :style="{
+        width: `${WORLD_WIDTH}px`,
+        height: `${WORLD_HEIGHT}px`,
+        transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`,
+        transformOrigin: '0 0',
+      }"
+    >
+      <div 
+        class="pointer-events-none" 
+        :style="activeModifier.getPreviewCSS({ 
+          worldWidth: WORLD_WIDTH, 
+          worldHeight: WORLD_HEIGHT, 
+          camera, 
+          viewportWidth: editorWidth, 
+          viewportHeight: editorHeight 
+        })" 
+      />
+    </div>
+
     <FixtureEditorSpatialControls
       v-if="activeModifier && activeModifier.fanning !== 0"
       :viewport-el="viewportEl"
@@ -215,6 +245,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       :world-width="WORLD_WIDTH"
       :world-height="WORLD_HEIGHT"
       :world-to-viewport="worldToViewport"
+      @dragStart="handleSpatialDragStart"
       @modifierChange="handleModifierChange"
       @modifierDragEnd="handleModifierDragEnd"
       @redraw="() => fixtureCanvas?.draw()"

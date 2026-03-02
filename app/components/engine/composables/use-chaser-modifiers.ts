@@ -62,8 +62,15 @@ export function useChaserModifiers(
     effect.speed = 0.005;
     effect.fanning = 0.1;
     effect.direction = 'LINEAR';
-    effect.originX = 0.5;
-    effect.originY = 0.5;
+    const avgX = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
+      : 0.5;
+    const avgY = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
+      : 0.5;
+
+    effect.originX = avgX;
+    effect.originY = avgY;
     effect.angle = 0;
     effect.reverse = false;
     effectEngine.addEffect(effect);

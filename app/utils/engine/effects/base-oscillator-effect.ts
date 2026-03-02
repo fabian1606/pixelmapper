@@ -72,6 +72,75 @@ export abstract class BaseOscillatorEffect implements Effect {
     return this.getShape(this.timePhase - phaseOffset);
   }
 
+  getPreviewCSS(params: {
+    worldWidth: number;
+    worldHeight: number;
+    camera: { x: number; y: number; scale: number };
+    viewportWidth: number;
+    viewportHeight: number;
+  }): Record<string, string> {
+    if (this.fanning === 0 || this.direction === 'NONE') return {};
+
+    const { worldWidth, worldHeight, camera, viewportWidth, viewportHeight } = params;
+    const angleDeg = ((this.angle ?? 0) * 180) / Math.PI;
+    const fanningPx = this.fanning * worldWidth;
+    const ox = (this.originX ?? 0.5) * worldWidth;
+    const oy = (this.originY ?? 0.5) * worldHeight;
+
+    // Very subtle dark gray pattern overlay (80% of current)
+    const cCrest = 'rgba(255, 255, 255, 0.096)';
+    const cTrough = 'rgba(0, 0, 0, 0.48)';
+
+    // Visible screen boundaries in world space coordinates
+    const vLeft = -camera.x / camera.scale;
+    const vTop = -camera.y / camera.scale;
+    const vRight = vLeft + viewportWidth / camera.scale;
+    const vBottom = vTop + viewportHeight / camera.scale;
+
+    if (this.direction === 'LINEAR' || this.direction === 'SYMMETRICAL') {
+      // Find the furthest visible corner from the origin to ensure the rotated div covers the screen
+      const dists = [
+        Math.hypot(vLeft - ox, vTop - oy),
+        Math.hypot(vRight - ox, vTop - oy),
+        Math.hypot(vLeft - ox, vBottom - oy),
+        Math.hypot(vRight - ox, vBottom - oy)
+      ];
+      const maxDist = Math.max(...dists);
+      // Double the maximum distance to use as the diameter for our square container
+      const minSize = maxDist * 2;
+
+      // Find the next even integer multiple of fanningPx to guarantee the exact center matches 0px phase
+      const N = Math.ceil(minSize / (fanningPx * 2));
+      const pxC = N * 2 * fanningPx;
+
+      return {
+        position: 'absolute',
+        width: `${pxC}px`,
+        height: `${pxC}px`,
+        left: `${ox - pxC / 2}px`,
+        top: `${oy - pxC / 2}px`,
+        transform: `rotate(${angleDeg}deg)`,
+        transformOrigin: '50% 50%',
+        backgroundImage: `repeating-linear-gradient(${this.reverse ? -90 : 90}deg, ${cTrough} 0px, ${cCrest} ${fanningPx / 2}px, ${cTrough} ${fanningPx}px)`
+      };
+    } else if (this.direction === 'RADIAL') {
+      // For radial, we just size the div EXACTLY to the visible viewport bounds in world space
+      // and offset the `circle at` mathematically from the new top left. Zero clipping, 100% optimized.
+      const vWidth = viewportWidth / camera.scale;
+      const vHeight = viewportHeight / camera.scale;
+
+      return {
+        position: 'absolute',
+        width: `${vWidth}px`,
+        height: `${vHeight}px`,
+        left: `${vLeft}px`,
+        top: `${vTop}px`,
+        backgroundImage: `repeating-radial-gradient(circle at ${ox - vLeft}px ${oy - vTop}px, ${cTrough} 0px, ${cCrest} ${fanningPx / 2}px, ${cTrough} ${fanningPx}px)`
+      };
+    }
+    return {};
+  }
+
   /**
    * Subclasses must implement this to return a value from -1 to 1 based on phase.
    */

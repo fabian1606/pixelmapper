@@ -18,12 +18,20 @@ export type ChannelType =
   // Other
   | 'FOG' | 'MAINTENANCE' | 'GENERIC' | 'NO_FUNCTION' | 'CUSTOM';
 
+export type SpeedMode = 'time' | 'beat' | 'infinite';
+
+export interface SpeedConfig {
+  mode: SpeedMode;
+  timeMs: number;
+  beatValue: number; // e.g., 0.25 for 1/4 note
+}
+
 export interface ChannelChaserConfig {
   stepsCount: number;
   activeEditStep: number;
   isPlaying: boolean;
-  stepDurationMs: number;
-  fadeDurationMs: number;
+  stepDuration: SpeedConfig;
+  fadeDuration: SpeedConfig;
 }
 
 export type EffectDirection = 'NONE' | 'LINEAR' | 'RADIAL' | 'SYMMETRICAL';
@@ -117,6 +125,11 @@ export interface Effect {
   fanning: number;
 
   /**
+   * Speed configuration for the effect.
+   */
+  speed: SpeedConfig;
+
+  /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).
    */
   update?(deltaTime: number): void;
@@ -127,4 +140,16 @@ export interface Effect {
    * @param context The current context the effect is being rendered for.
    */
   render(context: EffectContext): number;
+
+  /**
+   * Optional method to render a background CSS preview of the effect's spatial distribution.
+   * Expected to return a style object mapping (e.g., { background: '...' }).
+   */
+  getPreviewCSS?(params: {
+    worldWidth: number;
+    worldHeight: number;
+    camera: { x: number; y: number; scale: number };
+    viewportWidth: number;
+    viewportHeight: number;
+  }): Record<string, string>;
 }

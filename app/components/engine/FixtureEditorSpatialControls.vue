@@ -17,6 +17,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'modifierChange', modifier: Effect, changes: Partial<Effect>): void;
   (e: 'modifierDragEnd', modifier: Effect): void;
+  (e: 'dragStart', type: 'origin' | 'endpoint'): void;
   (e: 'redraw'): void;
 }>();
 
@@ -44,12 +45,14 @@ let spatialDragType: HandleDragType = null;
 
 function handleOriginDragStart(e: MouseEvent) {
   spatialDragType = 'origin';
+  emit('dragStart', 'origin');
   window.addEventListener('mousemove', handleWindowMouseMove);
   window.addEventListener('mouseup',   handleWindowMouseUp);
 }
 
 function handleEndpointDragStart(e: MouseEvent) {
   spatialDragType = 'endpoint';
+  emit('dragStart', 'endpoint');
   window.addEventListener('mousemove', handleWindowMouseMove);
   window.addEventListener('mouseup',   handleWindowMouseUp);
 }
