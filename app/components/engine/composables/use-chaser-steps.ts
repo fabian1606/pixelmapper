@@ -1,7 +1,7 @@
 import { computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
-import type { ChannelChaserConfig, ChannelType } from '~/utils/engine/types';
+import type { ChannelChaserConfig, ChannelType, SpeedConfig } from '~/utils/engine/types';
 import { extractTabChannelFilter, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import type { useChaserHistory } from './use-chaser-history';
 
@@ -18,8 +18,8 @@ export function useChaserSteps(
     let maxSteps = 1;
     let maxActiveStep = 0;
     let isPlaying = true;
-    let stepDurationMs = 1000;
-    let fadeDurationMs = 0;
+    let stepDuration: SpeedConfig = { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 };
+    let fadeDuration: SpeedConfig = { mode: 'time', timeMs: 0, beatValue: 1, beatOffset: 0 };
     let found = false;
 
     for (const f of props.fixtures) {
@@ -27,8 +27,8 @@ export function useChaserSteps(
         if (tabChannelFilter(c.type, c.role) && c.chaserConfig) {
           if (!found) {
             isPlaying = c.chaserConfig.isPlaying;
-            stepDurationMs = c.chaserConfig.stepDurationMs;
-            fadeDurationMs = c.chaserConfig.fadeDurationMs;
+            stepDuration = c.chaserConfig.stepDuration;
+            fadeDuration = c.chaserConfig.fadeDuration;
             found = true;
           }
           if (c.chaserConfig.stepsCount > maxSteps) maxSteps = c.chaserConfig.stepsCount;
@@ -41,8 +41,8 @@ export function useChaserSteps(
       stepsCount: maxSteps,
       activeEditStep: Math.min(maxActiveStep, maxSteps - 1),
       isPlaying,
-      stepDurationMs,
-      fadeDurationMs
+      stepDuration,
+      fadeDuration
     };
   });
 
@@ -125,7 +125,7 @@ export function useChaserSteps(
     commitChannels(snaps, 'Delete Step');
   }
 
-  function updateTiming(key: 'stepDurationMs' | 'fadeDurationMs', value: number) {
+  function updateTiming(key: 'stepDuration' | 'fadeDuration', value: SpeedConfig) {
     const snaps = captureChannels();
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'steps');
     const target = activeChaserConfig.value;

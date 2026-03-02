@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from '@/components/ui/select';
 import type { Effect, ChannelType } from '~/utils/engine/types';
 import ChaserFanningControl from './ChaserFanningControl.vue';
+import SpeedControl from './SpeedControl.vue';
 
 defineProps<{
   activeModifiers: Effect[];
@@ -100,16 +101,13 @@ const emit = defineEmits<{
               />
             </div>
             <!-- Speed -->
-            <div class="space-y-1.5">
-              <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Speed</Label>
-              <Input 
-                type="number" 
-                step="0.001" 
+            <div class="space-y-1.5 flex flex-col justify-start">
+              <SpeedControl 
+                label="Speed"
+                :disable-infinite="true"
                 :model-value="(modifier as any).speed" 
-                @update:model-value="v => emit('update-modifier', modifier, 'speed', Number(v))" 
-                class="h-8 text-xs font-mono" 
-                @blur="emit('handle-modifier-drag-end', 'Update Modifier Speed')" 
-                @keydown.enter="emit('handle-modifier-drag-end', 'Update Modifier Speed')"
+                @update:model-value="emit('update-modifier', modifier, 'speed', $event); emit('handle-modifier-drag-end', 'Update Modifier Speed')" 
+                @dropdown-open-change="v => emit('dropdown-open-change', v)"
               />
             </div>
             <!-- Direction & Reverse Control Extracted -->

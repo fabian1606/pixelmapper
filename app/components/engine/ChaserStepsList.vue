@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { Trash2 } from 'lucide-vue-next';
-import type { ChannelChaserConfig } from '~/utils/engine/types';
+import SpeedControl from './SpeedControl.vue';
+import type { ChannelChaserConfig, SpeedConfig } from '~/utils/engine/types';
 
 defineProps<{
   activeChaserConfig: ChannelChaserConfig;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update-timing', key: 'stepDurationMs' | 'fadeDurationMs', value: number): void;
+  (e: 'update-timing', key: 'stepDuration' | 'fadeDuration', value: SpeedConfig): void;
   (e: 'set-active-step', index: number): void;
   (e: 'add-step'): void;
   (e: 'delete-active-step'): void;
+  (e: 'dropdown-open-change', open: boolean): void;
 }>();
 </script>
 
@@ -18,25 +20,20 @@ const emit = defineEmits<{
   <div class="space-y-4">
     
     <!-- Timing rows -->
-    <div v-if="activeChaserConfig?.stepsCount > 1" class="space-y-3">
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Speed (ms)</span>
-        <input 
-          type="number" 
-          :value="activeChaserConfig.stepDurationMs" 
-          @input="e => emit('update-timing', 'stepDurationMs', Number((e.target as HTMLInputElement).value))" 
-          class="w-24 h-7 text-xs bg-background border border-border rounded px-2 focus:ring-1 focus:ring-primary outline-none transition-all text-right" 
-        />
-      </div>
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Fade (ms)</span>
-        <input 
-          type="number" 
-          :value="activeChaserConfig.fadeDurationMs" 
-          @input="e => emit('update-timing', 'fadeDurationMs', Number((e.target as HTMLInputElement).value))" 
-          class="w-24 h-7 text-xs bg-background border border-border rounded px-2 focus:ring-1 focus:ring-primary outline-none transition-all text-right" 
-        />
-      </div>
+    <div v-if="activeChaserConfig?.stepsCount > 1" class="flex items-start gap-4">
+      <SpeedControl 
+        label="Step Length"
+        :model-value="activeChaserConfig.stepDuration"
+        @update:model-value="v => emit('update-timing', 'stepDuration', v)"
+        @dropdown-open-change="v => emit('dropdown-open-change', v)"
+      />
+      <SpeedControl 
+        label="Fade Length"
+        :model-value="activeChaserConfig.fadeDuration"
+        :disable-offset="true"
+        @update:model-value="v => emit('update-timing', 'fadeDuration', v)"
+        @dropdown-open-change="v => emit('dropdown-open-change', v)"
+      />
     </div>
 
     <!-- Steps Row -->

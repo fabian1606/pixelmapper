@@ -30,7 +30,8 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
     clone.originY = effect.originY;
     clone.angle = effect.angle;
     if ('speed' in effect) {
-      (clone as any).speed = (effect as any).speed;
+      const spd = (effect as any).speed;
+      (clone as any).speed = typeof spd === 'object' ? { ...spd } : spd;
     }
 
     // Internal state like timePhase should theoretically be cloned too

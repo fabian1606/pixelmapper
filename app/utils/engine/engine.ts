@@ -1,4 +1,4 @@
-import type { Effect, EffectContext } from '~/utils/engine/types';
+import type { Effect, EffectContext, SpeedConfig } from '~/utils/engine/types';
 import type { Fixture } from './core/fixture';
 import type { Channel } from './core/channel';
 import { reactive, ref, type Ref } from 'vue';
@@ -6,6 +6,23 @@ import { reactive, ref, type Ref } from 'vue';
 export class EffectEngine {
   public effects = reactive<Effect[]>([]);
   public activeModifier: Ref<Effect | null> = ref(null);
+
+  /**
+   * Global BPM for the engine, used to calculate beat-based speeds.
+   */
+  public globalBpm = ref<number>(120);
+
+  /**
+   * Resolves a SpeedConfig down into exact milliseconds for playback and math.
+   */
+  public resolveSpeedToMs(speed: SpeedConfig): number {
+    if (speed.mode === 'infinite') return Infinity;
+    if (speed.mode === 'time') return speed.timeMs;
+    // Beat mode: 1 beat = 60000ms / BPM.
+    // beatValue of 1 = 1 beat (e.g., 1/4 note in 4/4 time).
+    // beatValue of 4 = 4 beats (e.g., 1 full bar).
+    return (60000 / this.globalBpm.value) * speed.beatValue;
+  }
 
   /**
    * Register a new effect with the engine
@@ -36,7 +53,7 @@ export class EffectEngine {
     // Update all effects once per frame
     for (const effect of this.effects) {
       if (effect.update) {
-        effect.update(deltaTimeMs);
+        effect.update(deltaTimeMs, this);
       }
     }
 
@@ -51,24 +68,34 @@ export class EffectEngine {
           channel.currentBaseValue = channel.stepValues[activeStep] ?? 0;
         } else {
           // Chaser playback mode
-          const cycleTime = chaserState.stepDurationMs * chaserState.stepsCount;
-          const timeInCycle = timeMs % cycleTime;
-          const currentIndex = Math.floor(timeInCycle / chaserState.stepDurationMs);
-          const nextIndex = (currentIndex + 1) % chaserState.stepsCount;
-          const timeInStep = timeInCycle % chaserState.stepDurationMs;
+          const stepMs = this.resolveSpeedToMs(chaserState.stepDuration);
+          const fadeMs = this.resolveSpeedToMs(chaserState.fadeDuration);
 
-          let factor = 0;
-          if (timeInStep < chaserState.fadeDurationMs && chaserState.fadeDurationMs > 0) {
-            factor = timeInStep / chaserState.fadeDurationMs;
-          } else if (chaserState.fadeDurationMs === 0) {
-            factor = 1; // Snaps immediately if fade is 0
+          if (stepMs === Infinity) {
+            channel.currentBaseValue = channel.stepValues[chaserState.activeEditStep] ?? 0;
           } else {
-            factor = 1; // Holding phase
-          }
+            const beatDurMs = 60000 / this.globalBpm.value;
+            const offsetMs = chaserState.stepDuration.mode === 'beat' ? (chaserState.stepDuration.beatOffset || 0) * beatDurMs : 0;
+            const cycleTime = stepMs * chaserState.stepsCount;
+            const shiftedTime = Math.max(0, timeMs + offsetMs); // apply offset shift to time
+            const timeInCycle = shiftedTime % cycleTime;
+            const currentIndex = Math.floor(timeInCycle / stepMs);
+            const nextIndex = (currentIndex + 1) % chaserState.stepsCount;
+            const timeInStep = timeInCycle % stepMs;
 
-          const v1 = channel.stepValues[currentIndex] ?? 0;
-          const v2 = channel.stepValues[nextIndex] ?? 0;
-          channel.currentBaseValue = v1 + (v2 - v1) * factor;
+            let factor = 0;
+            if (timeInStep < fadeMs && fadeMs > 0) {
+              factor = timeInStep / fadeMs;
+            } else if (fadeMs === 0) {
+              factor = 1; // Snaps immediately if fade is 0
+            } else {
+              factor = 1; // Holding phase
+            }
+
+            const v1 = channel.stepValues[currentIndex] ?? 0;
+            const v2 = channel.stepValues[nextIndex] ?? 0;
+            channel.currentBaseValue = v1 + (v2 - v1) * factor;
+          }
         }
         // Initialize channel value via additive blending
         channel.value = channel.currentBaseValue;

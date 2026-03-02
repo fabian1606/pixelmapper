@@ -1,4 +1,5 @@
-import type { Effect, EffectContext, ChannelType, EffectDirection } from "../types";
+import type { Effect, EffectContext, ChannelType, EffectDirection, SpeedConfig } from "../types";
+import type { EffectEngine } from "../engine";
 
 export abstract class BaseOscillatorEffect implements Effect {
   public targetChannels: ChannelType[] = [];
@@ -13,7 +14,7 @@ export abstract class BaseOscillatorEffect implements Effect {
   /**
    * Speed of the oscillator animation.
    */
-  public speed: number = 0.002;
+  public speed: SpeedConfig = { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 };
 
   /**
    * Frequency (phase offset scaling) across fixtures.
@@ -21,9 +22,27 @@ export abstract class BaseOscillatorEffect implements Effect {
   public fanning: number = 0.5;
 
   protected timePhase: number = 0;
+  protected currentOffsetPhase: number = 0;
 
-  update(deltaTime: number): void {
-    this.timePhase += deltaTime * this.speed;
+  update(deltaTime: number, engine: EffectEngine): void {
+    const durationMs = engine.resolveSpeedToMs(this.speed);
+
+    if (durationMs === Infinity || durationMs === 0) {
+      // timePhase remains frozen
+      return;
+    }
+
+    if (this.speed.mode === 'beat' && this.speed.beatOffset) {
+      const beatDurMs = 60000 / engine.globalBpm.value;
+      const offsetMs = this.speed.beatOffset * beatDurMs;
+      this.currentOffsetPhase = (offsetMs / durationMs) * Math.PI * 2;
+    } else {
+      this.currentOffsetPhase = 0;
+    }
+
+    // Phase scales from 0 to 2π over the full durationMs cycle
+    const phaseAdvance = (deltaTime / durationMs) * Math.PI * 2;
+    this.timePhase += phaseAdvance;
   }
 
   protected getDirectionalOffset(context: EffectContext): number {
@@ -69,7 +88,7 @@ export abstract class BaseOscillatorEffect implements Effect {
     // If reversed, add phaseOffset so waves propagate TOWARDS the origin.
     if (this.reverse) phaseOffset = -phaseOffset;
 
-    return this.getShape(this.timePhase - phaseOffset);
+    return this.getShape(this.timePhase - phaseOffset + this.currentOffsetPhase);
   }
 
   getPreviewCSS(params: {

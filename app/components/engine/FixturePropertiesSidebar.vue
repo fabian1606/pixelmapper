@@ -238,7 +238,7 @@ const stopAllTooltip = computed(() => {
 </script>
 
 <template>
-  <div ref="sidebarRef" class="absolute right-0 top-0 h-full flex pointer-events-none">
+  <div ref="sidebarRef" class="absolute right-0 top-0 h-full flex pointer-events-none z-50">
     
     <!-- Floating Overlay Panel -->
     <div 

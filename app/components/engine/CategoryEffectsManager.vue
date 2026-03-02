@@ -117,6 +117,7 @@ defineExpose({
           @set-active-step="setActiveStep"
           @add-step="addStep"
           @delete-active-step="deleteActiveStep"
+          @dropdown-open-change="handleDropdownOpenChange"
         />
       </div>
 

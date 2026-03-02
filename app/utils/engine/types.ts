@@ -24,6 +24,7 @@ export interface SpeedConfig {
   mode: SpeedMode;
   timeMs: number;
   beatValue: number; // e.g., 0.25 for 1/4 note
+  beatOffset: number; // Phase/time offset in beats (e.g. 0.25 for 1/4 beat shift)
 }
 
 export interface ChannelChaserConfig {
@@ -132,7 +133,7 @@ export interface Effect {
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).
    */
-  update?(deltaTime: number): void;
+  update?(deltaTime: number, engine: any): void;
 
   /**
    * Renders the raw effect wave for a given context.

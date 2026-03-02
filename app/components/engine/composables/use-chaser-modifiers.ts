@@ -59,7 +59,7 @@ export function useChaserModifiers(
     effect.targetChannels = [...availableChannelTypes.value]; // default to all relevant channels
     effect.targetFixtureIds = props.fixtures.map(f => f.id);
     effect.strength = 100;
-    effect.speed = 0.005;
+    effect.speed = { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 };
     effect.fanning = 0.1;
     effect.direction = 'LINEAR';
     const avgX = props.fixtures.length > 0
@@ -89,7 +89,7 @@ export function useChaserModifiers(
       clone.reverse = effect.reverse;
       clone.strength = effect.strength;
       clone.fanning = effect.fanning;
-      clone.speed = effect.speed;
+      clone.speed = { ...effect.speed };
       (clone as any).timePhase = (effect as any).timePhase;
       return clone;
     }
