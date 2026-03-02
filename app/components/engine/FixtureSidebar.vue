@@ -2,8 +2,10 @@
 import { ref } from 'vue';
 import type { SceneNode, FixtureGroup } from '~/utils/engine/core/group';
 import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Effect } from '~/utils/engine/types';
 import FixtureSidebarNode from './FixtureSidebarNode.vue';
-import { Lightbulb, LayoutGrid, Plus, SquareFunction } from 'lucide-vue-next';
+import PresetsSidebar from './PresetsSidebar.vue';
+import { Lightbulb, Plus, SquareFunction } from 'lucide-vue-next';
 import {
   Sidebar,
   SidebarContent,
@@ -16,6 +18,8 @@ import { Button } from '@/components/ui/button';
 const props = defineProps<{
   nodes: SceneNode[];
   selectedIds: Set<string | number>;
+  fixtures: Fixture[];
+  effects: Effect[];
 }>();
 
 const emit = defineEmits<{
@@ -25,6 +29,8 @@ const emit = defineEmits<{
   (e: 'zoomTo', node: SceneNode): void;
   (e: 'requestAddFixture'): void;
   (e: 'deleteNode', node: SceneNode): void;
+  (e: 'selectFixtures', ids: (string | number)[]): void;
+  (e: 'openPropertiesTab', tab: string): void;
 }>();
 
 const activeTab = ref<'fixtures' | 'presets' | null>('fixtures');
@@ -32,6 +38,14 @@ const activeTab = ref<'fixtures' | 'presets' | null>('fixtures');
 function toggleTab(tab: 'fixtures' | 'presets') {
   activeTab.value = activeTab.value === tab ? null : tab;
 }
+
+const presetsSidebarRef = ref<{ quickSave: () => void } | null>(null);
+
+function quickSave() {
+  presetsSidebarRef.value?.quickSave();
+}
+
+defineExpose({ quickSave });
 </script>
 
 <template>
@@ -44,11 +58,12 @@ function toggleTab(tab: 'fixtures' | 'presets') {
     >
       <SidebarHeader class="h-12 flex flex-row items-center justify-between px-4 border-b border-border bg-sidebar">
         <span class="font-semibold text-xs tracking-wider uppercase text-muted-foreground">
-          {{ activeTab === 'fixtures' ? 'Fixtures' : 'Presets' }}
+          {{ activeTab === 'fixtures' ? 'Fixtures' : 'Changes' }}
         </span>
 
-        <!-- Add Fixture button in header -->
+        <!-- Add Fixture button (only visible on fixtures tab) -->
         <Button
+          v-if="activeTab === 'fixtures'"
           variant="ghost"
           size="icon"
           class="size-7 text-muted-foreground hover:text-foreground"
@@ -82,14 +97,15 @@ function toggleTab(tab: 'fixtures' | 'presets') {
         </SidebarGroup>
 
         <!-- Presets tab -->
-        <SidebarGroup v-else-if="activeTab === 'presets'" class="p-4 flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-          <SquareFunction class="size-10 opacity-20" />
-          <div class="text-center space-y-1">
-            <p class="text-xs font-semibold">Scene Presets</p>
-            <p class="text-[10px] leading-relaxed max-w-[150px]">Presets will allow you to save and recall scene layouts and effect configurations.</p>
-          </div>
-          <Button variant="outline" size="sm" disabled class="mt-2 text-[9px] uppercase tracking-widest">Soon</Button>
-        </SidebarGroup>
+        <div v-else-if="activeTab === 'presets'" class="h-full overflow-hidden">
+          <PresetsSidebar
+            ref="presetsSidebarRef"
+            :fixtures="fixtures"
+            :effects="effects"
+            @select-fixtures="ids => emit('selectFixtures', ids)"
+            @open-properties-tab="tab => emit('openPropertiesTab', tab)"
+          />
+        </div>
       </SidebarContent>
     </Sidebar>
 

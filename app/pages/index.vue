@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watchEffect, shallowRef, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, shallowRef, computed, nextTick } from 'vue';
 import { SineEffect } from '~/utils/engine/effects/sine-effect';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
@@ -145,6 +145,17 @@ const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
 
 function handleZoomTo(node: SceneNode) {
   fixtureEditor.value?.zoomTo(node);
+}
+
+function handleSelectFixtures(ids: (string | number)[]) {
+  selectedIds.value = new Set(ids);
+}
+
+const propertiesSidebarRef = ref<InstanceType<typeof FixturePropertiesSidebar> | null>(null);
+const fixtureSidebarRef = ref<{ quickSave: () => void } | null>(null);
+
+function handleOpenPropertiesTab(tab: string) {
+  nextTick(() => propertiesSidebarRef.value?.openTab(tab));
 }
 
 // Selection / Groups logic
@@ -306,6 +317,8 @@ useShortcuts([
   { key: 'Backspace', label: 'Delete Selected', handler: handleDeleteSelected },
   // Add fixture
   { key: 'a',      shift: true,               label: 'Add Fixture',     handler: () => { addDialogOpen.value = true; } },
+  // Presets
+  { key: 'p',      shift: true,               label: 'Save as Preset',  handler: () => fixtureSidebarRef.value?.quickSave() },
 ]);
 
 onMounted(() =>  { animFrameId = requestAnimationFrame(renderLoop); });
@@ -316,15 +329,20 @@ onUnmounted(() => { cancelAnimationFrame(animFrameId); });
   <SidebarProvider>
     <div class="flex h-screen w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
       <FixtureSidebar
+        ref="fixtureSidebarRef"
         class="shrink-0"
         :nodes="sceneNodes"
         :selected-ids="selectedIds"
+        :fixtures="flatFixtures"
+        :effects="engine.effects"
         @select="handleSelect"
         @group="handleGroup"
         @ungroup="handleUngroup"
         @zoom-to="handleZoomTo"
         @request-add-fixture="addDialogOpen = true"
         @delete-node="handleDeleteNode"
+        @select-fixtures="handleSelectFixtures"
+        @open-properties-tab="handleOpenPropertiesTab"
       />
       <main class="flex-1 relative">
         <ContextMenu>
@@ -357,7 +375,7 @@ onUnmounted(() => { cancelAnimationFrame(animFrameId); });
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        <FixturePropertiesSidebar :selected-ids="selectedIds" :fixtures="flatFixtures" :nodes="sceneNodes" />
+        <FixturePropertiesSidebar ref="propertiesSidebarRef" :selected-ids="selectedIds" :fixtures="flatFixtures" :nodes="sceneNodes" />
       </main>
     </div>
   </SidebarProvider>

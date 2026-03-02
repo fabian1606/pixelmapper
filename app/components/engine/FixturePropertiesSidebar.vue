@@ -234,6 +234,12 @@ const stopAllTooltip = computed(() => {
   return 'Stop all functions';
 });
 
+// Expose openTab so parent (index.vue) can open a specific tab programmatically
+function openTab(tabKey: string) {
+  activeTab.value = tabKey as typeof activeTab.value;
+}
+
+defineExpose({ openTab });
 
 </script>
 
