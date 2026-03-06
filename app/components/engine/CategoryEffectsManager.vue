@@ -79,9 +79,19 @@ watch(activeModifiers, (modifiers) => {
   }
 });
 
+function openModifier() {
+  layerMode.value = 'modifiers';
+}
+
+function openSteps() {
+  layerMode.value = 'steps';
+}
+
 defineExpose({
   activeChaserConfig,
   layerMode,
+  openModifier,
+  openSteps,
 });
 </script>
 

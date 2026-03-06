@@ -1,0 +1,158 @@
+import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Effect } from '~/utils/engine/types';
+import type { Preset, PresetModifierSnapshot } from '~/utils/engine/preset-types';
+import { SineEffect } from '~/utils/engine/effects/sine-effect';
+import { getCategoryType, getEffectCategoryType } from './preset-helpers';
+
+// ─── Reset ────────────────────────────────────────────────────────────────────
+
+/** Resets all channels on the given fixtures back to their default values. */
+export function resetFixtureChannels(fixtures: Fixture[]): void {
+  for (const fixture of fixtures) {
+    for (const ch of fixture.channels) {
+      ch.stepValues = [ch.defaultValue];
+      ch.currentBaseValue = ch.defaultValue;
+      ch.chaserConfig = undefined;
+    }
+  }
+}
+
+// ─── Effect reconstruction ────────────────────────────────────────────────────
+
+/** Reconstructs a live Effect instance from a saved PresetModifierSnapshot. */
+export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
+  if (snap.effectType === 'SineEffect') {
+    const eff = new SineEffect();
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    eff.strength = snap.strength;
+    eff.fanning = snap.fanning;
+    eff.speed = { ...snap.speed };
+    eff.direction = snap.direction ?? 'LINEAR';
+    eff.reverse = snap.reverse ?? false;
+    eff.originX = snap.originX ?? 0.5;
+    eff.originY = snap.originY ?? 0.5;
+    eff.angle = snap.angle ?? 0;
+    return eff;
+  }
+  // Future effect types can be added here
+  return null;
+}
+
+// ─── Internal apply helpers ───────────────────────────────────────────────────
+
+/** Removes all effects that target any fixture that the preset controls. */
+function clearPresetEffects(preset: Preset, effects: Effect[]): void {
+  const allPresetFixtureIds = new Set(preset.categories.flatMap((c) => c.fixtureIds));
+  for (let i = effects.length - 1; i >= 0; i--) {
+    const eff = effects[i];
+    if (eff?.targetFixtureIds?.some((id) => allPresetFixtureIds.has(id))) {
+      effects.splice(i, 1);
+    }
+  }
+}
+
+/** Applies channel snapshots and reconstructs modifier effects from a preset. */
+function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+  const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
+
+  clearPresetEffects(preset, effects);
+
+  for (const category of preset.categories) {
+    for (const fixtureId of category.fixtureIds) {
+      const fixture = fixtureMap.get(fixtureId);
+      if (!fixture) continue;
+
+      for (const snap of category.channels) {
+        const ch = fixture.channels[snap.channelIndex];
+        if (!ch || ch.type !== snap.channelType) continue; // sanity check
+        ch.stepValues = [...snap.stepValues];
+        ch.currentBaseValue = snap.stepValues[0] ?? ch.defaultValue;
+        ch.chaserConfig = snap.chaserConfig ? { ...snap.chaserConfig } : undefined;
+      }
+    }
+
+    // Restore modifier effects; assign target fixture IDs from the category
+    for (const modSnap of category.modifiers) {
+      const eff = reconstructEffect(modSnap);
+      if (eff) {
+        eff.targetFixtureIds = [...category.fixtureIds];
+        effects.push(eff);
+      }
+    }
+  }
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Applies a preset: clears relevant channels/effects for the preset's
+ * fixture-category pairs, then restores values and modifier effects.
+ */
+export function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+  const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
+
+  // Clear only the category/fixture pairs this preset controls
+  for (const category of preset.categories) {
+    for (const fixtureId of category.fixtureIds) {
+      const fixture = fixtureMap.get(fixtureId);
+      if (!fixture) continue;
+
+      for (const ch of fixture.channels) {
+        if (getCategoryType(ch.type) === category.type) {
+          ch.stepValues = [ch.defaultValue];
+          ch.currentBaseValue = ch.defaultValue;
+          ch.chaserConfig = undefined;
+        }
+      }
+    }
+
+    // Remove effects targeting these fixtures in this category
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const eff = effects[i];
+      if (!eff) continue;
+      if (getEffectCategoryType(eff) === category.type && eff.targetFixtureIds) {
+        eff.targetFixtureIds = eff.targetFixtureIds.filter(
+          (id) => !category.fixtureIds.includes(id as string | number)
+        );
+        if (eff.targetFixtureIds.length === 0) effects.splice(i, 1);
+      }
+    }
+  }
+
+  applyPresetToFixtures(preset, fixtures, effects);
+}
+
+/**
+ * Stops a preset: reverts channels to default and removes modifier effects
+ * that were applied by this preset.
+ */
+export function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+  const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
+
+  for (const category of preset.categories) {
+    for (const fixtureId of category.fixtureIds) {
+      const fixture = fixtureMap.get(fixtureId);
+      if (!fixture) continue;
+
+      for (const snap of category.channels) {
+        const ch = fixture.channels[snap.channelIndex];
+        if (!ch || ch.type !== snap.channelType) continue; // sanity check
+        ch.stepValues = [ch.defaultValue];
+        ch.currentBaseValue = ch.defaultValue;
+        ch.chaserConfig = undefined;
+      }
+    }
+
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const eff = effects[i];
+      if (!eff) continue;
+      if (getEffectCategoryType(eff) === category.type && eff.targetFixtureIds) {
+        eff.targetFixtureIds = eff.targetFixtureIds.filter(
+          (id) => !category.fixtureIds.includes(id as string | number)
+        );
+        if (eff.targetFixtureIds.length === 0) effects.splice(i, 1);
+      }
+    }
+  }
+}

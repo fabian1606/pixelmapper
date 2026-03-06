@@ -1,7 +1,7 @@
 import { computed, type Ref } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelType } from '~/utils/engine/types';
-import { TAB_ORDER, CHANNEL_CATEGORIES, type ChannelCategoryKey } from '~/utils/engine/channel-categories';
+import { CHANNEL_CATEGORIES, type ChannelCategoryKey } from '~/utils/engine/channel-categories';
 
 export interface ChannelEntry {
   channelType: ChannelType;
@@ -44,12 +44,14 @@ export function useChannelSections(
 
     // 1. Collect all unique channels across all selected fixtures in this tab
     type ChannelKey = string;
-    const allChannels = new Map<ChannelKey, { channelType: ChannelType; oflChannelName: string; fixtures: Fixture[] }>();
+    const allChannels = new Map<ChannelKey, { channelType: ChannelType; oflChannelName: string; fixtures: Fixture[]; minDmxIndex: number }>();
 
     for (const f of fixtures) {
       const usedKeysInFixture = new Set<string>();
 
-      for (const ch of f.channels) {
+      for (let i = 0; i < f.channels.length; i++) {
+        const ch = f.channels[i];
+        if (!ch) continue;
         if (!tabChannelFilter(ch.type, ch.role)) continue;
 
         const rawName = ch.oflChannelName ?? ch.type;
@@ -71,18 +73,18 @@ export function useChannelSections(
         usedKeysInFixture.add(finalKey);
 
         if (!allChannels.has(finalKey)) {
-          allChannels.set(finalKey, { channelType: ch.type, oflChannelName: rawName, fixtures: [] });
+          allChannels.set(finalKey, { channelType: ch.type, oflChannelName: rawName, fixtures: [], minDmxIndex: i });
+        } else {
+          const entry = allChannels.get(finalKey)!;
+          entry.minDmxIndex = Math.min(entry.minDmxIndex, i);
         }
         allChannels.get(finalKey)!.fixtures.push(f);
       }
     }
 
-    // Sort channels by TAB_ORDER, then alphabetically
-    const tabOrderIndex = new Map(TAB_ORDER.map((t, i) => [t, i]));
+    // Sort channels by their original DMX order to preserve matrix pixel groupings etc.
     const orderedChannels = [...allChannels.values()].sort((a, b) => {
-      const ai = tabOrderIndex.get(a.channelType) ?? 999;
-      const bi = tabOrderIndex.get(b.channelType) ?? 999;
-      if (ai !== bi) return ai - bi;
+      if (a.minDmxIndex !== b.minDmxIndex) return a.minDmxIndex - b.minDmxIndex;
       return a.oflChannelName.localeCompare(b.oflChannelName);
     });
 

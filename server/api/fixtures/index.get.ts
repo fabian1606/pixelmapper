@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
   const manufacturerKeysSet = new Set<string>();
   for (const key of allKeys) {
     const parts = key.split(':');
-    if (parts.length === 2 && parts[1].endsWith('.json')) {
+    if (parts.length === 2 && parts[0] && parts[1]?.endsWith('.json')) {
       manufacturerKeysSet.add(parts[0]);
     }
   }
@@ -45,7 +45,7 @@ export default defineEventHandler(async (event) => {
     const fixtureCountMap = new Map<string, number>();
     for (const key of allKeys) {
       const parts = key.split(':');
-      if (parts.length === 2 && parts[1].endsWith('.json')) {
+      if (parts.length === 2 && parts[0] && parts[1]?.endsWith('.json')) {
         const mfKey = parts[0];
         fixtureCountMap.set(mfKey, (fixtureCountMap.get(mfKey) ?? 0) + 1);
       }
@@ -110,8 +110,9 @@ export default defineEventHandler(async (event) => {
             shortName: m.shortName,
             channelCount: m.channels.filter(ch => {
               if (!ch) return false;
+              if (typeof ch !== 'string') return true; // Matrix insert represents multiple channels
               return !Object.values(fixture.availableChannels).some(
-                c => c.fineChannelAliases?.includes(ch)
+                c => c.fineChannelAliases?.includes(ch as string)
               );
             }).length,
           })),

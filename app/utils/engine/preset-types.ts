@@ -10,6 +10,8 @@ export type PresetCategoryType = 'color' | 'movement' | 'beam' | 'dimmer' | 'oth
  * A snapshot of a single channel's programmed state at the time the preset was saved.
  */
 export interface PresetChannelSnapshot {
+  /** Index of this channel within fixture.channels (stable, from OFL mode order). */
+  channelIndex: number;
   channelType: ChannelType;
   stepValues: number[];
   chaserConfig?: import('./types').ChannelChaserConfig;
@@ -50,6 +52,8 @@ export interface PresetCategory {
   channels: PresetChannelSnapshot[];
   /** Effect/modifier snapshots that apply to these fixtures (may be empty) */
   modifiers: PresetModifierSnapshot[];
+  /** True if this category entry represents a modifier change rather than a channel value change */
+  isModifier?: boolean;
 }
 
 /**

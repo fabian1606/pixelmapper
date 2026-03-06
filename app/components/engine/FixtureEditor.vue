@@ -33,9 +33,7 @@ interface Emits {
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
-const FIXTURE_RADIUS = 18;
-const WORLD_WIDTH    = 3000;
-const WORLD_HEIGHT   = 3000;
+import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
 
 // ─── Responsive Sizing ───────────────────────────────────────────────────────
 const viewportEl = ref<HTMLElement | null>(null);
@@ -129,7 +127,8 @@ function rect(): DOMRect {
 // ─── Fixture visibility / screen position ─────────────────────────────────────
 function isFixtureVisible(f: Fixture): boolean {
   const pos    = worldToViewport(f.fixturePosition.x * WORLD_WIDTH, f.fixturePosition.y * WORLD_HEIGHT);
-  const r      = (f.fixtureSize?.x ?? 1) * FIXTURE_RADIUS * camera.scale;
+  const maxSize = Math.max(f.fixtureSize?.x ?? 1, f.fixtureSize?.y ?? 1);
+  const r      = maxSize * FIXTURE_RADIUS * camera.scale;
   const margin = r + 20;
   return (
     pos.x + margin >= 0 && pos.x - margin <= editorWidth.value &&
@@ -256,7 +255,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       <FixtureNode
         v-if="isFixtureVisible(fixture)"
         :fixture="fixture"
-        :radius="(fixture.fixtureSize?.x ?? 1) * FIXTURE_RADIUS * camera.scale"
+        :radius="FIXTURE_RADIUS * camera.scale"
         :is-selected="isFixtureSelected(fixture)"
         :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
         :show-labels="camera.scale > 1.2"

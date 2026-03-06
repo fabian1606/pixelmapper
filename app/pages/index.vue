@@ -22,7 +22,7 @@ import {
   ContextMenuItem,
   ContextMenuShortcut,
 } from '@/components/ui/context-menu';
-
+import { usePresets } from '~/components/engine/composables/use-presets';
 
 const COLS = 5;
 const ROWS = 4;
@@ -152,10 +152,35 @@ function handleSelectFixtures(ids: (string | number)[]) {
 }
 
 const propertiesSidebarRef = ref<InstanceType<typeof FixturePropertiesSidebar> | null>(null);
-const fixtureSidebarRef = ref<{ quickSave: () => void } | null>(null);
+const fixtureSidebarRef = ref<{ 
+  quickSave: () => void,
+  overwriteActivePreset: () => void,
+  createPresetFromSelection: (selectedIds: Set<string | number>) => void
+} | null>(null);
 
-function handleOpenPropertiesTab(tab: string) {
-  nextTick(() => propertiesSidebarRef.value?.openTab(tab));
+function handleOpenPropertiesTab(tab: string, isModifier?: boolean) {
+  nextTick(() => propertiesSidebarRef.value?.openTab(tab, isModifier));
+}
+
+// Preset Context Menu Actions
+const { selectedPresetId, getUnsavedChanges } = usePresets();
+
+const hasUnsavedChanges = computed(() => {
+  return getUnsavedChanges(flatFixtures.value, engine.effects, sceneNodes.value).length > 0;
+});
+
+function handleCreatePreset() {
+  fixtureSidebarRef.value?.quickSave();
+}
+
+function handleOverwritePreset() {
+  fixtureSidebarRef.value?.overwriteActivePreset();
+}
+
+function handleCreatePresetFromSelection() {
+  if (selectedIds.value.size > 0) {
+    fixtureSidebarRef.value?.createPresetFromSelection(selectedIds.value);
+  }
 }
 
 // Selection / Groups logic
@@ -367,6 +392,18 @@ onUnmounted(() => { cancelAnimationFrame(animFrameId); });
             <ContextMenuItem v-if="hasSelectedGroup" @click="handleUngroupSelected">
               Ungroup
               <ContextMenuShortcut>⇧⌘G</ContextMenuShortcut>
+            </ContextMenuItem>
+            <ContextMenuSeparator v-if="selectedIds.size > 0 || hasUnsavedChanges" />
+            <ContextMenuItem v-if="hasUnsavedChanges" @click="handleCreatePreset">
+              Create Preset
+              <ContextMenuShortcut>⇧P</ContextMenuShortcut>
+            </ContextMenuItem>
+            <ContextMenuItem v-if="selectedIds.size > 0" @click="handleCreatePresetFromSelection">
+              Create Preset from Selection
+            </ContextMenuItem>
+            <ContextMenuItem v-if="selectedPresetId && hasUnsavedChanges" @click="handleOverwritePreset">
+              Overwrite Active Preset
+              <ContextMenuShortcut>⇧S</ContextMenuShortcut>
             </ContextMenuItem>
             <ContextMenuSeparator v-if="selectedIds.size > 0" />
             <ContextMenuItem v-if="selectedIds.size > 0" class="text-destructive focus:text-destructive" @click="handleDeleteSelected">

@@ -42,13 +42,14 @@ const emit = defineEmits<Emits>();
     <div
       class="fixture-node"
       v-bind="$attrs"
-      :class="{ 'is-dragging': isDragging, 'is-selected': isSelected }"
+      :class="{ 'is-dragging': isDragging, 'is-selected': isSelected, 'is-multi-head': fixture.beams && fixture.beams.length > 1 }"
       :style="{
-        width:  `${radius * 2}px`,
-        height: `${radius * 2}px`,
+        width:  `${radius * 2 * (fixture.fixtureSize?.x ?? 1)}px`,
+        height: `${radius * 2 * (fixture.fixtureSize?.y ?? 1)}px`,
       }"
       @mousedown.prevent.stop="emit('dragstart', $event)"
     >
+      <!-- beams are rendered on the canvas layer below; no HTML overlay needed -->
       <div v-if="showLabels" class="fixture-label">{{ fixture.name }}</div>
     </div>
   </FixtureContextMenu>
@@ -67,6 +68,12 @@ const emit = defineEmits<Emits>();
   z-index: 1;
 }
 
+.fixture-node.is-multi-head {
+  border-radius: 8px;
+}
+
+
+
 .fixture-node:hover {
   border-color: rgba(255, 255, 255, 0.6);
 }
@@ -83,10 +90,10 @@ const emit = defineEmits<Emits>();
 
 .fixture-label {
   position: absolute;
-  top: 120%;
+  top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  margin-top: 4px;
+  margin-top: 12px;
   font-size: 13px;
   font-family: inherit;
   color: var(--muted-foreground);

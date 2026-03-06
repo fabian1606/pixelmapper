@@ -123,11 +123,30 @@ export interface OflChannel {
 
 // ─── Mode ────────────────────────────────────────────────────────────────────
 
+export interface OflMatrixChannelInsert {
+  insert: 'matrixChannels';
+  /**
+   * Defines iteration order for pixel keys.
+   * - eachPixelABC: alphanumeric sort (most common, 183 fixtures)
+   * - eachPixelXYZ / YXZ / …: axis-ordered variants
+   * - eachPixelGroup: iterate over pixelGroups in definition order
+   * - string[]: explicit ordered list of pixelKey or pixelGroup names
+   */
+  repeatFor:
+  | 'eachPixelABC'
+  | 'eachPixelXYZ' | 'eachPixelYXZ' | 'eachPixelZYX'
+  | 'eachPixelZXY' | 'eachPixelXZY' | 'eachPixelYZX'
+  | 'eachPixelGroup'
+  | string[];
+  channelOrder: 'perPixel' | 'perChannel';
+  templateChannels: string[];
+}
+
 export interface OflMode {
   name: string;
   shortName: string;
   /** Ordered list of channel keys used in this mode */
-  channels: (string | null)[];
+  channels: (string | null | OflMatrixChannelInsert)[];
   /** Physical property overrides specific to this mode */
   physical?: OflPhysical;
 }
@@ -214,8 +233,9 @@ export interface OflWheel {
 // ─── Matrix ──────────────────────────────────────────────────────────────────
 
 export interface OflMatrix {
-  pixelKeys?: (string | null)[][][];
-  pixelGroups?: Record<string, (string | null)[][][] | 'all'>;
+  pixelCount?: [number, number, number]; // [X, Y, Z]
+  pixelKeys?: (string | null)[][][]; // [Z][Y][X]
+  pixelGroups?: Record<string, (string | null)[][][] | 'all' | any>;
 }
 
 // ─── Manufacturers ───────────────────────────────────────────────────────────

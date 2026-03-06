@@ -2,7 +2,10 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
-import { usePresets } from '~/components/engine/composables/use-presets';
+import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
+import { SavePresetCommand, DeletePresetCommand, OverwritePresetCommand } from '~/components/engine/commands/preset-commands';
 import type { Preset, PresetCategory, PresetCategoryType } from '~/utils/engine/preset-types';
 import { CHANNEL_CATEGORIES } from '~/utils/engine/channel-categories';
 import {
@@ -31,6 +34,7 @@ import {
 } from '@/components/ui/accordion';
 import { AccordionHeader } from 'reka-ui';
 import { Input } from '@/components/ui/input';
+import type { SceneNode } from '~/utils/engine/core/group';
 
 
 // ─── Props & Emits ────────────────────────────────────────────────────────────
@@ -39,13 +43,14 @@ const props = defineProps<{
   fixtures: Fixture[];
   /** Live reactive effects array from EffectEngine.effects */
   effects: Effect[];
+  nodes?: SceneNode[];
 }>();
 
 const emit = defineEmits<{
   /** Called when a preset subgroup is clicked — selects those fixture IDs */
   (e: 'selectFixtures', ids: (string | number)[]): void;
   /** Called when a category item is clicked — opens that tab in the properties panel */
-  (e: 'openPropertiesTab', tab: string): void;
+  (e: 'openPropertiesTab', tab: string, isModifier?: boolean): void;
 }>();
 
 // ─── Preset state ─────────────────────────────────────────────────────────────
@@ -54,25 +59,69 @@ const {
   savedPresets,
   selectedPresetId,
   getUnsavedChanges,
-  savePreset,
   applyPreset,
-  deletePreset,
   renamePreset,
-  stopPreset, // Added stopPreset
+  stopPreset,
 } = usePresets();
+
+const history = useHistory();
+
+// Shortcuts
+useShortcuts([
+  { key: 'P', shift: true, label: 'Save Preset', handler: () => quickSave() },
+  { key: 'S', shift: true, label: 'Overwrite Preset', handler: () => overwriteActivePreset() }
+]);
 
 // ─── Unsaved changes (reactive, recomputed on fixture changes) ────────────────
 
-const unsavedChanges = computed(() => getUnsavedChanges(props.fixtures, props.effects));
+const unsavedChanges = computed(() => getUnsavedChanges(props.fixtures, props.effects, props.nodes));
 const hasUnsaved = computed(() => unsavedChanges.value.length > 0);
 
 // ─── Save preset ─────────────────────────────────────────────────────────────
 
 function quickSave() {
   const name = `Preset ${savedPresets.value.length + 1}`;
-  const preset = savePreset(name, props.fixtures, props.effects);
-  // Immediately start rename on the newly created preset
+  // Capture ALL currently programmed channels (null = no diff, full snapshot)
+  const categories = extractCategories(props.fixtures, props.effects, null, props.nodes);
+  const id = `preset-${Date.now()}`;
+  const preset: Preset = {
+    id,
+    name,
+    createdAt: new Date().toISOString(),
+    categories,
+  };
+  history.execute(new SavePresetCommand(
+    preset,
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+    () => selectedPresetId.value,
+    (id) => { selectedPresetId.value = id; }
+  ));
   nextTick(() => startRename(preset));
+}
+
+function handleOverwrite(preset: Preset) {
+  const oldCats = preset.categories;
+  const newCats = extractCategories(props.fixtures, props.effects, null, props.nodes);
+  
+  history.execute(new OverwritePresetCommand(
+    preset.id,
+    preset.name,
+    oldCats,
+    newCats,
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; }
+  ));
+}
+
+function handleDeletePreset(preset: Preset) {
+  history.execute(new DeletePresetCommand(
+    preset,
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+    () => selectedPresetId.value,
+    (id) => { selectedPresetId.value = id; }
+  ));
 }
 
 // ─── Rename state ─────────────────────────────────────────────────────────────
@@ -147,17 +196,55 @@ const categoryTypeToTab: Record<PresetCategoryType, string> = {
 };
 
 function handleCategoryClick(category: PresetCategory, preset: Preset) {
-  applyPreset(preset, props.fixtures, props.effects);
+  if (selectedPresetId.value !== preset.id) {
+    applyPreset(preset, props.fixtures, props.effects);
+  }
   emit('selectFixtures', category.fixtureIds);
-  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control');
+  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier);
 }
 
 function handleUnsavedCategoryClick(category: PresetCategory) {
   emit('selectFixtures', category.fixtureIds);
-  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control');
+  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier);
 }
 
-defineExpose({ quickSave });
+function overwriteActivePreset() {
+  if (selectedPresetId.value && hasUnsaved.value) {
+    const preset = savedPresets.value.find(p => p.id === selectedPresetId.value);
+    if (preset) handleOverwrite(preset);
+  }
+}
+
+function createPresetFromSelection(selectedIds: Set<string | number>) {
+  const selectedFixtures = props.fixtures.filter(f => selectedIds.has(f.id));
+  if (selectedFixtures.length === 0) return;
+
+  const name = `Preset ${savedPresets.value.length + 1}`;
+  const categories = extractCategories(selectedFixtures, props.effects, null, props.nodes);
+  const id = `preset-${Date.now()}`;
+  const preset: Preset = {
+    id,
+    name,
+    createdAt: new Date().toISOString(),
+    categories,
+  };
+  history.execute(new SavePresetCommand(
+    preset,
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+    () => selectedPresetId.value,
+    (id) => { selectedPresetId.value = id; }
+  ));
+  nextTick(() => startRename(preset));
+}
+
+defineExpose({
+  quickSave,
+  overwriteActivePreset,
+  createPresetFromSelection,
+  hasUnsaved,
+  selectedPresetId,
+});
 </script>
 
 <template>
@@ -167,7 +254,7 @@ defineExpose({ quickSave });
         <!-- Unsaved Changes header -->
 
         <!-- Unsaved changes list (max ~5 items before scroll) -->
-        <div class="max-h-40 overflow-y-auto pb-5" >
+        <div class="h-40 overflow-y-auto pb-5" >
           <div v-if="!hasUnsaved" class="px-3 py-3 text-[10px] text-muted-foreground opacity-50">
             No changes in programmer
           </div>
@@ -180,10 +267,20 @@ defineExpose({ quickSave });
             >
               <component
                 :is="getCategoryIcon(category.type)"
-                class="size-3.5 shrink-0 text-muted-foreground"
+                class="size-3.5 shrink-0 transition-colors"
+                :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/ucat:text-foreground'"
               />
-              <span class="flex-1 truncate text-muted-foreground group-hover/ucat:text-foreground transition-colors">
+              <span 
+                class="flex-1 truncate transition-colors"
+                :class="category.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/ucat:text-foreground'"
+              >
                 {{ category.label }}
+              </span>
+              <span 
+                class="opacity-0 group-hover/ucat:opacity-70 transition-opacity text-[10px] shrink-0"
+                :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/ucat:text-foreground'"
+              >
+                {{ category.isModifier ? '(Effect)' : '(Value)' }}
               </span>
             </button>
           </div>
@@ -244,20 +341,33 @@ defineExpose({ quickSave });
                       </template>
                     </div>
 
-                    <!-- Play / Stop button -->
-                    <button
-                       class="flex items-center justify-center pl-3 py-1 text-xs font-medium hover:opacity-80 transition-opacity"
-                       @click.stop="togglePresetApply(preset)"
-                     >
-                       <Square
-                         v-if="selectedPresetId === preset.id"
-                         class="size-3.5 shrink-0 fill-primary text-primary"
-                       />
-                       <Play
-                         v-else
-                         class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors"
-                       />
-                    </button>
+                    <!-- Action buttons -->
+                    <div class="flex items-center">
+                      <!-- Overwrite button -->
+                      <button
+                        v-if="selectedPresetId === preset.id && hasUnsaved"
+                        class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity"
+                        @click.stop="handleOverwrite(preset)"
+                        title="Overwrite Preset with current changes (Shift+S)"
+                      >
+                        <Save class="size-3.5 shrink-0 text-foreground" />
+                      </button>
+
+                      <!-- Play / Stop button -->
+                      <button
+                         class="flex items-center justify-center pl-2 pr-3 py-1 text-xs font-medium hover:opacity-80 transition-opacity"
+                         @click.stop="togglePresetApply(preset)"
+                       >
+                         <Square
+                           v-if="selectedPresetId === preset.id"
+                           class="size-3.5 shrink-0 fill-primary text-primary"
+                         />
+                         <Play
+                           v-else
+                           class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors"
+                         />
+                      </button>
+                    </div>
                   </AccordionTrigger>
                 </AccordionHeader>
               </ContextMenuTrigger>
@@ -276,7 +386,7 @@ defineExpose({ quickSave });
                   <Pencil class="mr-2 size-4" /> Rename
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem @click="deletePreset(preset.id)" class="text-destructive focus:bg-destructive focus:text-destructive-foreground">
+                <ContextMenuItem @click="handleDeletePreset(preset)" class="text-destructive focus:bg-destructive focus:text-destructive-foreground">
                   <Trash2 class="mr-2 size-4" /> Delete Preset
                 </ContextMenuItem>
               </ContextMenuContent>
@@ -295,14 +405,27 @@ defineExpose({ quickSave });
                 >
                   <component
                     :is="getCategoryIcon(category.type)"
-                    class="size-3.5 shrink-0 text-muted-foreground"
+                    class="size-3.5 shrink-0 transition-colors"
+                    :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/cat:text-foreground'"
                   />
-                  <span class="flex-1 truncate text-muted-foreground group-hover/cat:text-foreground transition-colors">
+                  <span 
+                    class="flex-1 truncate transition-colors"
+                    :class="category.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/cat:text-foreground'"
+                  >
                     {{ category.label }}
                   </span>
-                  <span class="text-[9px] text-muted-foreground/50 shrink-0 tabular-nums">
-                    {{ category.fixtureIds.length }} fixture{{ category.fixtureIds.length !== 1 ? 's' : '' }}
-                  </span>
+                  <!-- Default state: show fixture count; Hover state: show (Effect) or (Value) -->
+                  <div class="relative flex items-center justify-end w-12 shrink-0">
+                    <span class="group-hover/cat:opacity-0 opacity-100 text-muted-foreground/50 transition-opacity text-[9px] tabular-nums text-right w-full absolute pointer-events-none">
+                      {{ category.fixtureIds.length }} fixture{{ category.fixtureIds.length !== 1 ? 's' : '' }}
+                    </span>
+                    <span 
+                      class="opacity-0 group-hover/cat:opacity-70 transition-opacity text-[10px] tabular-nums text-right w-full"
+                      :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/cat:text-foreground'"
+                    >
+                      {{ category.isModifier ? '(Effect)' : '(Value)' }}
+                    </span>
+                  </div>
                 </button>
               </div>
             </AccordionContent>
@@ -316,9 +439,10 @@ defineExpose({ quickSave });
             class="mt-5 h-7 text-[10px] uppercase tracking-widest font-semibold gap-1.5"
             :disabled="!hasUnsaved"
             @click="quickSave"
+            title="Save as new preset (Shift+P)"
           >
             <Save class="size-3" />
-            Save as Preset
+            Create Preset <span class="opacity-50 ml-1 font-normal capitalize tracking-normal">(Shift+P)</span>
           </Button>
         </div>
       </div>

@@ -41,6 +41,8 @@ export interface Channel {
   oflChannelName?: string;
   /** Default DMX value (0-255) from OFL, used for resetting channels when 'Stop All' is pressed. */
   defaultValue: number;
+  /** Matches the beam.id this channel controls in a multi-head/matrix fixture. */
+  beamId?: string;
   /** All OFL capabilities for this channel (used to build the capability dropdown). */
   oflCapabilities?: OflCapability[];
   /**

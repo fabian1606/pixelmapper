@@ -30,7 +30,7 @@ const emit = defineEmits<{
   (e: 'requestAddFixture'): void;
   (e: 'deleteNode', node: SceneNode): void;
   (e: 'selectFixtures', ids: (string | number)[]): void;
-  (e: 'openPropertiesTab', tab: string): void;
+  (e: 'openPropertiesTab', tab: string, isModifier?: boolean): void;
 }>();
 
 const activeTab = ref<'fixtures' | 'presets' | null>('fixtures');
@@ -39,13 +39,27 @@ function toggleTab(tab: 'fixtures' | 'presets') {
   activeTab.value = activeTab.value === tab ? null : tab;
 }
 
-const presetsSidebarRef = ref<{ quickSave: () => void } | null>(null);
+const presetsSidebarRef = ref<{ 
+  quickSave: () => void,
+  overwriteActivePreset: () => void,
+  createPresetFromSelection: (selectedIds: Set<string | number>) => void,
+  hasUnsaved: boolean,
+  selectedPresetId: string | null
+} | null>(null);
 
 function quickSave() {
   presetsSidebarRef.value?.quickSave();
 }
 
-defineExpose({ quickSave });
+function overwriteActivePreset() {
+  presetsSidebarRef.value?.overwriteActivePreset();
+}
+
+function createPresetFromSelection(selectedIds: Set<string | number>) {
+  presetsSidebarRef.value?.createPresetFromSelection(selectedIds);
+}
+
+defineExpose({ quickSave, overwriteActivePreset, createPresetFromSelection, presetsSidebarRef });
 </script>
 
 <template>
@@ -76,7 +90,7 @@ defineExpose({ quickSave });
 
       <SidebarContent class="p-0 bg-sidebar overflow-hidden">
         <!-- Fixtures tab: scene tree -->
-        <SidebarGroup v-if="activeTab === 'fixtures'" class="p-2">
+        <SidebarGroup v-show="activeTab === 'fixtures'" class="p-2">
           <SidebarMenu v-if="nodes.length > 0">
             <FixtureSidebarNode
               v-for="node in nodes"
@@ -97,13 +111,14 @@ defineExpose({ quickSave });
         </SidebarGroup>
 
         <!-- Presets tab -->
-        <div v-else-if="activeTab === 'presets'" class="h-full overflow-hidden">
+        <div v-show="activeTab === 'presets'" class="h-full overflow-hidden">
           <PresetsSidebar
             ref="presetsSidebarRef"
             :fixtures="fixtures"
             :effects="effects"
+            :nodes="nodes"
             @select-fixtures="ids => emit('selectFixtures', ids)"
-            @open-properties-tab="tab => emit('openPropertiesTab', tab)"
+            @open-properties-tab="(tab, isMod) => emit('openPropertiesTab', tab, isMod)"
           />
         </div>
       </SidebarContent>

@@ -39,6 +39,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-modifier: var(--modifier);
 }
 
 :root {
@@ -74,6 +76,9 @@
   --sidebar-accent-foreground: hsl(240 5.9% 10%);
   --sidebar-border: hsl(220 13% 91%);
   --sidebar-ring: hsl(240 5% 64.9%);
+
+  --modifier: hsl(210 60% 50%);
+  /* A pleasant, readable blue */
 }
 
 .dark {
@@ -113,6 +118,9 @@
   --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(240 4.9% 83.9%);
+
+  --modifier: hsl(211, 30%, 58%);
+  /* A desaturated, muted blue for dark mode */
 }
 
 @layer base {

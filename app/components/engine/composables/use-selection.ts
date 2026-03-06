@@ -46,6 +46,7 @@ export function useSelection(
   let beforeSnapshot: FixturePositionSnapshot[] = [];
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
+    if (event.button === 2) return; // ignore right click
     if ((event.target as HTMLElement).closest('.fixture-node')) return;
     const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
     if (!event.shiftKey) selectedIds.value = new Set();
@@ -104,6 +105,8 @@ export function useSelection(
 
     // Propagate to the model ref (notifies parent + canvas)
     selectedIds.value = effectiveSelectedIds;
+
+    if (event.button === 2) return; // ignore right click for dragging, but allow it to update selection
 
     const startPositions = new Map<string | number, Point>();
     const w = getWidth();

@@ -36,10 +36,6 @@ export function useHistory() {
   const canRedo = computed(() => future.value.length > 0);
   const lastDescription = computed(() => past.value.at(-1)?.description ?? null);
 
-  /**
-   * Execute a command and push it to the undo stack.
-   * Clears the redo stack (branching history is discarded).
-   */
   function execute(command: Command) {
     command.execute();
     past.value.push(command);
@@ -49,7 +45,9 @@ export function useHistory() {
 
   function undo() {
     const command = past.value.pop();
-    if (!command) return;
+    if (!command) {
+      return;
+    }
     command.undo();
     future.value.push(command);
   }

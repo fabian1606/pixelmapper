@@ -144,7 +144,7 @@ The system integrates with the **Open Fixture Library (OFL)** to provide a vast 
 
 - **Local Data Source:** A shallow clone of the OFL repository exists at `ofl-data/` (gitignored).
 - **Server API:** Nuxt server routes (`/api/fixtures`) browse and serve the local JSON definitions.
-- **Fixture Factory:** `createFixtureFromOfl` translates OFL definitions into internal `Fixture` and `Channel` structures, mapping capabilities and colors to the internal engine types.
+- **Fixture Factory:** `createFixtureFromOfl` translates OFL definitions into internal `Fixture` and `Channel` structures. Detailed implementation notes can be found in [ofl.md](file:///home/fabian/projects/sideprojects/pixelmapper/ofl.md).
 - **Library Browser:** A grouped accordion UI in a global dialog allows users to search, select, and configure fixtures (Universe, DMX Address, Mode) before adding them to the scene.
 
 ---

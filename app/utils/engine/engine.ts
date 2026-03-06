@@ -2,6 +2,7 @@ import type { Effect, EffectContext, SpeedConfig } from '~/utils/engine/types';
 import type { Fixture } from './core/fixture';
 import type { Channel } from './core/channel';
 import { reactive, ref, type Ref } from 'vue';
+import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from './constants';
 
 export class EffectEngine {
   public effects = reactive<Effect[]>([]);
@@ -102,8 +103,13 @@ export class EffectEngine {
       }
     }
 
+    // Base constants for converting relative fixture dimensions to a normalized world
+    // Import them inline or at top of file, assuming they are exported from constants
+    // For now we'll import them locally to avoid circulars if not set
+
     for (const [i, fixture] of fixtures.entries()) {
-      const context: EffectContext = {
+      // Create a base context focused on the fixture's center
+      const fixtureContext: EffectContext = {
         time: timeMs,
         index: i,
         fixtureCount: fixtures.length,
@@ -111,35 +117,66 @@ export class EffectEngine {
         y: fixture.fixturePosition.y,
       };
 
-      // Evaluate each effect and combine the results via additive blending.
+      // Pre-calculate fixture rotation matrix
+      const rotRad = (fixture.rotation ?? 0) * (Math.PI / 180);
+      const cosR = Math.cos(rotRad);
+      const sinR = Math.sin(rotRad);
+
       for (const effect of this.effects) {
-        // Skip fixtures not targeted by this effect
         if (effect.targetFixtureIds && !effect.targetFixtureIds.includes(fixture.id)) {
           continue;
         }
 
-        const waveValue = effect.render(context); // Expects -1 to 1
+        if (!effect.targetChannels || effect.targetChannels.length === 0) continue;
 
-        // Apply effect to all target channel types
-        if (effect.targetChannels && effect.targetChannels.length > 0) {
-          const matchingChannels = fixture.channels.filter((c: Channel) => effect.targetChannels.includes(c.type));
-          for (const channel of matchingChannels) {
-            // Determine maximum and minimum achievable values based on strength
-            const targetMax = Math.min(channel.currentBaseValue + effect.strength, 255);
-            const targetMin = Math.max(channel.currentBaseValue - effect.strength, 0);
+        const matchingChannels = fixture.channels.filter((c: Channel) => effect.targetChannels.includes(c.type));
 
-            // Map the expected [-1, 1] wave shape to the [targetMin, targetMax] range
-            const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
+        for (const channel of matchingChannels) {
+          let waveValue = 0;
 
-            // Calculate relative offset it contributes
-            const offset = mappedValue - channel.currentBaseValue;
+          // If the channel has a specific beam, calculate effect AT that beam's exact physical world position
+          if (channel.beamId) {
+            const beam = fixture.beams?.find(b => b.id === channel.beamId);
+            if (beam) {
+              // localX / localY are in [-0.5, 0.5] relative to the fixture's natural footprint
+              // we scale this by the configured fixture footprint size physically
+              const fWidth = fixture.fixtureSize.x * FIXTURE_RADIUS * 2;
+              const fHeight = fixture.fixtureSize.y * FIXTURE_RADIUS * 2;
 
-            channel.value += offset;
+              const localPx = beam.localX * fWidth;
+              const localPy = beam.localY * fHeight;
+
+              // Apply fixture rotation to the beam's local offsets 
+              const rotPx = localPx * cosR - localPy * sinR;
+              const rotPy = localPx * sinR + localPy * cosR;
+
+              // Convert back to normalized world coordinates [0..1]
+              const beamWorldX = fixture.fixturePosition.x + (rotPx / WORLD_WIDTH);
+              const beamWorldY = fixture.fixturePosition.y + (rotPy / WORLD_HEIGHT);
+
+              waveValue = effect.render({
+                ...fixtureContext,
+                x: beamWorldX,
+                y: beamWorldY
+              });
+            } else {
+              waveValue = effect.render(fixtureContext);
+            }
+          } else {
+            // Global channel (e.g. Master Dimmer, or a single-pixel fixture)
+            waveValue = effect.render(fixtureContext);
           }
+
+          const targetMax = Math.min(channel.currentBaseValue + effect.strength, 255);
+          const targetMin = Math.max(channel.currentBaseValue - effect.strength, 0);
+
+          const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
+          const offset = mappedValue - channel.currentBaseValue;
+
+          channel.value += offset;
         }
       }
 
-      // Clamp values strictly to 0-255 after all effects are applied
       for (const channel of fixture.channels) {
         channel.value = Math.min(Math.max(Math.round(channel.value), 0), 255);
       }

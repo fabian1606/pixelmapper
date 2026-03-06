@@ -20,6 +20,7 @@ export class Fixture {
 
   fixturePosition: FixturePosition;
   fixtureSize: FixtureSize;
+  rotation: number = 0; // Degrees (0-360)
 
   beams: Beam[];
 
@@ -57,13 +58,15 @@ export class Fixture {
   }
 
   /**
-   * Computes the final visual RGBA color of this fixture by mixing its COLOR channels
-   * and applying any DIMMER channels as a global intensity multiplier.
-   * Returns a CSS-compatible `rgb(r, g, b)` string.
+   * Computes the final visual RGBA color of this fixture (or a specific beam).
+   * Mixes its COLOR channels and applies any DIMMER channels as a global intensity multiplier.
+   * Channels without a beamId apply to all beams (e.g., Master Dimmer).
    */
-  resolveColor(): string {
-    const colorChannels = this.channels.filter(c => c.role === 'COLOR');
-    const dimmerChannels = this.channels.filter(c => c.role === 'DIMMER');
+  resolveColor(beamId?: string): string {
+    const applies = (c: Channel) => !beamId || !c.beamId || c.beamId === beamId;
+
+    const colorChannels = this.channels.filter(c => c.role === 'COLOR' && applies(c));
+    const dimmerChannels = this.channels.filter(c => c.role === 'DIMMER' && applies(c));
 
     const dimmerMultiplier = dimmerChannels.length > 0
       ? dimmerChannels.reduce((sum, d) => sum + d.value, 0) / (dimmerChannels.length * 255)
@@ -71,6 +74,7 @@ export class Fixture {
 
     let r = 0, g = 0, b = 0;
     for (const ch of colorChannels) {
+      if (!ch.colorValue) continue;
       const factor = ch.value / 255;
       const hex = ch.colorValue.replace('#', '');
       r += parseInt(hex.substring(0, 2), 16) * factor;

@@ -20,6 +20,7 @@ import { type SnapshotMap } from './commands/set-channel-values-command';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelSections } from './composables/use-channel-sections';
 import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
+import { usePresets } from '~/components/engine/composables/use-presets';
 interface Props {
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
@@ -77,6 +78,12 @@ function stopAllOrSelected() {
   const snapshots = captureSnapshots(targetFixtures);
   const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
   let modifiersChanged = false;
+  
+  // Also clear the active preset if "stop all" is used globally (not just for selected subset)
+  if (props.selectedIds.size === 0) {
+    const { selectedPresetId } = usePresets();
+    selectedPresetId.value = null;
+  }
   
   for (const f of targetFixtures) {
     for (const ch of f.channels) {
@@ -235,8 +242,13 @@ const stopAllTooltip = computed(() => {
 });
 
 // Expose openTab so parent (index.vue) can open a specific tab programmatically
-function openTab(tabKey: string) {
+function openTab(tabKey: string, isModifier?: boolean) {
   activeTab.value = tabKey as typeof activeTab.value;
+  if (isModifier) {
+    nextTick(() => effectsManager.value?.openModifier());
+  } else {
+    nextTick(() => effectsManager.value?.openSteps());
+  }
 }
 
 defineExpose({ openTab });

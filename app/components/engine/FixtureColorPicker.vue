@@ -22,9 +22,9 @@ const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
 
 interface ColorFixtureData {
   fixture: Fixture;
-  redCh?: any;
-  greenCh?: any;
-  blueCh?: any;
+  redChs: any[];
+  greenChs: any[];
+  blueChs: any[];
   wheelCh?: any;
 }
 
@@ -36,20 +36,17 @@ const colorFixtures = computed(() => {
       if (['RED', 'GREEN', 'BLUE', 'COLOR_WHEEL'].includes(entry.channelType)) {
         for (const fixture of entry.fixtures) {
           if (!map.has(String(fixture.id))) {
-            map.set(String(fixture.id), { fixture });
+            map.set(String(fixture.id), { fixture, redChs: [], greenChs: [], blueChs: [] });
           }
           const fd = map.get(String(fixture.id))!;
           
-          // Find the specific channel in the fixture matching the entry's criteria
-          const ch = fixture.channels.find(c => 
-            c.type === entry.channelType && 
-            (c.oflChannelName ?? c.type) === (entry.oflChannelName ?? entry.channelType)
-          );
-          
-          if (ch) {
-            if (entry.channelType === 'RED') fd.redCh = ch;
-            if (entry.channelType === 'GREEN') fd.greenCh = ch;
-            if (entry.channelType === 'BLUE') fd.blueCh = ch;
+          // Collect ALL channels of this type (not just the last one)
+          for (const ch of fixture.channels) {
+            if (ch.type !== entry.channelType) continue;
+            if ((ch.oflChannelName ?? ch.type) !== (entry.oflChannelName ?? entry.channelType)) continue;
+            if (entry.channelType === 'RED'   && !fd.redChs.includes(ch))   fd.redChs.push(ch);
+            if (entry.channelType === 'GREEN' && !fd.greenChs.includes(ch)) fd.greenChs.push(ch);
+            if (entry.channelType === 'BLUE'  && !fd.blueChs.includes(ch))  fd.blueChs.push(ch);
             if (entry.channelType === 'COLOR_WHEEL') fd.wheelCh = ch;
           }
         }
@@ -59,11 +56,11 @@ const colorFixtures = computed(() => {
 
   // Filter out fixtures that don't have either (R, G, and B) OR a color wheel
   return Array.from(map.values()).filter(fd => 
-    (fd.redCh && fd.greenCh && fd.blueCh) || fd.wheelCh
+    (fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0) || fd.wheelCh
   );
 });
 
-const hasRgb = computed(() => colorFixtures.value.some(fd => fd.redCh && fd.greenCh && fd.blueCh));
+const hasRgb = computed(() => colorFixtures.value.some(fd => fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0));
 const hasWheel = computed(() => colorFixtures.value.some(fd => fd.wheelCh));
 
 // ─── Extract Color Wheel Colors ──────────────────────────────────────────
@@ -128,10 +125,10 @@ const avgRgb = computed(() => {
   let totalR = 0, totalG = 0, totalB = 0;
 
   for (const fd of colorFixtures.value) {
-    if (fd.redCh && fd.greenCh && fd.blueCh) {
-      totalR += fd.redCh.stepValues[props.activeStep] ?? 0;
-      totalG += fd.greenCh.stepValues[props.activeStep] ?? 0;
-      totalB += fd.blueCh.stepValues[props.activeStep] ?? 0;
+    if (fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0) {
+      totalR += fd.redChs[0].stepValues[props.activeStep] ?? 0;
+      totalG += fd.greenChs[0].stepValues[props.activeStep] ?? 0;
+      totalB += fd.blueChs[0].stepValues[props.activeStep] ?? 0;
       validCount++;
     }
   }
@@ -212,12 +209,12 @@ function updateColorFromEvent(e: MouseEvent | TouchEvent) {
   const allFixtures = colorFixtures.value.map(fd => fd.fixture);
   emit('before-change', allFixtures);
 
-  // Update RGB channels
+  // Update ALL RGB channels
   for (const fd of colorFixtures.value) {
-    if (fd.redCh && fd.greenCh && fd.blueCh) {
-      padStepValues(fd.redCh, r);
-      padStepValues(fd.greenCh, g);
-      padStepValues(fd.blueCh, b);
+    if (fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0) {
+      for (const ch of fd.redChs)   padStepValues(ch, r);
+      for (const ch of fd.greenChs) padStepValues(ch, g);
+      for (const ch of fd.blueChs)  padStepValues(ch, b);
     }
     
     // Sync Wheel to nearest color
@@ -292,10 +289,10 @@ function selectColorBox(c: WheelColorOpt) {
     if (fd.wheelCh) {
       padStepValues(fd.wheelCh, c.value);
     }
-    if (fd.redCh && fd.greenCh && fd.blueCh) {
-      padStepValues(fd.redCh, c.r);
-      padStepValues(fd.greenCh, c.g);
-      padStepValues(fd.blueCh, c.b);
+    if (fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0) {
+      for (const ch of fd.redChs)   padStepValues(ch, c.r);
+      for (const ch of fd.greenChs) padStepValues(ch, c.g);
+      for (const ch of fd.blueChs)  padStepValues(ch, c.b);
     }
   }
 
