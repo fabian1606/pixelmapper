@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watchEffect, shallowRef, computed, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, shallowRef, computed, nextTick, markRaw, triggerRef, watch } from 'vue';
 import { SineEffect } from '~/utils/engine/effects/sine-effect';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
@@ -30,6 +30,12 @@ const fixtureCount = COLS * ROWS;
 const engine = new EffectEngine();
 const history = useHistory();
 
+// When history changes, we must trigger updates on sceneNodes since it is a shallowRef
+// and commands mutate it without replacing the array instance.
+watch(() => history.version.value, () => {
+  triggerRef(sceneNodes);
+});
+
 // Create fixtures in a grid layout (normalized 0-1 positions)
 const stepX = 0.04;
 const stepY = 0.06;
@@ -41,6 +47,8 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
   const col = i % COLS;
   
   const fixture = Fixture.createRGBFixture(i);
+  fixture.startAddress = (i * 4) + 1;
+
   if (i === 0) fixture.name = 'Front Left';
   if (i === 9) fixture.name = 'Front Right';
   if (i === 30) fixture.name = 'Back Left';
@@ -54,11 +62,12 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
     x: 1,
     y: 1,
   };
-  return fixture;
+  return markRaw(fixture);
 });
 
-const sceneNodes = ref<SceneNode[]>([...fixtures]);
-const selectedIds = ref<Set<string | number>>(new Set());
+const sceneNodes = shallowRef<SceneNode[]>([...fixtures]);
+const selectedIds = shallowRef<Set<string | number>>(new Set());
+
 
 // Flat fixtures computed property for the engine and editor
 const flatFixtures = computed(() => {
@@ -94,15 +103,16 @@ watchEffect(() => {
       const base = globalBases.value[channel.type];
       if (base !== undefined) {
         // Skip channels that have been explicitly programmed by the user
-        const isProgrammed = channel.chaserConfig || channel.stepValues.some(v => v !== 0);
+        const isProgrammed = channel.chaserConfig.isPlaying || channel.chaserConfig.stepValues.some((v: number) => v !== 0);
         if (!isProgrammed) {
-          channel.stepValues[0] = base;
+          channel.chaserConfig.stepValues[0] = base;
           channel.currentBaseValue = base;
         }
       }
     }
   }
 });
+
 
 
 // Reactive color map — updated every frame, consumed by FixtureEditor
@@ -119,10 +129,10 @@ const renderLoop = (time: number) => {
 
   engine.render(flatFixtures.value, elapsed, deltaTime);
 
-  // Rebuild color map each frame so FixtureEditor stays live
+  // Rebuild color map each frame
   const colorMap = new Map<string | number, string>();
   for (const f of flatFixtures.value) {
-    colorMap.set(f.id, f.resolveColor());
+    colorMap.set(f.id, f.resolveColor(engine.dmxBuffer));
   }
   fixtureColors.value = colorMap;
 
@@ -216,9 +226,18 @@ let nextFixtureId = fixtureCount;
 const addDialogOpen = ref(false);
 
 function handleAddOflFixtures(fixtures: Fixture[]) {
-  // 1. Prepare fixtures (assign IDs and positions)
+  // Find highest address used
+  let maxAddress = 0;
+  for (const f of flatFixtures.value) {
+    const fMax = f.startAddress + f.channels.length - 1;
+    if (fMax > maxAddress) maxAddress = fMax;
+  }
+
+  // 1. Prepare fixtures (assign IDs, addresses, and positions)
   fixtures.forEach((f, i) => {
     f.id = `ofl-${nextFixtureId++}`;
+    f.startAddress = maxAddress + 1;
+    maxAddress += f.channels.length;
     // Spread them out slightly if multiple
     f.fixturePosition = { 
       x: 0.5 + (i * 0.02), 

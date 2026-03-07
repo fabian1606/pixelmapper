@@ -44,8 +44,8 @@ const representativeChannel = computed(() => {
     }
 
     if (ch) {
-      const hasNonZero = ch.stepValues.some(v => v !== 0);
-      const score = (hasNonZero ? 10000 : 0) + ch.stepValues.length;
+      const hasNonZero = ch.chaserConfig.stepValues.some(v => v !== 0);
+      const score = (hasNonZero ? 10000 : 0) + ch.chaserConfig.stepValues.length;
       
       if (score > maxScore) {
         maxScore = score;
@@ -57,10 +57,10 @@ const representativeChannel = computed(() => {
   return bestMatch;
 });
 
-const rawValue = ref(representativeChannel.value?.stepValues[props.activeStep] ?? 0);
+const rawValue = ref(representativeChannel.value?.chaserConfig.stepValues[props.activeStep] ?? 0);
 
 watch(
-  () => representativeChannel.value?.stepValues[props.activeStep],
+  () => representativeChannel.value?.chaserConfig.stepValues[props.activeStep],
   (newVal) => {
     if (newVal !== undefined && !isDragging.value) {
       rawValue.value = newVal;
@@ -124,23 +124,14 @@ function handleValueChange(newVal: number) {
     }
     
     for (const ch of matchedChannels) {
-      while (ch.stepValues.length <= props.activeStep) {
-        ch.stepValues.push(ch.stepValues[ch.stepValues.length - 1] ?? 0);
+      while (ch.chaserConfig.stepValues.length <= props.activeStep) {
+        ch.chaserConfig.stepValues.push(ch.chaserConfig.stepValues[ch.chaserConfig.stepValues.length - 1] ?? 0);
       }
-      ch.stepValues[props.activeStep] = clamped;
+      ch.chaserConfig.stepValues[props.activeStep] = clamped;
 
-      // Ensure that adjusting a value on a fixture that didn't have steps yet initializes its chaserConfig
-      // so it actually plays the newly padded sequence.
-      if (!ch.chaserConfig && props.activeStep > 0) {
-         ch.chaserConfig = {
-           stepsCount: props.activeStep + 1,
-           activeEditStep: props.activeStep,
-           isPlaying: true, // Auto-play if we just inherently activated steps
-           stepDurationMs: 1000,
-           fadeDurationMs: 0
-         };
-      } else if (ch.chaserConfig && ch.chaserConfig.stepsCount <= props.activeStep) {
-         ch.chaserConfig.stepsCount = props.activeStep + 1;
+      // If writing to a step beyond step 0, update the stepsCount so it plays the sequence
+      if (props.activeStep > 0 && ch.chaserConfig.stepsCount <= props.activeStep) {
+        ch.chaserConfig.stepsCount = props.activeStep + 1;
       }
     }
   }

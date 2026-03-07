@@ -203,6 +203,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       ref="fixtureCanvas"
       :fixtures="fixtures"
       :colors="colors"
+      :dmx-buffer="effectEngine?.dmxBuffer"
       :interaction="interaction"
       :camera="camera"
       :world-width="WORLD_WIDTH"

@@ -24,7 +24,7 @@ export function useChaserSteps(
 
     for (const f of props.fixtures) {
       for (const c of f.channels) {
-        if (tabChannelFilter(c.type, c.role) && c.chaserConfig) {
+        if (tabChannelFilter(c.type, c.role)) {
           if (!found) {
             isPlaying = c.chaserConfig.isPlaying;
             stepDuration = c.chaserConfig.stepDuration;
@@ -38,6 +38,7 @@ export function useChaserSteps(
     }
 
     return {
+      stepValues: [],
       stepsCount: maxSteps,
       activeEditStep: Math.min(maxActiveStep, maxSteps - 1),
       isPlaying,
@@ -54,12 +55,10 @@ export function useChaserSteps(
     for (const f of props.fixtures) {
       for (const c of f.channels) {
         if (tabChannelFilter(c.type, c.role)) {
-          if (!c.chaserConfig) c.chaserConfig = { ...target };
           c.chaserConfig.stepsCount = target.stepsCount;
           c.chaserConfig.activeEditStep = index;
-
-          while (c.stepValues.length < target.stepsCount) {
-            c.stepValues.push(c.stepValues[c.stepValues.length - 1] ?? 0);
+          while (c.chaserConfig.stepValues.length < target.stepsCount) {
+            c.chaserConfig.stepValues.push(c.chaserConfig.stepValues[c.chaserConfig.stepValues.length - 1] ?? 0);
           }
         }
       }
@@ -77,15 +76,12 @@ export function useChaserSteps(
     for (const fixture of props.fixtures) {
       for (const channel of fixture.channels) {
         if (tabChannelFilter(channel.type, channel.role)) {
-          if (!channel.chaserConfig) channel.chaserConfig = { ...target };
-
           channel.chaserConfig.stepsCount = newIndex + 1;
           channel.chaserConfig.activeEditStep = newIndex;
-
-          while (channel.stepValues.length < newIndex) {
-            channel.stepValues.push(channel.stepValues[channel.stepValues.length - 1] ?? 0);
+          while (channel.chaserConfig.stepValues.length < newIndex) {
+            channel.chaserConfig.stepValues.push(channel.chaserConfig.stepValues[channel.chaserConfig.stepValues.length - 1] ?? 0);
           }
-          channel.stepValues[newIndex] = channel.stepValues[target.activeEditStep] ?? channel.stepValues[channel.stepValues.length - 1] ?? 0;
+          channel.chaserConfig.stepValues[newIndex] = channel.chaserConfig.stepValues[target.activeEditStep] ?? channel.chaserConfig.stepValues[channel.chaserConfig.stepValues.length - 1] ?? 0;
         }
       }
     }
@@ -103,12 +99,10 @@ export function useChaserSteps(
     for (const fixture of props.fixtures) {
       for (const channel of fixture.channels) {
         if (tabChannelFilter(channel.type, channel.role)) {
-          if (!channel.chaserConfig) channel.chaserConfig = { ...target };
-
-          while (channel.stepValues.length < target.stepsCount) {
-            channel.stepValues.push(channel.stepValues[channel.stepValues.length - 1] ?? 0);
+          while (channel.chaserConfig.stepValues.length < target.stepsCount) {
+            channel.chaserConfig.stepValues.push(channel.chaserConfig.stepValues[channel.chaserConfig.stepValues.length - 1] ?? 0);
           }
-          channel.stepValues.splice(toDelete, 1);
+          channel.chaserConfig.stepValues.splice(toDelete, 1);
 
           channel.chaserConfig.stepsCount = target.stepsCount - 1;
           if (toDelete === target.stepsCount - 1 && target.activeEditStep === toDelete) {
@@ -132,7 +126,6 @@ export function useChaserSteps(
     for (const fixture of props.fixtures) {
       for (const channel of fixture.channels) {
         if (tabChannelFilter(channel.type, channel.role)) {
-          if (!channel.chaserConfig) channel.chaserConfig = { ...target };
           channel.chaserConfig[key] = value;
         }
       }
@@ -148,10 +141,12 @@ export function useChaserSteps(
     for (const fixture of props.fixtures) {
       for (const channel of fixture.channels) {
         if (tabChannelFilter(channel.type, channel.role)) {
-          channel.chaserConfig = undefined;
-          if (channel.stepValues.length > 1) {
-            channel.stepValues = [channel.stepValues[target.activeEditStep] ?? channel.stepValues[0] ?? 0];
-          }
+          // Collapse to single static step (the currently selected value)
+          const keepValue = channel.chaserConfig.stepValues[target.activeEditStep] ?? channel.chaserConfig.stepValues[0] ?? 0;
+          channel.chaserConfig.stepValues = [keepValue];
+          channel.chaserConfig.stepsCount = 1;
+          channel.chaserConfig.activeEditStep = 0;
+          channel.chaserConfig.isPlaying = false;
         }
       }
     }

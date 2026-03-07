@@ -126,9 +126,9 @@ const avgRgb = computed(() => {
 
   for (const fd of colorFixtures.value) {
     if (fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0) {
-      totalR += fd.redChs[0].stepValues[props.activeStep] ?? 0;
-      totalG += fd.greenChs[0].stepValues[props.activeStep] ?? 0;
-      totalB += fd.blueChs[0].stepValues[props.activeStep] ?? 0;
+      totalR += fd.redChs[0].chaserConfig.stepValues[props.activeStep] ?? 0;
+      totalG += fd.greenChs[0].chaserConfig.stepValues[props.activeStep] ?? 0;
+      totalB += fd.blueChs[0].chaserConfig.stepValues[props.activeStep] ?? 0;
       validCount++;
     }
   }
@@ -154,20 +154,12 @@ const isDraggingWheel = ref(false);
 let currentDragSnapshots: SnapshotMap | null = null;
 
 function padStepValues(ch: any, val: number) {
-  while (ch.stepValues.length <= props.activeStep) {
-    ch.stepValues.push(ch.stepValues[ch.stepValues.length - 1] ?? 0);
+  while (ch.chaserConfig.stepValues.length <= props.activeStep) {
+    ch.chaserConfig.stepValues.push(ch.chaserConfig.stepValues[ch.chaserConfig.stepValues.length - 1] ?? 0);
   }
-  ch.stepValues[props.activeStep] = val;
+  ch.chaserConfig.stepValues[props.activeStep] = val;
 
-  if (!ch.chaserConfig && props.activeStep > 0) {
-    ch.chaserConfig = {
-      stepsCount: props.activeStep + 1,
-      activeEditStep: props.activeStep,
-      isPlaying: true,
-      stepDurationMs: 1000,
-      fadeDurationMs: 0
-    };
-  } else if (ch.chaserConfig && ch.chaserConfig.stepsCount <= props.activeStep) {
+  if (props.activeStep > 0 && ch.chaserConfig.stepsCount <= props.activeStep) {
     ch.chaserConfig.stepsCount = props.activeStep + 1;
   }
 }

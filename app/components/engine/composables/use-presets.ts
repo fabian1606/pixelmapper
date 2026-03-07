@@ -9,11 +9,12 @@ import { applyPreset as _applyPreset, stopPreset as _stopPreset } from './preset
 // Re-export for consumers that import extractCategories from this module
 export { extractCategories } from './preset-diff';
 
+import { storeToRefs } from 'pinia';
+import { useEngineStore } from '~/stores/engine-store';
+
 // ─── Singleton state ──────────────────────────────────────────────────────────
 
 let nextPresetIndex = 1;
-const savedPresets = ref<Preset[]>([]);
-const selectedPresetId = ref<string | null>(null);
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -25,6 +26,9 @@ const selectedPresetId = ref<string | null>(null);
  * and preset application.
  */
 export function usePresets() {
+  const store = useEngineStore();
+  const { savedPresets, selectedPresetId } = storeToRefs(store);
+
   function getActivePreset(): Preset | null {
     return selectedPresetId.value
       ? (savedPresets.value.find((p) => p.id === selectedPresetId.value) ?? null)

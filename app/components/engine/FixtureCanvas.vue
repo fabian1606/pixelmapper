@@ -7,8 +7,10 @@ import type { Camera } from './composables/use-camera';
 interface Props {
   fixtures: Fixture[];
   colors: Map<string | number, string>;
+  dmxBuffer?: Uint8Array;
   interaction: Interaction;
   camera: Camera;
+
   worldWidth: number;
   worldHeight: number;
   viewportWidth: number;
@@ -104,7 +106,7 @@ function draw() {
         // localX/Y is in -0.5..+0.5 → map to fixture footprint
         const bx = wx + beam.localX * halfW * 2;
         const by = wy + beam.localY * halfH * 2;
-        const beamColor = fixture.resolveColor(beam.id);
+        const beamColor = fixture.resolveColor(props.dmxBuffer || new Uint8Array(), beam.id);
 
         // Glow halo for this beam
         const glow = ctx.createRadialGradient(bx, by, 0, bx, by, clampedPixelR * 3.5);

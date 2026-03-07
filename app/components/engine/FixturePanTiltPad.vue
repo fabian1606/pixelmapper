@@ -65,8 +65,8 @@ const avgPanTilt = computed(() => {
   let totalP = 0, totalT = 0;
 
   for (const fd of panTiltFixtures.value) {
-    totalP += fd.panCh?.stepValues[props.activeStep] ?? 0;
-    totalT += fd.tiltCh?.stepValues[props.activeStep] ?? 0;
+    totalP += fd.panCh?.chaserConfig.stepValues[props.activeStep] ?? 0;
+    totalT += fd.tiltCh?.chaserConfig.stepValues[props.activeStep] ?? 0;
     validCount++;
   }
 
@@ -84,20 +84,11 @@ const isDraggingPad = ref(false);
 let currentDragSnapshots: SnapshotMap | null = null;
 
 function padStepValues(ch: any, val: number) {
-  while (ch.stepValues.length <= props.activeStep) {
-    ch.stepValues.push(ch.stepValues[ch.stepValues.length - 1] ?? 0);
+  while (ch.chaserConfig.stepValues.length <= props.activeStep) {
+    ch.chaserConfig.stepValues.push(ch.chaserConfig.stepValues[ch.chaserConfig.stepValues.length - 1] ?? 0);
   }
-  ch.stepValues[props.activeStep] = Math.max(0, Math.min(255, Math.round(val)));
-
-  if (!ch.chaserConfig && props.activeStep > 0) {
-    ch.chaserConfig = {
-      stepsCount: props.activeStep + 1,
-      activeEditStep: props.activeStep,
-      isPlaying: true,
-      stepDurationMs: 1000,
-      fadeDurationMs: 0
-    };
-  } else if (ch.chaserConfig && ch.chaserConfig.stepsCount <= props.activeStep) {
+  ch.chaserConfig.stepValues[props.activeStep] = Math.max(0, Math.min(255, Math.round(val)));
+  if (props.activeStep > 0 && ch.chaserConfig.stepsCount <= props.activeStep) {
     ch.chaserConfig.stepsCount = props.activeStep + 1;
   }
 }

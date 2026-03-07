@@ -28,6 +28,12 @@ export interface SpeedConfig {
 }
 
 export interface ChannelChaserConfig {
+  /**
+   * The programmed DMX step values for this channel.
+   * A single-element array represents a static "scene" value.
+   * Chaser engines interpolate across multiple steps.
+   */
+  stepValues: number[];
   stepsCount: number;
   activeEditStep: number;
   isPlaying: boolean;

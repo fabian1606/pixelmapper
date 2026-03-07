@@ -244,7 +244,8 @@ export function createFixtureFromOfl(
   // ── 2. Build Channel objects ──────────────────────────────────────────────
   const channels: Channel[] = [];
 
-  for (const item of expandedKeys) {
+  for (let dmxIndex = 0; dmxIndex < expandedKeys.length; dmxIndex++) {
+    const item = expandedKeys[dmxIndex]!;
     if (isFineChannel(item.key, item.templateKey, oflFixture)) continue;
 
     // Lookup order:
@@ -264,8 +265,8 @@ export function createFixtureFromOfl(
 
     channels.push({
       type: mapped.type,
+      addressOffset: dmxIndex,
       value: mapped.defaultValue,
-      stepValues: [mapped.defaultValue],
       currentBaseValue: mapped.defaultValue,
       role: mapped.role,
       colorValue: mapped.colorValue,
@@ -274,6 +275,14 @@ export function createFixtureFromOfl(
       beamId: item.beamId,
       oflCapabilities: caps,
       oflWheels: oflFixture.wheels ?? {},
+      chaserConfig: {
+        stepValues: [mapped.defaultValue],
+        stepsCount: 1,
+        activeEditStep: 0,
+        isPlaying: false,
+        stepDuration: { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 },
+        fadeDuration: { mode: 'time', timeMs: 0, beatValue: 0, beatOffset: 0 },
+      },
     });
   }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watchEffect } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect, markRaw } from 'vue';
 import { SineEffect } from '~/utils/engine/effects/sine-effect';
+
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 
@@ -25,6 +26,8 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
   const col = i % COLS;
   
   const fixture = Fixture.createRGBFixture(i);
+  fixture.startAddress = (i * 4) + 1;
+  
   if (i === 0) fixture.name = 'Front Left';
   if (i === 9) fixture.name = 'Front Right';
   if (i === 30) fixture.name = 'Back Left';
@@ -38,10 +41,11 @@ const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
     x: 1,
     y: 1,
   };
-  return fixture;
+  return markRaw(fixture);
 });
 
 // Global Base Values
+
 const globalBases = ref<Record<string, number>>({
   RED: 0,
   GREEN: 0,
@@ -66,7 +70,7 @@ watchEffect(() => {
     for (const channel of fixture.channels) {
       const base = globalBases.value[channel.type];
       if (base !== undefined) {
-        channel.stepValues[0] = base;
+        channel.chaserConfig.stepValues[0] = base;
         channel.currentBaseValue = base;
       }
     }
@@ -102,8 +106,9 @@ const renderLoop = (time: number) => {
   // Rebuild color map each frame so FixtureEditor stays live
   const colorMap = new Map<string | number, string>();
   fixtureSnapshots.value = fixtures.map(f => {
-    colorMap.set(f.id, f.resolveColor());
+    colorMap.set(f.id, f.resolveColor(engine.dmxBuffer));
     return { id: f.id, channels: f.channels.map(c => ({ type: c.type, value: c.value })) };
+
   });
   fixtureColors.value = colorMap;
 

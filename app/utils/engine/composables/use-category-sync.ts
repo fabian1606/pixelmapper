@@ -22,8 +22,8 @@ export function findRichestFixture(fixtures: Fixture[], filter: ChannelFilter, e
 
     for (const c of f.channels) {
       if (!filter(c.type, c.role)) continue;
-      stepsCount += c.stepValues.length;
-      if (c.stepValues.some(v => v !== 0)) hasNonZero = true;
+      stepsCount += c.chaserConfig.stepValues.length;
+      if (c.chaserConfig.stepValues.some(v => v !== 0)) hasNonZero = true;
     }
 
     let effectCount = 0;
@@ -73,8 +73,12 @@ export function syncCategoryFromSource(
 
     if (mode === 'steps' || mode === 'all') {
       // Always sync target to match source (as requested for overriding)
-      tc.stepValues = [...sc.stepValues];
-      tc.chaserConfig = sc.chaserConfig ? { ...sc.chaserConfig } : undefined;
+      tc.chaserConfig.stepValues = [...sc.chaserConfig.stepValues];
+      tc.chaserConfig.stepsCount = sc.chaserConfig.stepsCount;
+      tc.chaserConfig.activeEditStep = sc.chaserConfig.activeEditStep;
+      tc.chaserConfig.isPlaying = sc.chaserConfig.isPlaying;
+      tc.chaserConfig.stepDuration = { ...sc.chaserConfig.stepDuration };
+      tc.chaserConfig.fadeDuration = { ...sc.chaserConfig.fadeDuration };
     }
   }
 

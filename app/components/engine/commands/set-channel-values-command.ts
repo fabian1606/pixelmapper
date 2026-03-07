@@ -21,9 +21,10 @@ export type SnapshotMap = Map<ChannelRef, { before: ChannelSnapshot; after: Chan
  */
 export function createSnapshot(channel: Channel): ChannelSnapshot {
   return {
-    stepValues: [...channel.stepValues],
+    stepValues: [...channel.chaserConfig.stepValues],
     colorValue: channel.colorValue,
-    chaserConfig: channel.chaserConfig ? JSON.parse(JSON.stringify(channel.chaserConfig)) : undefined
+    // Snapshot the full chaserConfig (includes stepValues, timing, etc.)
+    chaserConfig: JSON.parse(JSON.stringify(channel.chaserConfig))
   };
 }
 
@@ -43,9 +44,8 @@ export class SetChannelValuesCommand implements Command {
       const channel = ref.fixture.channels[ref.channelIndex];
       if (!channel) continue;
 
-      channel.stepValues = [...state.after.stepValues];
+      Object.assign(channel.chaserConfig, JSON.parse(JSON.stringify(state.after.chaserConfig)));
       channel.colorValue = state.after.colorValue;
-      channel.chaserConfig = state.after.chaserConfig ? JSON.parse(JSON.stringify(state.after.chaserConfig)) : undefined;
     }
   }
 
@@ -54,9 +54,8 @@ export class SetChannelValuesCommand implements Command {
       const channel = ref.fixture.channels[ref.channelIndex];
       if (!channel) continue;
 
-      channel.stepValues = [...state.before.stepValues];
+      Object.assign(channel.chaserConfig, JSON.parse(JSON.stringify(state.before.chaserConfig)));
       channel.colorValue = state.before.colorValue;
-      channel.chaserConfig = state.before.chaserConfig ? JSON.parse(JSON.stringify(state.before.chaserConfig)) : undefined;
     }
   }
 }

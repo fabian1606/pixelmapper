@@ -47,8 +47,8 @@ export function getEffectCategoryType(effect: Effect): PresetCategoryType {
 
 /** Returns true if a channel has been actively programmed from its default. */
 export function isChannelProgrammed(ch: Channel): boolean {
-  if (ch.chaserConfig) return true;
-  return ch.stepValues.some((v) => v !== ch.defaultValue);
+  if (ch.chaserConfig.isPlaying || ch.chaserConfig.stepsCount > 1) return true;
+  return ch.chaserConfig.stepValues.some((v) => v !== ch.defaultValue);
 }
 
 // ─── Fingerprinting ───────────────────────────────────────────────────────────

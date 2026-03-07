@@ -17,6 +17,7 @@ export interface Command {
 const MAX_SIZE = 100;
 const past = ref<Command[]>([]);
 const future = ref<Command[]>([]);
+const version = ref(0);
 
 /**
  * Global undo/redo history stack (singleton).
@@ -41,6 +42,7 @@ export function useHistory() {
     past.value.push(command);
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
+    version.value++;
   }
 
   function undo() {
@@ -50,6 +52,7 @@ export function useHistory() {
     }
     command.undo();
     future.value.push(command);
+    version.value++;
   }
 
   function redo() {
@@ -57,9 +60,10 @@ export function useHistory() {
     if (!command) return;
     command.execute();
     past.value.push(command);
+    version.value++;
   }
 
-  return { execute, undo, redo, canUndo, canRedo, lastDescription };
+  return { execute, undo, redo, canUndo, canRedo, lastDescription, version };
 }
 
 export type History = ReturnType<typeof useHistory>;

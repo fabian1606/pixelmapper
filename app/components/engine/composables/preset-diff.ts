@@ -125,8 +125,8 @@ function diffChannels(
         const snap: PresetChannelSnapshot = {
           channelIndex: i,
           channelType: ch.type,
-          stepValues: [...ch.stepValues],
-          chaserConfig: ch.chaserConfig ? { ...ch.chaserConfig } : undefined,
+          stepValues: [...ch.chaserConfig.stepValues],
+          chaserConfig: { ...ch.chaserConfig },
         };
 
         if (activePreset) {

@@ -9,6 +9,12 @@ export class EffectEngine {
   public activeModifier: Ref<Effect | null> = ref(null);
 
   /**
+   * The global DMX buffer containing the final calculated values for up to 512 channels.
+   * Format: Uint8Array(512). Access via buffer[startAddress - 1 + addressOffset].
+   */
+  public dmxBuffer: Uint8Array = new Uint8Array(512);
+
+  /**
    * Global BPM for the engine, used to calculate beat-based speeds.
    */
   public globalBpm = ref<number>(120);
@@ -66,14 +72,14 @@ export class EffectEngine {
         if (!chaserState || chaserState.stepsCount <= 1 || !chaserState.isPlaying) {
           // Static / edit mode
           const activeStep = chaserState?.activeEditStep ?? 0;
-          channel.currentBaseValue = channel.stepValues[activeStep] ?? 0;
+          channel.currentBaseValue = chaserState.stepValues[activeStep] ?? 0;
         } else {
           // Chaser playback mode
           const stepMs = this.resolveSpeedToMs(chaserState.stepDuration);
           const fadeMs = this.resolveSpeedToMs(chaserState.fadeDuration);
 
           if (stepMs === Infinity) {
-            channel.currentBaseValue = channel.stepValues[chaserState.activeEditStep] ?? 0;
+            channel.currentBaseValue = chaserState.stepValues[chaserState.activeEditStep] ?? 0;
           } else {
             const beatDurMs = 60000 / this.globalBpm.value;
             const offsetMs = chaserState.stepDuration.mode === 'beat' ? (chaserState.stepDuration.beatOffset || 0) * beatDurMs : 0;
@@ -93,8 +99,8 @@ export class EffectEngine {
               factor = 1; // Holding phase
             }
 
-            const v1 = channel.stepValues[currentIndex] ?? 0;
-            const v2 = channel.stepValues[nextIndex] ?? 0;
+            const v1 = chaserState.stepValues[currentIndex] ?? 0;
+            const v2 = chaserState.stepValues[nextIndex] ?? 0;
             channel.currentBaseValue = v1 + (v2 - v1) * factor;
           }
         }
@@ -179,6 +185,9 @@ export class EffectEngine {
 
       for (const channel of fixture.channels) {
         channel.value = Math.min(Math.max(Math.round(channel.value), 0), 255);
+
+        // Write final value to global DMX buffer
+        this.dmxBuffer[fixture.startAddress - 1 + channel.addressOffset] = channel.value;
       }
     }
   }

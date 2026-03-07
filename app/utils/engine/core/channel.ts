@@ -16,17 +16,17 @@ export type ChannelRole = 'COLOR' | 'DIMMER' | 'NONE';
 export interface Channel {
   /** The OFL-aligned channel type (e.g. RED, GREEN, DIMMER, PAN). */
   type: ChannelType;
-  /** Current DMX output value (0–255), written each frame by the EffectEngine. */
+  /** 0-based index offset from the fixture's startAddress */
+  addressOffset: number;
+
+  /**
+   * Current DMX output value (0–255), written each frame by the EffectEngine.
+   * This is a runtime scratch field — do not persist or clone it.
+   */
   value: number;
   /**
-   * The programmed step values for this channel.
-   * If there is only 1 step, this array has length 1.
-   * Chaser engines interpolate across these steps.
-   */
-  stepValues: number[];
-  /**
-   * The dynamic base value for this frame (interpolated between steps).
-   * Effects are applied additively on top of this.
+   * The computed base value for this frame (interpolated between chaser steps).
+   * This is a runtime scratch field — do not persist or clone it.
    */
   currentBaseValue: number;
   /** How this channel contributes to the fixture's visual color computation. */
@@ -51,8 +51,8 @@ export interface Channel {
    */
   oflWheels?: Record<string, OflWheel>;
   /**
-   * State and configuration for building sequences natively on this channel.
-   * If undefined, the channel defaults to rendering stepValues[0].
+   * Chaser configuration and programmed step values for this channel.
+   * Always present — even a static channel has a chaserConfig with a single stepValue.
    */
-  chaserConfig?: import('../types').ChannelChaserConfig;
+  chaserConfig: import('../types').ChannelChaserConfig;
 }

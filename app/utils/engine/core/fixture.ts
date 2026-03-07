@@ -17,6 +17,7 @@ export class Fixture {
   name: string;
   channels: Channel[];
   parent: import('./group').FixtureGroup | null = null;
+  startAddress: number; // 1-based DMX start address
 
   fixturePosition: FixturePosition;
   fixtureSize: FixtureSize;
@@ -30,10 +31,11 @@ export class Fixture {
    */
   oflKey?: string;
 
-  constructor(id: string | number, channels: Channel[] = []) {
+  constructor(id: string | number, channels: Channel[] = [], startAddress: number = 1) {
     this.id = id;
     this.name = `Fixture ${id}`;
     this.channels = channels;
+    this.startAddress = startAddress;
     this.fixturePosition = { x: 0, y: 0 };
     this.fixtureSize = { x: 1, y: 1 };
     this.beams = [new Beam('beam-0', 0, 0)];
@@ -62,20 +64,22 @@ export class Fixture {
    * Mixes its COLOR channels and applies any DIMMER channels as a global intensity multiplier.
    * Channels without a beamId apply to all beams (e.g., Master Dimmer).
    */
-  resolveColor(beamId?: string): string {
+  resolveColor(dmxBuffer: Uint8Array, beamId?: string): string {
     const applies = (c: Channel) => !beamId || !c.beamId || c.beamId === beamId;
 
     const colorChannels = this.channels.filter(c => c.role === 'COLOR' && applies(c));
     const dimmerChannels = this.channels.filter(c => c.role === 'DIMMER' && applies(c));
 
     const dimmerMultiplier = dimmerChannels.length > 0
-      ? dimmerChannels.reduce((sum, d) => sum + d.value, 0) / (dimmerChannels.length * 255)
+      ? dimmerChannels.reduce((sum, d) => sum + (dmxBuffer[this.startAddress - 1 + d.addressOffset] ?? 0), 0) / (dimmerChannels.length * 255)
       : 1.0;
+
 
     let r = 0, g = 0, b = 0;
     for (const ch of colorChannels) {
       if (!ch.colorValue) continue;
-      const factor = ch.value / 255;
+      const val = dmxBuffer[this.startAddress - 1 + ch.addressOffset] ?? 0;
+      const factor = val / 255;
       const hex = ch.colorValue.replace('#', '');
       r += parseInt(hex.substring(0, 2), 16) * factor;
       g += parseInt(hex.substring(2, 4), 16) * factor;
@@ -92,12 +96,22 @@ export class Fixture {
    * Maps to OFL fixture "generic/drgb-fader".
    */
   static createRGBFixture(id: number | string): Fixture {
+    const makeChaser = (defaultVal: number): import('./channel').Channel['chaserConfig'] => ({
+      stepValues: [defaultVal],
+      stepsCount: 1,
+      activeEditStep: 0,
+      isPlaying: false,
+      stepDuration: { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 },
+      fadeDuration: { mode: 'time', timeMs: 0, beatValue: 0, beatOffset: 0 },
+    });
+
     const fixture = new Fixture(id, [
-      { type: 'RED', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#FF0000' },
-      { type: 'GREEN', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#00FF00' },
-      { type: 'BLUE', value: 0, defaultValue: 0, stepValues: [0], currentBaseValue: 0, role: 'COLOR', colorValue: '#0000FF' },
-      { type: 'DIMMER', value: 255, defaultValue: 255, stepValues: [255], currentBaseValue: 255, role: 'DIMMER', colorValue: '#FFFFFF' },
+      { type: 'RED', addressOffset: 0, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#FF0000', chaserConfig: makeChaser(0) },
+      { type: 'GREEN', addressOffset: 1, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#00FF00', chaserConfig: makeChaser(0) },
+      { type: 'BLUE', addressOffset: 2, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#0000FF', chaserConfig: makeChaser(0) },
+      { type: 'DIMMER', addressOffset: 3, value: 255, currentBaseValue: 255, defaultValue: 255, role: 'DIMMER', colorValue: '#FFFFFF', chaserConfig: makeChaser(255) },
     ]);
+
     fixture.oflKey = 'generic/drgb-fader';
     return fixture;
   }

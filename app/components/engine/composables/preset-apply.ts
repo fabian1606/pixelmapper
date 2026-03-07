@@ -10,9 +10,11 @@ import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 export function resetFixtureChannels(fixtures: Fixture[]): void {
   for (const fixture of fixtures) {
     for (const ch of fixture.channels) {
-      ch.stepValues = [ch.defaultValue];
+      ch.chaserConfig.stepValues = [ch.defaultValue];
+      ch.chaserConfig.stepsCount = 1;
+      ch.chaserConfig.activeEditStep = 0;
+      ch.chaserConfig.isPlaying = false;
       ch.currentBaseValue = ch.defaultValue;
-      ch.chaserConfig = undefined;
     }
   }
 }
@@ -66,9 +68,13 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
       for (const snap of category.channels) {
         const ch = fixture.channels[snap.channelIndex];
         if (!ch || ch.type !== snap.channelType) continue; // sanity check
-        ch.stepValues = [...snap.stepValues];
+        ch.chaserConfig.stepValues = [...snap.stepValues];
+        ch.chaserConfig.stepsCount = snap.chaserConfig?.stepsCount ?? snap.stepValues.length;
+        ch.chaserConfig.activeEditStep = snap.chaserConfig?.activeEditStep ?? 0;
+        ch.chaserConfig.isPlaying = snap.chaserConfig?.isPlaying ?? false;
+        if (snap.chaserConfig?.stepDuration) ch.chaserConfig.stepDuration = { ...snap.chaserConfig.stepDuration };
+        if (snap.chaserConfig?.fadeDuration) ch.chaserConfig.fadeDuration = { ...snap.chaserConfig.fadeDuration };
         ch.currentBaseValue = snap.stepValues[0] ?? ch.defaultValue;
-        ch.chaserConfig = snap.chaserConfig ? { ...snap.chaserConfig } : undefined;
       }
     }
 
@@ -100,9 +106,11 @@ export function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect
 
       for (const ch of fixture.channels) {
         if (getCategoryType(ch.type) === category.type) {
-          ch.stepValues = [ch.defaultValue];
+          ch.chaserConfig.stepValues = [ch.defaultValue];
+          ch.chaserConfig.stepsCount = 1;
+          ch.chaserConfig.activeEditStep = 0;
+          ch.chaserConfig.isPlaying = false;
           ch.currentBaseValue = ch.defaultValue;
-          ch.chaserConfig = undefined;
         }
       }
     }
@@ -138,9 +146,11 @@ export function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[
       for (const snap of category.channels) {
         const ch = fixture.channels[snap.channelIndex];
         if (!ch || ch.type !== snap.channelType) continue; // sanity check
-        ch.stepValues = [ch.defaultValue];
+        ch.chaserConfig.stepValues = [ch.defaultValue];
+        ch.chaserConfig.stepsCount = 1;
+        ch.chaserConfig.activeEditStep = 0;
+        ch.chaserConfig.isPlaying = false;
         ch.currentBaseValue = ch.defaultValue;
-        ch.chaserConfig = undefined;
       }
     }
 
