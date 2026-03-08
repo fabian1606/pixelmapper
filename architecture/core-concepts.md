@@ -10,10 +10,10 @@ A `FixtureGroup` is a logical container that can hold `Fixture`s or other `Fixtu
 - **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
 - **`getAllFixtures()`** — Recursively extracts all child fixtures for rendering limitelessly nested groups.
 
-*Note: The primary node array `sceneNodes` is tracked as a `shallowRef` to prevent Vue from doing deep reactivity loops over the graph for performance.*
+*Note: The primary node array `sceneNodes` is tracked as a `shallowRef` inside Pinia. This deliberately prevents Vue from doing deep reactivity loops over the graph for performance. Adding/removing nodes requires replacing the array or calling `triggerRef(sceneNodes)`.*
 
 ## Fixture
-A `Fixture` is the top-level entity representing a physical light device. It is instantiated and wrapped in `markRaw()` to optimize engine performance.
+A `Fixture` is the top-level entity representing a physical light device. Because they are stored inside a `shallowRef`, they act as plain JavaScript objects. This Data-Oriented Design (DoD) choice explicitly prevents Vue from converting thousands of nested fixture properties into expensive reactive proxies, which would otherwise cripple the 60fps render loop.
 - **`id`** — Unique identifier.
 - **`name`** — Display name.
 - **`startAddress: number`** — 1-based universe address for this fixture's DMX footprint. (Used to write into the global `dmxBuffer`).

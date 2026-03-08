@@ -9,6 +9,13 @@ The visual surface of the application. The UI mostly reads from `engine.dmxBuffe
 - Positions are normalized (0–1), making them resolution-independent.
 - The updated positions are immediately used by spatial direction modes (SPATIAL_X/Y/RADIAL) in the next render frame.
 
+### 60fps Rendering Optimizations
+To maintain a smooth 60fps even with 50+ fixtures on screen, the editor employs several advanced DOM and Vue optimization strategies:
+1. **Containerization for O(1) Camera Panning**: Instead of recalculating camera offsets for each fixture, all fixtures are placed in a single static `.world-container`. The camera's pan and zoom are applied globally to this container using `transform: translate3d(...) scale(...)`. This reduces the rendering cost of moving the camera from O(N) to O(1).
+2. **Hardware-Accelerated CSS**: Individual fixture nodes are mapped to their world coordinates using `transform: translate3d(...)` rather than `left` and `top` CSS properties, shifting DOM movement entirely to the GPU and preventing layout thrashing.
+3. **Reactivity Detachment`: The underlying `FixtureCanvas` (which draws the beams) is explicitly detached from Vue's deep reactivity system. Instead of using `watchEffect` (which builds massive dependency graphs out of the deeply reactive Fixtures 60 times a second), it relies on manual, shallow watchers on the `camera` and `engine.dmxBuffer` to trigger its `draw()` loop.
+4. **Native Clipping**: We omit `v-show` and `v-if` for off-screen fixtures entirely. Because the world container has `overflow: hidden`, the browser's native compositing engine perfectly clips invisible DOM nodes essentially for free, whereas Vue directive evaluations incur significant CPU overhead during rapid zooming or panning.
+
 `FixtureWorkspace.vue` wraps the editor and provides the core layout for the canvas, along with the main right-click Context Menu.
 
 `index.vue` is deliberately kept as a pure layout shell, using `useWorkspaceOperations()` to delegate Node logic, and the `engine-store.ts` for all selection and data references.
@@ -38,4 +45,4 @@ To support `Cmd+Z`, the system uses `SetChannelValuesCommand`:
 4. If there's a difference, the `SetChannelValuesCommand` is pushed to `useHistory()`.
 
 ### The Ticker Pattern
-Beyond undo/redo, `useHistory()` provides a reactive `version` ref. This acts as a global "state changed" heartbeat for the application. Components use it to trigger re-renders that would otherwise be missed by Vue due to `markRaw()` performance optimizations on the core engine data.
+Beyond undo/redo, `useHistory()` provides a reactive `version` ref. This acts as a global "state changed" heartbeat for the application. Because fixtures are stored in a `shallowRef` (to prevent massive deep proxy evaluation graphs natively in Vue), components use this Ticker version to explicitly trigger re-renders exactly when needed.
