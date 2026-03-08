@@ -1,6 +1,7 @@
 import type { ChannelType, SpatialVector } from '../types';
 import type { Channel } from './channel';
 import { Beam } from './beam';
+import { reactive } from 'vue';
 
 export interface FixturePosition {
   x: number;
@@ -49,17 +50,6 @@ export class Fixture {
   }
 
   /**
-   * Updates a specific channel type with a new value.
-   * If there are multiple channels of the same type, all are updated.
-   */
-  updateChannelValue(type: ChannelType, value: number) {
-    const channels = this.getChannelsByType(type);
-    for (const channel of channels) {
-      channel.value = value;
-    }
-  }
-
-  /**
    * Computes the final visual RGBA color of this fixture (or a specific beam).
    * Mixes its COLOR channels and applies any DIMMER channels as a global intensity multiplier.
    * Channels without a beamId apply to all beams (e.g., Master Dimmer).
@@ -96,7 +86,7 @@ export class Fixture {
    * Maps to OFL fixture "generic/drgb-fader".
    */
   static createRGBFixture(id: number | string): Fixture {
-    const makeChaser = (defaultVal: number): import('./channel').Channel['chaserConfig'] => ({
+    const makeChaser = (defaultVal: number): import('./channel').Channel['chaserConfig'] => reactive({
       stepValues: [defaultVal],
       stepsCount: 1,
       activeEditStep: 0,
@@ -106,10 +96,10 @@ export class Fixture {
     });
 
     const fixture = new Fixture(id, [
-      { type: 'RED', addressOffset: 0, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#FF0000', chaserConfig: makeChaser(0) },
-      { type: 'GREEN', addressOffset: 1, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#00FF00', chaserConfig: makeChaser(0) },
-      { type: 'BLUE', addressOffset: 2, value: 0, currentBaseValue: 0, defaultValue: 0, role: 'COLOR', colorValue: '#0000FF', chaserConfig: makeChaser(0) },
-      { type: 'DIMMER', addressOffset: 3, value: 255, currentBaseValue: 255, defaultValue: 255, role: 'DIMMER', colorValue: '#FFFFFF', chaserConfig: makeChaser(255) },
+      { type: 'RED', addressOffset: 0, role: 'COLOR', colorValue: '#FF0000', defaultValue: 0, chaserConfig: makeChaser(255) },
+      { type: 'GREEN', addressOffset: 1, role: 'COLOR', colorValue: '#00FF00', defaultValue: 0, chaserConfig: makeChaser(255) },
+      { type: 'BLUE', addressOffset: 2, role: 'COLOR', colorValue: '#0000FF', defaultValue: 0, chaserConfig: makeChaser(255) },
+      { type: 'DIMMER', addressOffset: 3, role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0, chaserConfig: makeChaser(255) },
     ]);
 
     fixture.oflKey = 'generic/drgb-fader';

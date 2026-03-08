@@ -4,6 +4,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
 import { useHistory } from '~/components/engine/composables/use-history';
+import type { SceneNode } from '~/utils/engine/core/group';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { SavePresetCommand, DeletePresetCommand, OverwritePresetCommand } from '~/components/engine/commands/preset-commands';
 import type { Preset, PresetCategory, PresetCategoryType } from '~/utils/engine/preset-types';
@@ -34,7 +35,6 @@ import {
 } from '@/components/ui/accordion';
 import { AccordionHeader } from 'reka-ui';
 import { Input } from '@/components/ui/input';
-import type { SceneNode } from '~/utils/engine/core/group';
 
 
 // ─── Props & Emits ────────────────────────────────────────────────────────────
@@ -74,7 +74,11 @@ useShortcuts([
 
 // ─── Unsaved changes (reactive, recomputed on fixture changes) ────────────────
 
-const unsavedChanges = computed(() => getUnsavedChanges(props.fixtures, props.effects, props.nodes));
+// Remove the channelWriteVersion since we are relying on deep reactivity now.
+const unsavedChanges = computed(() => {
+  history.version.value;         // Re-evaluate on undo/redo
+  return getUnsavedChanges(props.fixtures, props.effects, props.nodes);
+});
 const hasUnsaved = computed(() => unsavedChanges.value.length > 0);
 
 // ─── Save preset ─────────────────────────────────────────────────────────────
@@ -268,17 +272,17 @@ defineExpose({
               <component
                 :is="getCategoryIcon(category.type)"
                 class="size-3.5 shrink-0 transition-colors"
-                :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/ucat:text-foreground'"
+                :class="category.isModifier ? 'text-modifier' : 'text-foreground'"
               />
               <span 
                 class="flex-1 truncate transition-colors"
-                :class="category.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/ucat:text-foreground'"
+                :class="category.isModifier ? 'text-modifier font-medium' : 'text-foreground'"
               >
                 {{ category.label }}
               </span>
               <span 
                 class="opacity-0 group-hover/ucat:opacity-70 transition-opacity text-[10px] shrink-0"
-                :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/ucat:text-foreground'"
+                :class="category.isModifier ? 'text-modifier' : 'text-foreground'"
               >
                 {{ category.isModifier ? '(Effect)' : '(Value)' }}
               </span>

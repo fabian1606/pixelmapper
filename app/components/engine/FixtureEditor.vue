@@ -251,26 +251,34 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       @redraw="() => fixtureCanvas?.draw()"
     />
 
-    <!-- Fixture interaction shells -->
-    <template v-for="fixture in fixtures" :key="fixture.id">
-      <FixtureNode
-        v-if="isFixtureVisible(fixture)"
-        :fixture="fixture"
-        :radius="FIXTURE_RADIUS * camera.scale"
-        :is-selected="isFixtureSelected(fixture)"
-        :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
-        :show-labels="camera.scale > 1.2"
-        :style="{
-          left: `${getFixtureScreenPos(fixture).x}px`,
-          top:  `${getFixtureScreenPos(fixture).y}px`,
-          transform: 'translate(-50%, -50%)',
-        }"
-        @dragstart="handleDragStart($event, fixture)"
-        @delete="handleDeleteRequest"
-        @group="emit('group')"
-        @ungroup="g => emit('ungroup', g)"
-      />
-    </template>
+    <!-- World Container for O(1) Camera panning/zooming -->
+    <div
+      class="world-container absolute left-0 top-0 origin-top-left pointer-events-none"
+      :style="{
+        width: `${WORLD_WIDTH}px`,
+        height: `${WORLD_HEIGHT}px`,
+        transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.scale})`,
+      }"
+    >
+      <template v-for="fixture in fixtures" :key="fixture.id">
+        <!-- We use pointer-events-auto here because the world-container disables them -->
+        <FixtureNode
+          class="pointer-events-auto"
+          :fixture="fixture"
+          :radius="FIXTURE_RADIUS"
+          :is-selected="isFixtureSelected(fixture)"
+          :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
+          :show-labels="camera.scale > 1.2"
+          :style="{
+            transform: `translate3d(calc(${fixture.fixturePosition.x * WORLD_WIDTH}px - 50%), calc(${fixture.fixturePosition.y * WORLD_HEIGHT}px - 50%), 0)`,
+          }"
+          @dragstart="handleDragStart($event, fixture)"
+          @delete="handleDeleteRequest"
+          @group="emit('group')"
+          @ungroup="g => emit('ungroup', g)"
+        />
+      </template>
+    </div>
   </div>
 </template>
 

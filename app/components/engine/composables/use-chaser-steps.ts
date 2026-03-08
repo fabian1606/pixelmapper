@@ -76,6 +76,7 @@ export function useChaserSteps(
     for (const fixture of props.fixtures) {
       for (const channel of fixture.channels) {
         if (tabChannelFilter(channel.type, channel.role)) {
+          channel.chaserConfig.isPlaying = true;
           channel.chaserConfig.stepsCount = newIndex + 1;
           channel.chaserConfig.activeEditStep = newIndex;
           while (channel.chaserConfig.stepValues.length < newIndex) {

@@ -1,5 +1,6 @@
 import type { OflFixture, OflMatrix, OflMatrixChannelInsert } from './types';
 import { resolveOflChannel } from './capability-map';
+import { reactive } from 'vue';
 import { Fixture } from '../engine/core/fixture';
 import type { Channel } from '../engine/core/channel';
 import { Beam } from '../engine/core/beam';
@@ -266,8 +267,6 @@ export function createFixtureFromOfl(
     channels.push({
       type: mapped.type,
       addressOffset: dmxIndex,
-      value: mapped.defaultValue,
-      currentBaseValue: mapped.defaultValue,
       role: mapped.role,
       colorValue: mapped.colorValue,
       defaultValue: mapped.defaultValue,
@@ -275,14 +274,14 @@ export function createFixtureFromOfl(
       beamId: item.beamId,
       oflCapabilities: caps,
       oflWheels: oflFixture.wheels ?? {},
-      chaserConfig: {
+      chaserConfig: reactive({
         stepValues: [mapped.defaultValue],
         stepsCount: 1,
         activeEditStep: 0,
         isPlaying: false,
         stepDuration: { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 },
         fadeDuration: { mode: 'time', timeMs: 0, beatValue: 0, beatOffset: 0 },
-      },
+      }),
     });
   }
 

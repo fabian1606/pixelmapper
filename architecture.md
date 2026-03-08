@@ -57,7 +57,12 @@ app/components/engine/
 ├── FixtureSidebar.vue          # Figma-style sidebar layer hierarchy
 ├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures; uses FixtureContextMenu
 ├── FixtureContextMenu.vue      # Unified context menu; capability flags control visible items
+├── FixtureWorkspace.vue        # Wraps the canvas editor and the master context menu
 ├── DeleteConfirmDialog.vue     # AlertDialog confirmation before deleting a node
+├── composables/
+│   ├── use-presets.ts          # Handles diffing and preset generation
+│   ├── use-history.ts          # Custom Undo/Redo command stack integration
+│   └── use-workspace-operations.ts # Extracted logic for grouping, ungrouping, and deleting
 ├── commands/
 │   └── (Contains Undo/Redo Command implementations like Move, Group, SetChannels)
 └── FixtureEditor.vue           # 2D drag-and-drop fixture positioning UI

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { OctagonX, ListOrdered } from 'lucide-vue-next';
@@ -31,7 +31,6 @@ const props = defineProps<Props>();
 
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
 import CategoryEffectsManager from './CategoryEffectsManager.vue';
-import { inject } from 'vue';
 import type { EffectEngine } from '~/utils/engine/engine';
 
 // Effect Engine for modifying modifiers on edits
@@ -45,8 +44,8 @@ const activeTab = ref<ChannelCategoryKey | null>(null);
 const sidebarRef = ref<HTMLElement | null>(null);
 
 const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
-const { tabChannelFilter, channelSections } = useChannelSections(activeTab, getSelectedFixtures);
 const commandHistory = useHistory();
+const { tabChannelFilter, channelSections } = useChannelSections(activeTab, getSelectedFixtures);
 
 // Category Effects Manager reference to access the active configuration
 const effectsManager = ref<InstanceType<typeof CategoryEffectsManager> | null>(null);
@@ -136,7 +135,6 @@ function resetActiveTabGroup() {
         ch.chaserConfig.stepsCount = 1;
         ch.chaserConfig.activeEditStep = 0;
         ch.chaserConfig.isPlaying = false;
-        ch.value = ch.defaultValue ?? 0;
       }
     }
 

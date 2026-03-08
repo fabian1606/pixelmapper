@@ -2,13 +2,16 @@
 
 The visual surface of the application. The UI mostly reads from `engine.dmxBuffer` to draw colors on the screen, remaining cleanly decoupled from the heavy math of the core engine.
 
-## Fixture Editor
+## Fixture Editor and Workspace
 `FixtureEditor.vue` is a standalone visual component for arranging fixtures in 2D space.
-
 - Renders each fixture as a glowing colored circle, color derived from `fixture.resolveColor(dmxBuffer)`.
 - Support drag-and-drop to update `fixture.fixturePosition`.
 - Positions are normalized (0–1), making them resolution-independent.
 - The updated positions are immediately used by spatial direction modes (SPATIAL_X/Y/RADIAL) in the next render frame.
+
+`FixtureWorkspace.vue` wraps the editor and provides the core layout for the canvas, along with the main right-click Context Menu.
+
+`index.vue` is deliberately kept as a pure layout shell, using `useWorkspaceOperations()` to delegate Node logic, and the `engine-store.ts` for all selection and data references.
 
 ## Context Menu System
 `FixtureContextMenu.vue` is the single shared context menu wrapper used by every interactive node.
@@ -33,3 +36,6 @@ To support `Cmd+Z`, the system uses `SetChannelValuesCommand`:
 2. The user interacts and freely mutates the live object.
 3. On completion (e.g. `mouseup`), a post-change snapshot is captured.
 4. If there's a difference, the `SetChannelValuesCommand` is pushed to `useHistory()`.
+
+### The Ticker Pattern
+Beyond undo/redo, `useHistory()` provides a reactive `version` ref. This acts as a global "state changed" heartbeat for the application. Components use it to trigger re-renders that would otherwise be missed by Vue due to `markRaw()` performance optimizations on the core engine data.

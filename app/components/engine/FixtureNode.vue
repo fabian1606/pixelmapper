@@ -10,6 +10,7 @@ interface Props {
   isDragging?: boolean;
   isSelected?: boolean;
   showLabels?: boolean;
+  visible?: boolean;
 }
 
 interface Emits {
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
   isDragging: false,
   isSelected: false,
   showLabels: true,
+  visible: true,
 });
 
 const emit = defineEmits<Emits>();
@@ -40,6 +42,7 @@ const emit = defineEmits<Emits>();
     @ungroup="emit('ungroup', fixture.parent!)"
   >
     <div
+      v-show="visible"
       class="fixture-node"
       v-bind="$attrs"
       :class="{ 'is-dragging': isDragging, 'is-selected': isSelected, 'is-multi-head': fixture.beams && fixture.beams.length > 1 }"
@@ -58,6 +61,8 @@ const emit = defineEmits<Emits>();
 <style scoped>
 .fixture-node {
   position: absolute;
+  top: 0;
+  left: 0;
   border-radius: 50%;
   cursor: grab;
   display: flex;

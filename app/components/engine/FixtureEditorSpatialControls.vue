@@ -114,20 +114,16 @@ function handleWindowMouseUp() {
     <!-- ① Origin handle -->
     <SpatialHandle
       type="origin"
-      :style="{
-        left: `${getOriginViewportPos(activeModifier).x}px`,
-        top:  `${getOriginViewportPos(activeModifier).y}px`,
-      }"
+      :x="getOriginViewportPos(activeModifier).x"
+      :y="getOriginViewportPos(activeModifier).y"
       @dragstart="handleOriginDragStart($event)"
     />
 
     <!-- ② Endpoint handle -->
     <SpatialHandle
       type="endpoint"
-      :style="{
-        left: `${getEndViewportPos(activeModifier).x}px`,
-        top:  `${getEndViewportPos(activeModifier).y}px`,
-      }"
+      :x="getEndViewportPos(activeModifier).x"
+      :y="getEndViewportPos(activeModifier).y"
       @dragstart="handleEndpointDragStart($event)"
     />
   </template>

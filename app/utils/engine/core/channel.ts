@@ -21,14 +21,8 @@ export interface Channel {
 
   /**
    * Current DMX output value (0–255), written each frame by the EffectEngine.
-   * This is a runtime scratch field — do not persist or clone it.
    */
-  value: number;
-  /**
-   * The computed base value for this frame (interpolated between chaser steps).
-   * This is a runtime scratch field — do not persist or clone it.
-   */
-  currentBaseValue: number;
+  // Removed `value` and `currentBaseValue` in favor of Float32Array and Uint8Array in the engine.
   /** How this channel contributes to the fixture's visual color computation. */
   role: ChannelRole;
   /**

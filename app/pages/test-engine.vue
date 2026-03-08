@@ -71,7 +71,6 @@ watchEffect(() => {
       const base = globalBases.value[channel.type];
       if (base !== undefined) {
         channel.chaserConfig.stepValues[0] = base;
-        channel.currentBaseValue = base;
       }
     }
   }
@@ -107,8 +106,7 @@ const renderLoop = (time: number) => {
   const colorMap = new Map<string | number, string>();
   fixtureSnapshots.value = fixtures.map(f => {
     colorMap.set(f.id, f.resolveColor(engine.dmxBuffer));
-    return { id: f.id, channels: f.channels.map(c => ({ type: c.type, value: c.value })) };
-
+    return { id: f.id, channels: f.channels.map(c => ({ type: c.type, value: engine.dmxBuffer[f.startAddress - 1 + c.addressOffset] ?? 0 })) };
   });
   fixtureColors.value = colorMap;
 

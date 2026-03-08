@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watchEffect, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Interaction } from './composables/use-selection';
 import type { Camera } from './composables/use-camera';
@@ -172,7 +172,25 @@ function draw() {
 }
 
 onMounted(draw);
-watchEffect(draw);
+
+// The 60fps engine loop updates `props.colors` via a shallowRef, making it a perfect trigger.
+// We use flush: 'sync' to draw immediately without waiting for Vue's next tick.
+watch(() => props.colors, draw, { flush: 'sync' });
+
+// Draw when the camera moves (pan/zoom)
+watch(
+  [() => props.camera.x, () => props.camera.y, () => props.camera.scale],
+  draw,
+  { flush: 'sync' }
+);
+
+// Draw when marquee selection updates
+watch(
+  () => props.interaction,
+  draw,
+  { deep: true, flush: 'sync' }
+);
+
 defineExpose({ draw });
 </script>
 

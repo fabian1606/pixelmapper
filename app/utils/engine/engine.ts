@@ -15,6 +15,12 @@ export class EffectEngine {
   public dmxBuffer: Uint8Array = new Uint8Array(512);
 
   /**
+   * Internal scratch buffer for storing computed base values before effects are applied.
+   * 0-511 addressing aligns exactly with dmxBuffer.
+   */
+  public baseBuffer: Float32Array = new Float32Array(512);
+
+  /**
    * Global BPM for the engine, used to calculate beat-based speeds.
    */
   public globalBpm = ref<number>(120);
@@ -67,19 +73,22 @@ export class EffectEngine {
     // Compute currentBaseValue based on chaser steps
     for (const fixture of fixtures) {
       for (const channel of fixture.channels) {
+        const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
         const chaserState = channel.chaserConfig;
+
+        let calculatedBase = 0;
 
         if (!chaserState || chaserState.stepsCount <= 1 || !chaserState.isPlaying) {
           // Static / edit mode
           const activeStep = chaserState?.activeEditStep ?? 0;
-          channel.currentBaseValue = chaserState.stepValues[activeStep] ?? 0;
+          calculatedBase = chaserState.stepValues[activeStep] ?? 0;
         } else {
           // Chaser playback mode
           const stepMs = this.resolveSpeedToMs(chaserState.stepDuration);
           const fadeMs = this.resolveSpeedToMs(chaserState.fadeDuration);
 
           if (stepMs === Infinity) {
-            channel.currentBaseValue = chaserState.stepValues[chaserState.activeEditStep] ?? 0;
+            calculatedBase = chaserState.stepValues[chaserState.activeEditStep] ?? 0;
           } else {
             const beatDurMs = 60000 / this.globalBpm.value;
             const offsetMs = chaserState.stepDuration.mode === 'beat' ? (chaserState.stepDuration.beatOffset || 0) * beatDurMs : 0;
@@ -101,11 +110,12 @@ export class EffectEngine {
 
             const v1 = chaserState.stepValues[currentIndex] ?? 0;
             const v2 = chaserState.stepValues[nextIndex] ?? 0;
-            channel.currentBaseValue = v1 + (v2 - v1) * factor;
+            calculatedBase = v1 + (v2 - v1) * factor;
           }
         }
-        // Initialize channel value via additive blending
-        channel.value = channel.currentBaseValue;
+        // Save base state and initialize final buffer via additive blending
+        this.baseBuffer[dmxIndex] = calculatedBase;
+        this.dmxBuffer[dmxIndex] = calculatedBase;
       }
     }
 
@@ -173,21 +183,24 @@ export class EffectEngine {
             waveValue = effect.render(fixtureContext);
           }
 
-          const targetMax = Math.min(channel.currentBaseValue + effect.strength, 255);
-          const targetMin = Math.max(channel.currentBaseValue - effect.strength, 0);
+          const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
+          const baseValue = this.baseBuffer[dmxIndex] ?? 0;
+
+          const targetMax = Math.min(baseValue + effect.strength, 255);
+          const targetMin = Math.max(baseValue - effect.strength, 0);
 
           const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
-          const offset = mappedValue - channel.currentBaseValue;
+          const offset = mappedValue - baseValue;
 
-          channel.value += offset;
+          // Additively blend the effect on top of what was already in dmxBuffer
+          const currentDmx = this.dmxBuffer[dmxIndex] ?? 0;
+          this.dmxBuffer[dmxIndex] = currentDmx + offset;
         }
       }
 
       for (const channel of fixture.channels) {
-        channel.value = Math.min(Math.max(Math.round(channel.value), 0), 255);
-
-        // Write final value to global DMX buffer
-        this.dmxBuffer[fixture.startAddress - 1 + channel.addressOffset] = channel.value;
+        const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
+        this.dmxBuffer[dmxIndex] = Math.min(Math.max(Math.round(this.dmxBuffer[dmxIndex] ?? 0), 0), 255);
       }
     }
   }

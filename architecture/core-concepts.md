@@ -24,11 +24,9 @@ A `Fixture` is the top-level entity representing a physical light device. It is 
 - **`resolveColor(dmxBuffer): string`** — Computes the fixture's current visual color from its channel states and blending rules, reading values directly from the typed array buffer.
 
 ## Channel
-Each channel has:
+Each channel is purely structural metadata (an offset pointer) used by the engine. It does **not** store live `value` or `currentBaseValue` state, as those are handled by high-speed typed arrays in the Engine.
 - **`type: ChannelType`** — e.g. `RED`, `GREEN`, `BLUE`, `DIMMER`, `PAN`, `TILT`.
-- **`value: number`** — Current DMX output value (0–255), written by the engine each frame.
 - **`addressOffset: number`** — 0-based integer representing the slot inside the fixture's footprint.
-- **`currentBaseValue: number`** — The resting value computed per frame from chaser state.
 - **`chaserConfig: ChannelChaserConfig`** — Defines `stepValues`, playback state, and timing data.
 - **`role: ChannelRole`** — How this channel participates in color computation:
   - `COLOR` — Contributes a color addtively. Must provide `colorValue` (hex string).

@@ -1,21 +1,32 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 interface Props {
   /** 'origin' = square-style anchor (reposition center), 'endpoint' = circle (direction + magnitude) */
   type?: 'origin' | 'endpoint';
+  x?: number;
+  y?: number;
 }
 
 interface Emits {
   (e: 'dragstart', event: MouseEvent): void;
 }
 
-withDefaults(defineProps<Props>(), { type: 'endpoint' });
+const props = withDefaults(defineProps<Props>(), { type: 'endpoint' });
 const emit = defineEmits<Emits>();
+
+const transformStyle = computed(() => {
+  if (props.x === undefined || props.y === undefined) return {};
+  const base = `translate3d(${props.x}px, ${props.y}px, 0) translate(-50%, -50%)`;
+  return { transform: props.type === 'origin' ? `${base} rotate(45deg)` : base };
+});
 </script>
 
 <template>
   <div
     class="spatial-handle"
     :class="[`spatial-handle--${type}`]"
+    :style="transformStyle"
     @mousedown.prevent.stop="emit('dragstart', $event)"
   />
 </template>
@@ -23,7 +34,8 @@ const emit = defineEmits<Emits>();
 <style scoped>
 .spatial-handle {
   position: absolute;
-  transform: translate(-50%, -50%);
+  top: 0;
+  left: 0;
   cursor: grab;
   z-index: 20;
   transition: box-shadow 0.1s;
@@ -52,7 +64,6 @@ const emit = defineEmits<Emits>();
   background: var(--primary);
   border: 1.5px solid rgba(0, 0, 0, 0.5);
   box-shadow: 0 0 8px var(--primary);
-  transform: translate(-50%, -50%) rotate(45deg);
 }
 
 .spatial-handle--origin:hover {
