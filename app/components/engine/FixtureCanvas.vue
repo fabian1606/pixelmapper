@@ -20,7 +20,7 @@ interface Props {
 const props = defineProps<Props>();
 
 const canvasEl   = ref<HTMLCanvasElement | null>(null);
-const DOT_SPACING = 25;
+const DOT_SPACING = 25; // 25px per dot. 10 dots = 250px = 1 meter.
 
 function draw() {
   const canvas = canvasEl.value;
@@ -100,12 +100,16 @@ function draw() {
       const pixelR = Math.min(slotW, slotH) / 2 * 0.8;
       const clampedPixelR = Math.max(1.5, pixelR);
 
+      ctx.save();
+      ctx.translate(wx, wy);
+      ctx.rotate((fixture.rotation || 0) * Math.PI / 180);
+
       // ── Per-beam glow + dot ───────────────────────────────────────────────
       ctx.globalAlpha = 1;
       for (const beam of fixture.beams) {
-        // localX/Y is in -0.5..+0.5 → map to fixture footprint
-        const bx = wx + beam.localX * halfW * 2;
-        const by = wy + beam.localY * halfH * 2;
+        // localX/Y is in -0.5..+0.5 → map to fixture footprint (relative to center)
+        const bx = beam.localX * halfW * 2;
+        const by = beam.localY * halfH * 2;
         const beamColor = fixture.resolveColor(props.dmxBuffer || new Uint8Array(), beam.id);
 
         // Glow halo for this beam
@@ -124,10 +128,16 @@ function draw() {
         ctx.fillStyle = beamColor;
         ctx.fill();
       }
+      ctx.restore();
     } else {
       // Single head fixture
       ctx.save();
       ctx.translate(wx, wy);
+      // Wait, single head fixture can still be visually rotated if it's rectangular...
+      // but FixtureNode represents its box, and a single light doesn't change visually 
+      // when rotating a perfect circle glow. However, if it's placed differently, we should
+      // probably just always rotate.
+      ctx.rotate((fixture.rotation || 0) * Math.PI / 180);
       ctx.scale(rX / maxR, rY / maxR);
 
       const glow = ctx.createRadialGradient(0, 0, maxR * 0.3, 0, 0, maxR * 2.2);

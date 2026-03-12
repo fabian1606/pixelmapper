@@ -3,6 +3,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGr
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { ArrowDownUp } from 'lucide-vue-next';
+import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 
 import type { EffectDirection } from '~/utils/engine/types';
 
@@ -65,5 +66,17 @@ function onDirectionChange(val: any) {
     >
       <ArrowDownUp class="h-4 w-4" />
     </Button>
+
+    <div v-if="fanning !== 0" class="w-20 shrink-0">
+      <DraggableNumberInput
+        :model-value="fanning"
+        :min="0.1"
+        :max="10"
+        :step="0.1"
+        unit="x"
+        @update:model-value="(v: number) => emit('update:properties', { fanning: v })"
+        @change="emit('dropdown-open', false)"
+      />
+    </div>
   </div>
 </template>

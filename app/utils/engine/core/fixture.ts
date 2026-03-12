@@ -24,6 +24,17 @@ export class Fixture {
   fixtureSize: FixtureSize;
   rotation: number = 0; // Degrees (0-360)
 
+  manufacturer: string = '';
+  fixtureType: string = '';
+
+  get universe(): number {
+    return Math.floor((this.startAddress - 1) / 512) + 1;
+  }
+
+  get localAddress(): number {
+    return ((this.startAddress - 1) % 512) + 1;
+  }
+
   beams: Beam[];
 
   /**

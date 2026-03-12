@@ -33,6 +33,7 @@ Details the decoupled front-end architecture:
 - 2D `FixtureEditor` canvas and coordinate normalization.
 - Context Menu system rules.
 - Command-pattern Undo/Redo (`useHistory()`) for Property edits and Deletions.
+- **`DraggableNumberInput`**: Custom interactive input for tactile property editing (drag-to-change).
 
 ### 5. [Fixture Library (OFL)](./ofl.md)
 Explains how Pixelmapper maps and integrates the vast Open Fixture Library (OFL) to automatically construct complex real-world light objects and configurations.
@@ -53,7 +54,15 @@ app/utils/engine/
     ├── base-oscillator-effect.ts   # Abstract base for oscillating effects
     └── sine-effect.ts              # SineEffect implementation
 
+app/components/ui/
+├── input/                      # Standard Shadcn Input
+├── label/                      # Standard Shadcn Label
+└── DraggableNumberInput.vue    # Premium numeric input with drag-to-change functionality
+
 app/components/engine/
+├── SelectionInfoSection.vue    # Container for selected fixture properties
+├── SelectionPositionInfo.vue   # Sub-component for coordinate editing
+├── SelectionDmxInfo.vue        # Sub-component for DMX universe/address
 ├── FixtureSidebar.vue          # Figma-style sidebar layer hierarchy
 ├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures; uses FixtureContextMenu
 ├── FixtureContextMenu.vue      # Unified context menu; capability flags control visible items

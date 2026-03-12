@@ -4,10 +4,13 @@ import type { Point } from './use-camera';
 import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
 import type { SceneNode } from '~/utils/engine/core/group';
 
+import type { FixtureRotationSnapshot } from '../commands/rotate-fixture-command';
+
 export type Interaction =
   | { type: 'idle' }
   | { type: 'marquee'; start: Point; end: Point }
-  | { type: 'drag'; startWorld: Point; startPositions: Map<string | number, Point> };
+  | { type: 'drag'; startWorld: Point; startPositions: Map<string | number, Point> }
+  | { type: 'rotate'; startWorld: Point; startAngles: Map<string | number, number>; centerWorld: Point };
 
 const DOT_SPACING = 25;
 
@@ -27,6 +30,7 @@ function toNormalized(px: number, max: number): number {
  * @param getHeight         Getter for the world height in pixels.
  * @param toWorld           Converts viewport-space x/y to world-space (from useCamera).
  * @param onDragComplete    Called at drag end with before/after snapshots for history.
+ * @param onRotateComplete  Called at rotate end with before/after snapshots for history.
  */
 export function useSelection(
   getFixtures: () => Fixture[],
@@ -34,6 +38,7 @@ export function useSelection(
   getHeight: () => number,
   toWorld: (vx: number, vy: number) => Point,
   onDragComplete?: (before: FixturePositionSnapshot[], after: FixturePositionSnapshot[]) => void,
+  onRotateComplete?: (before: FixtureRotationSnapshot[], after: FixtureRotationSnapshot[]) => void,
   externalSelectedIds?: import('vue').Ref<Set<string | number>>
 ) {
   const selectedIds = externalSelectedIds ?? ref<Set<string | number>>(new Set());
@@ -44,6 +49,7 @@ export function useSelection(
 
   // Captures positions at drag-start so we can build an undo-able command later
   let beforeSnapshot: FixturePositionSnapshot[] = [];
+  let beforeRotationSnapshot: FixtureRotationSnapshot[] = [];
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
     if (event.button === 2) return; // ignore right click
@@ -131,6 +137,39 @@ export function useSelection(
     interaction.value = { type: 'drag', startWorld: world, startPositions };
   }
 
+  function onRotateStart(event: MouseEvent, fixture: Fixture, rect: DOMRect) {
+    if (event.button === 2) return;
+    const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+
+    // If fixture is not selected, select *only* it
+    let effectiveSelectedIds = new Set(selectedIds.value);
+    if (!effectiveSelectedIds.has(fixture.id)) {
+      effectiveSelectedIds = new Set([fixture.id]);
+      selectedIds.value = effectiveSelectedIds;
+    }
+
+    const startAngles = new Map<string | number, number>();
+    beforeRotationSnapshot = [];
+
+    // Calculate the pivot point (average position of selected items)
+    let sumX = 0, sumY = 0, count = 0;
+    const w = getWidth();
+    const h = getHeight();
+
+    for (const f of getFixtures()) {
+      if (effectiveSelectedIds.has(f.id)) {
+        sumX += f.fixturePosition.x * w;
+        sumY += f.fixturePosition.y * h;
+        count++;
+        startAngles.set(f.id, f.rotation || 0);
+        beforeRotationSnapshot.push({ id: f.id, rotation: f.rotation || 0 });
+      }
+    }
+
+    const centerWorld = { x: count > 0 ? sumX / count : 0, y: count > 0 ? sumY / count : 0 };
+    interaction.value = { type: 'rotate', startWorld: world, startAngles, centerWorld };
+  }
+
   function onMouseMove(event: MouseEvent, rect: DOMRect) {
     const iv = interaction.value;
     if (iv.type === 'idle') return;
@@ -148,6 +187,34 @@ export function useSelection(
         if (start) {
           f.fixturePosition.x = toNormalized(snapWorld(start.x + dx), w);
           f.fixturePosition.y = toNormalized(snapWorld(start.y + dy), h);
+        }
+      }
+    } else if (iv.type === 'rotate') {
+      // Calculate angle of start point relative to center
+      const startDx = iv.startWorld.x - iv.centerWorld.x;
+      const startDy = iv.startWorld.y - iv.centerWorld.y;
+      const startAngle = Math.atan2(startDy, startDx);
+
+      // Calculate angle of current point relative to center
+      const currDx = world.x - iv.centerWorld.x;
+      const currDy = world.y - iv.centerWorld.y;
+      const currAngle = Math.atan2(currDy, currDx);
+
+      // Determine delta (in degrees)
+      let deltaDeg = (currAngle - startAngle) * (180 / Math.PI);
+
+      if (event.shiftKey) {
+        // Snap to nearest 15 degrees if shift is held
+        deltaDeg = Math.round(deltaDeg / 15) * 15;
+      }
+
+      for (const f of getFixtures()) {
+        const startR = iv.startAngles.get(f.id);
+        if (startR !== undefined) {
+          // Normalize back to 0-360
+          let newRotation = (startR + deltaDeg) % 360;
+          if (newRotation < 0) newRotation += 360;
+          f.rotation = newRotation;
         }
       }
     }
@@ -195,10 +262,23 @@ export function useSelection(
       );
       if (didMove) onDragComplete(beforeSnapshot, afterSnapshot);
       beforeSnapshot = [];
+    } else if (iv.type === 'rotate' && beforeRotationSnapshot.length > 0 && onRotateComplete) {
+      // Capture AFTER rotation and notify parent for history recording
+      const afterSnapshot: FixtureRotationSnapshot[] = beforeRotationSnapshot.map(snap => {
+        const f = getFixtures().find(f => f.id === snap.id);
+        return {
+          id: snap.id,
+          rotation: f ? (f.rotation || 0) : snap.rotation,
+        };
+      });
+
+      const didRotate = beforeRotationSnapshot.some((b, i) => afterSnapshot[i] && b.rotation !== afterSnapshot[i]!.rotation);
+      if (didRotate) onRotateComplete(beforeRotationSnapshot, afterSnapshot);
+      beforeRotationSnapshot = [];
     }
 
     interaction.value = { type: 'idle' };
   }
 
-  return { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove, onMouseUp };
+  return { selectedIds, interaction, onViewportMouseDown, onDragStart, onRotateStart, onMouseMove, onMouseUp };
 }

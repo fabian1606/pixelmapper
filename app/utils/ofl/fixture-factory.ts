@@ -180,6 +180,7 @@ export function createFixtureFromOfl(
   oflFixture: OflFixture,
   modeIndex: number = 0,
   fixtureId?: string | number,
+  manufacturer?: string,
 ): Fixture {
   const mode = oflFixture.modes[modeIndex] ?? oflFixture.modes[0];
   if (!mode) throw new Error(`OFL fixture "${oflFixture.name}" has no modes defined.`);
@@ -288,12 +289,16 @@ export function createFixtureFromOfl(
   // ── 3. Assemble Fixture ───────────────────────────────────────────────────
   const fixture = new Fixture(fixtureId ?? crypto.randomUUID(), channels);
   fixture.name = oflFixture.name;
+  fixture.manufacturer = manufacturer ?? '';
+  fixture.fixtureType = oflFixture.name;
 
-  // Physical dimensions (150 mm = 1.0 unit, doubling the size as requested)
+  // Physical dimensions (w represents millimeters).
+  // 1 meter = 250 pixels in our scaled world. Base fixture width = 36px.
+  // Formula: fixtureSize.x = (w / 1000 * 250) / 36 = w / 144
   const physical = mode.physical ?? oflFixture.physical;
   if (physical?.dimensions) {
     const [w] = physical.dimensions;
-    fixture.fixtureSize = { x: w / 150, y: w / 150 }; // default: square (y will be refined below)
+    fixture.fixtureSize = { x: w / 144, y: w / 144 }; // default: square (y will be refined below)
   }
 
   // ── 4. Build Beams from pixel layout ─────────────────────────────────────

@@ -18,6 +18,12 @@ To maintain a smooth 60fps even with 50+ fixtures on screen, the editor employs 
 
 `FixtureWorkspace.vue` wraps the editor and provides the core layout for the canvas, along with the main right-click Context Menu.
 
+### Sidebar Layout
+The `FixtureSidebar.vue` provides a navigable tree of all fixtures and groups.
+- **Scrollable Content**: The `SidebarContent` is configured with `overflow-y-auto` to ensure that even large scenes with dozens of fixtures remain fully accessible through the layer hierarchy.
+- **Tabbed Interface**: Supports switching between the fixture tree and the preset/programmer view.
+- **Selection Info Section**: A dedicated panel at the bottom of the fixtures tab tracks the current selection. It provides real-time average X/Y position data and, for single selections, exposes manufacturer, model, channel count, and editable DMX addressing (Universe/Address).
+
 `index.vue` is deliberately kept as a pure layout shell, using `useWorkspaceOperations()` to delegate Node logic, and the `engine-store.ts` for all selection and data references.
 
 ## Context Menu System

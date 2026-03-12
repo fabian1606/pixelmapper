@@ -11,6 +11,7 @@ import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
 import { useHistory } from './composables/use-history';
 import { MoveFixtureCommand } from './commands/move-fixture-command';
+import { RotateFixtureCommand } from './commands/rotate-fixture-command';
 import { inject } from 'vue';
 import type { EffectEngine } from '~/utils/engine/engine';
 import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
@@ -98,7 +99,7 @@ defineExpose({ zoomTo, zoomToFit });
 
 const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { default: () => new Set() });
 
-const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove, onMouseUp } =
+const { selectedIds, interaction, onViewportMouseDown, onDragStart, onRotateStart, onMouseMove, onMouseUp } =
   useSelection(
     () => props.fixtures,
     () => WORLD_WIDTH,
@@ -106,6 +107,9 @@ const { selectedIds, interaction, onViewportMouseDown, onDragStart, onMouseMove,
     viewportToWorld,
     (before, after) => {
       history.execute(new MoveFixtureCommand(props.fixtures, before, after));
+    },
+    (before, after) => {
+      history.execute(new RotateFixtureCommand(props.fixtures, before, after));
     },
     selectedIdsModel
   );
@@ -183,6 +187,7 @@ function handleModifierDragEnd(modifier: Effect) {
 function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
 function handleMouseDown(e: MouseEvent) { onViewportMouseDown(e, rect()); }
 function handleDragStart(e: MouseEvent, f: Fixture) { onDragStart(e, f, rect()); }
+function handleRotateStart(e: MouseEvent, f: Fixture) { onRotateStart(e, f, rect()); }
 function handleMouseMove(e: MouseEvent) { onMouseMove(e, rect()); fixtureCanvas.value?.draw(); }
 function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw(); }
 </script>
@@ -273,6 +278,7 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
             transform: `translate3d(calc(${fixture.fixturePosition.x * WORLD_WIDTH}px - 50%), calc(${fixture.fixturePosition.y * WORLD_HEIGHT}px - 50%), 0)`,
           }"
           @dragstart="handleDragStart($event, fixture)"
+          @rotatestart="handleRotateStart($event, fixture)"
           @delete="handleDeleteRequest"
           @group="emit('group')"
           @ungroup="g => emit('ungroup', g)"

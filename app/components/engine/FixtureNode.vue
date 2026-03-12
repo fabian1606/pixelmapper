@@ -15,6 +15,7 @@ interface Props {
 
 interface Emits {
   (e: 'dragstart', event: MouseEvent): void;
+  (e: 'rotatestart', event: MouseEvent): void;
   (e: 'delete', fixture: Fixture): void;
   (e: 'group'): void;
   (e: 'ungroup', group: FixtureGroup): void;
@@ -49,9 +50,18 @@ const emit = defineEmits<Emits>();
       :style="{
         width:  `${radius * 2 * (fixture.fixtureSize?.x ?? 1)}px`,
         height: `${radius * 2 * (fixture.fixtureSize?.y ?? 1)}px`,
+        transform: `rotate(${fixture.rotation || 0}deg)`
       }"
       @mousedown.prevent.stop="emit('dragstart', $event)"
     >
+      <!-- Invisible Rotation Hover Zones (only for multi-head fixtures) -->
+      <template v-if="fixture.beams && fixture.beams.length > 1">
+        <div class="rotate-zone rotate-tl" @mousedown.prevent.stop="emit('rotatestart', $event)" />
+        <div class="rotate-zone rotate-tr" @mousedown.prevent.stop="emit('rotatestart', $event)" />
+        <div class="rotate-zone rotate-bl" @mousedown.prevent.stop="emit('rotatestart', $event)" />
+        <div class="rotate-zone rotate-br" @mousedown.prevent.stop="emit('rotatestart', $event)" />
+      </template>
+
       <!-- beams are rendered on the canvas layer below; no HTML overlay needed -->
       <div v-if="showLabels" class="fixture-label">{{ fixture.name }}</div>
     </div>
@@ -76,6 +86,19 @@ const emit = defineEmits<Emits>();
 .fixture-node.is-multi-head {
   border-radius: 8px;
 }
+
+/* Invisible corners for rotation dragging */
+.rotate-zone {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 2;
+  /* Uncomment to debug: background: rgba(255, 0, 0, 0.4); */
+}
+.rotate-tl { top: -6px; left: -6px; cursor: alias; }
+.rotate-tr { top: -6px; right: -6px; cursor: alias; }
+.rotate-bl { bottom: -6px; left: -6px; cursor: alias; }
+.rotate-br { bottom: -6px; right: -6px; cursor: alias; }
 
 
 

@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Timer, Activity, Infinity as InfinityIcon, ChevronDown, FastForward } from 'lucide-vue-next';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import type { SpeedConfig, SpeedMode } from '~/utils/engine/types';
 
 const props = defineProps<{
@@ -93,14 +94,14 @@ const ActiveIcon = computed(() => {
         <component :is="ActiveIcon" class="w-4 h-4" />
       </button>
 
-      <div class="flex-1 relative h-8" v-if="modelValue.mode === 'time'">
-        <input 
-          type="number" 
-          :value="modelValue.timeMs" 
-          @input="e => updateTimeMs(Number((e.target as HTMLInputElement).value))" 
-          class="w-full h-full text-xs bg-background border border-input rounded-md pl-2 pr-6 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none transition-[color,box-shadow] text-right font-mono shadow-xs" 
+      <div class="flex-1 h-8" v-if="modelValue.mode === 'time'">
+        <DraggableNumberInput
+          :model-value="modelValue.timeMs"
+          unit="ms"
+          :min="0"
+          :step="50"
+          @update:model-value="updateTimeMs"
         />
-        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none select-none">ms</span>
       </div>
 
       <div class="flex-1 h-8" v-else-if="modelValue.mode === 'beat'">

@@ -11,6 +11,7 @@ import { useChannelCapabilities } from './composables/use-channel-capabilities';
 import { type SnapshotMap } from './commands/set-channel-values-command';
 import FixturePropertyControlBox from './FixturePropertyControlBox.vue';
 import FixturePropertyControlDropdown from './FixturePropertyControlDropdown.vue';
+import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 
 const props = defineProps<{
   type: ChannelType;
@@ -223,17 +224,12 @@ function onDropdownOpenChange(open: boolean) {
       />
     </div>
 
-    <!-- Editable value number -->
-    <div class="flex-shrink-0 cursor-ew-resize" @mousedown="startDrag">
-      <input
-        type="number"
-        :value="rawValue"
-        min="0"
-        max="255"
-        class="w-14 bg-transparent text-right text-lg font-mono font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary rounded px-1 py-1 hover:bg-muted/50 transition-colors"
-        @input="e => handleValueChange(Number((e.target as HTMLInputElement).value))"
-        @mousedown.stop
-        @wheel.prevent="e => handleValueChange(rawValue - Math.sign(e.deltaY))"
+    <div class="flex-shrink-0 w-16">
+      <DraggableNumberInput
+        :model-value="rawValue"
+        :min="0"
+        :max="255"
+        @update:model-value="handleValueChange"
       />
     </div>
   </div>

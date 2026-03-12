@@ -87,7 +87,9 @@ function handleAdd() {
   for (let i = 0; i < count; i++) {
     const fixture = createFixtureFromOfl(
       fullFixtureData.value, 
-      modeIdx
+      modeIdx,
+      undefined,
+      selectedSummary.value?.manufacturer
     );
     
     // Tag with DMX info

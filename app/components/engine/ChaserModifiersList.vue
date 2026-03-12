@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Trash2, Plus } from 'lucide-vue-next';
+import { Plus, Trash2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from '@/components/ui/select';
 import type { Effect, ChannelType } from '~/utils/engine/types';
@@ -88,16 +88,15 @@ const emit = defineEmits<{
         <div class="space-y-3 pt-3 border-t border-border/40">
           <!-- Parameters Grid -->
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-            <!-- Strength -->
             <div class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
-              <Input 
-                type="number" 
-                :model-value="modifier.strength" 
-                @update:model-value="v => emit('update-modifier', modifier, 'strength', Number(v))" 
-                class="h-8 text-xs font-mono" 
-                @blur="emit('handle-modifier-drag-end', 'Update Modifier Strength')" 
-                @keydown.enter="emit('handle-modifier-drag-end', 'Update Modifier Strength')"
+              <DraggableNumberInput
+                :model-value="modifier.strength"
+                @update:model-value="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+                unit="%"
+                :min="0"
+                :max="100"
+                @change="emit('handle-modifier-drag-end', 'Update Modifier Strength')"
               />
             </div>
             <!-- Speed -->

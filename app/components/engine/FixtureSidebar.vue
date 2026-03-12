@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import type { SceneNode, FixtureGroup } from '~/utils/engine/core/group';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import FixtureSidebarNode from './FixtureSidebarNode.vue';
 import PresetsSidebar from './PresetsSidebar.vue';
+import SelectionInfoSection from './SelectionInfoSection.vue';
 import { Lightbulb, Plus, SquareFunction } from 'lucide-vue-next';
 import {
   Sidebar,
@@ -39,7 +40,7 @@ function toggleTab(tab: 'fixtures' | 'presets') {
   activeTab.value = activeTab.value === tab ? null : tab;
 }
 
-const presetsSidebarRef = ref<{ 
+const presetsSidebarRef = ref<{
   quickSave: () => void,
   overwriteActivePreset: () => void,
   createPresetFromSelection: (selectedIds: Set<string | number>) => void,
@@ -60,6 +61,10 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
 }
 
 defineExpose({ quickSave, overwriteActivePreset, createPresetFromSelection, presetsSidebarRef });
+
+const selectedFixtures = computed(() =>
+  props.fixtures.filter(f => props.selectedIds.has(f.id))
+);
 </script>
 
 <template>
@@ -88,7 +93,7 @@ defineExpose({ quickSave, overwriteActivePreset, createPresetFromSelection, pres
         </Button>
       </SidebarHeader>
 
-      <SidebarContent class="p-0 bg-sidebar overflow-hidden">
+      <SidebarContent class="p-0 bg-sidebar overflow-y-auto">
         <!-- Fixtures tab: scene tree -->
         <SidebarGroup v-show="activeTab === 'fixtures'" class="p-2">
           <SidebarMenu v-if="nodes.length > 0">
@@ -122,6 +127,13 @@ defineExpose({ quickSave, overwriteActivePreset, createPresetFromSelection, pres
           />
         </div>
       </SidebarContent>
+
+      <!-- Selection Info Section (Fixed at bottom of fixtures tab) -->
+      <SelectionInfoSection
+        v-if="activeTab === 'fixtures'"
+        :selected-fixtures="selectedFixtures"
+        :all-fixtures="fixtures"
+      />
     </Sidebar>
 
     <!-- Activity Bar (Narrow) -->
