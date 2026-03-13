@@ -5,6 +5,7 @@ import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from '~/components/engine/composables/use-history';
+import { useConnectionsStore } from '~/stores/connections-store';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -51,6 +52,7 @@ export const useEngineStore = defineStore('engine', () => {
     initialized = true;
 
     const history = useHistory();
+    const connectionsStore = useConnectionsStore();
 
     // Sync UI trigger on history undo/redo
     watch(() => history.version.value, () => {
@@ -120,6 +122,7 @@ export const useEngineStore = defineStore('engine', () => {
       lastTime = time;
 
       engine.render(flatFixtures.value, elapsed, deltaTime);
+      connectionsStore.sendFrame(engine.dmxBuffer);
       animFrameId = requestAnimationFrame(renderLoop);
     };
 

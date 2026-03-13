@@ -158,7 +158,7 @@ useShortcuts([
 
 <template>
   <SidebarProvider>
-    <div class="flex h-screen w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
+    <div class="flex h-full w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
       <FixtureSidebar
         ref="fixtureSidebarRef"
         class="shrink-0"
