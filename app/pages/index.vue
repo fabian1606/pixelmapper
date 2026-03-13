@@ -22,7 +22,7 @@ import { useEngineStore } from '~/stores/engine-store';
 const engineStore = useEngineStore();
 engineStore.initEngine();
 
-const { sceneNodes, flatFixtures, fixtureColors, selectedIds } = storeToRefs(engineStore);
+const { sceneNodes, flatFixtures, selectedIds } = storeToRefs(engineStore);
 const engine = engineStore.engine; // Not reactive by design
 const history = useHistory();
 

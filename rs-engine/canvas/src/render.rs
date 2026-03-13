@@ -30,7 +30,7 @@ impl Default for RenderState {
 
 fn border_color(selected: bool) -> Color {
     if selected {
-        Color::rgba(139, 92, 246, 255) // --primary purple
+        Color::rgba(251, 191, 36, 255) // --primary yellow
     } else {
         Color::rgba(255, 255, 255, 56) // 0.22 alpha white
     }
@@ -144,21 +144,6 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             stroke.set_line_width(lw);
             canvas.stroke_path(&mut ring_path, &stroke);
 
-            // Rotation handles at corners (only when selected)
-            if fixture.selected {
-                let margin = 6.0 / state.scale;
-                let sz = 5.0 / state.scale;
-                for (cx, cy) in [
-                    (-half_w - margin, -half_h - margin),
-                    ( half_w + margin, -half_h - margin),
-                    (-half_w - margin,  half_h + margin),
-                    ( half_w + margin,  half_h + margin),
-                ] {
-                    let mut p = Path::new();
-                    p.rect(cx - sz / 2.0, cy - sz / 2.0, sz, sz);
-                    canvas.fill_path(&mut p, &Paint::color(ring_color));
-                }
-            }
 
         } else {
             // Single head – use beam color if present, else fixture-level fallback
@@ -192,24 +177,28 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
 
     canvas.reset_transform();
 
-    // 3. Marquee Selection
+    // 3. Marquee Selection (coordinates are world-pixels; convert to screen-pixels)
     if state.is_marquee {
-        let x = f32::min(state.marquee_sx, state.marquee_ex);
-        let y = f32::min(state.marquee_sy, state.marquee_ey);
-        let w = (state.marquee_ex - state.marquee_sx).abs();
-        let h = (state.marquee_ey - state.marquee_sy).abs();
+        let to_screen_x = |wx: f32| wx * state.scale + state.cam_x;
+        let to_screen_y = |wy: f32| wy * state.scale + state.cam_y;
+
+        let sx = to_screen_x(state.marquee_sx);
+        let sy = to_screen_y(state.marquee_sy);
+        let ex = to_screen_x(state.marquee_ex);
+        let ey = to_screen_y(state.marquee_ey);
+
+        let x = f32::min(sx, ex);
+        let y = f32::min(sy, ey);
+        let w = (ex - sx).abs();
+        let h = (ey - sy).abs();
 
         let mut path = Path::new();
         path.rect(x, y, w, h);
-        
-        let mut fill_paint = Paint::color(Color::rgba(251, 191, 36, 20)); // ~0.08 alpha
-        canvas.fill_path(&mut path, &fill_paint);
 
-        let lw = 1.0 / state.scale;
-        let mut stroke_paint = Paint::color(Color::rgba(251, 191, 36, 191)); // ~0.75 alpha
-        stroke_paint.set_line_width(lw);
-        // Note: dash is not natively directly supported in femtovg like 2d context, 
-        // we might leave it solid or implement dasing later.
+        canvas.fill_path(&mut path, &Paint::color(Color::rgba(251, 191, 36, 20)));
+
+        let mut stroke_paint = Paint::color(Color::rgba(251, 191, 36, 191));
+        stroke_paint.set_line_width(1.0);
         canvas.stroke_path(&mut path, &stroke_paint);
     }
 

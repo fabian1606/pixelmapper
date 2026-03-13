@@ -17,7 +17,6 @@ import type { Effect } from '~/utils/engine/types';
 
 interface Props {
   fixtures: Fixture[];
-  colors: Map<string | number, string>;
   width?: number;
   height?: number;
 }
@@ -137,11 +136,41 @@ function rect(): DOMRect {
   return viewportEl.value!.getBoundingClientRect();
 }
 
+// ─── Cursor ───────────────────────────────────────────────────────────────────
+const cursor = ref('default');
+
+function updateCursor(e: MouseEvent) {
+  const t = interaction.value.type;
+  if (t === 'drag') { cursor.value = 'grabbing'; return; }
+  if (t === 'rotate') { cursor.value = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'20\' height=\'20\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M10 2 A8 8 0 1 1 2 10\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\'/%3E%3Cpolygon points=\'10,0 7,4 13,4\' fill=\'white\'/%3E%3C/svg%3E") 10 10, alias'; return; }
+  const r = rect();
+  const vx = e.clientX - r.left;
+  const vy = e.clientY - r.top;
+  if (fixtureCanvas.value?.hitTestRotationZone(vx, vy)) {
+    cursor.value = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'20\' height=\'20\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M10 2 A8 8 0 1 1 2 10\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\'/%3E%3Cpolygon points=\'10,0 7,4 13,4\' fill=\'white\'/%3E%3C/svg%3E") 10 10, alias';
+  } else if (fixtureCanvas.value?.hitTest(vx, vy)) {
+    cursor.value = 'grab';
+  } else {
+    cursor.value = 'default';
+  }
+}
+
 // ─── Viewport event delegation ─────────────────────────────────────────────────
 function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
 function handleMouseDown(e: MouseEvent) { onViewportMouseDown(e, rect()); }
-function handleMouseMove(e: MouseEvent) { onMouseMove(e, rect()); fixtureCanvas.value?.sync(); }
-function handleMouseUp()                { onMouseUp(); }
+function handleMouseMove(e: MouseEvent) {
+  onMouseMove(e, rect());
+  const t = interaction.value.type;
+  if (t === 'drag' || t === 'rotate') fixtureCanvas.value?.sync();
+  updateCursor(e);
+}
+function handleMouseUp(e?: MouseEvent) {
+  const t = interaction.value.type;
+  const wasInteracting = t === 'drag' || t === 'rotate';
+  onMouseUp();
+  if (wasInteracting) fixtureCanvas.value?.sync();
+  if (e) updateCursor(e); else cursor.value = 'default';
+}
 </script>
 
 <template>
@@ -149,6 +178,7 @@ function handleMouseUp()                { onMouseUp(); }
     ref="viewportEl"
     v-bind="$attrs"
     class="viewport"
+    :style="{ cursor }"
     @wheel.prevent="handleWheel"
     @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
@@ -216,7 +246,6 @@ function handleMouseUp()                { onMouseUp(); }
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   overflow: hidden;
-  cursor: crosshair;
   user-select: none;
   outline: none;
 }

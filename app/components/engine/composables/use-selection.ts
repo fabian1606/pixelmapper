@@ -184,13 +184,13 @@ export function useSelection(
     } else if (iv.type === 'rotate') {
       const startAngle = Math.atan2(iv.startWorld.y - iv.centerWorld.y, iv.startWorld.x - iv.centerWorld.x);
       const currAngle  = Math.atan2(world.y - iv.centerWorld.y, world.x - iv.centerWorld.x);
-      let deltaDeg = (currAngle - startAngle) * (180 / Math.PI);
-      if (event.shiftKey) deltaDeg = Math.round(deltaDeg / 15) * 15;
+      const deltaDeg = (currAngle - startAngle) * (180 / Math.PI);
       for (const f of getFixtures()) {
         const startR = iv.startAngles.get(f.id);
         if (startR !== undefined) {
-          let r = (startR + deltaDeg) % 360;
-          if (r < 0) r += 360;
+          let r = startR + deltaDeg;
+          if (event.shiftKey) r = Math.round(r / 15) * 15;
+          r = ((r % 360) + 360) % 360;
           f.rotation = r;
         }
       }

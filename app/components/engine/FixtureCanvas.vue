@@ -53,6 +53,12 @@ function syncFixtures() {
   const wc = wasmCanvas;
   if (!wc) return;
 
+  const isSelected = (f: Fixture): boolean => {
+    let c: any = f;
+    while (c) { if (props.selectedIds.has(c.id)) return true; c = c.parent; }
+    return false;
+  };
+
   const canvasFixtures = props.fixtures.map(f => {
     const dmxIdx = (offset: number) => f.startAddress - 1 + offset;
     const chIdx = (type: string, beamId?: string) => {
@@ -67,7 +73,7 @@ function syncFixtures() {
       width: f.fixtureSize?.x ?? 1,
       height: f.fixtureSize?.y ?? 1,
       rotation: f.rotation || 0,
-      selected: props.selectedIds.has(f.id),
+      selected: isSelected(f),
       channelStart: f.startAddress,
       rIndex:      chIdx('RED'),
       gIndex:      chIdx('GREEN'),
@@ -96,7 +102,10 @@ function syncFixtures() {
 function syncSelected() {
   const wc = wasmCanvas;
   if (!wc) return;
-  const arr = Array.from(props.selectedIds).map(String);
+  // Expand: include fixture IDs whose ancestor is in selectedIds
+  const arr = props.fixtures
+    .filter(f => { let c: any = f; while (c) { if (props.selectedIds.has(c.id)) return true; c = c.parent; } return false; })
+    .map(f => String(f.id));
   wc.set_selected(arr);
 }
 

@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/context-menu';
 
 const engineStore = useEngineStore();
-const { sceneNodes, selectedIds, flatFixtures, fixtureColors } = storeToRefs(engineStore);
+const { sceneNodes, selectedIds, flatFixtures } = storeToRefs(engineStore);
 const engine = engineStore.engine;
 
 const { 
@@ -111,7 +111,6 @@ defineExpose({
             ref="fixtureEditor"
             v-model:selected-ids="selectedIds"
             :fixtures="flatFixtures"
-            :colors="fixtureColors"
             class="w-full h-full"
             @delete-fixture="handleDeleteNode"
             @delete-selected="handleDeleteSelected"

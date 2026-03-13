@@ -21,7 +21,6 @@ export const useEngineStore = defineStore('engine', () => {
 
   const sceneNodes = shallowRef<SceneNode[]>([]);
   const selectedIds = shallowRef<Set<string | number>>(new Set());
-  const fixtureColors = shallowRef<Map<string | number, string>>(new Map());
 
   const globalBases = ref<Record<string, number>>({
     RED: 0,
@@ -121,13 +120,6 @@ export const useEngineStore = defineStore('engine', () => {
       lastTime = time;
 
       engine.render(flatFixtures.value, elapsed, deltaTime);
-
-      const colorMap = new Map<string | number, string>();
-      for (const f of flatFixtures.value) {
-        colorMap.set(f.id, f.resolveColor(engine.dmxBuffer));
-      }
-      fixtureColors.value = colorMap;
-
       animFrameId = requestAnimationFrame(renderLoop);
     };
 
@@ -142,7 +134,6 @@ export const useEngineStore = defineStore('engine', () => {
     sceneNodes,
     selectedIds,
     flatFixtures,
-    fixtureColors,
     globalBases,
     initEngine
   };
