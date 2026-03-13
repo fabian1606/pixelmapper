@@ -50,7 +50,7 @@ const emit = defineEmits<Emits>();
       :style="{
         width:  `${radius * 2 * (fixture.fixtureSize?.x ?? 1)}px`,
         height: `${radius * 2 * (fixture.fixtureSize?.y ?? 1)}px`,
-        transform: `rotate(${fixture.rotation || 0}deg)`
+        transform: `translate(-50%, -50%) rotate(${fixture.rotation || 0}deg)`
       }"
       @mousedown.prevent.stop="emit('dragstart', $event)"
     >

@@ -1,14 +1,14 @@
 # EffectEngine & Rendering
 
-## The Engine (`engine.ts`)
-The pure mathematical heart of the application. It runs 60 times a second, oscillating channels based on effects and computing raw DMX bytes. It knows *nothing* about Vue components or the UI.
+## The Engine (`rs-engine`)
+The pure mathematical heart of the application is written in **Rust** and compiled to WebAssembly (Wasm). It runs 60 times a second, oscillating channels based on effects and computing raw DMX bytes. 
 
-`EffectEngine` provides a global `Uint8Array(512)` named `dmxBuffer` array representing the final output integer values.
-It also utilizes an internal `Float32Array(512)` named `baseBuffer` to store intermediate math (like chaser interpolations) precisely before effect modulation.
+The `EffectEngine` in TS is now a thin wrapper that syncs `RenderTarget` (flattened channels) and `EffectConfig` objects to the Rust backend using JSON.
 
-### Why Typed Arrays (Data-Oriented Design)?
-1. **Performance & Memory**: In the first version of Pixelmapper, Vue's deep reactivity system monitored every individual channel's value. When running effects on 40+ fixtures (resulting in hundreds of channel changes per frame at 60fps), Vue's reactivity overhead crippled framerates. Moving `value` and `currentBaseValue` out of objects and into native typed arrays bypasses Vue's proxy watchers entirely, offering blazing-fast C-level memory access.
-2. **1:1 Hardware Mapping**: DMX-512 protocol dictates that a single DMX universe is precisely 512 bytes (values 0-255). By rendering directly into a `Uint8Array(512)`, the Engine's memory structure perfectly mirrors the physical hardware output required by Art-Net or sACN nodes.
+### Why Rust & WebAssembly?
+1. **Performance & Memory**: The Rust engine bypassed JS garbage collection entirely. By exposing a direct `Uint8Array` memory view to the JS side, we read the final DMX values seamlessly at 60fps with zero-copy overhead. 
+2. **ESP32-P4 Compatibility**: The exact same `rs-engine` crate can be compiled natively using `#[no_std]` (or `alloc`) for the ESP32-P4. The frontend simply sends the exact same JSON configuration over UDP to the ESP32 instead of the local Wasm module.
+3. **1:1 Hardware Mapping**: By rendering directly into a `[u8; 512]`, the Engine's memory structure perfectly mirrors the physical hardware output required by Art-Net or sACN nodes.
 
 ### Render Loop
 `EffectEngine.render(fixtures, timeMs, deltaTimeMs)` runs once per animation frame:

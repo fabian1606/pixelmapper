@@ -266,23 +266,27 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       }"
     >
       <template v-for="fixture in fixtures" :key="fixture.id">
-        <!-- We use pointer-events-auto here because the world-container disables them -->
-        <FixtureNode
-          class="pointer-events-auto"
-          :fixture="fixture"
-          :radius="FIXTURE_RADIUS"
-          :is-selected="isFixtureSelected(fixture)"
-          :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
-          :show-labels="camera.scale > 1.2"
+        <div
+          class="absolute origin-center pointer-events-none"
           :style="{
-            transform: `translate3d(calc(${fixture.fixturePosition.x * WORLD_WIDTH}px - 50%), calc(${fixture.fixturePosition.y * WORLD_HEIGHT}px - 50%), 0)`,
+            transform: `translate3d(${fixture.fixturePosition.x * WORLD_WIDTH}px, ${fixture.fixturePosition.y * WORLD_HEIGHT}px, 0)`,
           }"
-          @dragstart="handleDragStart($event, fixture)"
-          @rotatestart="handleRotateStart($event, fixture)"
-          @delete="handleDeleteRequest"
-          @group="emit('group')"
-          @ungroup="g => emit('ungroup', g)"
-        />
+        >
+          <!-- We use pointer-events-auto here because the world-container disables them -->
+          <FixtureNode
+            class="pointer-events-auto"
+            :fixture="fixture"
+            :radius="FIXTURE_RADIUS"
+            :is-selected="isFixtureSelected(fixture)"
+            :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
+            :show-labels="camera.scale > 1.2"
+            @dragstart="handleDragStart($event, fixture)"
+            @rotatestart="handleRotateStart($event, fixture)"
+            @delete="handleDeleteRequest"
+            @group="emit('group')"
+            @ungroup="g => emit('ungroup', g)"
+          />
+        </div>
       </template>
     </div>
   </div>

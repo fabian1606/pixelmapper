@@ -3,205 +3,179 @@ import type { Fixture } from './core/fixture';
 import type { Channel } from './core/channel';
 import { reactive, ref, type Ref } from 'vue';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from './constants';
+import initWasm, { WasmEngine } from 'rs-engine';
+import wasmUrl from 'rs-engine/rs_engine_bg.wasm?url';
+
+// We must initialize the Wasm module before we can use WasmEngine
+let isWasmInitialized = false;
 
 export class EffectEngine {
   public effects = reactive<Effect[]>([]);
   public activeModifier: Ref<Effect | null> = ref(null);
 
   /**
-   * The global DMX buffer containing the final calculated values for up to 512 channels.
-   * Format: Uint8Array(512). Access via buffer[startAddress - 1 + addressOffset].
-   */
-  public dmxBuffer: Uint8Array = new Uint8Array(512);
-
-  /**
-   * Internal scratch buffer for storing computed base values before effects are applied.
-   * 0-511 addressing aligns exactly with dmxBuffer.
-   */
-  public baseBuffer: Float32Array = new Float32Array(512);
-
-  /**
    * Global BPM for the engine, used to calculate beat-based speeds.
    */
   public globalBpm = ref<number>(120);
 
-  /**
-   * Resolves a SpeedConfig down into exact milliseconds for playback and math.
-   */
-  public resolveSpeedToMs(speed: SpeedConfig): number {
-    if (speed.mode === 'infinite') return Infinity;
-    if (speed.mode === 'time') return speed.timeMs;
-    // Beat mode: 1 beat = 60000ms / BPM.
-    // beatValue of 1 = 1 beat (e.g., 1/4 note in 4/4 time).
-    // beatValue of 4 = 4 beats (e.g., 1 full bar).
-    return (60000 / this.globalBpm.value) * speed.beatValue;
-  }
+  private wasmEngine: WasmEngine | null = null;
+  private cachedTargetsPayload: string = "";
+  private cachedEffectsPayload: string = "";
 
   /**
-   * Register a new effect with the engine
+   * The DMX buffer mapped directly from Wasm memory!
+   * Access via buffer[startAddress - 1 + addressOffset].
    */
+  public dmxBuffer: Uint8Array = new Uint8Array(512);
+
+  constructor() {
+    this.init();
+  }
+
+  private async init() {
+    if (!isWasmInitialized) {
+      await initWasm(wasmUrl);
+      isWasmInitialized = true;
+    }
+    this.wasmEngine = new WasmEngine();
+    this.wasmEngine.set_bpm(this.globalBpm.value);
+    this.dmxBuffer = this.wasmEngine.get_dmx_view();
+  }
+
   public addEffect(effect: Effect) {
     this.effects.push(effect);
   }
 
-  /**
-   * Remove all effects
-   */
   public clearEffects() {
     this.effects.splice(0, this.effects.length);
   }
 
   /**
-   * Renders a single frame for the given array of fixtures and context time.
-   * 
-   * @param fixtures The array of fixtures to apply effects to.
-   * @param timeMs The current elapsed absolute time in milliseconds.
-   * @param deltaTimeMs The time elapsed since the last frame in milliseconds.
+   * Synchronizes the frontend Fixtures down into flattened RenderTargets for the Rust Engine.
    */
+  private syncTargets(fixtures: Fixture[]) {
+    if (!this.wasmEngine) return;
+
+    const targets: any[] = [];
+
+    for (const fixture of fixtures) {
+      const rotRad = (fixture.rotation ?? 0) * (Math.PI / 180);
+      const cosR = Math.cos(rotRad);
+      const sinR = Math.sin(rotRad);
+
+      for (const channel of fixture.channels) {
+        let worldX = fixture.fixturePosition.x;
+        let worldY = fixture.fixturePosition.y;
+
+        if (channel.beamId) {
+          const beam = fixture.beams?.find(b => b.id === channel.beamId);
+          if (beam) {
+            const fWidth = fixture.fixtureSize.x * FIXTURE_RADIUS * 2;
+            const fHeight = fixture.fixtureSize.y * FIXTURE_RADIUS * 2;
+
+            const localPx = beam.localX * fWidth;
+            const localPy = beam.localY * fHeight;
+
+            const rotPx = localPx * cosR - localPy * sinR;
+            const rotPy = localPx * sinR + localPy * cosR;
+
+            worldX += rotPx / WORLD_WIDTH;
+            worldY += rotPy / WORLD_HEIGHT;
+          }
+        }
+
+        const chaserState = channel.chaserConfig;
+        
+        targets.push({
+          dmxIndex: fixture.startAddress - 1 + channel.addressOffset,
+          channelType: channel.type,
+          groupIndex: typeof fixture.id === 'string' ? parseInt(fixture.id, 10) || 0 : fixture.id,
+          worldX,
+          worldY,
+          // Chaser Config serialization matches Rust struct exactly
+          chaserConfig: chaserState ? {
+            stepValues: chaserState.stepValues,
+            stepsCount: chaserState.stepsCount,
+            activeEditStep: chaserState.activeEditStep,
+            isPlaying: chaserState.isPlaying,
+            stepDuration: {
+              mode: chaserState.stepDuration.mode,
+              timeMs: chaserState.stepDuration.timeMs,
+              beatValue: chaserState.stepDuration.beatValue,
+              beatOffset: chaserState.stepDuration.beatOffset || 0
+            },
+            fadeDuration: {
+              mode: chaserState.fadeDuration.mode,
+              timeMs: chaserState.fadeDuration.timeMs,
+              beatValue: chaserState.fadeDuration.beatValue,
+              beatOffset: chaserState.fadeDuration.beatOffset || 0
+            }
+          } : null
+        });
+      }
+    }
+
+    const payload = JSON.stringify(targets);
+    if (payload !== this.cachedTargetsPayload) {
+      this.wasmEngine.sync_targets(payload);
+      this.cachedTargetsPayload = payload;
+    }
+  }
+
+  /**
+   * Synchronizes active Effect configurations down to the Rust Engine.
+   */
+  private syncEffects() {
+    if (!this.wasmEngine) return;
+
+    const effectConfigs = this.effects.map(effect => {
+      let effectType = "Sine";
+      // We assume standard properties exist on the effect from types.ts
+      return {
+        targetChannels: effect.targetChannels,
+        targetGroupIndices: effect.targetFixtureIds 
+          ? effect.targetFixtureIds.map(id => typeof id === 'string' ? parseInt(id, 10) || 0 : id)
+          : null,
+        direction: effect.direction ?? 'LINEAR',
+        originX: effect.originX ?? 0.5,
+        originY: effect.originY ?? 0.5,
+        angle: effect.angle ?? 0,
+        strength: effect.strength,
+        reverse: effect.reverse ?? false,
+        fanning: effect.fanning,
+        speed: { ...effect.speed, beatOffset: effect.speed.beatOffset || 0 },
+        effectType
+      };
+    });
+
+    const payload = JSON.stringify(effectConfigs);
+    if (payload !== this.cachedEffectsPayload) {
+      this.wasmEngine.sync_effects(payload);
+      this.cachedEffectsPayload = payload;
+    }
+  }
+
   public render(
     fixtures: Fixture[],
     timeMs: number,
     deltaTimeMs: number
   ): void {
-    // Update all effects once per frame
-    for (const effect of this.effects) {
-      if (effect.update) {
-        effect.update(deltaTimeMs, this);
-      }
-    }
+    if (!this.wasmEngine) return;
 
-    // Compute currentBaseValue based on chaser steps
-    for (const fixture of fixtures) {
-      for (const channel of fixture.channels) {
-        const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
-        const chaserState = channel.chaserConfig;
+    this.wasmEngine.set_bpm(this.globalBpm.value);
+    
+    // Sync state (JSON serialization only triggers when array lengths / simple props change, using a naive deep check could be added later, but stringify is fine for PoC)
+    // To ensure optimal 60fps, we only stringify/sync if the objects actually changed. 
+    // In a real app we'd trigger `syncTargets` ONLY when a user drags a fixture, not every frame.
+    // For this port, we do it every frame but rely on string comparison caching (which is fast enough for <100 fixtures)
+    this.syncTargets(fixtures);
+    this.syncEffects();
 
-        let calculatedBase = 0;
-
-        if (!chaserState || chaserState.stepsCount <= 1 || !chaserState.isPlaying) {
-          // Static / edit mode
-          const activeStep = chaserState?.activeEditStep ?? 0;
-          calculatedBase = chaserState.stepValues[activeStep] ?? 0;
-        } else {
-          // Chaser playback mode
-          const stepMs = this.resolveSpeedToMs(chaserState.stepDuration);
-          const fadeMs = this.resolveSpeedToMs(chaserState.fadeDuration);
-
-          if (stepMs === Infinity) {
-            calculatedBase = chaserState.stepValues[chaserState.activeEditStep] ?? 0;
-          } else {
-            const beatDurMs = 60000 / this.globalBpm.value;
-            const offsetMs = chaserState.stepDuration.mode === 'beat' ? (chaserState.stepDuration.beatOffset || 0) * beatDurMs : 0;
-            const cycleTime = stepMs * chaserState.stepsCount;
-            const shiftedTime = Math.max(0, timeMs + offsetMs); // apply offset shift to time
-            const timeInCycle = shiftedTime % cycleTime;
-            const currentIndex = Math.floor(timeInCycle / stepMs);
-            const nextIndex = (currentIndex + 1) % chaserState.stepsCount;
-            const timeInStep = timeInCycle % stepMs;
-
-            let factor = 0;
-            if (timeInStep < fadeMs && fadeMs > 0) {
-              factor = timeInStep / fadeMs;
-            } else if (fadeMs === 0) {
-              factor = 1; // Snaps immediately if fade is 0
-            } else {
-              factor = 1; // Holding phase
-            }
-
-            const v1 = chaserState.stepValues[currentIndex] ?? 0;
-            const v2 = chaserState.stepValues[nextIndex] ?? 0;
-            calculatedBase = v1 + (v2 - v1) * factor;
-          }
-        }
-        // Save base state and initialize final buffer via additive blending
-        this.baseBuffer[dmxIndex] = calculatedBase;
-        this.dmxBuffer[dmxIndex] = calculatedBase;
-      }
-    }
-
-    // Base constants for converting relative fixture dimensions to a normalized world
-    // Import them inline or at top of file, assuming they are exported from constants
-    // For now we'll import them locally to avoid circulars if not set
-
-    for (const [i, fixture] of fixtures.entries()) {
-      // Create a base context focused on the fixture's center
-      const fixtureContext: EffectContext = {
-        time: timeMs,
-        index: i,
-        fixtureCount: fixtures.length,
-        x: fixture.fixturePosition.x,
-        y: fixture.fixturePosition.y,
-      };
-
-      // Pre-calculate fixture rotation matrix
-      const rotRad = (fixture.rotation ?? 0) * (Math.PI / 180);
-      const cosR = Math.cos(rotRad);
-      const sinR = Math.sin(rotRad);
-
-      for (const effect of this.effects) {
-        if (effect.targetFixtureIds && !effect.targetFixtureIds.includes(fixture.id)) {
-          continue;
-        }
-
-        if (!effect.targetChannels || effect.targetChannels.length === 0) continue;
-
-        const matchingChannels = fixture.channels.filter((c: Channel) => effect.targetChannels.includes(c.type));
-
-        for (const channel of matchingChannels) {
-          let waveValue = 0;
-
-          // If the channel has a specific beam, calculate effect AT that beam's exact physical world position
-          if (channel.beamId) {
-            const beam = fixture.beams?.find(b => b.id === channel.beamId);
-            if (beam) {
-              // localX / localY are in [-0.5, 0.5] relative to the fixture's natural footprint
-              // we scale this by the configured fixture footprint size physically
-              const fWidth = fixture.fixtureSize.x * FIXTURE_RADIUS * 2;
-              const fHeight = fixture.fixtureSize.y * FIXTURE_RADIUS * 2;
-
-              const localPx = beam.localX * fWidth;
-              const localPy = beam.localY * fHeight;
-
-              // Apply fixture rotation to the beam's local offsets 
-              const rotPx = localPx * cosR - localPy * sinR;
-              const rotPy = localPx * sinR + localPy * cosR;
-
-              // Convert back to normalized world coordinates [0..1]
-              const beamWorldX = fixture.fixturePosition.x + (rotPx / WORLD_WIDTH);
-              const beamWorldY = fixture.fixturePosition.y + (rotPy / WORLD_HEIGHT);
-
-              waveValue = effect.render({
-                ...fixtureContext,
-                x: beamWorldX,
-                y: beamWorldY
-              });
-            } else {
-              waveValue = effect.render(fixtureContext);
-            }
-          } else {
-            // Global channel (e.g. Master Dimmer, or a single-pixel fixture)
-            waveValue = effect.render(fixtureContext);
-          }
-
-          const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
-          const baseValue = this.baseBuffer[dmxIndex] ?? 0;
-
-          const targetMax = Math.min(baseValue + effect.strength, 255);
-          const targetMin = Math.max(baseValue - effect.strength, 0);
-
-          const mappedValue = targetMin + ((waveValue + 1) / 2) * (targetMax - targetMin);
-          const offset = mappedValue - baseValue;
-
-          // Additively blend the effect on top of what was already in dmxBuffer
-          const currentDmx = this.dmxBuffer[dmxIndex] ?? 0;
-          this.dmxBuffer[dmxIndex] = currentDmx + offset;
-        }
-      }
-
-      for (const channel of fixture.channels) {
-        const dmxIndex = fixture.startAddress - 1 + channel.addressOffset;
-        this.dmxBuffer[dmxIndex] = Math.min(Math.max(Math.round(this.dmxBuffer[dmxIndex] ?? 0), 0), 255);
-      }
-    }
+    // The Rust Wasm Engine loop computes all phases and offsets natively
+    this.wasmEngine.render(timeMs, deltaTimeMs);
+    
+    // Re-fetch the view! If the Wasm memory grew during JSON parsing or rendering, 
+    // the old Uint8Array pointing to the buffer becomes detached. 
+    this.dmxBuffer = this.wasmEngine.get_dmx_view();
   }
 }

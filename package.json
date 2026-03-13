@@ -18,6 +18,7 @@
     "nuxt": "^4.3.1",
     "pinia": "^3.0.4",
     "reka-ui": "^2.8.2",
+    "rs-engine": "./rs-engine/pkg",
     "shadcn-nuxt": "2.4.3",
     "tailwind-merge": "^3.5.0",
     "vue": "^3.5.28",
