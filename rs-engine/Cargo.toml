@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "core",
-    "canvas"
+    "canvas",
+    "ffi"
 ]
 resolver = "2"

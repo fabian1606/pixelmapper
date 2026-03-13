@@ -1,0 +1,2 @@
+# USB CDC on Boot (Serial over USB-C on ESP32-P4)
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
