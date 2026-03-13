@@ -3,8 +3,8 @@ import type { Fixture } from './core/fixture';
 import type { Channel } from './core/channel';
 import { reactive, ref, type Ref } from 'vue';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from './constants';
-import initWasm, { WasmEngine } from 'rs-engine';
-import wasmUrl from 'rs-engine/rs_engine_bg.wasm?url';
+import initWasm, { WasmEngine } from 'rs-engine-core';
+import wasmUrl from 'rs-engine-core/rs_engine_core_bg.wasm?url';
 
 // We must initialize the Wasm module before we can use WasmEngine
 let isWasmInitialized = false;
@@ -29,7 +29,9 @@ export class EffectEngine {
   public dmxBuffer: Uint8Array = new Uint8Array(512);
 
   constructor() {
-    this.init();
+    if (typeof window !== 'undefined') {
+      this.init();
+    }
   }
 
   private async init() {

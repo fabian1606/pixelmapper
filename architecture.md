@@ -1,87 +1,33 @@
 # Pixelmapper Architecture
 
-## Core Tech Stack
-- **Framework:** Nuxt 4 + Vue 3
-- **UI Components:** Shadcn-vue, Tailwind CSS
-- **Runtime:** Bun
-- **Language:** TypeScript (Strict Mode)
+## Übersicht
+Das Pixelmapper Projekt kombiniert ein modernes UI gebaut in Vue 3 (Typescript) mit einer High-Performance Rendering & Effekt-Engine geschrieben in Rust (mittels WebAssembly). 
+
+## Prinzipien
+- **UI ist JS/TS**: Alles, was DOM-Updates, state management (Pinia/Vue), und pure Web-Interfaces angeht, passiert in Vue/JS.
+- **Schwere Berechnungen & Rendering in Rust**: Die gesamte Logik, die in Echtzeit iteriert (z.B. 60fps), wird in Rust ausgelagert, um von Wasm-Geschwindigkeit und Speicher-Sicherheit zu profitieren.
 
 ---
 
-## Architecture Domains
+## Kern-Architektur
 
-To keep the documentation clean and maintainable, the system architecture has been split into independent domain files. Please read through these documents for a deep dive into the system:
+Um die Engine sowohl im Browser (Wasm) als auch nativ (C++) nutzen zu können, wird sie strikt in zwei Layer getrennt:
 
-### 1. [Core Concepts](./architecture/core-concepts.md)
-Contains the foundational structural data models:
-- **`FixtureGroup`**, **`Fixture`**, **`Channel`**, **`Beam`**
-- Details on `markRaw` wrappers and physical representations.
+### 1. Core Engine (`rs-engine-core`)
+Das Herzstück der Licht-Berechnung. Es ist **platform-agnostisch**, nutzt keine Web-APIs und kann via C-Bindings/FFI nach C++ kompiliert sowie als reine WebAssembly-Bibliothek genutzt werden.
+- **EffectEngine (`engine.rs`)**: Kalkuliert bei jedem Frame den finalen DMX-Buffer (512 Channel / Universum). Sie iteriert über Targets (Scheinwerfer), Chasers und Effekte (Waves, etc.).
+- **Memory Access**: Bietet schnellen, direkten Zugriff auf den DMX Buffer an (`extern "C"` für C++, oder `js_sys::Uint8Array::view` Wrappers in Wasm).
 
-### 2. [EffectEngine & Rendering](./architecture/engine.md)
-Details the pure mathematical core of the application:
-- Why we use a `Uint8Array` (`dmxBuffer`) for blazing-fast memory access instead of Vue Reactivity.
-- The 60fps render loop steps.
-- How `BaseOscillatorEffect` and spatial fanning calculations operate.
+### 2. Canvas Rendering Engine (`rs-engine-canvas`)
+Das 2D Rendering der Scheinwerfer und der Arbeitsfläche für den Pixelmapper/Browser. Dies baut auf der Core Engine auf, wird aber *nur* für WebAssembly kompiliert.
+- **Wasm Bindings**: Hier befindet sich das Brücken-Interface zu JavaScript.
+- **femtovg**: Dient als Hardware-beschleunigter 2D Renderer (OpenGL/WebGL2). Das Frontend übergibt lediglich den WebGL-Context.
+- **Räumliche Indexierung (`rstar`)**: Damit Mouse-Events (Hover/Marquee-Select) direkt in Wasm berechnet werden, anstatt Daten an JS zu senden.
+- **Exaktes Hit-Testing (`usvg`)**: Vektor-basierte Hit-Polygon-Tests (PiP) um auch komplexe Fixture-Silhouetten zu erkennen.
 
-### 3. [Global State & Presets](./architecture/state.md)
-Explains how the stateless engine bridges to the UI:
-- Pinia (`engine-store.ts`) usage for saved data.
-- Why Presets store explicit Fixture References (`fixtureIds`) for selective application and modular diffing.
+## Skalierbarkeits-Pattern
+- **Data Synchronization**: Das Statusmodell (Beams, Targets, Effects) ist in JS der "Master". Bei Änderungen wird der entsprechende Wasm-Status per Payload synchronisiert (`sync_targets()`, `sync_effects()`).
+- **Separation of Concerns**: Die Wasm-Engine darf das DOM nicht kennen. Jegliche Interaktion geht über definierte Bindings (`wasm_bindings.rs`).
+- **Verwendung moderner Standards**: Vite/Bun im Frontend für schnelles HMR, Rust Edition 2024 für moderne Sprachfeatures. 
 
-### 4. [Vue UI, Editor & History](./architecture/ui-history.md)
-Details the decoupled front-end architecture:
-- 2D `FixtureEditor` canvas and coordinate normalization.
-- Context Menu system rules.
-- Command-pattern Undo/Redo (`useHistory()`) for Property edits and Deletions.
-- **`DraggableNumberInput`**: Custom interactive input for tactile property editing (drag-to-change).
-
-### 5. [Fixture Library (OFL)](./ofl.md)
-Explains how Pixelmapper maps and integrates the vast Open Fixture Library (OFL) to automatically construct complex real-world light objects and configurations.
-
----
-
-## Directory Layout
-```
-app/utils/engine/
-├── types.ts                    # Core types: ChannelType, EffectDirection, Effect interface
-├── engine.ts                   # EffectEngine controller (Uint8Array DMX buffer)
-├── core/
-│   ├── group.ts                # FixtureGroup and SceneNode hierarchy (Figma-style grouping)
-│   ├── channel.ts              # Channel interface, ChannelRole, concrete classes
-│   ├── beam.ts                 # Beam class (local offset within a fixture)
-│   └── fixture.ts              # Fixture class with position, beams, resolveColor()
-└── effects/
-    ├── base-oscillator-effect.ts   # Abstract base for oscillating effects
-    └── sine-effect.ts              # SineEffect implementation
-
-app/components/ui/
-├── input/                      # Standard Shadcn Input
-├── label/                      # Standard Shadcn Label
-└── DraggableNumberInput.vue    # Premium numeric input with drag-to-change functionality
-
-app/components/engine/
-├── SelectionInfoSection.vue    # Container for selected fixture properties
-├── SelectionPositionInfo.vue   # Sub-component for coordinate editing
-├── SelectionDmxInfo.vue        # Sub-component for DMX universe/address
-├── FixtureSidebar.vue          # Figma-style sidebar layer hierarchy
-├── FixtureSidebarNode.vue      # Recursive node for folders/fixtures; uses FixtureContextMenu
-├── FixtureContextMenu.vue      # Unified context menu; capability flags control visible items
-├── FixtureWorkspace.vue        # Wraps the canvas editor and the master context menu
-├── DeleteConfirmDialog.vue     # AlertDialog confirmation before deleting a node
-├── composables/
-│   ├── use-presets.ts          # Handles diffing and preset generation
-│   ├── use-history.ts          # Custom Undo/Redo command stack integration
-│   └── use-workspace-operations.ts # Extracted logic for grouping, ungrouping, and deleting
-├── commands/
-│   └── (Contains Undo/Redo Command implementations like Move, Group, SetChannels)
-└── FixtureEditor.vue           # 2D drag-and-drop fixture positioning UI
-```
-
----
-
-## Coding Guidelines
-- **Modules**: ESM focus.
-- **Types**: Shared types in `types/` or co-located for specific features. Prefer interfaces for objects, types for unions. Avoid `any`.
-- **Functions**: Keep under 50 lines. Prefer pure functions. Extract reusable logic. Avoid deep nesting (>3 levels).
-- **Naming**: `kebab-case` for files, `camelCase` for vars/funcs, `PascalCase` for types/classes, `UPPER_SNAKE_CASE` for constants.
-- **Documentation**: All new major features should update these architecture files.
+*Letztes Update: Canvas Wasm Migration Plan*

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 defineOptions({ inheritAttrs: false });
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { SpatialVector } from '~/utils/engine/types';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
-import FixtureNode from './FixtureNode.vue';
 import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
@@ -34,7 +32,7 @@ interface Emits {
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
-import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
+import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 
 // ─── Responsive Sizing ───────────────────────────────────────────────────────
 const viewportEl = ref<HTMLElement | null>(null);
@@ -55,37 +53,23 @@ const { editorWidth, editorHeight } = useEditorViewport(
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel, centerOn, fitAll } = useCamera();
 const history = useHistory();
-function handleDeleteRequest(fixture: Fixture) {
-  // If the fixture is part of the current selection, delete the entire selection
-  if (selectedIds.value.has(fixture.id)) {
-    emit('delete-selected');
-  } else {
-    emit('deleteFixture', fixture);
-  }
-}
 
-// ─── Zoom to Node ────────────────────────────────────────────────────────────
+// ─── Zoom ─────────────────────────────────────────────────────────────────────
 function zoomTo(node: SceneNode) {
   let avgPos = { x: 0, y: 0 };
-
   if (node instanceof FixtureGroup) {
-    const groupFixtures = node.getAllFixtures();
-    if (groupFixtures.length === 0) return;
-    avgPos.x = groupFixtures.reduce((sum: number, f: Fixture) => sum + f.fixturePosition.x, 0) / groupFixtures.length;
-    avgPos.y = groupFixtures.reduce((sum: number, f: Fixture) => sum + f.fixturePosition.y, 0) / groupFixtures.length;
+    const gf = node.getAllFixtures();
+    if (gf.length === 0) return;
+    avgPos.x = gf.reduce((s: number, f: Fixture) => s + f.fixturePosition.x, 0) / gf.length;
+    avgPos.y = gf.reduce((s: number, f: Fixture) => s + f.fixturePosition.y, 0) / gf.length;
   } else {
     avgPos.x = (node as Fixture).fixturePosition.x;
     avgPos.y = (node as Fixture).fixturePosition.y;
   }
-
-  if (camera.scale < 1.0) {
-    camera.scale = 1.0;
-  }
-
+  if (camera.scale < 1.0) camera.scale = 1.0;
   centerOn(avgPos.x * WORLD_WIDTH, avgPos.y * WORLD_HEIGHT, editorWidth.value, editorHeight.value);
 }
 
-/** Fit all fixtures into the viewport. */
 function zoomToFit() {
   const points = props.fixtures.map(f => ({
     wx: f.fixturePosition.x * WORLD_WIDTH,
@@ -99,7 +83,9 @@ defineExpose({ zoomTo, zoomToFit });
 
 const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { default: () => new Set() });
 
-const { selectedIds, interaction, onViewportMouseDown, onDragStart, onRotateStart, onMouseMove, onMouseUp } =
+const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
+
+const { selectedIds, interaction, onViewportMouseDown, onMouseMove, onMouseUp } =
   useSelection(
     () => props.fixtures,
     () => WORLD_WIDTH,
@@ -111,66 +97,30 @@ const { selectedIds, interaction, onViewportMouseDown, onDragStart, onRotateStar
     (before, after) => {
       history.execute(new RotateFixtureCommand(props.fixtures, before, after));
     },
-    selectedIdsModel
+    selectedIdsModel,
+    () => fixtureCanvas.value,
   );
 
-// Clear the active modifier (and spatial handle) if the user deselects everything
+const effectEngine = inject<EffectEngine>('effectEngine');
+
+const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
+
+let modifierDragBeforeEffects: Effect[] | null = null;
+const isSpatialDragging = ref(false);
+
 watch(selectedIdsModel, (newVal) => {
   if (effectEngine && newVal.size === 0) {
     effectEngine.activeModifier.value = null;
   }
 });
 
-// ─── Refs ─────────────────────────────────────────────────────────────────────
-const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
-
-function rect(): DOMRect {
-  return viewportEl.value!.getBoundingClientRect();
-}
-
-// ─── Fixture visibility / screen position ─────────────────────────────────────
-function isFixtureVisible(f: Fixture): boolean {
-  const pos    = worldToViewport(f.fixturePosition.x * WORLD_WIDTH, f.fixturePosition.y * WORLD_HEIGHT);
-  const maxSize = Math.max(f.fixtureSize?.x ?? 1, f.fixtureSize?.y ?? 1);
-  const r      = maxSize * FIXTURE_RADIUS * camera.scale;
-  const margin = r + 20;
-  return (
-    pos.x + margin >= 0 && pos.x - margin <= editorWidth.value &&
-    pos.y + margin >= 0 && pos.y - margin <= editorHeight.value
-  );
-}
-
-function getFixtureScreenPos(f: Fixture) {
-  return worldToViewport(f.fixturePosition.x * WORLD_WIDTH, f.fixturePosition.y * WORLD_HEIGHT);
-}
-
-function isFixtureSelected(f: Fixture): boolean {
-  let curr: SceneNode | null = f as unknown as SceneNode;
-  while (curr) {
-    if (selectedIds.value.has(curr.id)) return true;
-    curr = curr.parent;
-  }
-  return false;
-}
-
-const effectEngine = inject<EffectEngine>('effectEngine');
-
-// Computed so Vue's template reactivity correctly tracks changes to activeModifier.value
-const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
-
-let modifierDragBeforeEffects: Effect[] | null = null;
-
-const isSpatialDragging = ref(false);
-
 function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
   if (!effectEngine) return;
-  if (!modifierDragBeforeEffects) {
-    modifierDragBeforeEffects = cloneEffectsList(effectEngine.effects);
-  }
+  if (!modifierDragBeforeEffects) modifierDragBeforeEffects = cloneEffectsList(effectEngine.effects);
   Object.assign(modifier, changes);
 }
 
-function handleSpatialDragStart(type: 'origin' | 'endpoint') {
+function handleSpatialDragStart() {
   isSpatialDragging.value = true;
 }
 
@@ -183,13 +133,15 @@ function handleModifierDragEnd(modifier: Effect) {
   }
 }
 
+function rect(): DOMRect {
+  return viewportEl.value!.getBoundingClientRect();
+}
+
 // ─── Viewport event delegation ─────────────────────────────────────────────────
 function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
 function handleMouseDown(e: MouseEvent) { onViewportMouseDown(e, rect()); }
-function handleDragStart(e: MouseEvent, f: Fixture) { onDragStart(e, f, rect()); }
-function handleRotateStart(e: MouseEvent, f: Fixture) { onRotateStart(e, f, rect()); }
-function handleMouseMove(e: MouseEvent) { onMouseMove(e, rect()); fixtureCanvas.value?.draw(); }
-function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw(); }
+function handleMouseMove(e: MouseEvent) { onMouseMove(e, rect()); fixtureCanvas.value?.sync(); }
+function handleMouseUp()                { onMouseUp(); }
 </script>
 
 <template>
@@ -203,12 +155,11 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
     @mouseup="handleMouseUp"
     @mouseleave="handleMouseUp"
   >
-    <!-- Canvas: grid, fixture glows, marquee -->
+    <!-- WASM Canvas: grid, fixture glows, borders, marquee -->
     <FixtureCanvas
       ref="fixtureCanvas"
       :fixtures="fixtures"
-      :colors="colors"
-      :dmx-buffer="effectEngine?.dmxBuffer"
+      :selected-ids="selectedIds"
       :interaction="interaction"
       :camera="camera"
       :world-width="WORLD_WIDTH"
@@ -217,10 +168,10 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       :viewport-height="editorHeight"
     />
 
-    <!-- Effect Spatial Preview (Rendered behind fixtures, above canvas grid) -->
+    <!-- Effect Spatial Preview -->
     <div
       v-if="isSpatialDragging && activeModifier && activeModifier.getPreviewCSS"
-      class="absolute left-0 top-0 pointer-events-none transition-opacity duration-200"
+      class="absolute left-0 top-0 pointer-events-none"
       :style="{
         width: `${WORLD_WIDTH}px`,
         height: `${WORLD_HEIGHT}px`,
@@ -228,15 +179,15 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
         transformOrigin: '0 0',
       }"
     >
-      <div 
-        class="pointer-events-none" 
-        :style="activeModifier.getPreviewCSS({ 
-          worldWidth: WORLD_WIDTH, 
-          worldHeight: WORLD_HEIGHT, 
-          camera, 
-          viewportWidth: editorWidth, 
-          viewportHeight: editorHeight 
-        })" 
+      <div
+        class="pointer-events-none"
+        :style="activeModifier.getPreviewCSS({
+          worldWidth: WORLD_WIDTH,
+          worldHeight: WORLD_HEIGHT,
+          camera,
+          viewportWidth: editorWidth,
+          viewportHeight: editorHeight
+        })"
       />
     </div>
 
@@ -255,40 +206,6 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
       @modifierDragEnd="handleModifierDragEnd"
       @redraw="() => fixtureCanvas?.draw()"
     />
-
-    <!-- World Container for O(1) Camera panning/zooming -->
-    <div
-      class="world-container absolute left-0 top-0 origin-top-left pointer-events-none"
-      :style="{
-        width: `${WORLD_WIDTH}px`,
-        height: `${WORLD_HEIGHT}px`,
-        transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.scale})`,
-      }"
-    >
-      <template v-for="fixture in fixtures" :key="fixture.id">
-        <div
-          class="absolute origin-center pointer-events-none"
-          :style="{
-            transform: `translate3d(${fixture.fixturePosition.x * WORLD_WIDTH}px, ${fixture.fixturePosition.y * WORLD_HEIGHT}px, 0)`,
-          }"
-        >
-          <!-- We use pointer-events-auto here because the world-container disables them -->
-          <FixtureNode
-            class="pointer-events-auto"
-            :fixture="fixture"
-            :radius="FIXTURE_RADIUS"
-            :is-selected="isFixtureSelected(fixture)"
-            :is-dragging="interaction.type === 'drag' && interaction.startPositions?.has(fixture.id)"
-            :show-labels="camera.scale > 1.2"
-            @dragstart="handleDragStart($event, fixture)"
-            @rotatestart="handleRotateStart($event, fixture)"
-            @delete="handleDeleteRequest"
-            @group="emit('group')"
-            @ungroup="g => emit('ungroup', g)"
-          />
-        </div>
-      </template>
-    </div>
   </div>
 </template>
 
@@ -302,11 +219,5 @@ function handleMouseUp()                { onMouseUp(); fixtureCanvas.value?.draw
   cursor: crosshair;
   user-select: none;
   outline: none;
-}
-
-.gradient-svg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
 }
 </style>

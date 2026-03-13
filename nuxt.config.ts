@@ -8,6 +8,14 @@ export default defineNuxtConfig({
       //@ts-ignore
       tailwindcss(),
     ],
+    optimizeDeps: {
+      exclude: ['rs-engine-canvas', 'rs-engine-core'],
+    },
+    server: {
+      watch: {
+        ignored: ['!**/node_modules/rs-engine-canvas/**', '!**/node_modules/rs-engine-core/**'],
+      },
+    },
   },
 
   modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt'],
