@@ -43,5 +43,5 @@
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.5.0"
   },
-  "version": "0.1.14"
+  "version": "0.1.15"
 }

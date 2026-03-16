@@ -49,7 +49,7 @@ jobs:
       # Merge bootloader + partitions + app into a single flashable image (address 0x0)
       - name: Create merged firmware binary
         run: |
-          esptool.py --chip esp32p4 merge_bin \
+          python -m esptool --chip esp32p4 merge_bin \
             -o firmware.bin \
             --flash_mode dio \
             --flash_size 32MB \
