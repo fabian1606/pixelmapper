@@ -24,6 +24,7 @@ jobs:
           default: true
           ldproxy: false
           buildtargets: esp32p4
+          toolchain-version: "1.93.0.0"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -55,7 +56,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Firmware v${{ env.VERSION }}
+          name: Firmware ${{ github.ref_name }}
           make_latest: true
           files: |
             pio/.pio/build/waveshare_p4_poe/firmware.bin
