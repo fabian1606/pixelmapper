@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia';
-import { reactive } from 'vue';
+import { shallowReactive } from 'vue';
 import type { BaseConnector, EngineConnectorState } from '~/utils/connectors/base-connector';
 
 export const useConnectionsStore = defineStore('connections', () => {
-  const connectors = reactive<BaseConnector[]>([]);
+  const connectors = shallowReactive<BaseConnector[]>([]);
 
   function add(connector: BaseConnector) {
     connectors.push(connector);
