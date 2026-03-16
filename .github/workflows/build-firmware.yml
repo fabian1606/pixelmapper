@@ -24,13 +24,21 @@ jobs:
           curl -L https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu -o espup
           chmod +x espup
           ./espup install --targets esp32p4 --toolchain-version 1.93.0.0
-          # espup writes env vars to this file; source it for subsequent steps
-          cat $HOME/export-esp.sh >> "$GITHUB_ENV"
+          # Convert export-esp.sh (export KEY="val") → GITHUB_ENV (KEY=val)
+          sed 's/^export //' "$HOME/export-esp.sh" >> "$GITHUB_ENV"
+          # Also update PATH if espup added entries
+          source "$HOME/export-esp.sh"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
 
       - name: Verify ESP toolchain
         run: |
+          cat "$HOME/export-esp.sh"
+          echo "---"
           rustc --version
           rustup show
+          rustup component list --installed
+          echo "---"
+          ls "$(rustc --print sysroot)/lib/rustlib/src/" 2>/dev/null || echo "no rust-src found"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
