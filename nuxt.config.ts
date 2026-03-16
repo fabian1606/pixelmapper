@@ -1,6 +1,14 @@
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
+  typescript: {
+    tsConfig: {
+      compilerOptions: {
+        types: ['w3c-web-serial'],
+      },
+    },
+  },
+
   css: ['~/assets/css/tailwind.css'],
 
   vite: {

@@ -25,3 +25,6 @@ logs
 
 # Open Fixture Library clone (local data source, not committed)
 ofl-data/
+
+# Firmware version — written by GitHub Action from git tag; local builds use "dev"
+pio/include/version.h

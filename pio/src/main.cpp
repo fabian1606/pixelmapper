@@ -2,15 +2,17 @@
 #include <stdint.h>
 #include <string.h>
 #include "engine_ffi.h"
+#include "version.h"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 #define LED_PIN     45
 
 // ── Protocol ─────────────────────────────────────────────────────────────────
 // Packet: [0xAA][0x55][type][len_lo][len_hi][payload × len]
-#define MAGIC0        0xAA
-#define MAGIC1        0x55
-#define TYPE_TIMESYNC 0x13  // f32 LE — ESP32-only clock alignment
+#define MAGIC0           0xAA
+#define MAGIC1           0x55
+#define TYPE_VERSION_REQ 0x11  // zero-length — reply: "[version] X.Y.Z\n"
+#define TYPE_TIMESYNC    0x13  // f32 LE — ESP32-only clock alignment
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 static EffectEngine* engine       = nullptr;
@@ -32,7 +34,9 @@ static inline float readF32LE(const uint8_t* buf) {
 }
 
 static void dispatch() {
-    if (rxType == TYPE_TIMESYNC) {
+    if (rxType == TYPE_VERSION_REQ) {
+        Serial.printf("[version] %s\n", FIRMWARE_VERSION);
+    } else if (rxType == TYPE_TIMESYNC) {
         // Clock alignment is device-specific — handled here, not by the engine
         float browserElapsed = readF32LE(rxBuf);
         float newOffset = browserElapsed - (float)millis();
@@ -90,6 +94,7 @@ void setup() {
 
     ledcAttach(LED_PIN, 5000, 8); // 5kHz, 8-bit PWM
 
+    Serial.printf("[version] %s\n", FIRMWARE_VERSION);
     Serial.println("[boot] ready — waiting for sync");
 }
 

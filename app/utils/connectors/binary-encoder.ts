@@ -4,11 +4,12 @@ import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/consta
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
-export const TYPE_BPM        = 0x10;
-export const TYPE_TIMESYNC   = 0x13;
-export const TYPE_LAYOUT_BIN = 0x14;
-export const TYPE_CHAN_BIN   = 0x15;
-export const TYPE_FX_BIN     = 0x16;
+export const TYPE_BPM         = 0x10;
+export const TYPE_VERSION_REQ = 0x11;
+export const TYPE_TIMESYNC    = 0x13;
+export const TYPE_LAYOUT_BIN  = 0x14;
+export const TYPE_CHAN_BIN    = 0x15;
+export const TYPE_FX_BIN      = 0x16;
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -58,7 +59,14 @@ class BufWriter {
   }
 }
 
-// ── Simple f32 packets ────────────────────────────────────────────────────────
+// ── Simple fixed packets ──────────────────────────────────────────────────────
+
+export function buildVersionRequestPacket(): Uint8Array {
+  // Zero-length payload — ESP32 replies with "[version] X.Y.Z\n" on serial
+  const out = new Uint8Array(5);
+  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_VERSION_REQ; out[3] = 0; out[4] = 0;
+  return out;
+}
 
 export function buildBpmPacket(bpm: number): Uint8Array {
   const out = new Uint8Array(9);

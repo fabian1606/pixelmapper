@@ -1,9 +1,21 @@
-import { buildBpmPacket, buildTimesyncPacket } from '~/utils/connectors/binary-encoder';
+import { ref, computed } from 'vue';
+import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket } from '~/utils/connectors/binary-encoder';
 import { BaseConnector, type ConnectorMeta, type EngineConnectorState } from './base-connector';
 
 // ── SerialConnector ───────────────────────────────────────────────────────────
 // Forwards pre-built binary packets from the engine-store over USB serial.
 // No encoding logic here — the store owns that.
+
+function isNewer(latest: string | null, current: string | null): boolean {
+  if (!latest || !current || current === 'dev') return false;
+  const a = latest.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] ?? 0) > (b[i] ?? 0)) return true;
+    if ((a[i] ?? 0) < (b[i] ?? 0)) return false;
+  }
+  return false;
+}
 
 export class SerialConnector extends BaseConnector {
   readonly meta: ConnectorMeta = {
@@ -13,6 +25,14 @@ export class SerialConnector extends BaseConnector {
   };
 
   baudRate: number;
+
+  // ── Firmware version state ─────────────────────────────────────────────────
+  firmwareVersion = ref<string | null>(null);
+  latestVersion   = ref<string | null>(null);
+  latestBinUrl    = ref<string | null>(null);
+  isFlashing      = ref(false);
+  flashProgress   = ref(0);
+  updateAvailable = computed(() => isNewer(this.latestVersion.value, this.firmwareVersion.value));
 
   private port: SerialPort | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
@@ -39,12 +59,16 @@ export class SerialConnector extends BaseConnector {
       this.writer = this.port!.writable!.getWriter();
       this.status = 'connected';
       // Reset caches so everything is sent fresh on first onEngineState call
-      this.frameCount     = 0;
-      this.cachedBpm      = -1;
-      this.cachedLayout   = -1;
-      this.cachedChannels = -1;
-      this.cachedEffects  = -1;
+      this.frameCount         = 0;
+      this.cachedBpm          = -1;
+      this.cachedLayout       = -1;
+      this.cachedChannels     = -1;
+      this.cachedEffects      = -1;
+      this.firmwareVersion.value = null;
       this.startReadLoop();
+      // Request firmware version immediately after connect
+      this.send(buildVersionRequestPacket());
+      this.fetchLatestVersion();
     } catch (e: any) {
       this.status = 'error';
       this.errorMessage = e?.message ?? 'Connection failed';
@@ -104,6 +128,90 @@ export class SerialConnector extends BaseConnector {
     this.frameCount++;
   }
 
+  async flashFirmware() {
+    if (!this.port || !this.latestBinUrl.value || this.isFlashing.value) return;
+    this.isFlashing.value  = true;
+    this.flashProgress.value = 0;
+    this.pushLog('[flash] starting firmware update...');
+    try {
+      // Release writer before esptool-js takes control of the port
+      this.writer?.releaseLock();
+      this.writer = null;
+      this.readAbort?.abort();
+      this.readAbort = null;
+
+      const { ESPLoader, Transport } = await import('esptool-js');
+      const transport = new Transport(this.port, false);
+      const self = this;
+      const loader = new ESPLoader({
+        transport,
+        baudrate: 115200,
+        romBaudrate: 115200,
+        enableTracing: false,
+        terminal: {
+          clean() {},
+          writeLine(s: string) { self.pushLog(s); },
+          write(s: string) { self.pushLog(s); },
+        },
+      });
+
+      await loader.main();
+      this.pushLog('[flash] connected to ESP32 bootloader');
+
+      const binResp = await fetch(this.latestBinUrl.value);
+      const binData = await binResp.arrayBuffer();
+      // esptool-js expects base64-encoded binary
+      const bytes = new Uint8Array(binData);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+      const b64 = btoa(binary);
+
+      await loader.writeFlash({
+        fileArray: [{ data: b64, address: 0x0 }],
+        flashSize: 'keep',
+        flashMode: 'keep',
+        flashFreq: 'keep',
+        eraseAll: false,
+        compress: true,
+        reportProgress(_idx: number, written: number, total: number) {
+          self.flashProgress.value = Math.round((written / total) * 100);
+          self.pushLog(`[flash] ${self.flashProgress.value}%`);
+        },
+      });
+
+      await loader.softReset(false);  // soft reset, run user code
+      await transport.disconnect();
+      this.pushLog('[flash] done — rebooting ESP32');
+    } catch (e: any) {
+      this.pushLog(`[flash] error: ${e?.message ?? e}`);
+    } finally {
+      this.isFlashing.value = false;
+      // Re-acquire writer for normal operation
+      if (this.port?.writable) {
+        try {
+          this.writer = this.port.writable.getWriter();
+        } catch (_) {}
+      }
+      // Re-start read loop to catch boot output (version line)
+      this.firmwareVersion.value = null;
+      this.startReadLoop();
+    }
+  }
+
+  private async fetchLatestVersion() {
+    try {
+      const res  = await fetch('https://api.github.com/repos/fabian1606/pixelmapper/releases/latest');
+      if (!res.ok) return;
+      const data = await res.json();
+      // Releases are tagged "v1.2.3" — strip the "v"
+      this.latestVersion.value = (data.tag_name as string | undefined)?.replace(/^v/, '') ?? null;
+      const asset = (data.assets as any[] | undefined)?.find((a: any) => a.name === 'firmware.bin');
+      this.latestBinUrl.value  = asset?.browser_download_url ?? null;
+    } catch (_) {
+      // Non-fatal — no internet or no releases yet
+    }
+  }
+
   private send(packet: Uint8Array) {
     try {
       this.writer!.write(packet).catch(() => this.disconnect());
@@ -130,7 +238,13 @@ export class SerialConnector extends BaseConnector {
           partial = lines.pop() ?? '';
           for (const line of lines) {
             const t = line.trimEnd();
-            if (t) this.pushLog(t);
+            if (!t) continue;
+            // Parse firmware version from boot output or version request response
+            const vMatch = t.match(/^\[version\]\s+(.+)$/);
+            if (vMatch) {
+              this.firmwareVersion.value = vMatch[1]!.trim();
+            }
+            this.pushLog(t);
           }
         }
       } catch (_) {

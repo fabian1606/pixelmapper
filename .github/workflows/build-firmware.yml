@@ -1,0 +1,57 @@
+name: Build & Release ESP32 Firmware
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'   # Trigger: git tag v1.2.3 && git push origin v1.2.3
+                   # Or use: bun run release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the Espressif Rust toolchain (includes riscv32imafc-esp-espidf target)
+      - name: Install ESP Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          ldproxy: false
+          buildtargets: esp32p4
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rs-engine
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # Inject version from git tag into version.h before pio build runs link_rust.py
+      - name: Inject version into version.h
+        run: |
+          VER=${GITHUB_REF#refs/tags/v}
+          printf '#pragma once\n#define FIRMWARE_VERSION "%s"\n' "$VER" \
+            > pio/include/version.h
+          echo "VERSION=$VER" >> $GITHUB_ENV
+
+      # PlatformIO pre-script (link_rust.py) builds rs-engine-ffi automatically
+      - name: Build firmware
+        run: pio run
+        working-directory: pio
+
+      - name: Write firmware-meta.json
+        run: echo '{"version":"${{ env.VERSION }}"}' > firmware-meta.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Firmware v${{ env.VERSION }}
+          make_latest: true
+          files: |
+            pio/.pio/build/waveshare_p4_poe/firmware.bin
+            firmware-meta.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Usb, Plus, Trash2, CircleDot } from 'lucide-vue-next';
+import { Usb, Plus, Trash2, CircleDot, ArrowUpCircle } from 'lucide-vue-next';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
-import type { BaseConnector } from '~/utils/connectors/base-connector';
+import { SerialConnector } from '~/utils/connectors/serial-connector';
 
 const store = useConnectionsStore();
 
@@ -19,6 +18,10 @@ const statusColor: Record<string, string> = {
   connected: 'text-green-400',
   error: 'text-red-400',
 };
+
+function asSerial(c: any): SerialConnector | null {
+  return c instanceof SerialConnector ? c : null;
+}
 </script>
 
 <template>
@@ -45,42 +48,100 @@ const statusColor: Record<string, string> = {
     <div
       v-for="connector in store.connectors"
       :key="connector.id"
-      class="flex items-center gap-3 px-3 py-2.5 rounded border border-border bg-background text-sm"
+      class="flex flex-col gap-2 px-3 py-2.5 rounded border border-border bg-background text-sm"
     >
-      <CircleDot :size="14" :class="statusColor[connector.status]" />
+      <!-- Header row -->
+      <div class="flex items-center gap-3">
+        <CircleDot :size="14" :class="statusColor[connector.status]" />
 
-      <div class="flex-1 min-w-0">
-        <div class="font-medium">{{ connector.meta.label }}</div>
-        <div v-if="connector.errorMessage" class="text-xs text-red-400 truncate">
-          {{ connector.errorMessage }}
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">{{ connector.meta.label }}</div>
+          <div v-if="connector.errorMessage" class="text-xs text-red-400 truncate">
+            {{ connector.errorMessage }}
+          </div>
+          <div v-else class="text-xs text-muted-foreground capitalize">
+            {{ connector.status }}
+          </div>
         </div>
-        <div v-else class="text-xs text-muted-foreground capitalize">
-          {{ connector.status }}
+
+        <!-- Version badge (up to date) -->
+        <template v-if="asSerial(connector) && connector.status === 'connected'">
+          <span
+            v-if="asSerial(connector)!.firmwareVersion.value && !asSerial(connector)!.updateAvailable"
+            class="text-xs text-muted-foreground"
+          >
+            v{{ asSerial(connector)!.firmwareVersion.value }}
+            <span class="text-green-400/80">✓</span>
+          </span>
+          <span v-else-if="!asSerial(connector)!.firmwareVersion.value" class="text-xs text-muted-foreground">v—</span>
+        </template>
+
+        <button
+          v-if="connector.status === 'connected' && !asSerial(connector)?.isFlashing.value"
+          class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+          @click="connector.disconnect()"
+        >
+          Disconnect
+        </button>
+        <button
+          v-else-if="connector.status !== 'connected'"
+          class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+          :disabled="connector.status === 'connecting'"
+          @click="connector.connect()"
+        >
+          Connect
+        </button>
+
+        <button
+          class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          @click="store.remove(connector.id)"
+        >
+          <Trash2 :size="14" />
+        </button>
+      </div>
+
+      <!-- Firmware flash progress -->
+      <div
+        v-if="asSerial(connector) && asSerial(connector)!.isFlashing.value"
+        class="px-1"
+      >
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-muted-foreground">Flashing firmware…</span>
+          <span class="text-xs text-muted-foreground">{{ asSerial(connector)!.flashProgress.value }}%</span>
+        </div>
+        <div class="h-1 rounded bg-border overflow-hidden">
+          <div
+            class="h-full bg-blue-400 transition-all duration-200"
+            :style="{ width: asSerial(connector)!.flashProgress.value + '%' }"
+          />
         </div>
       </div>
 
-      <button
-        v-if="connector.status === 'connected'"
-        class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-        @click="connector.disconnect()"
+      <!-- Outdated firmware warning -->
+      <div
+        v-else-if="asSerial(connector) && connector.status === 'connected' && asSerial(connector)!.updateAvailable"
+        class="px-2 py-2 rounded border border-red-500/40 bg-red-500/10"
       >
-        Disconnect
-      </button>
-      <button
-        v-else
-        class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-        :disabled="connector.status === 'connecting'"
-        @click="connector.connect()"
-      >
-        Connect
-      </button>
-
-      <button
-        class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-        @click="store.remove(connector.id)"
-      >
-        <Trash2 :size="14" />
-      </button>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-xs font-medium text-red-400">Firmware outdated</div>
+            <div class="text-xs text-red-400/70 mt-0.5 leading-relaxed">
+              Device runs engine v{{ asSerial(connector)!.firmwareVersion.value }} —
+              some effects may not work correctly.
+              Update to v{{ asSerial(connector)!.latestVersion.value }}.
+            </div>
+          </div>
+          <button
+            class="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs
+                   bg-red-500/20 text-red-300 border border-red-500/40
+                   hover:bg-red-500/30 transition-colors"
+            @click="asSerial(connector)!.flashFirmware()"
+          >
+            <ArrowUpCircle :size="12" />
+            Update
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
