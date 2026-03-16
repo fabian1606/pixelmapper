@@ -54,8 +54,9 @@ jobs:
             -o firmware.bin \
             --flash_mode dio \
             --flash_size 32MB \
-            0x0    .pio/build/waveshare_p4_poe/bootloader.bin \
-            0x8000 .pio/build/waveshare_p4_poe/partitions.bin \
+            0x2000  .pio/build/waveshare_p4_poe/bootloader.bin \
+            0x8000  .pio/build/waveshare_p4_poe/partitions.bin \
+            0xe000  "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
             0x10000 .pio/build/waveshare_p4_poe/firmware.bin
         working-directory: pio
 
