@@ -1,4 +1,9 @@
-import { BaseConnector, type ConnectorMeta } from './base-connector';
+import { buildBpmPacket, buildTimesyncPacket } from '~/utils/connectors/binary-encoder';
+import { BaseConnector, type ConnectorMeta, type EngineConnectorState } from './base-connector';
+
+// ── SerialConnector ───────────────────────────────────────────────────────────
+// Forwards pre-built binary packets from the engine-store over USB serial.
+// No encoding logic here — the store owns that.
 
 export class SerialConnector extends BaseConnector {
   readonly meta: ConnectorMeta = {
@@ -11,12 +16,17 @@ export class SerialConnector extends BaseConnector {
 
   private port: SerialPort | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private readonly packet = new Uint8Array(513);
   private readAbort: AbortController | null = null;
+
+  private cachedBpm      = -1;
+  private cachedLayout   = -1;
+  private cachedChannels = -1;
+  private cachedEffects  = -1;
+  private frameCount     = 0;
+  private readonly TIMESYNC_INTERVAL = 120;
 
   constructor(id: string, baudRate = 921600) {
     super(id);
-    this.packet[0] = 0xff;
     this.baudRate = baudRate;
   }
 
@@ -28,6 +38,12 @@ export class SerialConnector extends BaseConnector {
       await this.port!.open({ baudRate: this.baudRate });
       this.writer = this.port!.writable!.getWriter();
       this.status = 'connected';
+      // Reset caches so everything is sent fresh on first onEngineState call
+      this.frameCount     = 0;
+      this.cachedBpm      = -1;
+      this.cachedLayout   = -1;
+      this.cachedChannels = -1;
+      this.cachedEffects  = -1;
       this.startReadLoop();
     } catch (e: any) {
       this.status = 'error';
@@ -43,15 +59,57 @@ export class SerialConnector extends BaseConnector {
       await this.port?.close();
     } catch (_) {}
     this.writer = null;
-    this.port = null;
+    this.port   = null;
     this.status = 'disconnected';
     this.errorMessage = null;
   }
 
-  sendFrame(dmxBuffer: Uint8Array) {
+  /** No-op — ESP32 renders its own DMX via the local Rust engine */
+  sendFrame(_dmxBuffer: Uint8Array) {}
+
+  override onEngineState(state: EngineConnectorState) {
     if (this.status !== 'connected' || !this.writer) return;
-    this.packet.set(dmxBuffer.subarray(0, 512), 1);
-    this.writer.write(this.packet).catch(() => this.disconnect());
+
+    const first = this.frameCount === 0;
+
+    if (first || state.bpm !== this.cachedBpm) {
+      this.send(buildBpmPacket(state.bpm));
+      this.cachedBpm = state.bpm;
+      if (first) this.pushLog(`[sync] bpm=${state.bpm}`);
+    }
+
+    if (first || state.layoutRevision !== this.cachedLayout) {
+      this.send(state.layoutPacket);
+      this.cachedLayout = state.layoutRevision;
+      this.pushLog(`[sync] layout ${state.layoutPacket.length}B`);
+    }
+
+    if (first || state.channelsRevision !== this.cachedChannels) {
+      this.send(state.channelsPacket);
+      this.cachedChannels = state.channelsRevision;
+      this.pushLog(`[sync] channels ${state.channelsPacket.length}B`);
+    }
+
+    if (first || state.effectsRevision !== this.cachedEffects) {
+      this.send(state.effectsPacket);
+      this.cachedEffects = state.effectsRevision;
+      this.pushLog(`[sync] effects ${state.effectsPacket.length}B`);
+    }
+
+    if (first || this.frameCount % this.TIMESYNC_INTERVAL === 0) {
+      this.send(buildTimesyncPacket(state.elapsedMs));
+      if (first) this.pushLog(`[sync] timesync elapsed=${Math.round(state.elapsedMs)}ms`);
+    }
+
+    this.frameCount++;
+  }
+
+  private send(packet: Uint8Array) {
+    try {
+      this.writer!.write(packet).catch(() => this.disconnect());
+    } catch {
+      this.disconnect();
+    }
   }
 
   private startReadLoop() {
@@ -61,7 +119,6 @@ export class SerialConnector extends BaseConnector {
     const run = async () => {
       const decoder = new TextDecoderStream();
       port.readable!.pipeTo(decoder.writable, { signal: this.readAbort!.signal }).catch(() => {});
-
       let partial = '';
       const reader = decoder.readable.getReader();
       try {
@@ -72,12 +129,11 @@ export class SerialConnector extends BaseConnector {
           const lines = partial.split('\n');
           partial = lines.pop() ?? '';
           for (const line of lines) {
-            const trimmed = line.trimEnd();
-            if (trimmed) this.pushLog(trimmed);
+            const t = line.trimEnd();
+            if (t) this.pushLog(t);
           }
         }
       } catch (_) {
-        // aborted or disconnected — expected
       } finally {
         reader.releaseLock();
       }

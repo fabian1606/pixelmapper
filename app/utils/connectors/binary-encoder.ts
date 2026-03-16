@@ -1,0 +1,199 @@
+import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Effect } from '~/utils/engine/types';
+import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
+
+// ── Packet type constants ─────────────────────────────────────────────────────
+
+export const TYPE_BPM        = 0x10;
+export const TYPE_TIMESYNC   = 0x13;
+export const TYPE_LAYOUT_BIN = 0x14;
+export const TYPE_CHAN_BIN   = 0x15;
+export const TYPE_FX_BIN     = 0x16;
+
+const MAGIC0 = 0xaa, MAGIC1 = 0x55;
+
+// ── Channel type ID map (must match rs-engine/core/src/engine.rs channel_type_name) ──
+
+export const CHANNEL_TYPE_ID: Record<string, number> = {
+  RED: 0, GREEN: 1, BLUE: 2, WHITE: 3, WARM_WHITE: 4, COOL_WHITE: 5, AMBER: 6, UV: 7,
+  CYAN: 8, MAGENTA: 9, YELLOW: 10, LIME: 11, INDIGO: 12, DIMMER: 13, PAN: 14, TILT: 15,
+  PANTILT_SPEED: 16, STROBE: 17, STROBE_SPEED: 18, STROBE_DURATION: 19,
+  ZOOM: 20, FOCUS: 21, IRIS: 22, FROST: 23, BEAM_ANGLE: 24, BEAM_POSITION: 25,
+  PRISM: 26, PRISM_ROTATION: 27, BLADE: 28, COLOR_WHEEL: 29, COLOR_PRESET: 30,
+  COLOR_TEMPERATURE: 31, GOBO_WHEEL: 32, GOBO_SPIN: 33, EFFECT: 34,
+  EFFECT_SPEED: 35, EFFECT_DURATION: 36, SOUND_SENSITIVITY: 37, ROTATION: 38,
+  SPEED: 39, TIME: 40, FOG: 41, MAINTENANCE: 42, GENERIC: 43, CUSTOM: 44,
+};
+
+const SPEED_MODE_ID: Record<string, number> = { time: 0, beat: 1, infinite: 2 };
+const DIRECTION_ID:  Record<string, number> = { NONE: 0, LINEAR: 1, RADIAL: 2, SYMMETRICAL: 3 };
+
+// ── Low-level buffer writer ───────────────────────────────────────────────────
+
+class BufWriter {
+  private buf: number[] = [];
+  private dv = new DataView(new ArrayBuffer(4));
+
+  u8(v: number)  { this.buf.push(v & 0xff); }
+  u16(v: number) { this.buf.push(v & 0xff, (v >> 8) & 0xff); }
+  f32(v: number) {
+    this.dv.setFloat32(0, v, true);
+    this.buf.push(this.dv.getUint8(0), this.dv.getUint8(1), this.dv.getUint8(2), this.dv.getUint8(3));
+  }
+
+  speed(s: { mode: string; timeMs: number; beatValue: number; beatOffset: number }) {
+    this.u8(SPEED_MODE_ID[s.mode] ?? 0);
+    this.f32(s.timeMs);
+    this.f32(s.beatValue);
+    this.f32(s.beatOffset);
+  }
+
+  toPacket(type: number): Uint8Array {
+    const out = new Uint8Array(5 + this.buf.length);
+    out[0] = MAGIC0; out[1] = MAGIC1; out[2] = type;
+    out[3] = this.buf.length & 0xff;
+    out[4] = (this.buf.length >> 8) & 0xff;
+    for (let i = 0; i < this.buf.length; i++) out[5 + i] = this.buf[i]!;
+    return out;
+  }
+}
+
+// ── Simple f32 packets ────────────────────────────────────────────────────────
+
+export function buildBpmPacket(bpm: number): Uint8Array {
+  const out = new Uint8Array(9);
+  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_BPM; out[3] = 4; out[4] = 0;
+  new DataView(out.buffer).setFloat32(5, bpm, true);
+  return out;
+}
+
+export function buildTimesyncPacket(elapsedMs: number): Uint8Array {
+  const out = new Uint8Array(9);
+  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_TIMESYNC; out[3] = 4; out[4] = 0;
+  new DataView(out.buffer).setFloat32(5, elapsedMs, true);
+  return out;
+}
+
+// ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────
+// Replicates the beam transform from engine.ts syncTargets() so WASM and ESP32
+// see identical worldX/worldY per channel.
+
+export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
+  const w = new BufWriter();
+  w.u16(fixtures.length);
+
+  for (const f of fixtures) {
+    const groupIndex = typeof f.id === 'string' ? (parseInt(f.id, 10) || 0) : (f.id as number);
+    const rotRad = (f.rotation ?? 0) * (Math.PI / 180);
+    const cosR = Math.cos(rotRad);
+    const sinR = Math.sin(rotRad);
+
+    w.u16(groupIndex);
+    w.u8(f.channels.length);
+
+    for (const ch of f.channels) {
+      let worldX = f.fixturePosition.x;
+      let worldY = f.fixturePosition.y;
+
+      // Per-beam position with rotation — mirrors engine.ts syncTargets() lines 82-96
+      if (ch.beamId) {
+        const beam = f.beams?.find(b => b.id === ch.beamId);
+        if (beam) {
+          const fWidth  = f.fixtureSize.x * FIXTURE_RADIUS * 2;
+          const fHeight = f.fixtureSize.y * FIXTURE_RADIUS * 2;
+          const localPx = beam.localX * fWidth;
+          const localPy = beam.localY * fHeight;
+          const rotPx = localPx * cosR - localPy * sinR;
+          const rotPy = localPx * sinR + localPy * cosR;
+          worldX += rotPx / WORLD_WIDTH;
+          worldY += rotPy / WORLD_HEIGHT;
+        }
+      }
+
+      w.u16(f.startAddress - 1 + ch.addressOffset);
+      w.u8(CHANNEL_TYPE_ID[ch.type] ?? 255);
+      w.f32(worldX);
+      w.f32(worldY);
+    }
+  }
+
+  return w.toPacket(TYPE_LAYOUT_BIN);
+}
+
+// ── Channels packet (TYPE_CHAN_BIN 0x15) ──────────────────────────────────────
+// Groups channels with identical chaser configs to reduce size.
+
+export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
+  const groups = new Map<string, { chaser: Fixture['channels'][0]['chaserConfig']; dmxIndices: number[] }>();
+
+  for (const f of fixtures) {
+    for (const ch of f.channels) {
+      const dmxIndex = f.startAddress - 1 + ch.addressOffset;
+      const key = JSON.stringify(ch.chaserConfig);
+      if (!groups.has(key)) {
+        groups.set(key, { chaser: ch.chaserConfig, dmxIndices: [] });
+      }
+      groups.get(key)!.dmxIndices.push(dmxIndex);
+    }
+  }
+
+  const w = new BufWriter();
+  w.u16(groups.size);
+
+  for (const { chaser, dmxIndices } of groups.values()) {
+    w.u16(dmxIndices.length);
+    for (const idx of dmxIndices) w.u16(idx);
+    w.u8(chaser.stepsCount);
+    w.u8(chaser.activeEditStep);
+    w.u8(chaser.isPlaying ? 1 : 0);
+    w.speed(chaser.stepDuration);
+    w.speed(chaser.fadeDuration);
+    for (let i = 0; i < chaser.stepsCount; i++) {
+      w.f32(chaser.stepValues[i] ?? 0);
+    }
+  }
+
+  return w.toPacket(TYPE_CHAN_BIN);
+}
+
+// ── Effects packet (TYPE_FX_BIN 0x16) ────────────────────────────────────────
+
+export function buildEffectsBin(effects: Effect[], allFixtureIds: number[]): Uint8Array {
+  // Bitmask size derived from fixture count — both sides compute the same value
+  // after layout sync. Bit i = fixture with group_index i is targeted.
+  const fixtureCount = allFixtureIds.length;
+  const bitmaskBytes = Math.ceil(fixtureCount / 8);
+
+  const w = new BufWriter();
+  w.u8(effects.length);
+
+  for (const effect of effects) {
+    // Channel types: count=0 means all channel types
+    const targetChannels: string[] = effect.targetChannels ?? [];
+    w.u8(targetChannels.length);
+    for (const ct of targetChannels) w.u8(CHANNEL_TYPE_ID[ct] ?? 255);
+
+    // Fixture bitmask: bit i set → fixture with group_index i is targeted.
+    // null/empty targetFixtureIds → all fixtures targeted (all bits set).
+    const bitmask = new Uint8Array(bitmaskBytes);
+    const targeted = effect.targetFixtureIds?.length
+      ? effect.targetFixtureIds.map(id => typeof id === 'string' ? (parseInt(id, 10) || 0) : (id as number))
+      : allFixtureIds;
+    for (const id of targeted) {
+      if (id < fixtureCount) bitmask[id >> 3] |= (1 << (id & 7));
+    }
+    for (const byte of bitmask) w.u8(byte);
+
+    w.u8(DIRECTION_ID[effect.direction ?? 'LINEAR'] ?? 1);
+    w.f32(effect.originX ?? 0.5);
+    w.f32(effect.originY ?? 0.5);
+    w.f32(effect.angle ?? 0);
+    w.f32(effect.strength);
+    w.u8(effect.reverse ? 1 : 0);
+    w.f32(effect.fanning);
+    w.u8(0); // effectType: SINE=0
+    w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
+  }
+
+  return w.toPacket(TYPE_FX_BIN);
+}

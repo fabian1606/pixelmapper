@@ -1,42 +1,99 @@
-# Core Concepts
+# Core Concepts: Fixtures, Channels, Beams
 
-This document explains the foundational structural data models that represent the real-world physical lights and groupings within Pixelmapper.
+This document explains the foundational data models that represent physical lights within Pixelmapper.
 
 ## FixtureGroup
-A `FixtureGroup` is a logical container that can hold `Fixture`s or other `FixtureGroup`s, forming a hierarchy (similar to Figma layers).
-- **`id`** — Unique identifier.
-- **`name`** — Display name (e.g., "New Group").
-- **`children: SceneNode[]`** — The nested nodes within this group.
-- **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
-- **`getAllFixtures()`** — Recursively extracts all child fixtures for rendering limitelessly nested groups.
 
-*Note: The primary node array `sceneNodes` is tracked as a `shallowRef` inside Pinia. This deliberately prevents Vue from doing deep reactivity loops over the graph for performance. Adding/removing nodes requires replacing the array or calling `triggerRef(sceneNodes)`.*
+A `FixtureGroup` is a logical container that can hold `Fixture`s or other `FixtureGroup`s, forming a hierarchy (similar to Figma layers).
+
+- **`id`** — Unique identifier.
+- **`name`** — Display name (e.g., "Front Wash").
+- **`children: SceneNode[]`** — Nested nodes within this group.
+- **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
+- **`getAllFixtures()`** — Recursively extracts all descendant fixtures.
+
+The primary node array `sceneNodes` is a `shallowRef` in Pinia. This deliberately prevents Vue from building deep reactive proxy graphs over the entire scene. Adding or removing nodes replaces the array reference or calls `triggerRef(sceneNodes)`.
 
 ## Fixture
-A `Fixture` is the top-level entity representing a physical light device. Because they are stored inside a `shallowRef`, they act as plain JavaScript objects. This Data-Oriented Design (DoD) choice explicitly prevents Vue from converting thousands of nested fixture properties into expensive reactive proxies, which would otherwise cripple the 60fps render loop.
-- **`id`** — Unique identifier.
+
+A `Fixture` represents a physical light device. Fixtures are stored inside a `shallowRef` and act as plain JavaScript objects — not Vue reactive proxies. This Data-Oriented Design (DoD) choice prevents Vue from tracking thousands of nested properties at 60 fps.
+
+- **`id: number`** — Numeric identifier. Used as `group_index` in the binary layout packet.
 - **`name`** — Display name.
-- **`startAddress: number`** — 1-based universe address for this fixture's DMX footprint. (Used to write into the global `dmxBuffer`).
-- **`parent: FixtureGroup | null`** — Reference to the parent group, if any.
+- **`startAddress: number`** — 1-based DMX universe address for this fixture's footprint.
 - **`channels: Channel[]`** — The DMX channels this fixture exposes.
-- **`fixturePosition: { x, y }`** — World-space position in normalized 0–1 space (used by the Fixture Editor and spatial effects).
-- **`beams: Beam[]`** — One or more beams. For a simple RGB LED, this is one Beam at `{localX: 0, localY: 0}`. Complex fixtures (moving heads, LED bars) can define multiple beams, each with a local offset from the fixture's world position.
-- **`resolveColor(dmxBuffer): string`** — Computes the fixture's current visual color from its channel states and blending rules, reading values directly from the typed array buffer.
+- **`fixturePosition: { x, y }`** — World-space position, normalized 0–1.
+- **`fixtureSize: { x, y }`** — Size multiplier for beam offset calculations.
+- **`rotation: number`** — Rotation in degrees, applied to beam local offsets.
+- **`beams: Beam[]`** — One or more output points of light (see below).
+- **`resolveColor(dmxBuffer): string`** — Computes the fixture's current visual color from its channels, reading values directly from the DMX buffer.
 
 ## Channel
-Each channel is purely structural metadata (an offset pointer) used by the engine. It does **not** store live `value` or `currentBaseValue` state, as those are handled by high-speed typed arrays in the Engine.
-- **`type: ChannelType`** — e.g. `RED`, `GREEN`, `BLUE`, `DIMMER`, `PAN`, `TILT`.
-- **`addressOffset: number`** — 0-based integer representing the slot inside the fixture's footprint.
-- **`chaserConfig: ChannelChaserConfig`** — Defines `stepValues`, playback state, and timing data.
-- **`role: ChannelRole`** — How this channel participates in color computation:
-  - `COLOR` — Contributes a color addtively. Must provide `colorValue` (hex string).
-  - `DIMMER` — Scales all `COLOR` channels globally (0 = off, 255 = full).
-  - `NONE` — No visual contribution (e.g. PAN, TILT).
-- **`colorValue: string`** — The peak hue of this channel (e.g. `#FF0000` for RED). Only used when `role === 'COLOR'`.
 
+Each channel is structural metadata — an offset pointer into the DMX universe. It does not store live `value` state; that lives in the engine's `dmx_buffer` and `base_buffer` typed arrays.
+
+- **`type: ChannelType`** — e.g. `RED`, `GREEN`, `BLUE`, `DIMMER`, `PAN`, `TILT`, `FOG`, etc.
+- **`addressOffset: number`** — 0-based offset within the fixture's DMX footprint.
+- **`chaserConfig: ChaserConfig`** — Defines step values, playback state, and timing.
+- **`beamId`** — Optional reference to a `Beam` within the fixture (for multi-beam fixtures).
+- **`role: ChannelRole`** — How this channel participates in color rendering:
+  - `COLOR` — Contributes additively to the fixture's visual color. Requires `colorValue` (hex).
+  - `DIMMER` — Scales all COLOR channels (0 = off, 255 = full brightness).
+  - `NONE` — No visual contribution (PAN, TILT, FOG, etc.).
 
 ## Beam
+
 A `Beam` lives inside a `Fixture` and represents a single output point of light.
-- **`id`** — Beam identifier within the fixture.
-- **`localX`, `localY`** — Offset relative to the fixture's world position. Defaults to `0, 0`.
-- Future extension: `rotation`, `zAngle`, `spread` for moving heads.
+
+- **`id`** — Identifier within the fixture.
+- **`localX`, `localY`** — Offset relative to the fixture's world position, in local fixture space.
+
+When `buildLayoutBin` computes `world_x/world_y` for each channel, it applies the fixture's rotation to the beam's local offset:
+
+```typescript
+const rotRad = fixture.rotation * (Math.PI / 180)
+const fWidth  = fixture.fixtureSize.x * FIXTURE_RADIUS * 2
+const fHeight = fixture.fixtureSize.y * FIXTURE_RADIUS * 2
+const localPx = beam.localX * fWidth
+const localPy = beam.localY * fHeight
+const rotPx = localPx * cos(rotRad) - localPy * sin(rotRad)
+const rotPy = localPx * sin(rotRad) + localPy * cos(rotRad)
+worldX = fixture.fixturePosition.x + rotPx / WORLD_WIDTH
+worldY = fixture.fixturePosition.y + rotPy / WORLD_HEIGHT
+```
+
+This transform is encoded once into the layout packet so both the WASM engine and the ESP32 see the same spatial coordinates without recomputing.
+
+## ChaserConfig
+
+Defines how a DMX channel's value steps over time:
+
+```typescript
+interface ChaserConfig {
+    stepValues:     number[]    // DMX values (0–255) per step
+    stepsCount:     number
+    activeEditStep: number      // which step is shown in the UI
+    isPlaying:      boolean     // whether the chaser is running
+    stepDuration:   SpeedConfig // how long each step lasts
+    fadeDuration:   SpeedConfig // crossfade time between steps
+}
+```
+
+A chaser with `stepsCount=1` and `isPlaying=false` is simply a static value — the common case for faders. The Rust engine handles both cases in the same code path.
+
+## RenderTarget
+
+The engine's internal per-channel view, built from the layout packet:
+
+```rust
+pub struct RenderTarget {
+    pub dmx_index:     usize,
+    pub channel_type:  String,
+    pub group_index:   usize,   // = fixture.id
+    pub world_x:       f32,
+    pub world_y:       f32,
+    pub chaser_config: Option<ChaserConfig>,
+}
+```
+
+`targets` is populated by `sync_layout` and updated by `sync_channels`. Effects use `group_index`, `channel_type`, `world_x`, `world_y` to decide whether and how to modulate each channel.

@@ -1,33 +1,50 @@
 # Pixelmapper Architecture
 
-## Übersicht
-Das Pixelmapper Projekt kombiniert ein modernes UI gebaut in Vue 3 (Typescript) mit einer High-Performance Rendering & Effekt-Engine geschrieben in Rust (mittels WebAssembly). 
+## Overview
 
-## Prinzipien
-- **UI ist JS/TS**: Alles, was DOM-Updates, state management (Pinia/Vue), und pure Web-Interfaces angeht, passiert in Vue/JS.
-- **Schwere Berechnungen & Rendering in Rust**: Die gesamte Logik, die in Echtzeit iteriert (z.B. 60fps), wird in Rust ausgelagert, um von Wasm-Geschwindigkeit und Speicher-Sicherheit zu profitieren.
+Pixelmapper is a DMX lighting controller with a Vue 3/TypeScript frontend and a Rust engine that runs on two target platforms:
 
----
+1. **Browser** — Rust compiled to WebAssembly (WASM), runs directly in the browser tab
+2. **ESP32-P4** — Rust compiled to a static C library (`no_std`), runs natively on the microcontroller
 
-## Kern-Architektur
+The key design principle: **both targets use the exact same Rust engine and the same binary protocol.** The browser tab and the ESP32 receive identical byte sequences and produce identical DMX output.
 
-Um die Engine sowohl im Browser (Wasm) als auch nativ (C++) nutzen zu können, wird sie strikt in zwei Layer getrennt:
+## File Structure
 
-### 1. Core Engine (`rs-engine-core`)
-Das Herzstück der Licht-Berechnung. Es ist **platform-agnostisch**, nutzt keine Web-APIs und kann via C-Bindings/FFI nach C++ kompiliert sowie als reine WebAssembly-Bibliothek genutzt werden.
-- **EffectEngine (`engine.rs`)**: Kalkuliert bei jedem Frame den finalen DMX-Buffer (512 Channel / Universum). Sie iteriert über Targets (Scheinwerfer), Chasers und Effekte (Waves, etc.).
-- **Memory Access**: Bietet schnellen, direkten Zugriff auf den DMX Buffer an (`extern "C"` für C++, oder `js_sys::Uint8Array::view` Wrappers in Wasm).
+```
+pixelmapper/
+├── app/                           # Nuxt 4 / Vue 3 frontend
+│   ├── stores/
+│   │   ├── engine-store.ts        # Render loop, packet cache, revision tracking
+│   │   └── connections-store.ts   # Connector registry
+│   └── utils/
+│       ├── engine/
+│       │   └── engine.ts          # Thin WASM wrapper (EffectEngine)
+│       └── connectors/
+│           ├── binary-encoder.ts  # Single source of truth for all packet encoding
+│           ├── base-connector.ts  # Abstract connector base class
+│           └── serial-connector.ts # USB Serial → ESP32
+├── rs-engine/
+│   ├── core/                      # Platform-agnostic Rust engine
+│   │   ├── src/
+│   │   │   ├── engine.rs          # EffectEngine, render loop, DMX buffer
+│   │   │   ├── bin_protocol.rs    # Binary packet parsers (layout, channels, effects)
+│   │   │   ├── effects.rs         # Effect implementations (Sine, etc.)
+│   │   │   ├── types.rs           # Shared data types
+│   │   │   └── wasm_bindings.rs   # wasm-bindgen bindings for the browser
+│   │   └── pkg/                   # Compiled WASM package (generated, do not edit)
+│   └── ffi/                       # C FFI layer for ESP32
+│       ├── src/lib.rs             # extern "C" functions, delegates to core
+│       └── include/engine_ffi.h   # C header for PlatformIO
+└── pio/
+    └── src/main.cpp               # ESP32 Arduino sketch
+```
 
-### 2. Canvas Rendering Engine (`rs-engine-canvas`)
-Das 2D Rendering der Scheinwerfer und der Arbeitsfläche für den Pixelmapper/Browser. Dies baut auf der Core Engine auf, wird aber *nur* für WebAssembly kompiliert.
-- **Wasm Bindings**: Hier befindet sich das Brücken-Interface zu JavaScript.
-- **femtovg**: Dient als Hardware-beschleunigter 2D Renderer (OpenGL/WebGL2). Das Frontend übergibt lediglich den WebGL-Context.
-- **Räumliche Indexierung (`rstar`)**: Damit Mouse-Events (Hover/Marquee-Select) direkt in Wasm berechnet werden, anstatt Daten an JS zu senden.
-- **Exaktes Hit-Testing (`usvg`)**: Vektor-basierte Hit-Polygon-Tests (PiP) um auch komplexe Fixture-Silhouetten zu erkennen.
+Detailed documentation per subsystem:
 
-## Skalierbarkeits-Pattern
-- **Data Synchronization**: Das Statusmodell (Beams, Targets, Effects) ist in JS der "Master". Bei Änderungen wird der entsprechende Wasm-Status per Payload synchronisiert (`sync_targets()`, `sync_effects()`).
-- **Separation of Concerns**: Die Wasm-Engine darf das DOM nicht kennen. Jegliche Interaktion geht über definierte Bindings (`wasm_bindings.rs`).
-- **Verwendung moderner Standards**: Vite/Bun im Frontend für schnelles HMR, Rust Edition 2024 für moderne Sprachfeatures. 
-
-*Letztes Update: Canvas Wasm Migration Plan*
+- [Engine & Render Loop](architecture/engine.md)
+- [Binary Protocol](architecture/binary-protocol.md)
+- [Core Concepts: Fixtures, Channels, Beams](architecture/core-concepts.md)
+- [State Management & Reactivity](architecture/state.md)
+- [Connectors & Hardware](architecture/connectors.md)
+- [UI & History](architecture/ui-history.md)

@@ -13,6 +13,17 @@ export interface LogLine {
 
 import { reactive } from 'vue';
 
+export interface EngineConnectorState {
+  bpm: number;
+  elapsedMs: number;
+  layoutRevision: number;
+  channelsRevision: number;
+  effectsRevision: number;
+  layoutPacket: Uint8Array;
+  channelsPacket: Uint8Array;
+  effectsPacket: Uint8Array;
+}
+
 export abstract class BaseConnector {
   readonly id: string;
   abstract readonly meta: ConnectorMeta;
@@ -38,6 +49,10 @@ export abstract class BaseConnector {
    * Must be non-blocking — fire-and-forget async writes only.
    */
   abstract sendFrame(dmxBuffer: Uint8Array): void;
+
+  /** Optional: called when engine state changes (BPM, binary packets, time).
+   *  Implement this instead of sendFrame for connectors that run their own renderer. */
+  onEngineState?(state: EngineConnectorState): void;
 
   getConfig(): Record<string, unknown> {
     return {};

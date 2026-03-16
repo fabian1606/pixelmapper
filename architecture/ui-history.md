@@ -1,54 +1,65 @@
-# Vue UI & Editor Systems
-
-The visual surface of the application. The UI mostly reads from `engine.dmxBuffer` to draw colors on the screen, remaining cleanly decoupled from the heavy math of the core engine.
+# UI & History
 
 ## Fixture Editor and Workspace
-`FixtureEditor.vue` is a standalone visual component for arranging fixtures in 2D space.
-- Renders each fixture as a glowing colored circle, color derived from `fixture.resolveColor(dmxBuffer)`.
-- Support drag-and-drop to update `fixture.fixturePosition`.
+
+`FixtureEditor.vue` is the main 2D canvas for arranging fixtures in world space.
+
+- Renders each fixture as a glowing colored circle; color derived from `fixture.resolveColor(dmxBuffer)`.
+- Supports drag-and-drop to update `fixture.fixturePosition`.
 - Positions are normalized (0–1), making them resolution-independent.
-- The updated positions are immediately used by spatial direction modes (SPATIAL_X/Y/RADIAL) in the next render frame.
+- Updated positions are immediately encoded into the next `layoutPacket` rebuild (via the `watch(flatFixtures)` watcher in engine-store).
 
-### 60fps Rendering Optimizations
-To maintain a smooth 60fps even with 50+ fixtures on screen, the editor employs several advanced DOM and Vue optimization strategies:
-1. **Containerization for O(1) Camera Panning**: Instead of recalculating camera offsets for each fixture, all fixtures are placed in a single static `.world-container`. The camera's pan and zoom are applied globally to this container using `transform: translate3d(...) scale(...)`. This reduces the rendering cost of moving the camera from O(N) to O(1).
-2. **Hardware-Accelerated CSS**: Individual fixture nodes are mapped to their world coordinates using `transform: translate3d(...)` rather than `left` and `top` CSS properties, shifting DOM movement entirely to the GPU and preventing layout thrashing.
-3. **Reactivity Detachment`: The underlying `FixtureCanvas` (which draws the beams) is explicitly detached from Vue's deep reactivity system. Instead of using `watchEffect` (which builds massive dependency graphs out of the deeply reactive Fixtures 60 times a second), it relies on manual, shallow watchers on the `camera` and `engine.dmxBuffer` to trigger its `draw()` loop.
-4. **Native Clipping**: We omit `v-show` and `v-if` for off-screen fixtures entirely. Because the world container has `overflow: hidden`, the browser's native compositing engine perfectly clips invisible DOM nodes essentially for free, whereas Vue directive evaluations incur significant CPU overhead during rapid zooming or panning.
+### 60 fps Rendering Optimizations
 
-`FixtureWorkspace.vue` wraps the editor and provides the core layout for the canvas, along with the main right-click Context Menu.
-
-### Sidebar Layout
-The `FixtureSidebar.vue` provides a navigable tree of all fixtures and groups.
-- **Scrollable Content**: The `SidebarContent` is configured with `overflow-y-auto` to ensure that even large scenes with dozens of fixtures remain fully accessible through the layer hierarchy.
-- **Tabbed Interface**: Supports switching between the fixture tree and the preset/programmer view.
-- **Selection Info Section**: A dedicated panel at the bottom of the fixtures tab tracks the current selection. It provides real-time average X/Y position data and, for single selections, exposes manufacturer, model, channel count, and editable DMX addressing (Universe/Address).
-
-`index.vue` is deliberately kept as a pure layout shell, using `useWorkspaceOperations()` to delegate Node logic, and the `engine-store.ts` for all selection and data references.
-
-## Context Menu System
-`FixtureContextMenu.vue` is the single shared context menu wrapper used by every interactive node.
-- Accepts capability flags (`canZoom`, `canGroup`, `canUngroup`, `canDelete`) to control which items appear.
-- Default slot is used as the `ContextMenuTrigger`, so any element can be wrapped.
-- Internally renders `DeleteConfirmDialog` on delete requests.
-- Used by `FixtureNode` (2D canvas), `FixtureSidebarNode` (sidebar), and `FixtureGroup` nodes.
+1. **O(1) camera panning** — All fixtures live in a single `.world-container`. Pan and zoom are applied to the container via `transform: translate3d(...) scale(...)`, not to individual fixtures.
+2. **GPU-accelerated positioning** — Individual fixture nodes use `transform: translate3d(...)` instead of `left`/`top`, keeping layout out of the critical path.
+3. **Reactivity detachment** — The canvas draw loop does not use `watchEffect`. It relies on manual shallow watchers on `camera` and `engine.dmxBuffer` to trigger redraws.
+4. **Native clipping** — Off-screen fixtures are not conditionally rendered with `v-if`/`v-show`. The world container's `overflow: hidden` lets the browser clip them for free.
 
 ## History & Command Pattern
-The system provides proper `Cmd+Z` / Undo-Redo via the `useHistory()` composable and the Command pattern.
 
-### Delete Flow
-1. User right-clicks a fixture → context menu shows **Delete** with `Del` shortcut label.
-2. Alternatively, user presses `Del` or `Backspace` while a fixture is selected in the 2D editor.
-3. `DeleteConfirmDialog` is shown with the fixture name and an undo hint.
-4. On confirm, `DeleteNodeCommand` is executed via `useHistory()` → supports undo with `Cmd+Z`.
+All user actions that mutate fixture data go through a `Command` pushed to `useHistory()`. This enables full Cmd+Z / Redo support.
 
-### Property Changes Flow
-Channel values (faders, capability dropdowns, stepValues, base colors, and chaser configs) are mutated through the UI.
-To support `Cmd+Z`, the system uses `SetChannelValuesCommand`:
-1. Before a change (e.g. `mousedown` on a fader or entering a number), a deep copy of the `ChannelSnapshot` is taken for all affected fixture channels.
-2. The user interacts and freely mutates the live object.
-3. On completion (e.g. `mouseup`), a post-change snapshot is captured.
-4. If there's a difference, the `SetChannelValuesCommand` is pushed to `useHistory()`.
+### Command Examples
 
-### The Ticker Pattern
-Beyond undo/redo, `useHistory()` provides a reactive `version` ref. This acts as a global "state changed" heartbeat for the application. Because fixtures are stored in a `shallowRef` (to prevent massive deep proxy evaluation graphs natively in Vue), components use this Ticker version to explicitly trigger re-renders exactly when needed.
+| Command | Triggered by |
+|---------|-------------|
+| `SetChannelValuesCommand` | Dragging a fader, editing a step value |
+| `SetModifiersCommand` | Adding/removing an effect |
+| `DeleteNodeCommand` | Deleting a fixture or group |
+| `MoveNodeCommand` | Dragging a fixture in the editor |
+
+### SetChannelValuesCommand Flow
+
+1. On `mousedown`: take a deep snapshot of the affected channel's `ChaserConfig`.
+2. User interacts freely with the live object.
+3. On `mouseup`: take a post-change snapshot.
+4. If different: push `SetChannelValuesCommand` to history.
+
+This avoids recording every intermediate drag position — only the before/after states are stored.
+
+### Undo/Redo & Engine Sync
+
+When history undoes/redoes a `SetModifiersCommand`, the effects array may be replaced entirely. The engine-store watches `history.version` and re-syncs `activeEffects` if needed:
+
+```typescript
+watch(() => history.version.value, () => {
+    triggerRef(sceneNodes)
+    if (engine.effects !== activeEffects.value) {
+        activeEffects.value.splice(0, activeEffects.value.length, ...engine.effects)
+        engine.effects = activeEffects.value
+    }
+})
+```
+
+## Context Menu System
+
+`FixtureContextMenu.vue` is the single shared context menu used by all interactive nodes (canvas nodes, sidebar nodes, group nodes). It accepts capability flags (`canZoom`, `canGroup`, `canUngroup`, `canDelete`) to show/hide items, and renders `DeleteConfirmDialog` on delete requests.
+
+## Sidebar
+
+`FixtureSidebar.vue` provides a navigable tree of all fixtures and groups with:
+
+- **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor.
+- **Preset/programmer tab** — Active preset management.
+- **Selection info** — Average X/Y position for multi-selections; full channel details (address, type, manufacturer, model) for single selections.

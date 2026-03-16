@@ -47,6 +47,14 @@ impl WasmEngine {
         self.engine.render(time_ms, delta_time_ms);
     }
 
+    /// Dispatch a binary packet directly to the engine.
+    /// packet_type: 0x10=BPM(f32LE), 0x14=layout, 0x15=channels, 0x16=effects
+    /// Returns count of parsed items, or -1 on error.
+    #[wasm_bindgen]
+    pub fn dispatch(&mut self, packet_type: u8, data: &[u8]) -> i32 {
+        self.engine.dispatch_bin(packet_type, data)
+    }
+
     /// Returns a direct memory view into the DMX buffer without copying.
     /// This is an incredibly fast way for JS to read the Wasm memory.
     #[wasm_bindgen]

@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
-import type { BaseConnector } from '~/utils/connectors/base-connector';
+import type { BaseConnector, EngineConnectorState } from '~/utils/connectors/base-connector';
 
 export const useConnectionsStore = defineStore('connections', () => {
-  // reactive() makes connector.status / connector.errorMessage auto-reactive in the UI
   const connectors = reactive<BaseConnector[]>([]);
 
   function add(connector: BaseConnector) {
@@ -17,7 +16,7 @@ export const useConnectionsStore = defineStore('connections', () => {
     connectors.splice(idx, 1);
   }
 
-  /** Called by the engine-store render loop after every engine.render() */
+  /** Called by engine-store render loop — for DMX-output connectors */
   function sendFrame(dmxBuffer: Uint8Array) {
     for (const connector of connectors) {
       if (connector.status === 'connected') {
@@ -26,5 +25,14 @@ export const useConnectionsStore = defineStore('connections', () => {
     }
   }
 
-  return { connectors, add, remove, sendFrame };
+  /** Called by engine-store render loop — for parameter-based connectors (e.g. SerialConnector) */
+  function notifyEngineState(state: EngineConnectorState) {
+    for (const connector of connectors) {
+      if (connector.status === 'connected' && connector.onEngineState) {
+        connector.onEngineState(state);
+      }
+    }
+  }
+
+  return { connectors, add, remove, sendFrame, notifyEngineState };
 });

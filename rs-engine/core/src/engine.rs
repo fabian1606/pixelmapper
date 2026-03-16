@@ -1,5 +1,26 @@
-use crate::types::{RenderTarget, SpeedMode, SpeedConfig};
+use crate::types::{ChaserConfig, RenderTarget, SpeedMode, SpeedConfig};
 use crate::effects::{create_effect, Effect};
+
+// ── Internal structs for binary-decoded layout/channel data ──────────────────
+
+pub struct LayoutChannelEntry {
+    pub dmx_index: usize,
+    pub channel_type_id: u8,
+    pub world_x: f32,
+    pub world_y: f32,
+}
+
+pub struct LayoutEntry {
+    pub group_index: usize,
+    pub channels: Vec<LayoutChannelEntry>,
+}
+
+pub struct ChannelEntry {
+    pub dmx_indices: Vec<usize>,
+    pub chaser: ChaserConfig,
+}
+
+// ── Engine ────────────────────────────────────────────────────────────────────
 
 pub struct EffectEngine {
     pub dmx_buffer: [u8; 512],
@@ -12,6 +33,28 @@ pub struct EffectEngine {
 impl Default for EffectEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Maps the binary channel type ID (u8) to its string name used in the engine.
+pub fn channel_type_name(id: u8) -> &'static str {
+    match id {
+        0  => "RED",               1  => "GREEN",            2  => "BLUE",
+        3  => "WHITE",             4  => "WARM_WHITE",        5  => "COOL_WHITE",
+        6  => "AMBER",             7  => "UV",                8  => "CYAN",
+        9  => "MAGENTA",           10 => "YELLOW",            11 => "LIME",
+        12 => "INDIGO",            13 => "DIMMER",            14 => "PAN",
+        15 => "TILT",              16 => "PANTILT_SPEED",     17 => "STROBE",
+        18 => "STROBE_SPEED",      19 => "STROBE_DURATION",   20 => "ZOOM",
+        21 => "FOCUS",             22 => "IRIS",              23 => "FROST",
+        24 => "BEAM_ANGLE",        25 => "BEAM_POSITION",     26 => "PRISM",
+        27 => "PRISM_ROTATION",    28 => "BLADE",             29 => "COLOR_WHEEL",
+        30 => "COLOR_PRESET",      31 => "COLOR_TEMPERATURE", 32 => "GOBO_WHEEL",
+        33 => "GOBO_SPIN",         34 => "EFFECT",            35 => "EFFECT_SPEED",
+        36 => "EFFECT_DURATION",   37 => "SOUND_SENSITIVITY", 38 => "ROTATION",
+        39 => "SPEED",             40 => "TIME",              41 => "FOG",
+        42 => "MAINTENANCE",       43 => "GENERIC",           44 => "CUSTOM",
+        _  => "OTHER",
     }
 }
 
@@ -30,6 +73,8 @@ impl EffectEngine {
         self.global_bpm = bpm;
     }
 
+    // ── JSON path (unchanged, used by WASM/browser) ───────────────────────────
+
     pub fn sync_targets(&mut self, targets: Vec<RenderTarget>) {
         self.targets = targets;
     }
@@ -37,6 +82,60 @@ impl EffectEngine {
     pub fn sync_effects(&mut self, configs: Vec<crate::types::EffectConfig>) {
         self.effects = configs.into_iter().map(create_effect).collect();
     }
+
+    // ── Unified binary dispatch ───────────────────────────────────────────────
+
+    /// Single entry point for all binary packet types. Used by both WASM and ESP32 FFI.
+    pub fn dispatch_bin(&mut self, packet_type: u8, data: &[u8]) -> i32 {
+        match packet_type {
+            0x10 => {
+                // TYPE_BPM: f32 LE
+                if data.len() < 4 { return -1; }
+                let bpm = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                self.set_bpm(bpm);
+                0
+            }
+            0x14 => crate::bin_protocol::parse_layout_bin(self, data),
+            0x15 => crate::bin_protocol::parse_channels_bin(self, data),
+            0x16 => crate::bin_protocol::parse_effects_bin(self, data),
+            _    => -1,
+        }
+    }
+
+    // ── Binary path (used by ESP32 FFI) ──────────────────────────────────────
+
+    /// Rebuild the targets list from layout data (fixture positions + channel metadata).
+    /// Called when fixtures are added/moved. Chaser configs start as None until
+    /// sync_channels is called.
+    pub fn sync_layout(&mut self, entries: Vec<LayoutEntry>) {
+        self.targets.clear();
+        for fixture in entries {
+            for ch in fixture.channels {
+                self.targets.push(RenderTarget {
+                    dmx_index: ch.dmx_index,
+                    channel_type: channel_type_name(ch.channel_type_id).to_string(),
+                    group_index: fixture.group_index,
+                    world_x: ch.world_x,
+                    world_y: ch.world_y,
+                    chaser_config: None,
+                });
+            }
+        }
+    }
+
+    /// Update chaser configs for specific DMX channels. Multiple channels can share
+    /// the same chaser config (one ChannelEntry covers several dmxIndices).
+    pub fn sync_channels(&mut self, entries: Vec<ChannelEntry>) {
+        for entry in entries {
+            for dmx_index in &entry.dmx_indices {
+                if let Some(target) = self.targets.iter_mut().find(|t| t.dmx_index == *dmx_index) {
+                    target.chaser_config = Some(entry.chaser.clone());
+                }
+            }
+        }
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
 
     fn resolve_speed_to_ms(speed: &SpeedConfig, global_bpm: f32) -> f32 {
         match speed.mode {
@@ -103,7 +202,7 @@ impl EffectEngine {
                     }
                 }
             }
-            
+
             self.base_buffer[dmx_index] = calculated_base;
             self.dmx_buffer[dmx_index] = calculated_base.clamp(0.0, 255.0) as u8;
         }
@@ -118,7 +217,8 @@ impl EffectEngine {
             for effect in &self.effects {
                 let config = effect.get_config();
 
-                if !config.target_channels.contains(&target.channel_type) {
+                // Empty target_channels means "all channel types"
+                if !config.target_channels.is_empty() && !config.target_channels.contains(&target.channel_type) {
                     continue;
                 }
 
@@ -130,7 +230,7 @@ impl EffectEngine {
 
                 let wave_value = effect.render(target.world_x, target.world_y);
                 let base_value = self.base_buffer[dmx_index];
-                
+
                 let target_max = (base_value + config.strength).min(255.0);
                 let target_min = (base_value - config.strength).max(0.0);
 
