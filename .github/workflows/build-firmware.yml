@@ -26,6 +26,9 @@ jobs:
           buildtargets: esp32p4
           version: "1.93.0.0"
 
+      - name: Install rust-src for build-std
+        run: rustup component add rust-src
+
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
