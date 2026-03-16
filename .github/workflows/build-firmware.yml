@@ -3,8 +3,10 @@ name: Build & Release ESP32 Firmware
 on:
   push:
     tags:
-      - 'v*.*.*'   # Trigger: git tag v1.2.3 && git push origin v1.2.3
-                   # Or use: bun run release
+      - 'v*.*.*'   # Trigger: bun run release  (or: git tag v1.2.3 && git push origin v1.2.3)
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -13,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install the Espressif Rust toolchain (includes riscv32imafc-esp-espidf target)
+      # Espressif Rust toolchain — includes riscv32imafc-esp-espidf target for ESP32-P4
       - name: Install ESP Rust toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
@@ -29,13 +31,15 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      # Inject version from git tag into version.h before pio build runs link_rust.py
-      - name: Inject version into version.h
+      # Must run BEFORE pio build so version.h is set when link_rust.py + compiler run
+      - name: Inject version from tag into version.h
         run: |
-          VER=${GITHUB_REF#refs/tags/v}
+          VER="${GITHUB_REF#refs/tags/v}"
+          mkdir -p pio/include
           printf '#pragma once\n#define FIRMWARE_VERSION "%s"\n' "$VER" \
             > pio/include/version.h
-          echo "VERSION=$VER" >> $GITHUB_ENV
+          echo "Firmware version: $VER"
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
 
       # PlatformIO pre-script (link_rust.py) builds rs-engine-ffi automatically
       - name: Build firmware
@@ -43,7 +47,8 @@ jobs:
         working-directory: pio
 
       - name: Write firmware-meta.json
-        run: echo '{"version":"${{ env.VERSION }}"}' > firmware-meta.json
+        run: |
+          echo "{\"version\":\"$VERSION\"}" > firmware-meta.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
