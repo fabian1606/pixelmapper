@@ -24,19 +24,14 @@ jobs:
           curl -L https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu -o espup
           chmod +x espup
           ./espup install --targets esp32p4 --toolchain-version 1.93.0.0
-          # Convert export-esp.sh (export KEY="val") → GITHUB_ENV (KEY=val)
-          sed 's/^export //' "$HOME/export-esp.sh" >> "$GITHUB_ENV"
-          # Also update PATH if espup added entries
-          source "$HOME/export-esp.sh"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
-
       - name: Verify ESP toolchain
         run: |
+          source "$HOME/export-esp.sh"
           cat "$HOME/export-esp.sh"
           echo "---"
-          rustc --version
+          which rustc && rustc --version
           rustup show
-          rustup component list --installed
+          rustup component list --installed 2>/dev/null || true
           echo "---"
           ls "$(rustc --print sysroot)/lib/rustlib/src/" 2>/dev/null || echo "no rust-src found"
 
@@ -60,7 +55,9 @@ jobs:
 
       # PlatformIO pre-script (link_rust.py) builds rs-engine-ffi automatically
       - name: Build firmware
-        run: pio run
+        run: |
+          source "$HOME/export-esp.sh"
+          pio run
         working-directory: pio
 
       - name: Write firmware-meta.json
