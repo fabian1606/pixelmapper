@@ -24,7 +24,7 @@ jobs:
           default: true
           ldproxy: false
           buildtargets: esp32p4
-          toolchain-version: "1.93.0.0"
+          version: "1.93.0.0"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
