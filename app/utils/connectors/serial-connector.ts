@@ -7,7 +7,8 @@ import { BaseConnector, type ConnectorMeta, type EngineConnectorState } from './
 // No encoding logic here — the store owns that.
 
 function isNewer(latest: string | null, current: string | null): boolean {
-  if (!latest || !current || current === 'dev') return false;
+  if (!latest || !current) return false;
+  if (current === 'dev') return true; // dev build is always considered outdated when a release exists
   const a = latest.split('.').map(Number);
   const b = current.split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -37,6 +38,7 @@ export class SerialConnector extends BaseConnector {
   private port: SerialPort | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private readAbort: AbortController | null = null;
+  private readLoopDone: Promise<void> = Promise.resolve();
 
   private cachedBpm      = -1;
   private cachedLayout   = -1;
@@ -51,13 +53,12 @@ export class SerialConnector extends BaseConnector {
   }
 
   async connect() {
-    this.status = 'connecting';
-    this.errorMessage = null;
+    this.status.value = 'connecting';
+    this.errorMessage.value = null;
     try {
       this.port = await (navigator as any).serial.requestPort();
       await this.port!.open({ baudRate: this.baudRate });
       this.writer = this.port!.writable!.getWriter();
-      this.status = 'connected';
       // Reset caches so everything is sent fresh on first onEngineState call
       this.frameCount         = 0;
       this.cachedBpm          = -1;
@@ -66,33 +67,63 @@ export class SerialConnector extends BaseConnector {
       this.cachedEffects      = -1;
       this.firmwareVersion.value = null;
       this.startReadLoop();
-      // Request firmware version immediately after connect
-      this.send(buildVersionRequestPacket());
       this.fetchLatestVersion();
+      // Wait for ESP32 to finish booting (port.open may trigger reset via DTR/RTS).
+      // Listen for [boot] message or timeout after 3s.
+      await this.waitForBoot(3000);
+      this.status.value = 'connected';
+      this.pushLog('[serial] ESP32 ready — syncing engine state');
+      // Send VERSION_REQ after a short additional delay
+      setTimeout(() => {
+        if (this.status.value === 'connected') {
+          this.pushLog('[version] sending VERSION_REQ...');
+          this.send(buildVersionRequestPacket());
+        }
+      }, 500);
     } catch (e: any) {
-      this.status = 'error';
-      this.errorMessage = e?.message ?? 'Connection failed';
+      this.status.value = 'error';
+      this.errorMessage.value = e?.message ?? 'Connection failed';
     }
+  }
+
+  private waitForBoot(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        // Check if we've seen a [boot] or [version] line from the read loop
+        const hasBootMessage = this.logs.some(l =>
+          l.text.startsWith('[boot]') || l.text.startsWith('[version]')
+        );
+        if (hasBootMessage) {
+          clearInterval(check);
+          clearTimeout(timeout);
+          resolve();
+        }
+      }, 50);
+      const timeout = setTimeout(() => {
+        clearInterval(check);
+        this.pushLog('[serial] boot wait timed out — proceeding');
+        resolve();
+      }, timeoutMs);
+    });
   }
 
   async disconnect() {
     this.readAbort?.abort();
     this.readAbort = null;
-    try {
-      this.writer?.releaseLock();
-      await this.port?.close();
-    } catch (_) {}
+    await this.readLoopDone;
+    try { this.writer?.releaseLock(); } catch (_) {}
     this.writer = null;
+    try { await this.port?.close(); } catch (_) {}
     this.port   = null;
-    this.status = 'disconnected';
-    this.errorMessage = null;
+    this.status.value = 'disconnected';
+    this.errorMessage.value = null;
   }
 
   /** No-op — ESP32 renders its own DMX via the local Rust engine */
   sendFrame(_dmxBuffer: Uint8Array) {}
 
   override onEngineState(state: EngineConnectorState) {
-    if (this.status !== 'connected' || !this.writer) return;
+    if (this.status.value !== 'connected' || !this.writer) return;
 
     const first = this.frameCount === 0;
 
@@ -129,16 +160,20 @@ export class SerialConnector extends BaseConnector {
   }
 
   async flashFirmware() {
-    if (!this.port || !this.latestBinUrl.value || this.isFlashing.value) return;
+    if (this.isFlashing.value) return;
+    if (!this.port) { this.pushLog('[flash] no port'); return; }
+    if (!this.latestBinUrl.value) { this.pushLog('[flash] no bin URL — latest version not fetched yet'); return; }
     this.isFlashing.value  = true;
     this.flashProgress.value = 0;
     this.pushLog('[flash] starting firmware update...');
     try {
-      // Release writer before esptool-js takes control of the port
-      this.writer?.releaseLock();
+      // Release writer and close port so esptool-js can reopen it
+      try { this.writer?.releaseLock(); } catch (_) {}
       this.writer = null;
       this.readAbort?.abort();
       this.readAbort = null;
+      await this.readLoopDone;
+      try { await this.port!.close(); } catch (_) {}
 
       const { ESPLoader, Transport } = await import('esptool-js');
       const transport = new Transport(this.port, false);
@@ -158,7 +193,7 @@ export class SerialConnector extends BaseConnector {
       await loader.main();
       this.pushLog('[flash] connected to ESP32 bootloader');
 
-      const binResp = await fetch(this.latestBinUrl.value);
+      const binResp = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(this.latestBinUrl.value)}`);
       const binData = await binResp.arrayBuffer();
       // esptool-js expects base64-encoded binary
       const bytes = new Uint8Array(binData);
@@ -179,36 +214,45 @@ export class SerialConnector extends BaseConnector {
         },
       });
 
-      await loader.softReset(false);  // soft reset, run user code
+      await loader.after('hard_reset');
       await transport.disconnect();
       this.pushLog('[flash] done — rebooting ESP32');
     } catch (e: any) {
-      this.pushLog(`[flash] error: ${e?.message ?? e}`);
+      const msg = e?.message ?? String(e);
+      this.pushLog(`[flash] error: ${msg}`);
+      this.errorMessage.value = `Flash failed: ${msg}`;
     } finally {
       this.isFlashing.value = false;
-      // Re-acquire writer for normal operation
-      if (this.port?.writable) {
+      // Reopen port (esptool-js closed it) and re-acquire writer
+      if (this.port) {
         try {
-          this.writer = this.port.writable.getWriter();
-        } catch (_) {}
+          await this.port.open({ baudRate: this.baudRate });
+          this.writer = this.port.writable!.getWriter();
+          this.firmwareVersion.value = null;
+          this.startReadLoop();
+          // Delay VERSION_REQ to let ESP32 finish booting after hard reset
+          setTimeout(() => this.send(buildVersionRequestPacket()), 2000);
+        } catch (e: any) {
+          this.pushLog(`[flash] reconnect failed: ${e?.message ?? e}`);
+        }
       }
-      // Re-start read loop to catch boot output (version line)
-      this.firmwareVersion.value = null;
-      this.startReadLoop();
     }
   }
 
   private async fetchLatestVersion() {
     try {
       const res  = await fetch('https://api.github.com/repos/fabian1606/pixelmapper/releases/latest');
-      if (!res.ok) return;
+      if (!res.ok) {
+        this.pushLog(`[version] fetch failed: HTTP ${res.status}`);
+        return;
+      }
       const data = await res.json();
-      // Releases are tagged "v1.2.3" — strip the "v"
       this.latestVersion.value = (data.tag_name as string | undefined)?.replace(/^v/, '') ?? null;
       const asset = (data.assets as any[] | undefined)?.find((a: any) => a.name === 'firmware.bin');
       this.latestBinUrl.value  = asset?.browser_download_url ?? null;
-    } catch (_) {
-      // Non-fatal — no internet or no releases yet
+      this.pushLog(`[ota] latest=${this.latestVersion.value ?? 'none'} binUrl=${this.latestBinUrl.value ? 'ok' : 'missing'}`);
+    } catch (e: any) {
+      this.pushLog(`[version] fetch error: ${e?.message ?? e}`);
     }
   }
 
@@ -225,35 +269,38 @@ export class SerialConnector extends BaseConnector {
     const port = this.port!;
 
     const run = async () => {
-      const decoder = new TextDecoderStream();
-      port.readable!.pipeTo(decoder.writable, { signal: this.readAbort!.signal }).catch(() => {});
+      const textDecoder = new TextDecoder();
+      const reader = port.readable!.getReader();
+      const onAbort = () => reader.cancel().catch(() => {});
+      this.readAbort!.signal.addEventListener('abort', onAbort);
       let partial = '';
-      const reader = decoder.readable.getReader();
       try {
         while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
-          partial += value;
+          if (done) { console.log('[serial] reader done'); break; }
+          console.log('[serial] rx bytes:', value?.length);
+          partial += textDecoder.decode(value, { stream: true });
           const lines = partial.split('\n');
           partial = lines.pop() ?? '';
           for (const line of lines) {
             const t = line.trimEnd();
             if (!t) continue;
-            // Parse firmware version from boot output or version request response
-            const vMatch = t.match(/^\[version\]\s+(.+)$/);
+            const vMatch = t.match(/^\[version\]\s+([\w.\-]+)$/);
             if (vMatch) {
               this.firmwareVersion.value = vMatch[1]!.trim();
+              this.pushLog(`[version] parsed: ${this.firmwareVersion.value}`);
             }
             this.pushLog(t);
           }
         }
       } catch (_) {
       } finally {
+        this.readAbort?.signal.removeEventListener('abort', onAbort);
         reader.releaseLock();
       }
     };
 
-    run();
+    this.readLoopDone = run();
   }
 
   override getConfig() {

@@ -22,9 +22,14 @@ export class EffectEngine {
    */
   public dmxBuffer: Uint8Array = new Uint8Array(512);
 
+  /** Resolves when WASM is loaded and wasmEngine is ready. */
+  public readonly ready: Promise<void>;
+
   constructor() {
     if (typeof window !== 'undefined') {
-      this.init();
+      this.ready = this.init();
+    } else {
+      this.ready = Promise.resolve();
     }
   }
 

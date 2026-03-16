@@ -108,16 +108,29 @@ impl EffectEngine {
     /// Called when fixtures are added/moved. Chaser configs start as None until
     /// sync_channels is called.
     pub fn sync_layout(&mut self, entries: Vec<LayoutEntry>) {
+        // Build a map of existing chaser configs by dmx_index so we can preserve
+        // them across layout rebuilds (avoids DMX glitch to 0 between layout and
+        // channels dispatch).
+        let mut old_configs: Vec<(usize, ChaserConfig)> = Vec::new();
+        for t in &self.targets {
+            if let Some(cfg) = &t.chaser_config {
+                old_configs.push((t.dmx_index, cfg.clone()));
+            }
+        }
+
         self.targets.clear();
         for fixture in entries {
             for ch in fixture.channels {
+                let preserved = old_configs.iter()
+                    .find(|(idx, _)| *idx == ch.dmx_index)
+                    .map(|(_, cfg)| cfg.clone());
                 self.targets.push(RenderTarget {
                     dmx_index: ch.dmx_index,
                     channel_type: channel_type_name(ch.channel_type_id).to_string(),
                     group_index: fixture.group_index,
                     world_x: ch.world_x,
                     world_y: ch.world_y,
-                    chaser_config: None,
+                    chaser_config: preserved,
                 });
             }
         }

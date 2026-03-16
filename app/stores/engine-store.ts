@@ -66,9 +66,12 @@ export const useEngineStore = defineStore('engine', () => {
   let lastDispatchedChannels = -1;
   let lastDispatchedEffects  = -1;
 
-  const initEngine = () => {
+  const initEngine = async () => {
     if (initialized || typeof window === 'undefined') return;
     initialized = true;
+
+    // Wait for WASM to be fully loaded before setting up watches and render loop
+    await engine.ready;
 
     const history = useHistory();
     const connectionsStore = useConnectionsStore();
@@ -159,44 +162,48 @@ export const useEngineStore = defineStore('engine', () => {
     lastTime  = startTime;
 
     const renderLoop = (time: number) => {
-      const elapsed = time - startTime;
-      const delta   = time - lastTime;
-      lastTime = time;
-
-      // Dispatch changed binary packets to WASM engine
-      const lr = layoutRevision.value;
-      const cr = channelsRevision.value;
-      const er = effectsRevision.value;
-
-      // Only mark as dispatched if WASM is ready (dispatch returns >= 0).
-      // Packets are framed with a 5-byte header [AA 55 type len_lo len_hi];
-      // the WASM dispatch_bin expects only the raw payload (offset 5).
-      if (lr !== lastDispatchedLayout && engine.dispatch(TYPE_LAYOUT_BIN, layoutPacket.subarray(5)) >= 0) {
-        lastDispatchedLayout = lr;
-      }
-      if (cr !== lastDispatchedChannels && engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5)) >= 0) {
-        lastDispatchedChannels = cr;
-      }
-      if (er !== lastDispatchedEffects && engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5)) >= 0) {
-        lastDispatchedEffects = er;
-      }
-
-      engine.render(elapsed, delta);
-      currentElapsed.value = elapsed;
-      connectionsStore.sendFrame(engine.dmxBuffer);
       try {
-        connectionsStore.notifyEngineState({
-          bpm: engine.globalBpm.value,
-          elapsedMs: elapsed,
-          layoutRevision: lr,
-          channelsRevision: cr,
-          effectsRevision: er,
-          layoutPacket,
-          channelsPacket,
-          effectsPacket,
-        });
+        const elapsed = time - startTime;
+        const delta   = time - lastTime;
+        lastTime = time;
+
+        // Dispatch changed binary packets to WASM engine
+        const lr = layoutRevision.value;
+        const cr = channelsRevision.value;
+        const er = effectsRevision.value;
+
+        // Only mark as dispatched if WASM is ready (dispatch returns >= 0).
+        // Packets are framed with a 5-byte header [AA 55 type len_lo len_hi];
+        // the WASM dispatch_bin expects only the raw payload (offset 5).
+        if (lr !== lastDispatchedLayout && engine.dispatch(TYPE_LAYOUT_BIN, layoutPacket.subarray(5)) >= 0) {
+          lastDispatchedLayout = lr;
+        }
+        if (cr !== lastDispatchedChannels && engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5)) >= 0) {
+          lastDispatchedChannels = cr;
+        }
+        if (er !== lastDispatchedEffects && engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5)) >= 0) {
+          lastDispatchedEffects = er;
+        }
+
+        engine.render(elapsed, delta);
+        currentElapsed.value = elapsed;
+        connectionsStore.sendFrame(engine.dmxBuffer);
+        try {
+          connectionsStore.notifyEngineState({
+            bpm: engine.globalBpm.value,
+            elapsedMs: elapsed,
+            layoutRevision: lr,
+            channelsRevision: cr,
+            effectsRevision: er,
+            layoutPacket,
+            channelsPacket,
+            effectsPacket,
+          });
+        } catch (e) {
+          console.warn('[engine] notifyEngineState threw:', e);
+        }
       } catch (e) {
-        console.warn('[engine] notifyEngineState threw:', e);
+        console.error('[engine] render loop error:', e);
       }
 
       animFrameId = requestAnimationFrame(renderLoop);

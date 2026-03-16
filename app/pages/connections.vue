@@ -52,22 +52,22 @@ function asSerial(c: any): SerialConnector | null {
     >
       <!-- Header row -->
       <div class="flex items-center gap-3">
-        <CircleDot :size="14" :class="statusColor[connector.status]" />
+        <CircleDot :size="14" :class="statusColor[connector.status.value]" />
 
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ connector.meta.label }}</div>
-          <div v-if="connector.errorMessage" class="text-xs text-red-400 truncate">
-            {{ connector.errorMessage }}
+          <div v-if="connector.errorMessage.value" class="text-xs text-red-400 truncate">
+            {{ connector.errorMessage.value }}
           </div>
           <div v-else class="text-xs text-muted-foreground capitalize">
-            {{ connector.status }}
+            {{ connector.status.value }}
           </div>
         </div>
 
         <!-- Version badge (up to date) -->
-        <template v-if="asSerial(connector) && connector.status === 'connected'">
+        <template v-if="asSerial(connector) && connector.status.value === 'connected'">
           <span
-            v-if="asSerial(connector)!.firmwareVersion.value && !asSerial(connector)!.updateAvailable"
+            v-if="asSerial(connector)!.firmwareVersion.value && !asSerial(connector)!.updateAvailable.value"
             class="text-xs text-muted-foreground"
           >
             v{{ asSerial(connector)!.firmwareVersion.value }}
@@ -77,16 +77,16 @@ function asSerial(c: any): SerialConnector | null {
         </template>
 
         <button
-          v-if="connector.status === 'connected' && !asSerial(connector)?.isFlashing.value"
+          v-if="connector.status.value === 'connected' && !asSerial(connector)?.isFlashing.value"
           class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
           @click="connector.disconnect()"
         >
           Disconnect
         </button>
         <button
-          v-else-if="connector.status !== 'connected'"
+          v-else-if="connector.status.value !== 'connected'"
           class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-          :disabled="connector.status === 'connecting'"
+          :disabled="connector.status.value === 'connecting'"
           @click="connector.connect()"
         >
           Connect
@@ -119,7 +119,7 @@ function asSerial(c: any): SerialConnector | null {
 
       <!-- Outdated firmware warning -->
       <div
-        v-else-if="asSerial(connector) && connector.status === 'connected' && asSerial(connector)!.updateAvailable"
+        v-else-if="asSerial(connector) && connector.status.value === 'connected' && asSerial(connector)!.updateAvailable.value"
         class="px-2 py-2 rounded border border-red-500/40 bg-red-500/10"
       >
         <div class="flex items-start justify-between gap-3">

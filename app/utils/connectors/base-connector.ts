@@ -11,7 +11,7 @@ export interface LogLine {
   text: string;
 }
 
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
 
 export interface EngineConnectorState {
   bpm: number;
@@ -28,8 +28,8 @@ export abstract class BaseConnector {
   readonly id: string;
   abstract readonly meta: ConnectorMeta;
 
-  status: ConnectorStatus = 'disconnected';
-  errorMessage: string | null = null;
+  status = ref<ConnectorStatus>('disconnected');
+  errorMessage = ref<string | null>(null);
   logs: LogLine[] = reactive([]);
 
   protected pushLog(text: string) {

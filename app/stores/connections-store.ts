@@ -19,7 +19,7 @@ export const useConnectionsStore = defineStore('connections', () => {
   /** Called by engine-store render loop — for DMX-output connectors */
   function sendFrame(dmxBuffer: Uint8Array) {
     for (const connector of connectors) {
-      if (connector.status === 'connected') {
+      if (connector.status.value === 'connected') {
         connector.sendFrame(dmxBuffer);
       }
     }
@@ -28,7 +28,7 @@ export const useConnectionsStore = defineStore('connections', () => {
   /** Called by engine-store render loop — for parameter-based connectors (e.g. SerialConnector) */
   function notifyEngineState(state: EngineConnectorState) {
     for (const connector of connectors) {
-      if (connector.status === 'connected' && connector.onEngineState) {
+      if (connector.status.value === 'connected' && connector.onEngineState) {
         connector.onEngineState(state);
       }
     }
