@@ -17,23 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # espup is the official ESP Rust toolchain installer — bundles rust-src,
-      # the riscv32imafc-esp-espidf target, and the matching GCC linker.
-      - name: Install ESP Rust toolchain via espup
+      - name: Install Rust nightly + rust-src
         run: |
-          curl -L https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu -o espup
-          chmod +x espup
-          ./espup install --targets esp32p4 --toolchain-version 1.93.0.0
-      - name: Verify ESP toolchain
-        run: |
-          source "$HOME/export-esp.sh"
-          cat "$HOME/export-esp.sh"
-          echo "---"
-          which rustc && rustc --version
-          rustup show
-          rustup component list --installed 2>/dev/null || true
-          echo "---"
-          ls "$(rustc --print sysroot)/lib/rustlib/src/" 2>/dev/null || echo "no rust-src found"
+          rustup install nightly
+          rustup component add rust-src --toolchain nightly
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -53,11 +40,10 @@ jobs:
           echo "Firmware version: $VER"
           echo "VERSION=$VER" >> "$GITHUB_ENV"
 
-      # PlatformIO pre-script (link_rust.py) builds rs-engine-ffi automatically
+      # PlatformIO pre-script (link_rust.py) builds rs-engine-ffi automatically.
+      # link_rust.py adds PlatformIO's riscv32-esp-elf GCC to PATH for the Rust linker.
       - name: Build firmware
-        run: |
-          source "$HOME/export-esp.sh"
-          pio run
+        run: pio run
         working-directory: pio
 
       - name: Write firmware-meta.json
