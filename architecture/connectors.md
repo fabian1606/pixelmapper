@@ -94,6 +94,23 @@ Incoming serial data (ESP32 log output like `[dmx] 0 0 0 255`) is decoded as UTF
 
 `send()` wraps `writer.write()` in a try-catch so a synchronous throw (e.g. port closed unexpectedly) triggers `disconnect()` instead of propagating into the render loop. The render loop additionally wraps `notifyEngineState` in a try-catch to ensure the RAF chain is never broken by a misbehaving connector.
 
+### Firmware Updates (OTA via Web Serial)
+
+The `SerialConnector` also handles flashing new firmware binaries from GitHub releases using `esptool-js`.
+When the user clicks "update", the connector:
+1. Disconnects the serial stream.
+2. Initialises the `esptool-js` `ESPLoader` (auto-resets the chip into bootloader mode via DTR/RTS).
+3. Downloads the app binary (`firmware.bin`) from GitHub (via the Nuxt proxy API at `/api/firmware-proxy`).
+4. Flashes it to address **`0x10000`** — the standard ESP32 app partition.
+
+**Strategy — App-Only OTA**
+
+Only the Arduino app binary is updated. Bootloader (`0x2000`) and partition table (`0x8000`) remain intact on the device. This is the standard embedded OTA approach and avoids any risk of accidentally overwriting the bootloader.
+
+**Binary encoding**: `esptool-js` expects the `data` field as a *binary string* (characters `0x00-0xFF`). We use `loader.ui8ToBstr()` for a guaranteed lossless conversion — never `btoa()` (base64).
+
+**Proxy**: `/api/firmware-proxy` buffers the full binary in memory and returns a `Buffer` with `Content-Length`. Streaming (`sendStream`) was previously used but risks UTF-8 re-encoding corruption.
+
 ## ESP32 (`pio/src/main.cpp`)
 
 ### Packet Reception

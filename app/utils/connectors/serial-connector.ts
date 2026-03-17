@@ -165,6 +165,7 @@ export class SerialConnector extends BaseConnector {
     if (!this.latestBinUrl.value) { this.pushLog('[flash] no bin URL — latest version not fetched yet'); return; }
     this.isFlashing.value  = true;
     this.flashProgress.value = 0;
+    this.status.value = 'connecting'; // stop onEngineState from sending packets during flash
     this.pushLog('[flash] starting firmware update...');
     try {
       // Release writer and close port so esptool-js can reopen it
@@ -193,18 +194,26 @@ export class SerialConnector extends BaseConnector {
       await loader.main();
       this.pushLog('[flash] connected to ESP32 bootloader');
 
+      this.pushLog(`[flash] fetching v${this.latestVersion.value} from ${this.latestBinUrl.value}`);
       const binResp = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(this.latestBinUrl.value)}`);
       const binData = await binResp.arrayBuffer();
-      // esptool-js expects base64-encoded binary
+      this.pushLog(`[flash] binary size: ${binData.byteLength} bytes`);
+      // esptool-js expects a binary string (characters 0-255), not base64!
+      // To strictly avoid UTF-8 mangling during string conversion, we use
+      // the built-in UI8 to Binary String method of the loader if available,
+      // or we construct it explicitly.
       const bytes = new Uint8Array(binData);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
-      const b64 = btoa(binary);
+      let binary = loader.ui8ToBstr ? loader.ui8ToBstr(bytes) : '';
+      if (!binary) {
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+      }
 
+      // Flash ONLY the app binary at 0x10000 (standard OTA approach).
+      // Bootloader (0x2000) and partitions (0x8000) stay intact on the device.
       await loader.writeFlash({
-        fileArray: [{ data: b64, address: 0x0 }],
-        flashSize: 'keep',
-        flashMode: 'keep',
+        fileArray: [{ data: binary, address: 0x10000 }],
+        flashSize: '32MB',
+        flashMode: 'keep',   // don't rewrite headers — app image doesn't have them at offset 0x10000
         flashFreq: 'keep',
         eraseAll: false,
         compress: true,
@@ -214,7 +223,7 @@ export class SerialConnector extends BaseConnector {
         },
       });
 
-      await loader.after('hard_reset');
+      try { await loader.after('hard_reset'); } catch (_) {}
       await transport.disconnect();
       this.pushLog('[flash] done — rebooting ESP32');
     } catch (e: any) {
@@ -230,8 +239,10 @@ export class SerialConnector extends BaseConnector {
           this.writer = this.port.writable!.getWriter();
           this.firmwareVersion.value = null;
           this.startReadLoop();
-          // Delay VERSION_REQ to let ESP32 finish booting after hard reset
-          setTimeout(() => this.send(buildVersionRequestPacket()), 2000);
+          // Wait for ESP32 to finish booting before sending any packets
+          await this.waitForBoot(5000);
+          this.status.value = 'connected';
+          setTimeout(() => this.send(buildVersionRequestPacket()), 500);
         } catch (e: any) {
           this.pushLog(`[flash] reconnect failed: ${e?.message ?? e}`);
         }

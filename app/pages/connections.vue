@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Usb, Plus, Trash2, CircleDot, ArrowUpCircle } from 'lucide-vue-next';
+import { Usb, Plus, Trash2, CircleDot, ArrowUpCircle, RefreshCw } from 'lucide-vue-next';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
@@ -90,6 +90,15 @@ function asSerial(c: any): SerialConnector | null {
           @click="connector.connect()"
         >
           Connect
+        </button>
+
+        <button
+          v-if="asSerial(connector) && asSerial(connector)!.latestBinUrl.value"
+          class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          title="Force firmware update"
+          @click="asSerial(connector)!.flashFirmware()"
+        >
+          <RefreshCw :size="14" />
         </button>
 
         <button

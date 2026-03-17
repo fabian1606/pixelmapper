@@ -1,6 +1,9 @@
 /**
  * Proxies GitHub release asset downloads to avoid CORS restrictions.
  * Usage: GET /api/firmware-proxy?url=<encoded_browser_download_url>
+ *
+ * NOTE: We buffer the entire response instead of streaming, because H3's
+ * sendStream may re-encode chunks as UTF-8 which corrupts binary data.
  */
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -15,6 +18,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: res.status, message: `GitHub returned ${res.status}` });
   }
 
+  // Buffer the entire binary in memory — streaming risks UTF-8 re-encoding
+  const arrayBuffer = await res.arrayBuffer();
+  const buf = Buffer.from(arrayBuffer);
+
   setResponseHeader(event, 'Content-Type', 'application/octet-stream');
-  return sendStream(event, res.body!);
+  setResponseHeader(event, 'Content-Length', buf.length);
+  return buf;
 });

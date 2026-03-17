@@ -46,20 +46,9 @@ jobs:
         run: pio run
         working-directory: pio
 
-      # Merge bootloader + partitions + app into a single flashable image (address 0x0)
-      - name: Create merged firmware binary
-        run: |
-          pip install esptool
-          esptool.py --chip esp32p4 merge_bin \
-            -o firmware.bin \
-            --flash_mode dio \
-            --flash_size 32MB \
-            0x2000  .pio/build/waveshare_p4_poe/bootloader.bin \
-            0x8000  .pio/build/waveshare_p4_poe/partitions.bin \
-            0xe000  "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
-            0x10000 .pio/build/waveshare_p4_poe/firmware.bin
-        working-directory: pio
-
+      # The OTA update flashes only the app binary at 0x10000.
+      # Bootloader (0x2000) and partitions (0x8000) stay intact on the device.
+      # This is the standard ESP32 OTA approach.
       - name: Write firmware-meta.json
         run: |
           echo "{\"version\":\"$VERSION\"}" > firmware-meta.json
@@ -70,7 +59,7 @@ jobs:
           name: Firmware ${{ github.ref_name }}
           make_latest: true
           files: |
-            pio/firmware.bin
+            pio/.pio/build/waveshare_p4_poe/firmware.bin
             firmware-meta.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
