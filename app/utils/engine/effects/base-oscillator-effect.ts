@@ -2,8 +2,13 @@ import type { Effect, EffectContext, ChannelType, EffectDirection, SpeedConfig }
 import type { EffectEngine } from "../engine";
 
 export abstract class BaseOscillatorEffect implements Effect {
+  public id: string;
   public targetChannels: ChannelType[] = [];
   public targetFixtureIds?: (string | number)[];
+
+  constructor() {
+    this.id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
+  }
   public direction: EffectDirection = 'LINEAR';
   public originX: number = 0.5;
   public originY: number = 0.5;

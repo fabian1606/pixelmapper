@@ -65,7 +65,9 @@ watch(layerMode, (mode) => {
   if (mode === 'steps' && effectEngine) {
     effectEngine.activeModifier.value = null;
   } else if (mode === 'modifiers' && effectEngine && effectEngine.effects.length > 0) {
-    effectEngine.activeModifier.value = effectEngine.effects[0] || null;
+    if (!effectEngine.activeModifier.value || !effectEngine.effects.includes(effectEngine.activeModifier.value as Effect)) {
+      effectEngine.activeModifier.value = effectEngine.effects[0] || null;
+    }
   }
 });
 
@@ -79,8 +81,14 @@ watch(activeModifiers, (modifiers) => {
   }
 });
 
-function openModifier() {
+function openModifier(effectId?: string) {
   layerMode.value = 'modifiers';
+  if (effectId && effectEngine) {
+    const eff = effectEngine.effects.find(e => e.id === effectId);
+    if (eff) {
+      effectEngine.activeModifier.value = eff;
+    }
+  }
 }
 
 function openSteps() {

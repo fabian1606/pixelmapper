@@ -123,7 +123,7 @@ const selectedFixtures = computed(() =>
             :effects="effects"
             :nodes="nodes"
             @select-fixtures="ids => emit('selectFixtures', ids)"
-            @open-properties-tab="(tab, isMod) => emit('openPropertiesTab', tab, isMod)"
+            @open-properties-tab="(tab, isMod, effId) => emit('openPropertiesTab', tab, isMod, effId)"
           />
         </div>
       </SidebarContent>

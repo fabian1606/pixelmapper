@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
+import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { useHistory } from '~/components/engine/composables/use-history';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
@@ -18,6 +19,10 @@ import {
   Trash2,
   Play,
   Square,
+  GitFork,
+  Zap,
+  Activity,
+  Layers,
 } from 'lucide-vue-next';
 import {
   ContextMenu,
@@ -26,6 +31,16 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import {
   Accordion,
@@ -50,7 +65,7 @@ const emit = defineEmits<{
   /** Called when a preset subgroup is clicked — selects those fixture IDs */
   (e: 'selectFixtures', ids: (string | number)[]): void;
   /** Called when a category item is clicked — opens that tab in the properties panel */
-  (e: 'openPropertiesTab', tab: string, isModifier?: boolean): void;
+  (e: 'openPropertiesTab', tab: string, isModifier?: boolean, effectId?: string): void;
 }>();
 
 // ─── Preset state ─────────────────────────────────────────────────────────────
@@ -62,6 +77,7 @@ const {
   applyPreset,
   renamePreset,
   stopPreset,
+  getActivePresetResolved,
 } = usePresets();
 
 const history = useHistory();
@@ -80,6 +96,20 @@ const unsavedChanges = computed(() => {
   return getUnsavedChanges(props.fixtures, props.effects, props.nodes);
 });
 const hasUnsaved = computed(() => unsavedChanges.value.length > 0);
+
+const basePresets = computed(() => {
+  return savedPresets.value.filter(p => !p.basePresetId);
+});
+
+function getVariants(baseId: string) {
+  return savedPresets.value.filter(p => p.basePresetId === baseId);
+}
+
+const activeBaseId = computed(() => {
+  if (!selectedPresetId.value) return null;
+  const p = savedPresets.value.find(p => p.id === selectedPresetId.value);
+  return p?.basePresetId || p?.id || null;
+});
 
 // ─── Save preset ─────────────────────────────────────────────────────────────
 
@@ -104,9 +134,19 @@ function quickSave() {
   nextTick(() => startRename(preset));
 }
 
+// ... handleOverwrite remains unchanged
 function handleOverwrite(preset: Preset) {
   const oldCats = preset.categories;
-  const newCats = extractCategories(props.fixtures, props.effects, null, props.nodes);
+  
+  let diffBase: Preset | null = null;
+  if (preset.basePresetId) {
+    const rawBase = savedPresets.value.find(p => p.id === preset.basePresetId);
+    if (rawBase) {
+      diffBase = resolvePreset(rawBase, savedPresets.value);
+    }
+  }
+
+  const newCats = extractCategories(props.fixtures, props.effects, diffBase, props.nodes);
   
   history.execute(new OverwritePresetCommand(
     preset.id,
@@ -116,6 +156,44 @@ function handleOverwrite(preset: Preset) {
     () => savedPresets.value,
     (presets) => { savedPresets.value = presets; }
   ));
+}
+
+function quickSaveVariant(basePreset: Preset) {
+  const existingVariants = getVariants(basePreset.id || basePreset.basePresetId!);
+  const name = `Variant ${existingVariants.length + 1}`;
+  const resolvedBase = resolvePreset(basePreset, savedPresets.value);
+  const categories = extractCategories(props.fixtures, props.effects, resolvedBase, props.nodes);
+  const id = `preset-${Date.now()}`;
+  const preset: Preset = {
+    id,
+    name,
+    basePresetId: basePreset.basePresetId || basePreset.id,
+    type: 'normal',
+    createdAt: new Date().toISOString(),
+    categories,
+  };
+  history.execute(new SavePresetCommand(
+    preset,
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+    () => selectedPresetId.value,
+    (id) => { selectedPresetId.value = id; }
+  ));
+  nextTick(() => startRename(preset));
+}
+
+import type { OverwriteTarget, PresetType } from '~/utils/engine/preset-types';
+
+function setPresetType(preset: Preset, type: PresetType, target: OverwriteTarget | undefined = undefined) {
+  preset.type = type;
+  if (target) preset.overwriteTarget = target;
+  else preset.overwriteTarget = undefined;
+}
+
+function getVariantTypeDescription(variant: Preset) {
+  if (variant.type === 'flash') return 'Flash: Active only while triggered';
+  if (variant.type === 'overwrite') return `Overwrite: Replaces the global ${variant.overwriteTarget || 'FX'} button`;
+  return 'Normal: Standard preset variant';
 }
 
 function handleDeletePreset(preset: Preset) {
@@ -132,10 +210,30 @@ function handleDeletePreset(preset: Preset) {
 
 const renamingId = ref<string | null>(null);
 const renameValue = ref('');
+const renameInputRef = ref<any[]>([]);
 
 function startRename(preset: Preset) {
   renamingId.value = preset.id;
   renameValue.value = preset.name;
+  nextTick(() => {
+    // Attempt focus on all rendered refs (only one should actually be rendered at a time anyway)
+    renameInputRef.value.forEach(el => {
+      if (!el) return;
+      const inputEl = el?.$el || el;
+      if (inputEl && typeof inputEl.focus === 'function') {
+        inputEl.focus();
+        if (typeof inputEl.select === 'function') {
+          inputEl.select();
+        }
+      } else if (inputEl && inputEl.querySelector) {
+        const inner = inputEl.querySelector('input');
+        if (inner) {
+          inner.focus();
+          inner.select();
+        }
+      }
+    });
+  });
 }
 
 function confirmRename() {
@@ -150,7 +248,9 @@ function handleRenameKeydown(e: KeyboardEvent) {
 }
 
 function handleRenameBlur() {
-  confirmRename();
+  if (renamingId.value) {
+    confirmRename();
+  }
 }
 
 // ─── Category icons ───────────────────────────────────────────────────────────
@@ -176,7 +276,12 @@ function getCategoryIcon(type: PresetCategoryType) {
 const openPreset = ref<string | undefined>(undefined);
 
 watch(selectedPresetId, (id) => {
-  if (id && openPreset.value !== id) openPreset.value = id;
+  const activeBase = activeBaseId.value;
+  if (activeBase && openPreset.value !== activeBase) openPreset.value = activeBase;
+});
+
+watch(activeBaseId, (baseId) => {
+  if (baseId && openPreset.value !== baseId) openPreset.value = baseId;
 });
 
 function togglePresetApply(preset: Preset) {
@@ -184,7 +289,7 @@ function togglePresetApply(preset: Preset) {
     stopPreset(preset, props.fixtures, props.effects);
   } else {
     applyPreset(preset, props.fixtures, props.effects);
-    openPreset.value = preset.id;
+    openPreset.value = preset.basePresetId || preset.id;
   }
 }
 
@@ -204,12 +309,14 @@ function handleCategoryClick(category: PresetCategory, preset: Preset) {
     applyPreset(preset, props.fixtures, props.effects);
   }
   emit('selectFixtures', category.fixtureIds);
-  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier);
+  const effectId = category.isModifier && category.modifiers.length > 0 ? category.modifiers[0]?.id : undefined;
+  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier, effectId);
 }
 
 function handleUnsavedCategoryClick(category: PresetCategory) {
   emit('selectFixtures', category.fixtureIds);
-  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier);
+  const effectId = category.isModifier && category.modifiers.length > 0 ? category.modifiers[0]?.id : undefined;
+  emit('openPropertiesTab', categoryTypeToTab[category.type] ?? 'control', category.isModifier, effectId);
 }
 
 function overwriteActivePreset() {
@@ -244,10 +351,14 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
 
 defineExpose({
   quickSave,
+  quickSaveVariant,
   overwriteActivePreset,
   createPresetFromSelection,
   hasUnsaved,
   selectedPresetId,
+  basePresets,
+  getVariants,
+  activeBaseId
 });
 </script>
 
@@ -314,7 +425,7 @@ defineExpose({
 
         <Accordion v-else v-model="openPreset" type="single" collapsible class="px-1.5 py-1.5 space-y-0.5">
           <AccordionItem
-            v-for="preset in savedPresets"
+            v-for="preset in basePresets"
             :key="preset.id"
             :value="preset.id"
             class="rounded-md overflow-hidden !border-b border border-border/50 bg-background/20"
@@ -322,19 +433,21 @@ defineExpose({
             <!-- Custom header: rename/delete + accordion trigger -->
             <ContextMenu>
               <ContextMenuTrigger as-child>
-                <AccordionHeader class="w-full">
+                <AccordionHeader class="w-full relative">
                   <AccordionTrigger
                     class="flex-1 px-3 py-2 text-xs font-medium hover:no-underline border-border/40
                            transition-colors [&>svg]:hidden flex items-center justify-between w-full"
-                    :class="selectedPresetId === preset.id ? 'text-primary' : 'text-foreground'"
+                    :class="[selectedPresetId === preset.id ? 'text-primary' : 'text-foreground']"
                   >
                     <div class="flex items-center gap-2 flex-1 min-w-0 w-full" @dblclick.stop="startRename(preset)">
                       <!-- Name or rename input -->
                       <template v-if="renamingId === preset.id">
                         <Input
+                          ref="renameInputRef"
                           v-model="renameValue"
                           class="h-5 text-xs px-1 py-0 flex-1 min-w-0"
-                          @keydown="handleRenameKeydown"
+                          @keydown.prevent.enter="confirmRename"
+                          @keydown.prevent.escape="renamingId = null"
                           @blur="handleRenameBlur"
                           @click.stop
                           autofocus
@@ -347,8 +460,20 @@ defineExpose({
 
                     <!-- Action buttons -->
                     <div class="flex items-center">
-                      <!-- Overwrite button -->
+                      <!-- Create Variant button -->
                       <button
+                        type="button"
+                        v-if="activeBaseId === preset.id && hasUnsaved"
+                        class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity text-foreground"
+                        @click.stop="quickSaveVariant(preset)"
+                        title="Create Variant from current changes"
+                      >
+                        <GitFork class="size-3.5 shrink-0" />
+                      </button>
+
+                      <!-- Overwrite button for base preset -->
+                      <button
+                        type="button"
                         v-if="selectedPresetId === preset.id && hasUnsaved"
                         class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity"
                         @click.stop="handleOverwrite(preset)"
@@ -359,6 +484,7 @@ defineExpose({
 
                       <!-- Play / Stop button -->
                       <button
+                         type="button"
                          class="flex items-center justify-center pl-2 pr-3 py-1 text-xs font-medium hover:opacity-80 transition-opacity"
                          @click.stop="togglePresetApply(preset)"
                        >
@@ -400,37 +526,156 @@ defineExpose({
             <!-- Categories inside the preset -->
             <AccordionContent class="pb-0">
               <div class="py-1 px-1 border-t border-border/30">
-                <button
-                  v-for="(category, idx) in preset.categories"
-                  :key="idx"
-                  class="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-xs
-                         hover:bg-accent/60 transition-colors group/cat text-left"
-                  @click="handleCategoryClick(category, preset)"
-                >
-                  <component
-                    :is="getCategoryIcon(category.type)"
-                    class="size-3.5 shrink-0 transition-colors"
-                    :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/cat:text-foreground'"
-                  />
-                  <span 
-                    class="flex-1 truncate transition-colors"
-                    :class="category.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/cat:text-foreground'"
+                <div v-if="preset.categories.length > 0">
+                  <button
+                    v-for="(category, idx) in preset.categories"
+                    :key="idx"
+                    class="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-xs
+                           hover:bg-accent/60 transition-colors group/cat text-left"
+                    @click="handleCategoryClick(category, preset)"
                   >
-                    {{ category.label }}
-                  </span>
-                  <!-- Default state: show fixture count; Hover state: show (Effect) or (Value) -->
-                  <div class="relative flex items-center justify-end w-12 shrink-0">
-                    <span class="group-hover/cat:opacity-0 opacity-100 text-muted-foreground/50 transition-opacity text-[9px] tabular-nums text-right w-full absolute pointer-events-none">
-                      {{ category.fixtureIds.length }} fixture{{ category.fixtureIds.length !== 1 ? 's' : '' }}
-                    </span>
-                    <span 
-                      class="opacity-0 group-hover/cat:opacity-70 transition-opacity text-[10px] tabular-nums text-right w-full"
+                    <component
+                      :is="getCategoryIcon(category.type)"
+                      class="size-3.5 shrink-0 transition-colors"
                       :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/cat:text-foreground'"
+                    />
+                    <span 
+                      class="flex-1 truncate transition-colors"
+                      :class="category.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/cat:text-foreground'"
                     >
-                      {{ category.isModifier ? '(Effect)' : '(Value)' }}
+                      {{ category.label }}
                     </span>
+                    <div class="relative flex items-center justify-end w-12 shrink-0">
+                      <span class="group-hover/cat:opacity-0 opacity-100 text-muted-foreground/50 transition-opacity text-[9px] tabular-nums text-right w-full absolute pointer-events-none">
+                        {{ category.fixtureIds.length }} fixture{{ category.fixtureIds.length !== 1 ? 's' : '' }}
+                      </span>
+                      <span 
+                        class="opacity-0 group-hover/cat:opacity-70 transition-opacity text-[10px] tabular-nums text-right w-full"
+                        :class="category.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/cat:text-foreground'"
+                      >
+                        {{ category.isModifier ? '(Effect)' : '(Value)' }}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
+                <!-- Variants Loop -->
+                <div v-for="variant in getVariants(preset.id)" :key="variant.id" class="relative mt-2">
+                  <!-- The main branch line for this variant -->
+                  <div class="absolute left-3 top-0 bottom-0 w-px bg-primary/20 pointer-events-none" />
+                  
+                  <!-- Variant Header -->
+                  <ContextMenu>
+                    <ContextMenuTrigger as-child>
+                      <div class="relative flex items-center justify-between w-full px-2 py-1 text-xs font-medium transition-colors group/var" :class="selectedPresetId === variant.id ? 'text-primary' : 'text-foreground'">
+                        <!-- horizontal tick -->
+                        <div class="absolute left-3 top-1/2 w-3 border-t border-primary/20 pointer-events-none" />
+                        
+                        <div class="flex items-center gap-2 flex-1 min-w-0 w-full pl-5" @dblclick.stop="startRename(variant)">
+                           <template v-if="renamingId === variant.id">
+                              <Input ref="renameInputRef" v-model="renameValue" class="h-5 text-xs px-1 py-0 flex-1 min-w-0" @keydown.prevent.enter="confirmRename" @keydown.prevent.escape="renamingId = null" @blur="handleRenameBlur" @click.stop autofocus />
+                           </template>
+                           <template v-else>
+                              <span class="flex-1 text-left truncate">{{ variant.name }}</span>
+                           </template>
+                        </div>
+
+                        <div class="flex items-center transition-opacity" :class="selectedPresetId === variant.id ? 'opacity-100' : 'opacity-80 group-hover/var:opacity-100'">
+                           <!-- Preset Type Dropdown -->
+                           <DropdownMenu>
+                             <DropdownMenuTrigger as-child>
+                               <button
+                                 type="button"
+                                 class="flex items-center justify-center p-1.5 text-xs hover:opacity-100 opacity-60 transition-opacity text-foreground"
+                                 :title="getVariantTypeDescription(variant)"
+                                 @click.stop
+                               >
+                                 <Zap v-if="variant.type === 'flash'" class="size-3.5 shrink-0 text-yellow-500" />
+                                 <template v-else-if="variant.type === 'overwrite'">
+                                   <Activity class="size-3.5 shrink-0 text-orange-500" />
+                                   <span class="ml-1 text-[9px] uppercase font-bold text-orange-500">{{ variant.overwriteTarget?.substring(0, 3) || 'FX' }}</span>
+                                 </template>
+                                 <Layers v-else class="size-3.5 shrink-0" />
+                               </button>
+                             </DropdownMenuTrigger>
+                             <DropdownMenuContent class="w-40">
+                               <DropdownMenuItem :class="{'text-primary': !variant.type || variant.type === 'normal'}" @click.stop="setPresetType(variant, 'normal')">
+                                 <Layers class="mr-3 size-4 opacity-70" /> Normal
+                               </DropdownMenuItem>
+                               <DropdownMenuItem :class="{'text-primary': variant.type === 'flash'}" @click.stop="setPresetType(variant, 'flash')">
+                                 <Zap class="mr-3 size-4 opacity-70" /> Flash
+                               </DropdownMenuItem>
+                               <DropdownMenuSub>
+                                 <DropdownMenuSubTrigger :class="{'text-primary': variant.type === 'overwrite'}">
+                                   <Activity class="mr-3 size-4 opacity-70" /> Overwrite
+                                 </DropdownMenuSubTrigger>
+                                 <DropdownMenuPortal>
+                                   <DropdownMenuSubContent class="w-32">
+                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'strobe'}" @click.stop="setPresetType(variant, 'overwrite', 'strobe')">
+                                       Strobe
+                                     </DropdownMenuItem>
+                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blind'}" @click.stop="setPresetType(variant, 'overwrite', 'blind')">
+                                       Blind
+                                     </DropdownMenuItem>
+                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blackout'}" @click.stop="setPresetType(variant, 'overwrite', 'blackout')">
+                                       Blackout
+                                     </DropdownMenuItem>
+                                   </DropdownMenuSubContent>
+                                 </DropdownMenuPortal>
+                               </DropdownMenuSub>
+                             </DropdownMenuContent>
+                           </DropdownMenu>
+
+                           <!-- Variant Overwrite -->
+                           <button type="button" v-if="selectedPresetId === variant.id && hasUnsaved" class="p-1.5 text-xs hover:opacity-100 opacity-60 text-foreground" @click.stop="handleOverwrite(variant)" title="Overwrite Variant">
+                              <Save class="size-3.5 shrink-0" />
+                           </button>
+                           
+                           <!-- Variant Play/Stop -->
+                           <button type="button" class="pl-2 pr-1 py-1 text-xs hover:opacity-80" @click.stop="togglePresetApply(variant)">
+                             <Square v-if="selectedPresetId === variant.id" class="size-3.5 fill-primary text-primary shrink-0" />
+                             <Play v-else class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors" />
+                           </button>
+                        </div>
+                      </div>
+                    </ContextMenuTrigger>
+
+                    <ContextMenuContent class="w-48">
+                      <ContextMenuItem @click="togglePresetApply(variant)">
+                        <template v-if="selectedPresetId === variant.id">
+                          <Square class="mr-2 size-4 text-destructive" /> Stop
+                        </template>
+                        <template v-else>
+                          <Play class="mr-2 size-4" /> Play
+                        </template>
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem @click="startRename(variant)">
+                        <Pencil class="mr-2 size-4" /> Rename
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem @click="handleDeletePreset(variant)" class="text-destructive focus:bg-destructive focus:text-destructive-foreground">
+                        <Trash2 class="mr-2 size-4" /> Delete Variant
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+
+                  <!-- Variant Categories -->
+                  <div class="pl-6 pb-2 relative">
+                     <button v-for="(cat, vIdx) in variant.categories" :key="vIdx" class="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-xs hover:bg-accent/60 transition-colors text-left group/vcat" @click="handleCategoryClick(cat, variant)">
+                        <component :is="getCategoryIcon(cat.type)" class="size-3.5 shrink-0 transition-colors" :class="cat.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/vcat:text-foreground'" />
+                        <span class="flex-1 truncate transition-colors" :class="cat.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/vcat:text-foreground'">{{ cat.label }}</span>
+                        <!-- Variant category info -->
+                        <span 
+                          class="opacity-0 group-hover/vcat:opacity-70 transition-opacity text-[10px] shrink-0"
+                          :class="cat.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/vcat:text-foreground'"
+                        >
+                          {{ cat.isModifier ? '(Effect)' : '(Value)' }}
+                        </span>
+                     </button>
                   </div>
-                </button>
+                </div>
+
               </div>
             </AccordionContent>
           </AccordionItem>

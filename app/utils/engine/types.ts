@@ -86,6 +86,11 @@ export interface EffectContext {
 
 export interface Effect {
   /**
+   * Unique identifier for the effect instance.
+   */
+  id: string;
+
+  /**
    * The channel types this effect applies to (e.g., ['RED', 'DIMMER']).
    */
   targetChannels: ChannelType[];

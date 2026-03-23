@@ -249,10 +249,12 @@ const stopAllTooltip = computed(() => {
 });
 
 // Expose openTab so parent (index.vue) can open a specific tab programmatically
-function openTab(tabKey: string, isModifier?: boolean) {
+function openTab(tabKey: string, isModifier?: boolean, effectId?: string) {
   activeTab.value = tabKey as typeof activeTab.value;
   if (isModifier) {
-    nextTick(() => effectsManager.value?.openModifier());
+    nextTick(() => {
+      effectsManager.value?.openModifier(effectId);
+    });
   } else {
     nextTick(() => effectsManager.value?.openSteps());
   }

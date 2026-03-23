@@ -25,6 +25,7 @@ export function resetFixtureChannels(fixtures: Fixture[]): void {
 export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
   if (snap.effectType === 'SineEffect') {
     const eff = new SineEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
     eff.targetChannels = [...snap.targetChannels];
     eff.targetFixtureIds = [...snap.targetFixtureIds];
     eff.strength = snap.strength;

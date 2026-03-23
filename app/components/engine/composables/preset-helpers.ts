@@ -71,9 +71,9 @@ export function getChannelFingerprint(snapshots: PresetChannelSnapshot[]): strin
  * instead of showing as a separate "removed" + "added" pair.
  */
 export function getModifierIdentity(effect: Effect | PresetModifierSnapshot): string {
-  return 'effectType' in effect
-    ? (effect as PresetModifierSnapshot).effectType
-    : effect.constructor.name;
+  return 'id' in effect && effect.id
+    ? effect.id
+    : ('effectType' in effect ? (effect as PresetModifierSnapshot).effectType : effect.constructor.name);
 }
 
 /**
@@ -96,6 +96,7 @@ export function getModifierFingerprint(effect: Effect | PresetModifierSnapshot):
 /** Snapshots a live Effect into a serializable PresetModifierSnapshot. */
 export function snapshotEffect(effect: Effect): PresetModifierSnapshot {
   return {
+    id: effect.id,
     effectType: effect.constructor.name,
     targetChannels: [...(effect.targetChannels ?? [])],
     targetFixtureIds: [...(effect.targetFixtureIds ?? [])],

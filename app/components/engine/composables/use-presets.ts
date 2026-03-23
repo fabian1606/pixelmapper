@@ -5,6 +5,7 @@ import type { Effect } from '~/utils/engine/types';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { extractCategories } from './preset-diff';
 import { applyPreset as _applyPreset, stopPreset as _stopPreset } from './preset-apply';
+import { resolvePreset } from './preset-resolve';
 
 // Re-export for consumers that import extractCategories from this module
 export { extractCategories } from './preset-diff';
@@ -35,9 +36,15 @@ export function usePresets() {
       : null;
   }
 
-  function getUnsavedChanges(fixtures: Fixture[], effects: Effect[] = [], nodes?: SceneNode[]) {
-    return extractCategories(fixtures, effects, getActivePreset(), nodes);
+  function getActivePresetResolved(): Preset | null {
+    const raw = getActivePreset();
+    return raw ? resolvePreset(raw, savedPresets.value) : null;
   }
+
+  function getUnsavedChanges(fixtures: Fixture[], effects: Effect[] = [], nodes?: SceneNode[]) {
+    return extractCategories(fixtures, effects, getActivePresetResolved(), nodes);
+  }
+
 
   function savePreset(name: string, fixtures: Fixture[], effects: Effect[], nodes?: SceneNode[]): Preset {
     const id = `preset-${Date.now()}-${nextPresetIndex++}`;
@@ -60,12 +67,14 @@ export function usePresets() {
   }
 
   function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
-    _applyPreset(preset, fixtures, effects);
+    const resolved = resolvePreset(preset, savedPresets.value);
+    _applyPreset(resolved, fixtures, effects);
     selectedPresetId.value = preset.id;
   }
 
   function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
-    _stopPreset(preset, fixtures, effects);
+    const resolved = resolvePreset(preset, savedPresets.value);
+    _stopPreset(resolved, fixtures, effects);
     if (selectedPresetId.value === preset.id) selectedPresetId.value = null;
   }
 
@@ -83,6 +92,8 @@ export function usePresets() {
   return {
     savedPresets,
     selectedPresetId,
+    getActivePreset,
+    getActivePresetResolved,
     getUnsavedChanges,
     savePreset,
     overwritePreset,

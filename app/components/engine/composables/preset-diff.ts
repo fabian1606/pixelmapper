@@ -133,7 +133,18 @@ function diffChannels(
           let differs = !presetSnap;
           if (presetSnap) {
             if (snap.stepValues.join(',') !== presetSnap.stepValues.join(',')) differs = true;
-            if (JSON.stringify(snap.chaserConfig) !== JSON.stringify(presetSnap.chaserConfig)) differs = true;
+            
+            // Only consider it a diff if the actual programmed properties change (ignore activeEditStep which is UI state)
+            const a = snap.chaserConfig;
+            const b = presetSnap.chaserConfig;
+            if (a && b) {
+              if (a.stepsCount !== b.stepsCount) differs = true;
+              if (a.isPlaying !== b.isPlaying) differs = true;
+              if (JSON.stringify(a.fadeDuration || {}) !== JSON.stringify(b.fadeDuration || {})) differs = true;
+              if (JSON.stringify(a.stepDuration || {}) !== JSON.stringify(b.stepDuration || {})) differs = true;
+            } else if (a !== b) {
+              differs = true;
+            }
           }
           if (differs) {
             if (!changesByCat.has(cat)) changesByCat.set(cat, []);
@@ -144,14 +155,21 @@ function diffChannels(
           changesByCat.get(cat)!.push(snap);
         }
       } else if (activePreset && presetSnap) {
-        // Channel reverted to default while preset had a value → show as change
-        if (!changesByCat.has(cat)) changesByCat.set(cat, []);
-        changesByCat.get(cat)!.push({
-          channelIndex: i,
-          channelType: ch.type,
-          stepValues: [ch.defaultValue],
-          chaserConfig: undefined,
-        });
+        // Channel is NOT programmed in live (it's at default).
+        // If the preset snap ALSO represents the default value, then there is no diff!
+        const isPresetDefault = presetSnap.stepValues.every((v) => v === ch.defaultValue) &&
+                                (!presetSnap.chaserConfig || presetSnap.chaserConfig.stepsCount <= 1);
+        
+        if (!isPresetDefault) {
+          // Channel reverted to default while preset had a NON-DEFAULT value -> show as change
+          if (!changesByCat.has(cat)) changesByCat.set(cat, []);
+          changesByCat.get(cat)!.push({
+            channelIndex: i,
+            channelType: ch.type,
+            stepValues: [ch.defaultValue],
+            chaserConfig: undefined,
+          });
+        }
       }
     }
 

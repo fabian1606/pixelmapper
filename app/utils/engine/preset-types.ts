@@ -22,6 +22,8 @@ export interface PresetChannelSnapshot {
  * Enough data to recreate it via SineEffect or any future effect class.
  */
 export interface PresetModifierSnapshot {
+  /** Unique ID of this effect instance to allow stacking */
+  id: string;
   /** Effect class name, e.g. "SineEffect" – used to reconstruct the correct subclass */
   effectType: string;
   targetChannels: ChannelType[];
@@ -56,6 +58,9 @@ export interface PresetCategory {
   isModifier?: boolean;
 }
 
+export type PresetType = 'normal' | 'flash' | 'overwrite';
+export type OverwriteTarget = 'strobe' | 'blind' | 'blackout';
+
 /**
  * A named preset containing grouped channel state information,
  * ready to be applied back to matching fixtures.
@@ -65,6 +70,12 @@ export interface Preset {
   name: string;
   /** ISO timestamp when this preset was saved */
   createdAt: string;
+  /** The type of this preset (affects live mode behavior) */
+  type?: PresetType;
+  /** If type is overwrite, specifies which global function this replaces */
+  overwriteTarget?: OverwriteTarget;
   /** The grouped category entries */
   categories: PresetCategory[];
+  /** Optional ID of the base preset this is a variant of */
+  basePresetId?: string;
 }

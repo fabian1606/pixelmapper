@@ -10,6 +10,9 @@ export const TYPE_TIMESYNC    = 0x13;
 export const TYPE_LAYOUT_BIN  = 0x14;
 export const TYPE_CHAN_BIN    = 0x15;
 export const TYPE_FX_BIN      = 0x16;
+export const TYPE_OTA_BEGIN   = 0x15;
+export const TYPE_OTA_CHUNK   = 0x16;
+export const TYPE_OTA_END     = 0x17;
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -49,6 +52,12 @@ class BufWriter {
     this.f32(s.beatOffset);
   }
 
+  u32(v: number) { this.buf.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff); }
+
+  bytes(arr: Uint8Array) {
+    for (let i = 0; i < arr.length; i++) this.buf.push(arr[i]!);
+  }
+
   toPacket(type: number): Uint8Array {
     const out = new Uint8Array(5 + this.buf.length);
     out[0] = MAGIC0; out[1] = MAGIC1; out[2] = type;
@@ -80,6 +89,23 @@ export function buildTimesyncPacket(elapsedMs: number): Uint8Array {
   out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_TIMESYNC; out[3] = 4; out[4] = 0;
   new DataView(out.buffer).setFloat32(5, elapsedMs, true);
   return out;
+}
+
+export function buildOtaBeginPacket(totalSize: number): Uint8Array {
+  const w = new BufWriter();
+  w.u32(totalSize);
+  return w.toPacket(TYPE_OTA_BEGIN);
+}
+
+export function buildOtaChunkPacket(chunk: Uint8Array): Uint8Array {
+  const w = new BufWriter();
+  w.bytes(chunk);
+  return w.toPacket(TYPE_OTA_CHUNK);
+}
+
+export function buildOtaEndPacket(): Uint8Array {
+  const w = new BufWriter();
+  return w.toPacket(TYPE_OTA_END);
 }
 
 // ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────
