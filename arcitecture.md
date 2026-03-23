@@ -1,0 +1,38 @@
+# Pixelmapper Architecture
+
+This document outlines the core architectural patterns of the Pixelmapper application to help build scalable and expandable software.
+
+## Tech Stack Overview
+- **Language**: TypeScript (preferred over JavaScript)
+- **Runtime / Package Manager**: Bun (preferred over npm/node)
+- **Framework**: Nuxt 3 / Vue 3
+- **State Management**: Pinia
+- **Core Engine**: Custom TypeScript engine for DMX/Fixture management, Effects, and Presets. (Partially Rust WASM for rendering/canvas)
+
+## Core Concepts
+
+### 1. Engine & State
+The `EffectEngine` (in `app/utils/engine`) is the heart of the application. It runs a tick loop that computes DMX values based on fixtures, channel types, and active effects.
+- **Fixtures**: Represent physical devices. They have channels (e.g., RED, GREEN, PAN).
+- **Effects**: Modifiers (like `SineEffect`) that dynamically alter channel values over time.
+- **Pinia Stores**: Bridge the Vue reactivity system with the engine (`useEngineStore`).
+
+### 2. Presets
+Presets are snapshots of programmed channel values and active modifiers for a set of fixtures.
+- Stored as a list of `Preset` objects.
+- Grouped into `PresetCategory` (color, movement, etc.) for UI display.
+- **Preset Variants**: A variant is a preset that depends on a `basePresetId`. It only stores the *differences* (overrides) from the base preset. When applied, the system dynamically merges the base preset's state with the variant's overrides. This ensures that updates to the base preset automatically propagate to its variants.
+
+### 3. Groups (SceneNodes)
+Fixtures can be organized into hierarchical groups. This helps with selection and applying effects to multiple fixtures at once.
+
+## Software Patterns & Guidelines
+- **Modularity**: Large files (>200 lines) should be split into smaller, focused modules.
+- **Pure Functions for Engine Logic**: Functions like diffing presets or merging variants should be pure functions that take inputs and return new objects. This makes them easily testable and avoids side-effects.
+- **Composables**: Vue UI logic should be encapsulated in composables (`use-presets.ts`, etc.) to keep components clean.
+- **Documentation**: Write JSDoc comments for all major interfaces, classes, and exported functions.
+
+## Adding New Features
+1. **Plan first**: Review this document and established patterns.
+2. **Implement**: Keep UI and Engine logic separated. Use Pinia to bridge them.
+3. **Document**: Update this `architecture.md` file if adding new high-level concepts.

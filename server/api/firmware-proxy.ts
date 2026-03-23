@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event);
   const url = query.url as string | undefined;
 
-  if (!url || !url.startsWith('https://github.com/fabian1606/pixelmapper/releases/download/')) {
+  if (!url || !url.includes('github.com/fabian1606/pixelmapper/releases/')) {
     throw createError({ statusCode: 400, message: 'Invalid or missing url parameter' });
   }
 

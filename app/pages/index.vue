@@ -57,8 +57,8 @@ const fixtureSidebarRef = ref<{
   createPresetFromSelection: (selectedIds: Set<string | number>) => void
 } | null>(null);
 
-function handleOpenPropertiesTab(tab: string, isModifier?: boolean) {
-  nextTick(() => propertiesSidebarRef.value?.openTab(tab, isModifier));
+function handleOpenPropertiesTab(tab: string, isModifier?: boolean, effectId?: string) {
+  nextTick(() => propertiesSidebarRef.value?.openTab(tab, isModifier, effectId));
 }
 
 // Selection / Groups logic

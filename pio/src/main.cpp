@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 #include <string.h>
+#include <Update.h>
 #include "engine_ffi.h"
 #include "version.h"
 
@@ -13,12 +14,20 @@
 #define MAGIC1           0x55
 #define TYPE_VERSION_REQ 0x11  // zero-length — reply: "[version] X.Y.Z\n"
 #define TYPE_TIMESYNC    0x13  // f32 LE — ESP32-only clock alignment
+#define TYPE_OTA_BEGIN   0x15  // u32 LE (total size) — starts OTA process
+#define TYPE_OTA_CHUNK   0x16  // payload is bytes to write
+#define TYPE_OTA_END     0x17  // zero-length — finishes OTA and reboots
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 static EffectEngine* engine       = nullptr;
 static float         timeOffset   = 0.0f;
-static uint32_t      lastMs       = 0;
+static uint32_t      lastMs        = 0;
 static uint32_t      lastDmxReport = 0;
+
+// OTA State
+static bool          otaActive     = false;
+static uint32_t      otaTotalSize  = 0;
+static uint32_t      otaWritten    = 0;
 
 // ── Packet receiver state machine ────────────────────────────────────────────
 enum RxState { WAIT_MAGIC1, WAIT_MAGIC2, WAIT_TYPE, WAIT_LEN_LO, WAIT_LEN_HI, COLLECT };
@@ -33,6 +42,10 @@ static inline float readF32LE(const uint8_t* buf) {
     float v; memcpy(&v, buf, 4); return v;
 }
 
+static inline uint32_t readU32LE(const uint8_t* buf) {
+    uint32_t v; memcpy(&v, buf, 4); return v;
+}
+
 static void dispatch() {
     if (rxType == TYPE_VERSION_REQ) {
         Serial.printf("[version] %s\n", FIRMWARE_VERSION);
@@ -42,10 +55,43 @@ static void dispatch() {
         float newOffset = browserElapsed - (float)millis();
         timeOffset = timeOffset * 0.85f + newOffset * 0.15f;
         Serial.printf("[rx] timesync offset=%.1f\n", timeOffset);
+    } else if (rxType == TYPE_OTA_BEGIN) {
+        if (rxPos != 4) return;
+        otaTotalSize = readU32LE(rxBuf);
+        otaWritten   = 0;
+        otaActive    = Update.begin(otaTotalSize, U_FLASH);
+        if (otaActive) {
+            Serial.printf("[ota] begin %u bytes\n", otaTotalSize);
+        } else {
+            Serial.printf("[ota] error begin: %s\n", Update.errorString());
+        }
+    } else if (rxType == TYPE_OTA_CHUNK) {
+        if (!otaActive) return;
+        size_t written = Update.write(rxBuf, rxPos);
+        if (written == rxPos) {
+            otaWritten += written;
+            // Send exactly [ota] chunk <written> so the sender knows it's safe to send the next
+            Serial.printf("[ota] chunk %u\n", otaWritten);
+        } else {
+            Serial.printf("[ota] write failed: %s\n", Update.errorString());
+            otaActive = false;
+        }
+    } else if (rxType == TYPE_OTA_END) {
+        if (!otaActive) return;
+        if (Update.end(true)) {
+            Serial.println("[ota] success! rebooting...");
+            delay(100);
+            ESP.restart();
+        } else {
+            Serial.printf("[ota] end failed: %s\n", Update.errorString());
+            otaActive = false;
+        }
     } else {
+        if (otaActive) return; // Drop frame data if we are in the middle of an OTA update
         // All other packet types go directly to the Rust engine
         int32_t r = engine_dispatch(engine, rxType, rxBuf, rxPos);
-        Serial.printf("[rx] type=0x%02X len=%u result=%d\n", rxType, rxPos, r);
+        // Only log errors to avoid serial congestion
+        if (r < 0) Serial.printf("[rx] type=0x%02X len=%u result=%d\n", rxType, rxPos, r);
     }
 }
 
@@ -86,6 +132,7 @@ static void processByte(uint8_t b) {
 // ── Arduino ───────────────────────────────────────────────────────────────────
 
 void setup() {
+    Serial.setRxBufferSize(16384);
     Serial.begin(921600);
     delay(200);
 

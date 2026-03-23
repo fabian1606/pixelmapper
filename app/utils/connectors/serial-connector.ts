@@ -175,12 +175,11 @@ export class SerialConnector extends BaseConnector {
       const totalBytes = binData.byteLength;
       this.pushLog(`[flash] binary size: ${totalBytes} bytes`);
 
-      // Begin OTA
+      // Begin OTA — wait for ESP32 to erase flash partition (can take seconds)
       this.pushLog('[flash] starting native OTA update...');
+      const beginAck = this.waitForOtaAck('[ota] begin', 10000);
       this.send(buildOtaBeginPacket(totalBytes));
-
-      // Wait a moment for the ESP32 to erase the flash space
-      await new Promise(r => setTimeout(r, 500));
+      await beginAck;
 
       const bytes = new Uint8Array(binData);
       const CHUNK_SIZE = 2048; // 2KB chunks to easily fit in the ESP32's 8KB RX buffer
@@ -192,15 +191,15 @@ export class SerialConnector extends BaseConnector {
         const end = Math.min(written + CHUNK_SIZE, totalBytes);
         const chunk = bytes.subarray(written, end);
         
+        const chunkAck = this.waitForOtaAck('[ota] chunk', 5000);
         this.send(buildOtaChunkPacket(chunk));
         written = end;
 
         this.flashProgress.value = Math.round((written / totalBytes) * 100);
         this.pushLog(`[flash] sent chunk: ${written} / ${totalBytes} bytes (${this.flashProgress.value}%)`);
 
-        // Give the ESP32 time to write the chunk to flash.
-        // Update.write is blocking, so we need to pace ourselves.
-        await new Promise(r => setTimeout(r, 30));
+        // Wait for ESP32 to confirm it wrote this chunk before sending the next
+        await chunkAck;
       }
 
       this.pushLog('[flash] sending OTA end...');
@@ -216,6 +215,8 @@ export class SerialConnector extends BaseConnector {
       this.errorMessage.value = `Flash failed: ${msg}`;
     } finally {
       this.isFlashing.value = false;
+      this.otaAckResolve = null;
+      this.status.value = 'connected';
     }
   }
 
@@ -234,6 +235,24 @@ export class SerialConnector extends BaseConnector {
     } catch (e: any) {
       this.pushLog(`[version] fetch error: ${e?.message ?? e}`);
     }
+  }
+
+  private otaAckResolve: ((line: string) => void) | null = null;
+
+  private waitForOtaAck(prefix: string, timeoutMs: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.otaAckResolve = null;
+        reject(new Error(`OTA timeout waiting for "${prefix}" (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.otaAckResolve = (line: string) => {
+        if (line.startsWith(prefix)) {
+          clearTimeout(timer);
+          this.otaAckResolve = null;
+          resolve(line);
+        }
+      };
+    });
   }
 
   private send(packet: Uint8Array) {
@@ -270,6 +289,7 @@ export class SerialConnector extends BaseConnector {
               this.firmwareVersion.value = vMatch[1]!.trim();
               this.pushLog(`[version] parsed: ${this.firmwareVersion.value}`);
             }
+            if (this.otaAckResolve) this.otaAckResolve(t);
             this.pushLog(t);
           }
         }
