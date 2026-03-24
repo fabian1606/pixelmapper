@@ -10,7 +10,9 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Plus } from 'lucide-vue-next';
+import { computed } from 'vue';
 import type { OflFixture } from '~/utils/ofl/types';
+import { useEngineStore } from '~/stores/engine-store';
 
 interface Config {
   modeIndex: string;
@@ -19,7 +21,7 @@ interface Config {
   amount: number;
 }
 
-defineProps<{
+const props = defineProps<{
   fullFixtureData: OflFixture | null;
 }>();
 
@@ -28,6 +30,30 @@ const config = defineModel<Config>({ required: true });
 defineEmits<{
   (e: 'add'): void;
 }>();
+
+const engineStore = useEngineStore();
+
+const isAddressOccupied = computed(() => {
+  if (!props.fullFixtureData) return false;
+  
+  const modeIdx = parseInt(config.value.modeIndex, 10);
+  const selectedMode = props.fullFixtureData.modes[modeIdx];
+  const footprint = selectedMode ? selectedMode.channels.length : 1;
+  const totalChannels = footprint * config.value.amount;
+  
+  const startAbs = (config.value.universe - 1) * 512 + config.value.address;
+  const endAbs = startAbs + totalChannels - 1;
+
+  for (const f of engineStore.flatFixtures) {
+    const fStart = f.startAddress;
+    const fEnd = fStart + f.channels.length - 1;
+    // Check overlap
+    if (startAbs <= fEnd && endAbs >= fStart) {
+      return true;
+    }
+  }
+  return false;
+});
 </script>
 
 <template>
@@ -73,7 +99,8 @@ defineEmits<{
         type="number"
         min="1"
         max="512"
-        class="h-10 bg-background w-20"
+        class="h-10 w-20 transition-colors"
+        :class="isAddressOccupied ? 'border-destructive bg-destructive/10 text-destructive focus-visible:ring-destructive' : 'bg-background'"
       />
     </div>
 
@@ -89,7 +116,7 @@ defineEmits<{
     </div>
 
     <!-- Actions -->
-    <div class="col-span-12 md:col-span-3.5 flex items-center justify-end gap-3 pb-0.5 ml-auto">
+    <div class="col-span-12 md:col-span-4 flex items-center justify-end gap-3 pb-0.5 ml-auto">
       <Button
         :disabled="!fullFixtureData"
         @click="$emit('add')"

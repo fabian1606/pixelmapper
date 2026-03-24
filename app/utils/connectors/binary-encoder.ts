@@ -116,8 +116,9 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
   const w = new BufWriter();
   w.u16(fixtures.length);
 
-  for (const f of fixtures) {
-    const groupIndex = typeof f.id === 'string' ? (parseInt(f.id, 10) || 0) : (f.id as number);
+  for (let i = 0; i < fixtures.length; i++) {
+    const f = fixtures[i]!;
+    const groupIndex = i;
     const rotRad = (f.rotation ?? 0) * (Math.PI / 180);
     const cosR = Math.cos(rotRad);
     const sinR = Math.sin(rotRad);
@@ -192,11 +193,14 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
 
 // ── Effects packet (TYPE_FX_BIN 0x16) ────────────────────────────────────────
 
-export function buildEffectsBin(effects: Effect[], allFixtureIds: number[]): Uint8Array {
+export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Array {
   // Bitmask size derived from fixture count — both sides compute the same value
   // after layout sync. Bit i = fixture with group_index i is targeted.
-  const fixtureCount = allFixtureIds.length;
+  const fixtureCount = fixtures.length;
   const bitmaskBytes = Math.ceil(fixtureCount / 8);
+
+  const idToIndex = new Map<string | number, number>();
+  fixtures.forEach((f, i) => idToIndex.set(f.id, i));
 
   const w = new BufWriter();
   w.u8(effects.length);
@@ -210,11 +214,19 @@ export function buildEffectsBin(effects: Effect[], allFixtureIds: number[]): Uin
     // Fixture bitmask: bit i set → fixture with group_index i is targeted.
     // null/empty targetFixtureIds → all fixtures targeted (all bits set).
     const bitmask = new Uint8Array(bitmaskBytes);
-    const targeted = effect.targetFixtureIds?.length
-      ? effect.targetFixtureIds.map(id => typeof id === 'string' ? (parseInt(id, 10) || 0) : (id as number))
-      : allFixtureIds;
-    for (const id of targeted) {
-      if (id < fixtureCount) bitmask[id >> 3] |= (1 << (id & 7));
+    const targetedIndices: number[] = [];
+    
+    if (effect.targetFixtureIds?.length) {
+      for (const id of effect.targetFixtureIds) {
+        const idx = idToIndex.get(id);
+        if (idx !== undefined) targetedIndices.push(idx);
+      }
+    } else {
+      for (let i = 0; i < fixtureCount; i++) targetedIndices.push(i);
+    }
+    
+    for (const idx of targetedIndices) {
+      bitmask[idx >> 3] |= (1 << (idx & 7));
     }
     for (const byte of bitmask) w.u8(byte);
 

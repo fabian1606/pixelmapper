@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Settings, Terminal, Cable } from 'lucide-vue-next';
+import {  Cable, Sparkles, SlidersVertical } from 'lucide-vue-next';
 import { useEngineStore } from '~/stores/engine-store';
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 
@@ -31,15 +31,15 @@ onUnmounted(() => {
 });
 
 const tabs = [
-  { label: 'Setup', icon: Settings, path: '/' },
-  { label: 'Console', icon: Terminal, path: '/console' },
+  { label: 'Design', icon: Sparkles, path: '/' },
+  { label: 'Live', icon: SlidersVertical, path: '/console' },
   { label: 'Connections', icon: Cable, path: '/connections' },
 ];
 </script>
 
 <template>
   <header class="flex items-center h-14 bg-sidebar border-b border-sidebar-border px-4 gap-2 shrink-0">
-    <nav class="flex items-center gap-1">
+    <nav class="flex items-center gap-2">
       <NuxtLink
         v-for="tab in tabs"
         :key="tab.path"

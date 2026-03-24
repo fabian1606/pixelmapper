@@ -111,6 +111,7 @@ defineExpose({
             ref="fixtureEditor"
             v-model:selected-ids="selectedIds"
             :fixtures="flatFixtures"
+            style="border-radius: 0;"
             class="w-full h-full"
             @delete-fixture="handleDeleteNode"
             @delete-selected="handleDeleteSelected"

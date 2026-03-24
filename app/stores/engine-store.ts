@@ -148,12 +148,9 @@ export const useEngineStore = defineStore('engine', () => {
       channelsRevision.value++;
     }, { deep: true });
 
-    // Watch effects → rebuild effects packet
-    watch(activeEffects, () => {
-      const allIds = flatFixtures.value.map(f =>
-        typeof f.id === 'string' ? (parseInt(f.id, 10) || 0) : (f.id as number)
-      );
-      effectsPacket = buildEffectsBin(activeEffects.value, allIds);
+    // Watch effects or fixture list changes (for bitmask sizes) → rebuild effects packet
+    watch([activeEffects, flatFixtures], () => {
+      effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value);
       effectsRevision.value++;
     }, { deep: true, immediate: true });
 

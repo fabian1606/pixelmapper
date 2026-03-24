@@ -6,7 +6,7 @@ import type { Effect } from '~/utils/engine/types';
 import FixtureSidebarNode from './FixtureSidebarNode.vue';
 import PresetsSidebar from './PresetsSidebar.vue';
 import SelectionInfoSection from './SelectionInfoSection.vue';
-import { Lightbulb, Plus, SquareFunction } from 'lucide-vue-next';
+import { Lightbulb, Plus, Spotlight, SquareFunction } from 'lucide-vue-next';
 import {
   Sidebar,
   SidebarContent,
@@ -137,14 +137,14 @@ const selectedFixtures = computed(() =>
     </Sidebar>
 
     <!-- Activity Bar (Narrow) -->
-    <div class="w-12 bg-background flex flex-col items-center py-4 gap-4 border-l border-border">
+    <div class="w-12 bg-background flex flex-col items-center py-4 gap-2 border-l border-border">
       <button
         class="p-2 rounded-md transition-colors"
         :class="activeTab === 'fixtures' ? 'bg-accent text-primary' : 'text-muted-foreground hover:text-foreground'"
         @click="toggleTab('fixtures')"
         title="Scene Fixtures"
       >
-        <Lightbulb class="size-5" />
+        <Spotlight class="size-5" />
       </button>
       <button
         class="p-2 rounded-md transition-colors"

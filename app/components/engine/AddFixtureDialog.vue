@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { 
   Dialog, 
   DialogContent, 
@@ -19,9 +19,11 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Plus, X } from 'lucide-vue-next';
 import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
+import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
+import { useEngineStore } from '~/stores/engine-store';
 
 const props = defineProps<{
   open: boolean;
@@ -38,12 +40,48 @@ const selectedSummary = ref<FixtureSummary | null>(null);
 const fullFixtureData = ref<OflFixture | null>(null);
 const loadingDetails = ref(false);
 
+const engineStore = useEngineStore();
+
 const config = ref({
   modeIndex: '0', 
   universe: 1,
   address: 1,
   amount: 1,
 });
+
+// Calculate the footprint length of the selected mode (or 1 if none selected)
+function getSelectedFootprint(): number {
+  if (!fullFixtureData.value) return 1;
+  const modeIdx = parseInt(config.value.modeIndex, 10);
+  const selectedMode = fullFixtureData.value.modes[modeIdx];
+  return selectedMode ? selectedMode.channels.length : 1;
+}
+
+// Finds the first available address block capable of fitting the requested amount of channels
+function autoAssignFreeAddress() {
+  const footprint = getSelectedFootprint();
+  const requiredSpan = footprint * config.value.amount;
+
+  // Extract occupied chunks from flatFixtures
+  const occupiedRanges = engineStore.flatFixtures.map(f => {
+    return { start: f.startAddress, end: f.startAddress + f.channels.length - 1 };
+  }).sort((a, b) => a.start - b.start);
+
+  let searchStart = 1;
+  for (const range of occupiedRanges) {
+    if (searchStart + requiredSpan - 1 < range.start) {
+      break; // Found a large enough gap!
+    }
+    searchStart = Math.max(searchStart, range.end + 1);
+  }
+
+  // searchStart is an absolute address. Convert back to Universe & local address
+  config.value.universe = Math.floor((searchStart - 1) / 512) + 1;
+  config.value.address = ((searchStart - 1) % 512) + 1;
+}
+
+watch(() => config.value.amount, () => autoAssignFreeAddress());
+watch(() => config.value.modeIndex, () => autoAssignFreeAddress());
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +100,8 @@ async function handleSelect(summary: FixtureSummary) {
     if (data.modes.length > 0) {
       config.value.modeIndex = '0';
     }
+    // Set auto-assigned address natively
+    autoAssignFreeAddress();
   } catch (err) {
     console.error('Failed to load fixture details:', err);
   } finally {
@@ -80,7 +120,8 @@ function handleAdd() {
   // We use the length of the channels array in the mode
   const channelCount = selectedMode.channels.length;
   
-  let currentAddress = config.value.address;
+  let currentLocalAddress = config.value.address;
+  let currentUniverse = config.value.universe;
   const count = Math.max(1, Math.min(config.value.amount, 50)); // Cap to 50 for safety
 
   const fixtures: Fixture[] = [];
@@ -92,10 +133,13 @@ function handleAdd() {
       selectedSummary.value?.manufacturer
     );
     
+    // Compute absolute address across dynamic universes
+    fixture.startAddress = (currentUniverse - 1) * 512 + currentLocalAddress;
+
     // Tag with DMX info
     (fixture as any).dmxConfig = {
-      universe: config.value.universe,
-      address: currentAddress
+      universe: currentUniverse,
+      address: currentLocalAddress
     };
 
     // If adding multiple, uniquely name them if they don't have a unique name already
@@ -106,12 +150,12 @@ function handleAdd() {
     fixtures.push(fixture);
 
     // Increment address for the next fixture
-    currentAddress += channelCount;
+    currentLocalAddress += channelCount;
 
-    // Safety: break if we exceed DMX universe
-    if (currentAddress > 512) {
-      console.warn('Stopping auto-add: reached end of DMX universe (512)');
-      break;
+    // Auto-wrap Universe if local address overflows
+    if (currentLocalAddress + channelCount - 1 > 512) {
+      currentUniverse++;
+      currentLocalAddress = 1;
     }
   }
   
@@ -136,6 +180,9 @@ function resetState() {
 watch(() => props.open, (isOpen) => {
   if (!isOpen) {
     resetState();
+  } else {
+    // When opened, seed with the next free address in advance
+    autoAssignFreeAddress();
   }
 });
 </script>
@@ -179,75 +226,12 @@ watch(() => props.open, (isOpen) => {
               </div>
             </div>
 
-            <div class="grid grid-cols-14 gap-6 items-end">
-              <!-- Mode Selection -->
-              <div class="col-span-12 md:col-span-4 space-y-2.5">
-                <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">DMX Mode</Label>
-                <Select 
-                  v-model="config.modeIndex" 
-                  :disabled="!fullFixtureData"
-                >
-                  <SelectTrigger class="h-10 bg-background border-border">
-                    <SelectValue placeholder="Select mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem 
-                      v-for="(mode, idx) in fullFixtureData?.modes" 
-                      :key="idx" 
-                      :value="String(idx)"
-                      class="text-xs"
-                    >
-                      {{ mode.name }} <span class="ml-2 opacity-50">({{ mode.channels.length }}ch)</span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <!-- DMX Configuration -->
-              <div class="col-span-4 md:col-span-2 space-y-2.5">
-                <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Universe</Label>
-                <Input 
-                  v-model.number="config.universe" 
-                  type="number" 
-                  min="1" 
-                  class="h-10 bg-background w-20"
-                />
-              </div>
-
-              <div class="col-span-4 md:col-span-2 space-y-2.5">
-                <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Address</Label>
-                <Input 
-                  v-model.number="config.address" 
-                  type="number" 
-                  min="1" 
-                  max="512" 
-                  class="h-10 bg-background w-20"
-                />
-              </div>
-
-              <div class="col-span-4 md:col-span-2 space-y-2.5">
-                <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Amount</Label>
-                <Input 
-                  v-model.number="config.amount" 
-                  type="number" 
-                  min="1" 
-                  max="50"
-                  class="h-10 bg-background w-20"
-                />
-              </div>
-
-              <!-- Actions -->
-              <div class="col-span-12 md:col-span-3.5 flex items-center justify-end gap-3 pb-0.5 ml-auto">
-                <Button 
-                  :disabled="!fullFixtureData" 
-                  @click="handleAdd"
-                  class="px-6 h-10 font-bold tracking-tight shadow-lg shadow-primary/20"
-                >
-                  <Plus class="size-4 mr-2" />
-                  Add {{ config.amount }} Fixture{{ config.amount > 1 ? 's' : '' }}
-                </Button>
-              </div>
-            </div>
+            <AddFixtureConfigForm
+              v-model="config"
+              :full-fixture-data="fullFixtureData"
+              class="mt-2"
+              @add="handleAdd"
+            />
           </div>
         </div>
       </div>

@@ -23,8 +23,8 @@ pub struct ChannelEntry {
 // ── Engine ────────────────────────────────────────────────────────────────────
 
 pub struct EffectEngine {
-    pub dmx_buffer: [u8; 512],
-    pub base_buffer: [f32; 512],
+    pub dmx_buffer: Vec<u8>,
+    pub base_buffer: Vec<f32>,
     pub global_bpm: f32,
     pub targets: Vec<RenderTarget>,
     pub effects: Vec<Box<dyn Effect>>,
@@ -61,8 +61,8 @@ pub fn channel_type_name(id: u8) -> &'static str {
 impl EffectEngine {
     pub fn new() -> Self {
         Self {
-            dmx_buffer: [0; 512],
-            base_buffer: [0.0; 512],
+            dmx_buffer: vec![0; 512],
+            base_buffer: vec![0.0; 512],
             global_bpm: 120.0,
             targets: Vec::new(),
             effects: Vec::new(),
@@ -118,9 +118,15 @@ impl EffectEngine {
             }
         }
 
+        // Calculate maximum required DMX index for dynamic buffer sizing
+        let mut max_dmx_index = 0;
         self.targets.clear();
-        for fixture in entries {
-            for ch in fixture.channels {
+        for fixture in &entries {
+            for ch in &fixture.channels {
+                if ch.dmx_index > max_dmx_index {
+                    max_dmx_index = ch.dmx_index;
+                }
+                
                 let preserved = old_configs.iter()
                     .find(|(idx, _)| *idx == ch.dmx_index)
                     .map(|(_, cfg)| cfg.clone());
@@ -133,6 +139,16 @@ impl EffectEngine {
                     chaser_config: preserved,
                 });
             }
+        }
+
+        // Resize the buffer if we need more than we currently have, or pad up to nearest 512
+        let required_size = max_dmx_index + 1;
+        let padded_size = ((required_size + 511) / 512) * 512;
+        let new_size = padded_size.max(512);
+
+        if self.dmx_buffer.len() != new_size {
+            self.dmx_buffer.resize(new_size, 0);
+            self.base_buffer.resize(new_size, 0.0);
         }
     }
 
@@ -168,7 +184,7 @@ impl EffectEngine {
         // 2. Compute base values (Chasers or Defaults)
         for target in &self.targets {
             let dmx_index = target.dmx_index;
-            if dmx_index >= 512 {
+            if dmx_index >= self.dmx_buffer.len() {
                 continue;
             }
 
@@ -223,7 +239,7 @@ impl EffectEngine {
         // 3. Apply effects
         for target in &self.targets {
             let dmx_index = target.dmx_index;
-            if dmx_index >= 512 {
+            if dmx_index >= self.dmx_buffer.len() {
                 continue;
             }
 
