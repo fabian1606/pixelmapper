@@ -28,7 +28,6 @@ const fromMeters = (val: number) => val / STAGE_SIZE_METERS;
     <div class="grid grid-cols-3 gap-3">
       <DraggableNumberInput 
         label="X" 
-        unit="m"
         :step="0.01" 
         :model-value="toMeters(avgX)"
         @update:model-value="(val: number) => emit('live-change', 'x', fromMeters(val))"
@@ -36,7 +35,6 @@ const fromMeters = (val: number) => val / STAGE_SIZE_METERS;
       />
       <DraggableNumberInput 
         label="Y" 
-        unit="m"
         :step="0.01" 
         :model-value="toMeters(avgY)"
         @update:model-value="(val: number) => emit('live-change', 'y', fromMeters(val))"
@@ -44,7 +42,6 @@ const fromMeters = (val: number) => val / STAGE_SIZE_METERS;
       />
       <DraggableNumberInput 
         label="Rot" 
-        unit="°"
         :step="1" 
         :model-value="avgRotation"
         @update:model-value="(val: number) => emit('live-change', 'r', val)"

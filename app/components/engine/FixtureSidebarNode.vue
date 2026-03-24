@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { ChevronRight, ChevronDown, Spotlight, Folder } from 'lucide-vue-next';
@@ -31,6 +31,23 @@ const history = useHistory();
 
 const isGroup = computed(() => props.node instanceof FixtureGroup);
 const isSelected = computed(() => props.selectedIds.has(props.node.id));
+
+const isExpanded = ref(isGroup.value ? (props.node as FixtureGroup).expanded : false);
+
+watch(
+  () => props.node,
+  (newNode) => {
+    if (newNode instanceof FixtureGroup) {
+      isExpanded.value = newNode.expanded;
+    }
+  }
+);
+
+watch(isExpanded, (newVal) => {
+  if (isGroup.value) {
+    (props.node as FixtureGroup).expanded = newVal;
+  }
+});
 
 const isEditing = ref(false);
 const editName = ref('');
@@ -111,7 +128,7 @@ useShortcuts([
   </SidebarMenuItem>
 
   <!-- ─── Group (collapsible) node ─────────────────────────────────────────── -->
-  <Collapsible v-else v-model:open="(node as FixtureGroup).expanded" as-child>
+  <Collapsible v-else v-model:open="isExpanded" as-child>
     <SidebarMenuItem>
       <FixtureContextMenu
         :node="node"
@@ -129,7 +146,7 @@ useShortcuts([
         <SidebarMenuButton :is-active="isSelected" @click="handleSelect">
           <CollapsibleTrigger as-child>
             <button class="mr-1 hover:bg-accent rounded p-0.5" @click.stop @dblclick.stop="emit('zoomTo', node)">
-              <ChevronDown v-if="(node as FixtureGroup).expanded" class="w-3 h-3" />
+              <ChevronDown v-if="isExpanded" class="w-3 h-3" />
               <ChevronRight v-else class="w-3 h-3" />
             </button>
           </CollapsibleTrigger>

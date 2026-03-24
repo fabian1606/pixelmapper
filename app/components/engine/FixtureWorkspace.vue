@@ -16,6 +16,14 @@ import {
   ContextMenuShortcut,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
+import { Button } from '@/components/ui/button';
+import {
+  AlignHorizontalDistributeCenter,
+  AlignVerticalDistributeCenter,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  LayoutGrid
+} from 'lucide-vue-next';
 
 const engineStore = useEngineStore();
 const { sceneNodes, selectedIds, flatFixtures } = storeToRefs(engineStore);
@@ -25,7 +33,8 @@ const {
   handleGroup, 
   handleUngroup, 
   handleUngroupSelected, 
-  handleDeleteNodes 
+  handleDeleteNodes,
+  handleAlign
 } = useWorkspaceOperations(sceneNodes, selectedIds, flatFixtures);
 
 const { selectedPresetId, getUnsavedChanges } = usePresets();
@@ -105,6 +114,31 @@ defineExpose({
 
 <template>
   <div class="flex-1 relative">
+    
+    <!-- Alignment Toolbar -->
+    <div
+      v-if="selectedIds.size > 1"
+      class="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 p-1 rounded-md bg-background/80 backdrop-blur border border-border shadow-sm"
+    >
+      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Align Center X" @click="handleAlign('center-x')">
+        <AlignCenterVertical class="size-4" />
+      </Button>
+      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Align Center Y" @click="handleAlign('center-y')">
+        <AlignCenterHorizontal class="size-4" />
+      </Button>
+      <div class="w-px h-4 bg-border mx-1"></div>
+      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Distribute Horizontally" @click="handleAlign('distribute-x')">
+        <AlignHorizontalDistributeCenter class="size-4" />
+      </Button>
+      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Distribute Vertically" @click="handleAlign('distribute-y')">
+        <AlignVerticalDistributeCenter class="size-4" />
+      </Button>
+      <div class="w-px h-4 bg-border mx-1"></div>
+      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Smart Grid" @click="handleAlign('smart-grid')">
+        <LayoutGrid class="size-4" />
+      </Button>
+    </div>
+
     <ContextMenu>
       <ContextMenuTrigger as-child>
           <FixtureEditor

@@ -8,6 +8,7 @@ import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
 import { useHistory } from './composables/use-history';
+import { useEngineStore } from '~/stores/engine-store';
 import { MoveFixtureCommand } from './commands/move-fixture-command';
 import { RotateFixtureCommand } from './commands/rotate-fixture-command';
 import { inject } from 'vue';
@@ -52,6 +53,7 @@ const { editorWidth, editorHeight } = useEditorViewport(
 // ─── Composables ─────────────────────────────────────────────────────────────
 const { camera, viewportToWorld, worldToViewport, onWheel, centerOn, fitAll } = useCamera();
 const history = useHistory();
+const engineStore = useEngineStore();
 
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
 function zoomTo(node: SceneNode) {
@@ -111,6 +113,10 @@ watch(selectedIdsModel, (newVal) => {
   if (effectEngine && newVal.size === 0) {
     effectEngine.activeModifier.value = null;
   }
+});
+
+watch([() => engineStore._syncTrigger, () => history.version.value], () => {
+  fixtureCanvas.value?.sync();
 });
 
 function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {

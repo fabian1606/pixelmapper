@@ -209,6 +209,11 @@ export const useEngineStore = defineStore('engine', () => {
     animFrameId = requestAnimationFrame(renderLoop);
   };
 
+  let _syncTrigger = ref(0);
+  const triggerCanvasSync = () => {
+    _syncTrigger.value++;
+  };
+
   return {
     savedPresets,
     selectedPresetId,
@@ -220,5 +225,7 @@ export const useEngineStore = defineStore('engine', () => {
     globalBases,
     currentElapsed,
     initEngine,
+    _syncTrigger,
+    triggerCanvasSync,
   };
 });

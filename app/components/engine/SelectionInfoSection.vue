@@ -9,6 +9,7 @@ import { SetModifiersCommand } from './commands/set-modifiers-command';
 import { UpdateDmxCommand } from './commands/update-dmx-command';
 import SelectionPositionInfo from './SelectionPositionInfo.vue';
 import SelectionDmxInfo from './SelectionDmxInfo.vue';
+import { useEngineStore } from '~/stores/engine-store';
 
 const props = defineProps<{
   selectedFixtures: Fixture[];
@@ -16,6 +17,7 @@ const props = defineProps<{
 }>();
 
 const history = useHistory();
+const engineStore = useEngineStore();
 
 // ─── Selection State ──────────────────────────────────────────────────────────
 
@@ -100,6 +102,8 @@ function handleLiveChange(axis: 'x' | 'y' | 'r', value: number) {
       fixture.fixturePosition.y = snap.y + deltaY;
     }
   }
+
+  engineStore.triggerCanvasSync();
 }
 
 function handlePositionChange(axis: 'x' | 'y' | 'r', _value: number) {
