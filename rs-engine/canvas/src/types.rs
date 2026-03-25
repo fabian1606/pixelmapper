@@ -21,6 +21,7 @@ pub struct FixtureBeam {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureCanvasData {
     pub id: String,
+    pub name: String,
 
     #[serde(rename = "worldX")]
     pub world_x: f32,

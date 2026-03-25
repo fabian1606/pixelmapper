@@ -68,6 +68,7 @@ function syncFixtures() {
     };
     return {
       id: String(f.id),
+      name: String(f.name),
       worldX: f.fixturePosition.x,
       worldY: f.fixturePosition.y,
       width: f.fixtureSize?.x ?? 1,

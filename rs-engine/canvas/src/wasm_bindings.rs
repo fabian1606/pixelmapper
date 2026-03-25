@@ -37,8 +37,14 @@ impl WasmCanvas {
         let renderer = OpenGl::new_from_html_canvas(&html_canvas)
             .map_err(|e| JsValue::from_str(&format!("Failed to create OpenGl renderer: {:?}", e)))?;
 
-        let femto_canvas = Canvas::new(renderer)
+        let mut femto_canvas = Canvas::new(renderer)
             .map_err(|e| JsValue::from_str(&format!("Failed to create Femtovg Canvas: {:?}", e)))?;
+
+        if let Ok(font_id) = femto_canvas.add_font_mem(include_bytes!("fonts/Roboto-Regular.ttf")) {
+            self.render_state.font_id = Some(font_id);
+        } else {
+            eprintln!("[canvas] Failed to load font into canvas");
+        }
 
         self.canvas = Some(femto_canvas);
         Ok(())

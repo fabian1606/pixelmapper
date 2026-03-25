@@ -14,6 +14,7 @@ pub struct RenderState {
     pub marquee_sy: f32,
     pub marquee_ex: f32,
     pub marquee_ey: f32,
+    pub font_id: Option<femtovg::FontId>,
 }
 
 impl Default for RenderState {
@@ -24,6 +25,7 @@ impl Default for RenderState {
             world_w: 1000.0, world_h: 1000.0,
             is_marquee: false,
             marquee_sx: 0.0, marquee_sy: 0.0, marquee_ex: 0.0, marquee_ey: 0.0,
+            font_id: None,
         }
     }
 }
@@ -173,9 +175,60 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
         }
 
         canvas.restore();
+
     }
 
     canvas.reset_transform();
+
+    // 2.b Text Label Overlay (crisp screen-space rendering)
+    if state.scale >= 1.5 {
+        if let Some(font_id) = state.font_id {
+            let mut paint = Paint::color(Color::rgba(230, 230, 230, 220));
+            paint.set_font(&[font_id]);
+            paint.set_text_align(femtovg::Align::Center);
+            paint.set_text_baseline(femtovg::Baseline::Middle);
+            paint.set_font_size(13.0); // Exactly 13px on screen!
+
+            for fixture in fixtures {
+                let wx = fixture.world_x * state.world_w;
+                let wy = fixture.world_y * state.world_h;
+                let rx = fixture.width * 16.0;
+                let ry = fixture.height * 16.0;
+                let max_r = f32::max(rx, ry);
+
+                // Calculate screen position
+                let screen_x = wx * state.scale + state.cam_x;
+                let screen_y = wy * state.scale + state.cam_y + (max_r * state.scale) + 18.0; // Pushed even further down
+
+                // Frustum Culling
+                if screen_x + 50.0 < 0.0 || screen_x - 50.0 > state.viewport_w ||
+                   screen_y + 30.0 < 0.0 || screen_y - 30.0 > state.viewport_h {
+                    continue;
+                }
+
+                if let Ok(metrics) = canvas.measure_text(screen_x, screen_y, &fixture.name, &paint) {
+                    let half_w = metrics.width() / 2.0;
+                    let pad_x = 5.0;
+                    let pad_y = 3.5;
+                    
+                    let mut bg = Path::new();
+                    bg.rounded_rect(
+                        screen_x - half_w - pad_x,
+                        screen_y - 6.5 - pad_y,
+                        metrics.width() + pad_x * 2.0,
+                        13.0 + pad_y * 2.0,
+                        4.0,
+                    );
+                    canvas.fill_path(&mut bg, &Paint::color(Color::rgba(16, 16, 16, 210)));
+                    
+                    let mut border = Paint::color(Color::rgba(255, 255, 255, 35));
+                    border.set_line_width(1.0);
+                    canvas.stroke_path(&mut bg, &border);
+                }
+                let _ = canvas.fill_text(screen_x, screen_y, &fixture.name, &paint);
+            }
+        }
+    }
 
     // 3. Marquee Selection (coordinates are world-pixels; convert to screen-pixels)
     if state.is_marquee {
