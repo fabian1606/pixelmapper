@@ -13,6 +13,7 @@ interface Props {
   sensitivity?: number;
   class?: string;
   disabled?: boolean;
+  description?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -111,13 +112,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div 
+  <div
     :class="cn(
       'group relative flex items-center h-8 bg-background border border-border rounded-md overflow-hidden transition-all duration-200 focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
       isDragging && 'border-primary/50 bg-primary/5 ring-1 ring-primary/20',
       disabled && 'opacity-50 cursor-not-allowed',
       props.class
     )"
+    :title="description"
   >
     <!-- Prefix / Label -->
     <div 

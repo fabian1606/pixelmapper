@@ -13,6 +13,13 @@ The key design principle: **both targets use the exact same Rust engine and the 
 
 ```
 pixelmapper/
+├── aiBackendService/              # Express backend with LangGraph for AI tasks
+│   ├── src/
+│   │   ├── nodes/                 # LangGraph nodes (e.g., extractGeneralInfo)
+│   │   ├── graph.ts               # LangGraph StateGraph pipeline
+│   │   ├── server.ts              # Express API
+│   │   └── state.ts               # Graph state schema
+│   ├── index.ts                   # Entry point for backend
 ├── app/                           # Nuxt 4 / Vue 3 frontend
 │   ├── stores/
 │   │   ├── engine-store.ts        # Render loop, packet cache, revision tracking
@@ -48,3 +55,17 @@ Detailed documentation per subsystem:
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
+
+## Custom Fixtures (SVG Based)
+
+To support custom, highly visual, or non-standard fixtures, the architecture provides a Custom Fixture Editor.
+- **Concept:** Users define a fixture visually by importing an SVG graphic.
+- **Mapping:** SVG elements and their attributes (like colors, opacities) will be mapped to DMX channels, allowing a rich visual representation of complex lights directly linked to the engine's DMX values.
+- **Integration:** The `CustomFixtureEditorDialog` provides a workspace where SVGs can be imported visually, parsed, and configured to generate standard `Fixture` objects (augmented with SVG definition data) before being injected into the main `FixtureWorkspace`.
+
+## AI Backend Service (aiBackendService)
+
+To aid in the creation of fixtures, an Express-based AI backend service powered by LangGraph uses LLMs to parse fixture manuals and automatically extract physical dimensions, features, and DMX mappings.
+- **Concept:** Provide a manual text (later OCR'd PDF) to an endpoint `/extract-fixture`.
+- **Pipeline:** A LangGraph pipeline directs the text through specific extraction nodes (currently just General Info), utilizing `withStructuredOutput` to enforce correct schemas.
+- **Goal:** Feed the extracted data straight into the Custom Fixture Editor to dramatically speed up fixture authoring.

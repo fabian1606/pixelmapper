@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import type { FixtureSummary, ManufacturerSummary } from '~/utils/ofl/types';
-import { Search, Loader2, ChevronRight } from 'lucide-vue-next';
+import { Search, Loader2, ChevronRight, Plus } from 'lucide-vue-next';
 import {
   Accordion,
   AccordionContent,
@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', item: FixtureSummary): void;
+  (e: 'create-custom-fixture'): void;
 }>();
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -128,14 +129,23 @@ onMounted(fetchManufacturers);
   <div class="flex flex-col h-full bg-background overflow-hidden font-sans">
     <!-- Search & Filters -->
     <div class="p-4 bg-muted/20">
-      <div class="relative">
-        <Search class="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-        <input
-          v-model="search"
-          type="text"
-          placeholder="Search fixture library..."
-          class="w-full h-9 pl-9 pr-3 text-sm rounded-md bg-background border border-border focus:ring-1 focus:ring-primary focus:outline-none text-foreground placeholder:text-muted-foreground"
-        />
+      <div class="flex gap-2 items-center">
+        <div class="relative flex-1">
+          <Search class="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+          <input
+            v-model="search"
+            type="text"
+            placeholder="Search fixture library..."
+            class="w-full h-9 pl-9 pr-3 text-sm rounded-md bg-background border border-border focus:ring-1 focus:ring-primary focus:outline-none text-foreground placeholder:text-muted-foreground"
+          />
+        </div>
+        <button
+          class="shrink-0 h-9 px-3 flex items-center justify-center gap-2 rounded-md bg-accent hover:bg-accent/80 text-accent-foreground text-xs font-medium transition-colors border border-border"
+          @click="emit('create-custom-fixture')"
+        >
+          <Plus class="size-3.5" />
+          Create custom fixture
+        </button>
       </div>
       
       <!-- Category filter pills -->

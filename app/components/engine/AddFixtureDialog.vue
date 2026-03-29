@@ -20,6 +20,7 @@ import {
 import { Loader2, Plus, X } from 'lucide-vue-next';
 import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
 import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
+import CustomFixtureEditorDialog from './CustomFixtureEditorDialog.vue';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -39,8 +40,15 @@ const emit = defineEmits<{
 const selectedSummary = ref<FixtureSummary | null>(null);
 const fullFixtureData = ref<OflFixture | null>(null);
 const loadingDetails = ref(false);
+const isCustomFixtureEditorOpen = ref(false);
 
 const engineStore = useEngineStore();
+
+function handleAddCustomFixtures(fixtures: Fixture[]) {
+  emit('add', fixtures);
+  isCustomFixtureEditorOpen.value = false;
+  emit('update:open', false);
+}
 
 const config = ref({
   modeIndex: '0', 
@@ -204,6 +212,7 @@ watch(() => props.open, (isOpen) => {
             class="flex-1"
             :selected-key="selectedSummary?.key"
             @select="handleSelect"
+            @create-custom-fixture="isCustomFixtureEditorOpen = true"
           />
         </div>
 
@@ -237,6 +246,11 @@ watch(() => props.open, (isOpen) => {
       </div>
     </DialogContent>
   </Dialog>
+
+  <CustomFixtureEditorDialog 
+    v-model:open="isCustomFixtureEditorOpen"
+    @add="handleAddCustomFixtures"
+  />
 </template>
 
 <style scoped>

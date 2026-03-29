@@ -205,10 +205,17 @@ export class SerialConnector extends BaseConnector {
       this.pushLog('[flash] sending OTA end...');
       this.send(buildOtaEndPacket());
 
-      this.pushLog('[flash] done! ESP32 will reboot in 100ms...');
-      
-      // We don't need to close/reopen the port. The ESP32 restart will 
-      // cause the OS to drop the USB connection and we can handle it seamlessly.
+      // Wait for ESP32 to reboot and send [version] line (up to 8s)
+      this.pushLog('[flash] waiting for ESP32 to reboot...');
+      this.firmwareVersion.value = null;
+      await this.waitForOtaAck('[version]', 8000);
+      // Reset caches so full state is re-sent after reboot
+      this.frameCount     = 0;
+      this.cachedBpm      = -1;
+      this.cachedLayout   = -1;
+      this.cachedChannels = -1;
+      this.cachedEffects  = -1;
+      this.pushLog(`[flash] update complete — running v${this.firmwareVersion.value}`);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       this.pushLog(`[flash] error: ${msg}`);
@@ -246,7 +253,7 @@ export class SerialConnector extends BaseConnector {
         reject(new Error(`OTA timeout waiting for "${prefix}" (${timeoutMs}ms)`));
       }, timeoutMs);
       this.otaAckResolve = (line: string) => {
-        if (line.startsWith(prefix)) {
+        if (line.includes(prefix)) {
           clearTimeout(timer);
           this.otaAckResolve = null;
           resolve(line);

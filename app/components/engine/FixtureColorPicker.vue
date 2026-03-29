@@ -84,12 +84,14 @@ const wheelColors = computed<WheelColorOpt[]>(() => {
       const wheels: Record<string, OflWheel> = fd.wheelCh.oflWheels;
       
       for (const cap of fd.wheelCh.oflCapabilities as OflCapability[]) {
-        if (!cap.wheel) continue;
-        
-        const wheel = wheels[cap.wheel];
+        const c = cap as Record<string, unknown>;
+        const capWheel = c.wheel as string | undefined;
+        if (!capWheel) continue;
+
+        const wheel = wheels[capWheel];
         if (!wheel) continue;
-        
-        const slotIdx = (cap.slotNumber ?? 1) - 1;
+
+        const slotIdx = ((c.slotNumber as number | undefined) ?? 1) - 1;
         const slot = wheel.slots[slotIdx];
         
         if (slot?.colors && slot.colors[0] && cap.dmxRange) {

@@ -13,11 +13,12 @@ export function useChannelCapabilities(
   );
 
   function resolveSlot(cap: OflCapability): OflWheelSlot | null {
-    const wheelName = cap.wheel;
+    const c = cap as Record<string, unknown>;
+    const wheelName = c.wheel as string | undefined;
     if (!wheelName) return null;
     const wheel = oflWheels.value[wheelName];
     if (!wheel) return null;
-    const slotIdx = (cap.slotNumber ?? 1) - 1;
+    const slotIdx = ((c.slotNumber as number | undefined) ?? 1) - 1;
     return wheel.slots[slotIdx] ?? null;
   }
 
@@ -37,33 +38,40 @@ export function useChannelCapabilities(
   });
 
   function capabilityLabel(cap: OflCapability): string {
+    const c = cap as Record<string, unknown>;
     if (cap.comment) return cap.comment;
-    if (cap.shutterEffect) return cap.shutterEffect;
-    if (cap.effectName) return cap.effectName;
-    if (cap.effectPreset) return cap.effectPreset;
+    if (c.shutterEffect) return c.shutterEffect as string;
+    if (c.effectName) return c.effectName as string;
+    if (c.effectPreset) return c.effectPreset as string;
 
     if (cap.type === 'WheelSlot' || cap.type === 'WheelShake') {
-      if (cap.slotNumberStart !== undefined && cap.slotNumberEnd !== undefined) {
-        const wheelName = cap.wheel ?? '';
+      const slotNumberStart = c.slotNumberStart as number | undefined;
+      const slotNumberEnd = c.slotNumberEnd as number | undefined;
+      if (slotNumberStart !== undefined && slotNumberEnd !== undefined) {
+        const wheelName = (c.wheel as string | undefined) ?? '';
         const wheel = oflWheels.value[wheelName];
         if (wheel) {
-          const a = wheel.slots[(cap.slotNumberStart - 1)]?.name ?? `Slot ${cap.slotNumberStart}`;
-          const b = wheel.slots[(cap.slotNumberEnd - 1)]?.name ?? `Slot ${cap.slotNumberEnd}`;
+          const a = wheel.slots[(slotNumberStart - 1)]?.name ?? `Slot ${slotNumberStart}`;
+          const b = wheel.slots[(slotNumberEnd - 1)]?.name ?? `Slot ${slotNumberEnd}`;
           return `${a} → ${b}`;
         }
-        return `Slot ${cap.slotNumberStart}–${cap.slotNumberEnd}`;
+        return `Slot ${slotNumberStart}–${slotNumberEnd}`;
       }
       const slot = resolveSlot(cap);
       if (slot) return slot.name ?? slot.type;
-      if (cap.slotNumber !== undefined) return `Slot ${cap.slotNumber}`;
+      const slotNumber = c.slotNumber as number | undefined;
+      if (slotNumber !== undefined) return `Slot ${slotNumber}`;
     }
 
     if (cap.type === 'WheelRotation' || cap.type === 'WheelSlotRotation') {
-      const dir = cap.speedStart?.includes('CW') ? 'CW' : cap.speedStart?.includes('CCW') ? 'CCW' : '';
+      const speedStart = c.speedStart as string | undefined;
+      const dir = speedStart?.includes('CW') ? 'CW' : speedStart?.includes('CCW') ? 'CCW' : '';
       return dir ? `Rotation ${dir}` : 'Rotation';
     }
 
-    if (cap.speedStart && cap.speedEnd) return `${cap.speedStart} → ${cap.speedEnd}`;
+    const speedStart = c.speedStart as string | undefined;
+    const speedEnd = c.speedEnd as string | undefined;
+    if (speedStart && speedEnd) return `${speedStart} → ${speedEnd}`;
     return cap.type;
   }
 

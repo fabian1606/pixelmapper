@@ -26,6 +26,17 @@ Presets are snapshots of programmed channel values and active modifiers for a se
 ### 3. Groups (SceneNodes)
 Fixtures can be organized into hierarchical groups. This helps with selection and applying effects to multiple fixtures at once.
 
+### 4. Custom Fixtures
+The Custom Fixture Editor (`CustomFixtureEditorDialog.vue`) allows creating fixtures without an OFL definition.
+- **Fixture Category**: Based directly on the official OFL category schema (`custom-fixture-types.ts`). Category determines both the canvas render mode and which settings are shown (e.g., pixel density for `Pixel Bar` and `Matrix`).
+- **Canvas render modes** mirror `render.rs`:
+  - `single` → circle with inner beam (Color Changer, Moving Head, Dimmer, etc.)
+  - `bar` → horizontal pixel row (Pixel Bar)
+  - `matrix` → N×M grid of circles (Matrix)
+  - `custom_svg` → user-uploaded SVG with interactive head selection
+- Layout: `CustomFixtureCanvas` (flex-1, left) + `CustomFixtureSidebar` (fixed w-72, right).
+- Shared types: `app/utils/engine/custom-fixture-types.ts`.
+
 ## Software Patterns & Guidelines
 - **Modularity**: Large files (>200 lines) should be split into smaller, focused modules.
 - **Pure Functions for Engine Logic**: Functions like diffing presets or merging variants should be pure functions that take inputs and return new objects. This makes them easily testable and avoids side-effects.
