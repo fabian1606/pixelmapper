@@ -61,6 +61,7 @@ Detailed documentation per subsystem:
 To support custom, highly visual, or non-standard fixtures, the architecture provides a Custom Fixture Editor.
 - **Concept:** Users define a fixture visually by importing an SVG graphic.
 - **Mapping:** SVG elements and their attributes (like colors, opacities) will be mapped to DMX channels, allowing a rich visual representation of complex lights directly linked to the engine's DMX values.
+- **Architecture:** The editor is highly modular, located in `app/components/engine/custom-fixture-editor/`. It is split into specialized sub-components for header, canvas rendering modes, sidebar forms, and a detailed DMX channel/mode editor. State is centralized in the `useCustomFixtureForm` composable to ensure consistency across the wizard steps.
 - **Integration:** The `CustomFixtureEditorDialog` provides a workspace where SVGs can be imported visually, parsed, and configured to generate standard `Fixture` objects (augmented with SVG definition data) before being injected into the main `FixtureWorkspace`.
 
 ## AI Backend Service (aiBackendService)

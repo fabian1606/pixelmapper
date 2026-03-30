@@ -31,6 +31,8 @@ export const CHANNEL_CAPABILITY_META: Record<ChannelType, { label: string; color
   DIMMER:           { label: 'Dimmer',          color: '#94a3b8', group: 'Intensity' },
   PAN:              { label: 'Pan',             color: '#64748b', group: 'Position' },
   TILT:             { label: 'Tilt',            color: '#64748b', group: 'Position' },
+  PAN_CONTINUOUS:   { label: 'Pan Continuous',   color: '#64748b', group: 'Position' },
+  TILT_CONTINUOUS:  { label: 'Tilt Continuous',  color: '#64748b', group: 'Position' },
   PANTILT_SPEED:    { label: 'P/T Speed',       color: '#64748b', group: 'Position' },
   STROBE:           { label: 'Strobe',          color: '#fbbf24', group: 'Beam' },
   STROBE_SPEED:     { label: 'Strobe Speed',    color: '#fbbf24', group: 'Beam' },
@@ -38,7 +40,9 @@ export const CHANNEL_CAPABILITY_META: Record<ChannelType, { label: string; color
   ZOOM:             { label: 'Zoom',            color: '#94a3b8', group: 'Beam' },
   FOCUS:            { label: 'Focus',           color: '#94a3b8', group: 'Beam' },
   IRIS:             { label: 'Iris',            color: '#94a3b8', group: 'Beam' },
+  IRIS_EFFECT:      { label: 'Iris Effect',      color: '#94a3b8', group: 'Beam' },
   FROST:            { label: 'Frost',           color: '#e0f2fe', group: 'Beam' },
+  FROST_EFFECT:     { label: 'Frost Effect',     color: '#e0f2fe', group: 'Beam' },
   BEAM_ANGLE:       { label: 'Beam Angle',      color: '#94a3b8', group: 'Beam' },
   BEAM_POSITION:    { label: 'Beam Position',   color: '#94a3b8', group: 'Beam' },
   GOBO_WHEEL:       { label: 'Gobo Wheel',      color: '#78716c', group: 'Gobo' },
@@ -46,19 +50,26 @@ export const CHANNEL_CAPABILITY_META: Record<ChannelType, { label: string; color
   PRISM:            { label: 'Prism',           color: '#a78bfa', group: 'Gobo' },
   PRISM_ROTATION:   { label: 'Prism Rotation',  color: '#a78bfa', group: 'Gobo' },
   BLADE:            { label: 'Blade',           color: '#78716c', group: 'Gobo' },
+  BLADE_ROTATION:        { label: 'Blade Rotation',        color: '#78716c', group: 'Gobo' },
+  BLADE_SYSTEM_ROTATION: { label: 'Blade System Rotation', color: '#78716c', group: 'Gobo' },
   EFFECT:           { label: 'Effect',          color: '#8b5cf6', group: 'Effects' },
   EFFECT_SPEED:     { label: 'Effect Speed',    color: '#8b5cf6', group: 'Effects' },
   EFFECT_DURATION:  { label: 'Effect Duration', color: '#8b5cf6', group: 'Effects' },
+  EFFECT_PARAMETER: { label: 'Effect Parameter', color: '#8b5cf6', group: 'Effects' },
   SOUND_SENSITIVITY:{ label: 'Sound',           color: '#8b5cf6', group: 'Effects' },
   ROTATION:         { label: 'Rotation',        color: '#64748b', group: 'Effects' },
   SPEED:            { label: 'Speed',           color: '#64748b', group: 'Effects' },
   TIME:             { label: 'Time',            color: '#64748b', group: 'Effects' },
   FOG:              { label: 'Fog',             color: '#e2e8f0', group: 'Other' },
+  FOG_OUTPUT:       { label: 'Fog Output',       color: '#e2e8f0', group: 'Other' },
+  FOG_TYPE:         { label: 'Fog Type',         color: '#e2e8f0', group: 'Other' },
   MAINTENANCE:      { label: 'Maintenance',     color: '#94a3b8', group: 'Other' },
   NO_FUNCTION:      { label: 'No Function',     color: '#475569', group: 'Other' },
   GENERIC:          { label: 'Generic',         color: '#64748b', group: 'Other' },
   CUSTOM:           { label: 'Custom',          color: '#64748b', group: 'Other' },
 };
+
+export type { ChannelType } from '~/utils/engine/types';
 
 export const CHANNEL_CAPABILITY_TYPES = Object.keys(CHANNEL_CAPABILITY_META) as ChannelType[];
 
@@ -66,6 +77,8 @@ export const CHANNEL_CAPABILITY_TYPES = Object.keys(CHANNEL_CAPABILITY_META) as 
 export const WHEEL_CAPABILITY_TYPES = new Set<ChannelType>([
   'COLOR_WHEEL', 'GOBO_WHEEL', 'PRISM',
 ]);
+
+export const WHEEL_RANGE_TYPES = Array.from(WHEEL_CAPABILITY_TYPES);
 
 // ─── Wheel definitions ────────────────────────────────────────────────────────
 

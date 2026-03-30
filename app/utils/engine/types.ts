@@ -6,17 +6,17 @@ export type ChannelType =
   // Intensity
   | 'DIMMER'
   // Position
-  | 'PAN' | 'TILT' | 'PANTILT_SPEED'
+  | 'PAN' | 'PAN_CONTINUOUS' | 'TILT' | 'TILT_CONTINUOUS' | 'PANTILT_SPEED'
   // Beam
   | 'STROBE' | 'STROBE_SPEED' | 'STROBE_DURATION'
-  | 'ZOOM' | 'FOCUS' | 'IRIS' | 'FROST' | 'BEAM_ANGLE' | 'BEAM_POSITION'
+  | 'ZOOM' | 'FOCUS' | 'IRIS' | 'IRIS_EFFECT' | 'FROST' | 'FROST_EFFECT' | 'BEAM_ANGLE' | 'BEAM_POSITION'
   // Shaping (Gobo, Prism, Blades)
-  | 'GOBO_WHEEL' | 'GOBO_SPIN' | 'PRISM' | 'PRISM_ROTATION' | 'BLADE'
+  | 'GOBO_WHEEL' | 'GOBO_SPIN' | 'PRISM' | 'PRISM_ROTATION' | 'BLADE' | 'BLADE_ROTATION' | 'BLADE_SYSTEM_ROTATION'
   // Effects & Control
-  | 'EFFECT' | 'EFFECT_SPEED' | 'EFFECT_DURATION' | 'SOUND_SENSITIVITY'
+  | 'EFFECT' | 'EFFECT_SPEED' | 'EFFECT_DURATION' | 'EFFECT_PARAMETER' | 'SOUND_SENSITIVITY'
   | 'ROTATION' | 'SPEED' | 'TIME'
   // Other
-  | 'FOG' | 'MAINTENANCE' | 'GENERIC' | 'NO_FUNCTION' | 'CUSTOM';
+  | 'FOG' | 'FOG_OUTPUT' | 'FOG_TYPE' | 'MAINTENANCE' | 'GENERIC' | 'NO_FUNCTION' | 'CUSTOM';
 
 export type SpeedMode = 'time' | 'beat' | 'infinite';
 
