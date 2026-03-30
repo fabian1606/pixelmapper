@@ -12,7 +12,10 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useWorkspaceOperations } from '~/components/engine/composables/use-workspace-operations';
 import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
+import { UpdateFixtureTypesCommand } from '~/components/engine/commands/update-fixture-types-command';
+import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import AddFixtureDialog from '~/components/engine/AddFixtureDialog.vue';
+import CustomFixtureEditorDialog from '~/components/engine/custom-fixture-editor/CustomFixtureEditorDialog.vue';
 import FixtureWorkspace from '~/components/engine/FixtureWorkspace.vue';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 
@@ -134,6 +137,39 @@ function confirmDelete() {
   nodesPendingDelete.value = [];
 }
 
+const customFixtureEditorOpen = ref(false);
+const editFixtureDefinition = shallowRef<import('~/utils/ofl/types').OflFixture | null>(null);
+
+function handleEditFixtureType(node: SceneNode) {
+  if (node instanceof Fixture && node.definition) {
+    editFixtureDefinition.value = node.definition;
+    customFixtureEditorOpen.value = true;
+  }
+}
+
+function handleUpdateFixtureType(newOfl: import('~/utils/ofl/types').OflFixture) {
+  const targetName = editFixtureDefinition.value?.name;
+  if (!targetName) return;
+
+  const oldInstances = flatFixtures.value.filter(f => f.definition?.name === targetName);
+  
+  if (oldInstances.length > 0) {
+    const newInstances = oldInstances.map(old => {
+      const newFixture = createFixtureFromOfl(newOfl);
+      newFixture.id = old.id;
+      newFixture.name = old.name;
+      newFixture.fixturePosition = { ...old.fixturePosition };
+      newFixture.startAddress = old.startAddress;
+      return newFixture;
+    });
+
+    const command = new UpdateFixtureTypesCommand(sceneNodes.value, oldInstances, newInstances);
+    history.execute(command);
+  }
+
+  customFixtureEditorOpen.value = false;
+  editFixtureDefinition.value = null;
+}
 
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
 useShortcuts([
@@ -170,6 +206,7 @@ useShortcuts([
         @group="handleGroup"
         @ungroup="handleUngroup"
         @zoom-to="handleZoomTo"
+        @edit-type="handleEditFixtureType"
         @request-add-fixture="addDialogOpen = true"
         @delete-node="handleDeleteNode"
         @select-fixtures="handleSelectFixtures"
@@ -181,6 +218,7 @@ useShortcuts([
           @quick-save="() => fixtureSidebarRef?.quickSave()"
           @overwrite-active-preset="() => fixtureSidebarRef?.overwriteActivePreset()"
           @create-preset-from-selection="(ids) => fixtureSidebarRef?.createPresetFromSelection(ids)"
+          @edit-type="handleEditFixtureType"
         />
         <FixturePropertiesSidebar ref="propertiesSidebarRef" :selected-ids="selectedIds" :fixtures="flatFixtures" :nodes="sceneNodes" />
       </main>
@@ -197,5 +235,11 @@ useShortcuts([
     :node-name="nodesPendingDelete[0]?.name ?? ''"
     :count="nodesPendingDelete.length"
     @confirm="confirmDelete"
+  />
+
+  <CustomFixtureEditorDialog
+    v-model:open="customFixtureEditorOpen"
+    :fixture-to-edit="editFixtureDefinition"
+    @update-type="handleUpdateFixtureType"
   />
 </template>

@@ -20,7 +20,7 @@ import {
 import { Loader2, Plus, X } from 'lucide-vue-next';
 import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
 import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
-import CustomFixtureEditorDialog from './CustomFixtureEditorDialog.vue';
+import CustomFixtureEditorDialog from './custom-fixture-editor/CustomFixtureEditorDialog.vue';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';

@@ -2,6 +2,7 @@ import type { ChannelType, SpatialVector } from '../types';
 import type { Channel } from './channel';
 import { Beam } from './beam';
 import { reactive } from 'vue';
+import type { OflFixture } from '~/utils/ofl/types';
 
 export interface FixturePosition {
   x: number;
@@ -42,6 +43,11 @@ export class Fixture {
    * Format: "manufacturer-key/fixture-key" (e.g. "generic/rgb-fader").
    */
   oflKey?: string;
+
+  /**
+   * Original OFL fixture definition, stored for editing a fixture type.
+   */
+  definition?: OflFixture;
 
   constructor(id: string | number, channels: Channel[] = [], startAddress: number = 1) {
     this.id = id;

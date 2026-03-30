@@ -357,6 +357,7 @@ export function createFixtureFromOfl(
   const ext = fixture as Fixture & { oflCategories: string[]; oflShortName: string };
   ext.oflCategories = oflFixture.categories;
   ext.oflShortName = oflFixture.shortName ?? oflFixture.name;
+  fixture.definition = oflFixture;
 
   return fixture;
 }

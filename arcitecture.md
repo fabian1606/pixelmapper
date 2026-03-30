@@ -40,7 +40,8 @@ The Custom Fixture Editor (`CustomFixtureEditorDialog.vue`) allows creating fixt
 ## Software Patterns & Guidelines
 - **Modularity**: Large files (>200 lines) should be split into smaller, focused modules.
 - **Pure Functions for Engine Logic**: Functions like diffing presets or merging variants should be pure functions that take inputs and return new objects. This makes them easily testable and avoids side-effects.
-- **Composables**: Vue UI logic should be encapsulated in composables (`use-presets.ts`, etc.) to keep components clean.
+- **Composables**: Vue UI logic should be encapsulated in composables (`use-presets.ts`, `use-global-context-menu.ts`, etc.) to keep components clean. Use composables for global UI states like Context Menus or Modals.
+- **Context Menus**: Do not use wrapper components like `<ContextMenuTrigger>`. Instead, use the global programmatic approach (`@contextmenu.prevent="openMenu($event, options)"`) via `useGlobalContextMenu` to keep templates clean and menu options easily editable.
 - **Documentation**: Write JSDoc comments for all major interfaces, classes, and exported functions.
 
 ## Adding New Features

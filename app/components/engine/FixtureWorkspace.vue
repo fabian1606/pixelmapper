@@ -61,6 +61,14 @@ const hasSelectedGroup = computed(() => {
   return hasGroup;
 });
 
+const singleSelectedFixture = computed(() => {
+  if (selectedIds.value.size !== 1) return null;
+  const id = Array.from(selectedIds.value)[0];
+  return flatFixtures.value.find(f => f.id === id) || null;
+});
+
+const canEditType = computed(() => !!singleSelectedFixture.value?.definition);
+
 const deleteDialogOpen = ref(false);
 const nodesPendingDelete = ref<SceneNode[]>([]);
 
@@ -101,7 +109,8 @@ const emit = defineEmits<{
   (e: 'quick-save'): void,
   (e: 'overwrite-active-preset'): void,
   (e: 'create-preset-from-selection', ids: Set<string | number>): void,
-  (e: 'bind-editor', editor: InstanceType<typeof FixtureEditor> | null): void
+  (e: 'bind-editor', editor: InstanceType<typeof FixtureEditor> | null): void,
+  (e: 'edit-type', node: SceneNode): void
 }>();
 
 const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
@@ -161,6 +170,10 @@ defineExpose({
         <ContextMenuItem v-if="hasSelectedGroup" @click="handleUngroupSelected">
           Ungroup
           <ContextMenuShortcut>⇧⌘G</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator v-if="canEditType" />
+        <ContextMenuItem v-if="canEditType" @click="emit('edit-type', singleSelectedFixture!)">
+          Edit Fixture Type
         </ContextMenuItem>
         <ContextMenuSeparator v-if="selectedIds.size > 0 || hasUnsavedChanges" />
         <ContextMenuItem v-if="hasUnsavedChanges" @click="emit('quick-save')">

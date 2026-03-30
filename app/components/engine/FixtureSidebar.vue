@@ -29,6 +29,7 @@ const emit = defineEmits<{
   (e: 'ungroup', group: FixtureGroup): void;
   (e: 'zoomTo', node: SceneNode): void;
   (e: 'requestAddFixture'): void;
+  (e: 'editType', node: SceneNode): void;
   (e: 'deleteNode', node: SceneNode): void;
   (e: 'selectFixtures', ids: (string | number)[]): void;
   (e: 'openPropertiesTab', tab: string, isModifier?: boolean): void;
@@ -105,8 +106,9 @@ const selectedFixtures = computed(() =>
               @select="(id, mult) => emit('select', id, mult)"
               @group="emit('group')"
               @ungroup="g => emit('ungroup', g)"
-              @zoom-to="n => emit('zoomTo', n)"
-              @delete="n => emit('deleteNode', n)"
+              @zoom-to="(n: SceneNode) => emit('zoomTo', n)"
+              @edit-type="(n: SceneNode) => emit('editType', n)"
+              @delete="(n: SceneNode) => emit('deleteNode', n)"
             />
           </SidebarMenu>
           <div v-else class="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground opacity-50">

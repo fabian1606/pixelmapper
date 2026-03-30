@@ -10,11 +10,20 @@ import CustomFixtureChannelEditor from './ChannelEditor/CustomFixtureChannelEdit
 
 import { useCustomFixtureForm } from '~/composables/engine/useCustomFixtureForm';
 
-const props = defineProps<{ open: boolean }>();
+import { buildOflFixture, initFromOflFixture } from '~/utils/engine/custom-fixture-omapping';
+import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
+import type { OflFixture } from '~/utils/ofl/types';
+import { watch } from 'vue';
+
+const props = defineProps<{ 
+  open: boolean;
+  fixtureToEdit?: OflFixture | null;
+}>();
 
 const emit = defineEmits<{
   (e: 'update:open', val: boolean): void;
   (e: 'add', fixtures: Fixture[]): void;
+  (e: 'update-type', ofl: OflFixture): void;
 }>();
 
 const STEPS = [
@@ -34,18 +43,45 @@ const {
   handleUploadSvg, handleToggleHeadSelection
 } = useCustomFixtureForm();
 
+watch(() => props.open, (isOpen) => {
+  if (isOpen) {
+    if (props.fixtureToEdit) {
+      try {
+        const init = initFromOflFixture(props.fixtureToEdit);
+        Object.assign(formState, init.state);
+        channels.value = init.channels;
+        modes.value = init.modes;
+        wheels.value = init.wheels;
+        fixtureCategory.value = init.category;
+        pixelColumns.value = init.pixelCols;
+        pixelRows.value = init.pixelRows;
+        currentStepIdx.value = 0;
+      } catch (err: any) {
+        console.error('Failed to init from OFL Fixture:', err);
+        alert('Ein Fehler ist beim Laden der Fixture aufgetreten: ' + err.message);
+        emit('update:open', false);
+      }
+    }
+  }
+});
+
 function goNext() {
   if (!isLastStep.value) currentStepIdx.value++;
   else handleSave();
 }
 
 function handleSave() {
-  console.log('Save custom fixture:', { 
-    ...formState, 
-    channels: channels.value, 
-    modes: modes.value, 
-    wheels: wheels.value 
-  });
+  const ofl = buildOflFixture(
+    formState, channels.value, modes.value, wheels.value, 
+    fixtureCategory.value, pixelColumns.value, pixelRows.value, customSvgData.value
+  );
+
+  if (props.fixtureToEdit) {
+    emit('update-type', ofl);
+  } else {
+    emit('add', [createFixtureFromOfl(ofl)]);
+  }
+
   emit('update:open', false);
 }
 </script>

@@ -24,6 +24,7 @@ const emit = defineEmits<{
   (e: 'group'): void;
   (e: 'ungroup', group: FixtureGroup): void;
   (e: 'zoomTo', node: SceneNode): void;
+  (e: 'editType', node: SceneNode): void;
   (e: 'delete', node: SceneNode): void;
 }>();
 
@@ -105,9 +106,11 @@ useShortcuts([
       :can-group="true"
       :can-rename="true"
       :can-delete="true"
+      :can-edit-type="!!(node as Fixture).definition"
       @zoom-to="emit('zoomTo', node)"
       @group="emit('group')"
       @rename="startEditing"
+      @edit-type="emit('editType', node)"
       @delete="emit('delete', node)"
     >
       <SidebarMenuButton :is-active="isSelected" @click="handleSelect">
@@ -175,8 +178,9 @@ useShortcuts([
             @select="(id, mult) => emit('select', id, mult)"
             @group="emit('group')"
             @ungroup="g => emit('ungroup', g)"
-            @zoom-to="n => emit('zoomTo', n)"
-            @delete="n => emit('delete', n)"
+            @zoom-to="(n: SceneNode) => emit('zoomTo', n)"
+            @edit-type="(n: SceneNode) => emit('editType', n)"
+            @delete="(n: SceneNode) => emit('delete', n)"
           />
         </SidebarMenuSub>
       </CollapsibleContent>
