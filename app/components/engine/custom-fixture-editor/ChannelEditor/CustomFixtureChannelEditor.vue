@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, ArrowRight } from 'lucide-vue-next';
+import { Plus, Trash2, ArrowRight, Save, Check } from 'lucide-vue-next';
 import { WHEEL_CAPABILITY_TYPES, type ChannelDraft, type ModeDraft, type WheelDraft } from '~/utils/engine/custom-fixture-types';
 
 import ChannelList from './ChannelList.vue';
@@ -63,6 +63,12 @@ function handleReorder(from: number, to: number) {
   if (moved) entries.splice(to, 0, moved);
   mode.entries = entries;
 }
+
+function isChannelInMode(channelId: string) {
+  const mode = modesArr.value[activeModeIdx.value];
+  if (!mode) return false;
+  return mode.entries.some(e => e.channelId === channelId);
+}
 </script>
 
 <template>
@@ -71,12 +77,9 @@ function handleReorder(from: number, to: number) {
     <ChannelList :channels="channels" :selected-channel-id="selectedChannelId" @add="addChannel" @delete="deleteChannel" @select="selectedId = $event" />
 
     <!-- Col 2: Details & Ranges -->
-    <div class="flex-1 border-r flex flex-col min-h-0 min-w-0">
-      <div class="border-b bg-muted/10 shrink-0 px-3 py-2 flex items-center justify-between">
-        <p class="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/60">Edit Channel</p>
-        <Button v-if="selectedChannel" size="sm" variant="ghost" class="h-6 px-2 gap-1 text-[10px] text-primary" @click="addSingleToMode(selectedChannel.id)">
-          Add to Mode <ArrowRight class="size-3" />
-        </Button>
+    <div class="flex-1 border-r-2 border-border/80 flex flex-col min-h-0 min-w-0 bg-background/50">
+      <div class="border-b-2 border-border/80 bg-muted/20 shrink-0 px-4 py-3 flex items-center justify-between">
+        <p class="text-[11px] uppercase tracking-wider font-extrabold text-foreground/70">2. Edit Channel</p>
       </div>
       <div class="flex-1 overflow-y-auto min-h-0">
         <template v-if="selectedChannel">
@@ -88,10 +91,40 @@ function handleReorder(from: number, to: number) {
     </div>
 
     <!-- Col 3: Mode Mapping -->
-    <div class="flex-1 flex flex-col min-h-0 min-w-0">
-      <div class="border-b bg-muted/10 shrink-0 px-3 py-2"><p class="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/60">Mode Mapping</p></div>
+    <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-muted/5 relative">
+      <div class="border-b-2 border-border/80 bg-muted/30 shrink-0 px-4 py-3"><p class="text-[11px] uppercase tracking-wider font-extrabold text-foreground/70">3. Mode Mapping</p></div>
       <ModeTabs :modes="modes" :active-mode-idx="activeModeIdx" @update:active-mode-idx="activeModeIdx = $event" @add="addMode" @rename="(idx, name) => modesArr[idx]!.name = name" />
+      
+      <!-- Box for available channels (Tag-based assignment UI) -->
+      <div class="border-b border-border/50 bg-background p-3 flex flex-col gap-2 shrink-0">
+        <p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Available Channels</p>
+        <div class="flex flex-wrap gap-1.5" v-if="channels.length > 0">
+          <button 
+            v-for="ch in channels" 
+            :key="ch.id"
+            @click="addSingleToMode(ch.id)"
+            class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] border transition-all duration-200"
+            :class="isChannelInMode(ch.id) 
+              ? 'bg-muted/30 text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground' 
+              : 'bg-primary/5 text-primary border-primary/20 hover:bg-primary/10 hover:border-primary/40 shadow-sm'"
+          >
+            <Check v-if="isChannelInMode(ch.id)" class="size-3 opacity-50" />
+            <Plus v-else class="size-3" />
+            <span class="font-medium">{{ ch.name }}</span>
+          </button>
+        </div>
+        <p v-else class="text-[10px] text-muted-foreground/50 italic">Create channels first to add them to a mode.</p>
+      </div>
+
       <ModeDmxAddressList v-if="modes[activeModeIdx]" :mode="modes[activeModeIdx]!" :channels="channels" :head-count="headCount" :entry-start-address="entryStartAddress" :addr-of="addrOf" @remove-entry="removeEntry" @patch-entry="patchEntry" @reorder="handleReorder" />
+      
+      <!-- Dedicated Save actions for the Channel Editor step -->
+      <div class="p-4 border-t-2 border-border/50 bg-background shrink-0 flex justify-end gap-3 bottom-0 sticky z-10">
+        <Button class="w-full gap-2 font-semibold shadow-md" size="lg" @click="emit('next')">
+          <Save class="size-4" />
+          Save Fixture
+        </Button>
+      </div>
     </div>
 
     <WheelEditorOverlay v-if="selectedChannelWheel" :open="wheelOverlayOpen" :wheel="selectedChannelWheel" @update:open="wheelOverlayOpen = $event" @update:wheel="patchChannel(selectedChannel!.id, {}) /* wheel sync is handled via watch in composable */" />

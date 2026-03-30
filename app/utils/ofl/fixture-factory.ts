@@ -126,7 +126,7 @@ function getOrderedPixelKeys(matrix: OflMatrix, repeatFor: OflMatrixChannelInser
 
 /** Returns true if this channel key is a "fine" (16-bit high byte) alias and can be skipped. */
 function isFineChannel(key: string, templateKey: string | undefined, oflFixture: OflFixture): boolean {
-  for (const ch of Object.values(oflFixture.availableChannels)) {
+  for (const ch of Object.values(oflFixture.availableChannels ?? {})) {
     if (ch.fineChannelAliases?.includes(key)) return true;
   }
   if (templateKey && oflFixture.templateChannels) {
@@ -220,10 +220,9 @@ export function createFixtureFromOfl(
     if (item.channelOrder === 'perPixel') {
       for (const pixelKey of keys) {
         for (const template of item.templateChannels) {
+          if (!template) continue; // null = DMX gap, skip
           expandedKeys.push({
-            key: isGroup
-              ? template.replace('$pixelKey', pixelKey)
-              : template.replace('$pixelKey', pixelKey),
+            key: template.replace('$pixelKey', pixelKey),
             templateKey: template,
             beamId: pixelKey,
           });
@@ -232,6 +231,7 @@ export function createFixtureFromOfl(
     } else {
       // perChannel: all pixels for one template, then move to next template
       for (const template of item.templateChannels) {
+        if (!template) continue; // null = DMX gap, skip
         for (const pixelKey of keys) {
           expandedKeys.push({
             key: template.replace('$pixelKey', pixelKey),
@@ -254,7 +254,7 @@ export function createFixtureFromOfl(
     // 1. availableChannels by exact key (normal channels)
     // 2. templateChannels by templateKey (matrix-expanded channels like "Red 1")
     const channelDef =
-      oflFixture.availableChannels[item.key] ??
+      (oflFixture.availableChannels ?? {})[item.key] ??
       (item.templateKey ? oflFixture.templateChannels?.[item.templateKey] : undefined);
 
     if (!channelDef) continue;

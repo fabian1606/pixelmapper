@@ -29,7 +29,6 @@ const emit = defineEmits<{
 const STEPS = [
   { id: 'general',  label: 'General Info' },
   { id: 'channels', label: 'Channels' },
-  { id: 'dmx',      label: 'DMX Mapping' },
 ] as const;
 
 const currentStepIdx = ref(0);
@@ -89,7 +88,7 @@ function handleSave() {
 <template>
   <Dialog :open="open" @update:open="val => emit('update:open', val)">
     <DialogContent
-      class="!max-w-[1400px] !w-[96vw] !h-[72vh] p-0 overflow-hidden bg-background border-none shadow-2xl flex flex-col"
+      class="!max-w-[1400px] !w-[96vw] !h-[72vh] p-0 overflow-hidden bg-background border-none shadow-2xl flex flex-col gap-0"
     >
       <CustomFixtureHeader 
         :steps="STEPS" 

@@ -10,11 +10,11 @@ defineProps<{
 <template>
   <g>
     <defs>
-      <!-- Fine dot grid: every 10 cm -->
+      <!-- Fine dot grid: every 100 mm (10 cm) -->
       <pattern id="cf-dot-sm" :width="gridPx" :height="gridPx" patternUnits="userSpaceOnUse">
         <circle cx="1" cy="1" r="1.2" fill="rgba(255,255,255,0.13)" />
       </pattern>
-      <!-- Accent dot grid: every 50 cm -->
+      <!-- Accent dot grid: every 500 mm (50 cm) -->
       <pattern id="cf-dot-lg" :width="gridPx*5" :height="gridPx*5" patternUnits="userSpaceOnUse">
         <circle cx="1" cy="1" r="2" fill="rgba(255,255,255,0.28)" />
       </pattern>

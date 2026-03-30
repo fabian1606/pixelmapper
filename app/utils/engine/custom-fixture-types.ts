@@ -143,9 +143,9 @@ export const CustomFixtureFormSchema = z.object({
   manufacturer:     z.string().describe('Brand or manufacturer name (e.g. "Chauvet DJ", "Martin", "Robe")').optional().default(''),
   comment:          z.string().describe('Any additional notes about this fixture, e.g. revision, known quirks').optional().default(''),
 
-  fixtureWidth:     z.number().min(1).max(500).describe('Physical width of the fixture housing in centimetres').optional().default(30),
-  fixtureHeight:    z.number().min(1).max(500).describe('Physical height of the fixture housing in centimetres').optional().default(30),
-  fixtureDepth:     z.number().min(0).max(999).describe('Physical depth (front-to-back) of the fixture housing in centimetres').optional().default(30),
+  fixtureWidth:     z.number().min(1).max(5000).describe('Physical width of the fixture housing in millimetres').optional().default(300),
+  fixtureHeight:    z.number().min(1).max(5000).describe('Physical height of the fixture housing in millimetres').optional().default(300),
+  fixtureDepth:     z.number().min(0).max(9999).describe('Physical depth (front-to-back) of the fixture housing in millimetres').optional().default(300),
   weight:           z.number().min(0).max(999).describe('Weight of the fixture in kilograms').optional().default(0),
   power:            z.number().min(0).max(9999).describe('Power consumption in watts at full load').optional().default(0),
 
@@ -173,19 +173,19 @@ export const GENERAL_INFO_FIELDS: FormFieldDescriptor[] = [
 
   // ── Physical Dimensions (OFL: physical.dimensions) ───────────────────────
   {
-    section: 'Physical Dimensions (cm)',
+    section: 'Physical Dimensions (mm)',
     kind: 'number-pair',
     keys: ['fixtureWidth', 'fixtureHeight'],
     dragLabels: ['Width', 'Height'],
-    units: ['cm', 'cm'],
-    min: 1, max: 500, step: 10,
+    units: ['mm', 'mm'],
+    min: 1, max: 5000, step: 10,
   },
   {
     kind: 'number-pair',
     keys: ['fixtureDepth', 'weight'],
     dragLabels: ['Depth', 'Weight'],
-    units: ['cm', 'kg'],
-    min: 0, max: 999, step: 1,
+    units: ['mm', 'kg'],
+    min: 0, max: 9999, step: 1,
   },
   {
     key: 'power',

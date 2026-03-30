@@ -70,6 +70,37 @@ function previewAddr(groupLastIdx: number, chInGroupIdx: number, headNum: number
   }
 }
 
+function flattenedPreview(groupLastIdx: number) {
+  const group = groupEntries(groupLastIdx);
+  if (!group.length) return [];
+  const order = group[0]!.entry.order ?? 'perPixel';
+  const result: { addr: number; name: string; head: number }[] = [];
+  const maxHeads = Math.min(props.headCount, 8);
+  
+  if (order === 'perPixel') {
+    for (let h = 1; h <= maxHeads; h++) {
+      for (let gi = 0; gi < group.length; gi++) {
+        result.push({
+          addr: previewAddr(groupLastIdx, gi, h),
+          name: ch(group[gi]!.entry.channelId)?.name || '',
+          head: h
+        });
+      }
+    }
+  } else {
+    for (let gi = 0; gi < group.length; gi++) {
+      for (let h = 1; h <= maxHeads; h++) {
+        result.push({
+          addr: previewAddr(groupLastIdx, gi, h),
+          name: ch(group[gi]!.entry.channelId)?.name || '',
+          head: h
+        });
+      }
+    }
+  }
+  return result;
+}
+
 function onDrop(toIdx: number) {
   if (dragFromIdx.value !== null && dragFromIdx.value !== toIdx) emit('reorder', dragFromIdx.value, toIdx);
   dragFromIdx.value = null; dragOverIdx.value = null;
@@ -109,12 +140,15 @@ function onDrop(toIdx: number) {
           </button>
         </div>
         
-        <div v-if="expandedGroups.has(groupEntries(i)[0]?.entry.entryId || '')" class="mt-2 space-y-px overflow-x-auto no-scrollbar px-6 pb-2">
-          <div v-for="h in Math.min(headCount, 8)" :key="h" class="flex gap-1">
-            <span class="text-[9px] w-10 text-muted-foreground/40 shrink-0">Head {{ h }}</span>
-            <div v-for="(ge, gi) in groupEntries(i)" :key="gi" class="text-[10px] font-mono text-muted-foreground/60 bg-muted/20 px-1 rounded">{{ previewAddr(i, gi, h) }}</div>
+        <div v-if="expandedGroups.has(groupEntries(i)[0]?.entry.entryId || '')" class="mt-2 space-y-0.5 px-6 pb-2">
+          <div v-for="(p, pi) in flattenedPreview(i)" :key="pi" class="flex items-center gap-3 py-0.5 border-b border-border/10 last:border-0">
+            <span class="text-[10px] font-mono text-muted-foreground/60 w-6 text-right">{{ p.addr }}</span>
+            <div class="flex-1 flex items-center justify-between gap-2 min-w-0">
+              <span class="text-[10px] font-medium truncate">{{ p.name }}</span>
+              <span class="text-[9px] text-muted-foreground/40 italic shrink-0">Head {{ p.head }}</span>
+            </div>
           </div>
-          <p v-if="headCount > 8" class="text-[9px] text-muted-foreground/30 pt-1 italic">... and {{ headCount - 8 }} more heads</p>
+          <p v-if="headCount > 8" class="text-[9px] text-muted-foreground/30 pt-2 italic text-center">... and more channels for {{ headCount - 8 }} more heads</p>
         </div>
       </div>
     </div>

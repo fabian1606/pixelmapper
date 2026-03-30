@@ -6,13 +6,14 @@ import { ChevronRight, ChevronDown, Spotlight, Folder } from 'lucide-vue-next';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { RenameNodeCommand } from '~/components/engine/commands/rename-command';
-import FixtureContextMenu from './FixtureContextMenu.vue';
 import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
 } from '@/components/ui/sidebar';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
+import { Trash2 } from 'lucide-vue-next';
 
 const props = defineProps<{
   node: SceneNode;
@@ -91,6 +92,56 @@ function cancelEditing() {
   isEditing.value = false;
 }
 
+const { openMenu } = useGlobalContextMenu();
+
+function onContextMenu(e: MouseEvent) {
+  const options: ContextMenuItemOption[] = [
+    {
+      label: 'Center Item',
+      action: () => emit('zoomTo', props.node),
+    },
+    {
+      label: 'Group Selection',
+      shortcut: '⌘G',
+      action: () => emit('group'),
+    },
+  ];
+
+  if (isGroup.value) {
+    options.push({
+      label: 'Ungroup',
+      shortcut: '⇧⌘G',
+      action: () => emit('ungroup', props.node as FixtureGroup),
+    });
+  }
+
+  options.push({
+    label: 'Rename',
+    shortcut: 'F2',
+    action: () => startEditing(),
+  });
+
+  if (!isGroup.value && (props.node as Fixture).definition) {
+    options.push({ isSeparator: true });
+    options.push({
+      label: 'Edit Fixture Type',
+      shortcut: 'E',
+      action: () => emit('editType', props.node),
+    });
+  }
+
+  options.push({ isSeparator: true });
+  options.push({
+    label: 'Delete',
+    variant: 'destructive',
+    icon: Trash2,
+    shortcut: 'Del',
+    action: () => emit('delete', props.node),
+  });
+
+  openMenu(e, options);
+}
+
 // F2 triggers rename only when this node is the single selection
 useShortcuts([
   { key: 'F2', label: 'Rename', handler: () => { if (isSelected.value) startEditing(); } },
@@ -100,21 +151,32 @@ useShortcuts([
 <template>
   <!-- ─── Fixture (leaf) node ─────────────────────────────────────────────── -->
   <SidebarMenuItem v-if="!isGroup">
-    <FixtureContextMenu
-      :node="node"
-      :can-zoom="true"
-      :can-group="true"
-      :can-rename="true"
-      :can-delete="true"
-      :can-edit-type="!!(node as Fixture).definition"
-      @zoom-to="emit('zoomTo', node)"
-      @group="emit('group')"
-      @rename="startEditing"
-      @edit-type="emit('editType', node)"
-      @delete="emit('delete', node)"
-    >
-      <SidebarMenuButton :is-active="isSelected" @click="handleSelect">
-        <Spotlight class="w-4 h-4 mr-2" @dblclick.stop="emit('zoomTo', node)" />
+    <SidebarMenuButton :is-active="isSelected" @click="handleSelect" @contextmenu.prevent="onContextMenu">
+      <Spotlight class="w-4 h-4 mr-2" @dblclick.stop="emit('zoomTo', node)" />
+      <input
+        v-if="isEditing"
+        ref="inputEl"
+        v-model="editName"
+        class="bg-background border border-primary rounded px-1 w-full text-sm outline-none"
+        @keydown.enter="saveRename"
+        @keydown.esc="cancelEditing"
+        @blur="onInputBlur"
+        @click.stop
+      />
+      <span v-else @dblclick="startEditing">{{ node.name }}</span>
+    </SidebarMenuButton>
+  </SidebarMenuItem>
+
+  <!-- ─── Group (collapsible) node ─────────────────────────────────────────── -->
+  <Collapsible v-else v-model:open="isExpanded" as-child>
+    <SidebarMenuItem>
+      <SidebarMenuButton :is-active="isSelected" @click="handleSelect" @contextmenu.prevent="onContextMenu">
+        <CollapsibleTrigger as-child>
+          <button class="mr-1 hover:bg-accent rounded p-0.5" @click.stop @dblclick.stop="emit('zoomTo', node)">
+            <ChevronDown v-if="isExpanded" class="w-3 h-3" />
+            <ChevronRight v-else class="w-3 h-3" />
+          </button>
+        </CollapsibleTrigger>
         <input
           v-if="isEditing"
           ref="inputEl"
@@ -122,50 +184,11 @@ useShortcuts([
           class="bg-background border border-primary rounded px-1 w-full text-sm outline-none"
           @keydown.enter="saveRename"
           @keydown.esc="cancelEditing"
-          @blur="onInputBlur"
+          @blur="saveRename"
           @click.stop
         />
         <span v-else @dblclick="startEditing">{{ node.name }}</span>
       </SidebarMenuButton>
-    </FixtureContextMenu>
-  </SidebarMenuItem>
-
-  <!-- ─── Group (collapsible) node ─────────────────────────────────────────── -->
-  <Collapsible v-else v-model:open="isExpanded" as-child>
-    <SidebarMenuItem>
-      <FixtureContextMenu
-        :node="node"
-        :can-zoom="true"
-        :can-group="true"
-        :can-ungroup="true"
-        :can-rename="true"
-        :can-delete="true"
-        @zoom-to="emit('zoomTo', node)"
-        @group="emit('group')"
-        @ungroup="emit('ungroup', node as FixtureGroup)"
-        @rename="startEditing"
-        @delete="emit('delete', node)"
-      >
-        <SidebarMenuButton :is-active="isSelected" @click="handleSelect">
-          <CollapsibleTrigger as-child>
-            <button class="mr-1 hover:bg-accent rounded p-0.5" @click.stop @dblclick.stop="emit('zoomTo', node)">
-              <ChevronDown v-if="isExpanded" class="w-3 h-3" />
-              <ChevronRight v-else class="w-3 h-3" />
-            </button>
-          </CollapsibleTrigger>
-          <input
-            v-if="isEditing"
-            ref="inputEl"
-            v-model="editName"
-            class="bg-background border border-primary rounded px-1 w-full text-sm outline-none"
-            @keydown.enter="saveRename"
-            @keydown.esc="cancelEditing"
-            @blur="saveRename"
-            @click.stop
-          />
-          <span v-else @dblclick="startEditing">{{ node.name }}</span>
-        </SidebarMenuButton>
-      </FixtureContextMenu>
 
       <CollapsibleContent>
         <SidebarMenuSub class="ml-4 border-l border-border pl-2">

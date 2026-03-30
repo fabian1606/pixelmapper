@@ -9,10 +9,10 @@ import CanvasRenderBar from './CanvasRenderBar.vue';
 import CanvasRenderMatrix from './CanvasRenderMatrix.vue';
 import CanvasRenderSvg from './CanvasRenderSvg.vue';
 
-/** Physical scale: 10px per cm. World is 1000×1000cm (10x10m) = 10000×10000px. */
-const SCALE = 10; // px per cm
-const WORLD_PX = 1000 * SCALE; // 10000
-const GRID_PX  = 10 * SCALE;  // 100 — one dot every 10 cm
+/** Physical scale: 1px per mm (equals 10px per cm). World is 10000×10000mm (10x10m) = 10000×10000px. */
+const SCALE = 1; // px per mm
+const WORLD_PX = 10000 * SCALE; // 10000
+const GRID_PX  = 100 * SCALE;  // 100 — one dot every 100 mm (10 cm)
 const CX = WORLD_PX / 2;
 const CY = WORLD_PX / 2;
 
@@ -89,7 +89,7 @@ function handleCanvasClick(event: MouseEvent) {
   <div class="flex-1 bg-neutral-950 flex flex-col overflow-hidden relative">
     <div class="absolute top-3 left-3 z-20 pointer-events-none flex gap-2">
       <div class="bg-black/60 backdrop-blur-md rounded-md px-2.5 py-1 border border-white/10 text-[11px] text-white/55 font-medium">
-        {{ FIXTURE_CATEGORIES[fixtureCategory].label }} · {{ fixtureWidth }}×{{ fixtureHeight }} cm
+        {{ FIXTURE_CATEGORIES[fixtureCategory].label }} · {{ fixtureWidth }}×{{ fixtureHeight }} mm
       </div>
     </div>
 

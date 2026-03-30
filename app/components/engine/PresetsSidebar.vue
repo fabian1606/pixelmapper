@@ -15,7 +15,6 @@ import {
   Save,
   X,
   Check,
-  Pencil,
   Trash2,
   Play,
   Square,
@@ -24,13 +23,7 @@ import {
   Activity,
   Layers,
 } from 'lucide-vue-next';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from '@/components/ui/context-menu';
+import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -349,6 +342,34 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
   nextTick(() => startRename(preset));
 }
 
+const { openMenu } = useGlobalContextMenu();
+
+function onPresetContextMenu(e: MouseEvent, preset: Preset) {
+  const isSelected = selectedPresetId.value === preset.id;
+  const options: ContextMenuItemOption[] = [
+    {
+      label: isSelected ? 'Stop' : 'Play',
+      variant: isSelected ? 'destructive' : 'default',
+      action: () => togglePresetApply(preset),
+    },
+    { isSeparator: true },
+    {
+      label: 'Rename',
+      action: () => startRename(preset),
+    },
+    { isSeparator: true },
+    {
+      label: preset.basePresetId ? 'Delete Variant' : 'Delete Preset',
+      icon: Trash2,
+      variant: 'destructive',
+      shortcut: 'Del',
+      action: () => handleDeletePreset(preset),
+    },
+  ];
+
+  openMenu(e, options);
+}
+
 defineExpose({
   quickSave,
   quickSaveVariant,
@@ -431,97 +452,73 @@ defineExpose({
             class="rounded-md overflow-hidden !border-b border border-border/50 bg-background/20"
           >
             <!-- Custom header: rename/delete + accordion trigger -->
-            <ContextMenu>
-              <ContextMenuTrigger as-child>
-                <AccordionHeader class="w-full relative">
-                  <AccordionTrigger
-                    class="flex-1 px-3 py-2 text-xs font-medium hover:no-underline border-border/40
-                           transition-colors [&>svg]:hidden flex items-center justify-between w-full"
-                    :class="[selectedPresetId === preset.id ? 'text-primary' : 'text-foreground']"
-                  >
-                    <div class="flex items-center gap-2 flex-1 min-w-0 w-full" @dblclick.stop="startRename(preset)">
-                      <!-- Name or rename input -->
-                      <template v-if="renamingId === preset.id">
-                        <Input
-                          ref="renameInputRef"
-                          v-model="renameValue"
-                          class="h-5 text-xs px-1 py-0 flex-1 min-w-0"
-                          @keydown.prevent.enter="confirmRename"
-                          @keydown.prevent.escape="renamingId = null"
-                          @blur="handleRenameBlur"
-                          @click.stop
-                          autofocus
-                        />
-                      </template>
-                      <template v-else>
-                        <span class="flex-1 text-left truncate">{{ preset.name }}</span>
-                      </template>
-                    </div>
-
-                    <!-- Action buttons -->
-                    <div class="flex items-center">
-                      <!-- Create Variant button -->
-                      <button
-                        type="button"
-                        v-if="activeBaseId === preset.id && hasUnsaved"
-                        class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity text-foreground"
-                        @click.stop="quickSaveVariant(preset)"
-                        title="Create Variant from current changes"
-                      >
-                        <GitFork class="size-3.5 shrink-0" />
-                      </button>
-
-                      <!-- Overwrite button for base preset -->
-                      <button
-                        type="button"
-                        v-if="selectedPresetId === preset.id && hasUnsaved"
-                        class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity"
-                        @click.stop="handleOverwrite(preset)"
-                        title="Overwrite Preset with current changes (Shift+S)"
-                      >
-                        <Save class="size-3.5 shrink-0 text-foreground" />
-                      </button>
-
-                      <!-- Play / Stop button -->
-                      <button
-                         type="button"
-                         class="flex items-center justify-center pl-2 pr-3 py-1 text-xs font-medium hover:opacity-80 transition-opacity"
-                         @click.stop="togglePresetApply(preset)"
-                       >
-                         <Square
-                           v-if="selectedPresetId === preset.id"
-                           class="size-3.5 shrink-0 fill-primary text-primary"
-                         />
-                         <Play
-                           v-else
-                           class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors"
-                         />
-                      </button>
-                    </div>
-                  </AccordionTrigger>
-                </AccordionHeader>
-              </ContextMenuTrigger>
-
-              <ContextMenuContent class="w-48">
-                <ContextMenuItem @click="togglePresetApply(preset)">
-                  <template v-if="selectedPresetId === preset.id">
-                    <Square class="mr-2 size-4 text-destructive" /> Stop
+            <AccordionHeader class="w-full relative" @contextmenu.prevent="onPresetContextMenu($event, preset)">
+              <AccordionTrigger
+                class="flex-1 px-3 py-2 text-xs font-medium hover:no-underline border-border/40
+                       transition-colors [&>svg]:hidden flex items-center justify-between w-full"
+                :class="[selectedPresetId === preset.id ? 'text-primary' : 'text-foreground']"
+              >
+                <div class="flex items-center gap-2 flex-1 min-w-0 w-full" @dblclick.stop="startRename(preset)">
+                  <!-- Name or rename input -->
+                  <template v-if="renamingId === preset.id">
+                    <Input
+                      ref="renameInputRef"
+                      v-model="renameValue"
+                      class="h-5 text-xs px-1 py-0 flex-1 min-w-0"
+                      @keydown.prevent.enter="confirmRename"
+                      @keydown.prevent.escape="renamingId = null"
+                      @blur="handleRenameBlur"
+                      @click.stop
+                      autofocus
+                    />
                   </template>
                   <template v-else>
-                    <Play class="mr-2 size-4" /> Play
+                    <span class="flex-1 text-left truncate">{{ preset.name }}</span>
                   </template>
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem @click="startRename(preset)">
-                  <Pencil class="mr-2 size-4" /> Rename
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem @click="handleDeletePreset(preset)" class="text-destructive focus:bg-destructive focus:text-destructive-foreground">
-                  <Trash2 class="mr-2 size-4" /> Delete Preset
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
+                </div>
 
+                <!-- Action buttons -->
+                <div class="flex items-center">
+                  <!-- Create Variant button -->
+                  <button
+                    type="button"
+                    v-if="activeBaseId === preset.id && hasUnsaved"
+                    class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity text-foreground"
+                    @click.stop="quickSaveVariant(preset)"
+                    title="Create Variant from current changes"
+                  >
+                    <GitFork class="size-3.5 shrink-0" />
+                  </button>
+
+                  <!-- Overwrite button for base preset -->
+                  <button
+                    type="button"
+                    v-if="selectedPresetId === preset.id && hasUnsaved"
+                    class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity"
+                    @click.stop="handleOverwrite(preset)"
+                    title="Overwrite Preset with current changes (Shift+S)"
+                  >
+                    <Save class="size-3.5 shrink-0 text-foreground" />
+                  </button>
+
+                  <!-- Play / Stop button -->
+                  <button
+                      type="button"
+                      class="flex items-center justify-center pl-2 pr-3 py-1 text-xs font-medium hover:opacity-80 transition-opacity"
+                      @click.stop="togglePresetApply(preset)"
+                    >
+                      <Square
+                        v-if="selectedPresetId === preset.id"
+                        class="size-3.5 shrink-0 fill-primary text-primary"
+                      />
+                      <Play
+                        v-else
+                        class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors"
+                      />
+                  </button>
+                </div>
+              </AccordionTrigger>
+            </AccordionHeader>
 
             <!-- Categories inside the preset -->
             <AccordionContent class="pb-0">
@@ -565,104 +562,85 @@ defineExpose({
                   <div class="absolute left-3 top-0 bottom-0 w-px bg-primary/20 pointer-events-none" />
                   
                   <!-- Variant Header -->
-                  <ContextMenu>
-                    <ContextMenuTrigger as-child>
-                      <div class="relative flex items-center justify-between w-full px-2 py-1 text-xs font-medium transition-colors group/var" :class="selectedPresetId === variant.id ? 'text-primary' : 'text-foreground'">
-                        <!-- horizontal tick -->
-                        <div class="absolute left-3 top-1/2 w-3 border-t border-primary/20 pointer-events-none" />
-                        
-                        <div class="flex items-center gap-2 flex-1 min-w-0 w-full pl-5" @dblclick.stop="startRename(variant)">
-                           <template v-if="renamingId === variant.id">
-                              <Input ref="renameInputRef" v-model="renameValue" class="h-5 text-xs px-1 py-0 flex-1 min-w-0" @keydown.prevent.enter="confirmRename" @keydown.prevent.escape="renamingId = null" @blur="handleRenameBlur" @click.stop autofocus />
-                           </template>
-                           <template v-else>
-                              <span class="flex-1 text-left truncate">{{ variant.name }}</span>
-                           </template>
-                        </div>
-
-                        <div class="flex items-center transition-opacity" :class="selectedPresetId === variant.id ? 'opacity-100' : 'opacity-80 group-hover/var:opacity-100'">
-                           <!-- Preset Type Dropdown -->
-                           <DropdownMenu>
-                             <DropdownMenuTrigger as-child>
-                               <button
-                                 type="button"
-                                 class="flex items-center justify-center p-1.5 text-xs hover:opacity-100 opacity-60 transition-opacity text-foreground"
-                                 :title="getVariantTypeDescription(variant)"
-                                 @click.stop
-                               >
-                                 <Zap v-if="variant.type === 'flash'" class="size-3.5 shrink-0 text-yellow-500" />
-                                 <template v-else-if="variant.type === 'overwrite'">
-                                   <Activity class="size-3.5 shrink-0 text-orange-500" />
-                                   <span class="ml-1 text-[9px] uppercase font-bold text-orange-500">{{ variant.overwriteTarget?.substring(0, 3) || 'FX' }}</span>
-                                 </template>
-                                 <Layers v-else class="size-3.5 shrink-0" />
-                               </button>
-                             </DropdownMenuTrigger>
-                             <DropdownMenuContent class="w-40">
-                               <DropdownMenuItem :class="{'text-primary': !variant.type || variant.type === 'normal'}" @click.stop="setPresetType(variant, 'normal')">
-                                 <Layers class="mr-3 size-4 opacity-70" /> Normal
-                               </DropdownMenuItem>
-                               <DropdownMenuItem :class="{'text-primary': variant.type === 'flash'}" @click.stop="setPresetType(variant, 'flash')">
-                                 <Zap class="mr-3 size-4 opacity-70" /> Flash
-                               </DropdownMenuItem>
-                               <DropdownMenuSub>
-                                 <DropdownMenuSubTrigger :class="{'text-primary': variant.type === 'overwrite'}">
-                                   <Activity class="mr-3 size-4 opacity-70" /> Overwrite
-                                 </DropdownMenuSubTrigger>
-                                 <DropdownMenuPortal>
-                                   <DropdownMenuSubContent class="w-32">
-                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'strobe'}" @click.stop="setPresetType(variant, 'overwrite', 'strobe')">
-                                       Strobe
-                                     </DropdownMenuItem>
-                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blind'}" @click.stop="setPresetType(variant, 'overwrite', 'blind')">
-                                       Blind
-                                     </DropdownMenuItem>
-                                     <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blackout'}" @click.stop="setPresetType(variant, 'overwrite', 'blackout')">
-                                       Blackout
-                                     </DropdownMenuItem>
-                                   </DropdownMenuSubContent>
-                                 </DropdownMenuPortal>
-                               </DropdownMenuSub>
-                             </DropdownMenuContent>
-                           </DropdownMenu>
-
-                           <!-- Variant Overwrite -->
-                           <button type="button" v-if="selectedPresetId === variant.id && hasUnsaved" class="p-1.5 text-xs hover:opacity-100 opacity-60 text-foreground" @click.stop="handleOverwrite(variant)" title="Overwrite Variant">
-                              <Save class="size-3.5 shrink-0" />
-                           </button>
-                           
-                           <!-- Variant Play/Stop -->
-                           <button type="button" class="pl-2 pr-1 py-1 text-xs hover:opacity-80" @click.stop="togglePresetApply(variant)">
-                             <Square v-if="selectedPresetId === variant.id" class="size-3.5 fill-primary text-primary shrink-0" />
-                             <Play v-else class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors" />
-                           </button>
-                        </div>
-                      </div>
-                    </ContextMenuTrigger>
-
-                    <ContextMenuContent class="w-48">
-                      <ContextMenuItem @click="togglePresetApply(variant)">
-                        <template v-if="selectedPresetId === variant.id">
-                          <Square class="mr-2 size-4 text-destructive" /> Stop
+                  <div 
+                    class="relative flex items-center justify-between w-full px-2 py-1 text-xs font-medium transition-colors group/var" 
+                    :class="selectedPresetId === variant.id ? 'text-primary' : 'text-foreground'"
+                    @contextmenu.prevent="onPresetContextMenu($event, variant)"
+                  >
+                    <!-- horizontal tick -->
+                    <div class="absolute left-3 top-1/2 w-3 border-t border-primary/20 pointer-events-none" />
+                    
+                    <div class="flex items-center gap-2 flex-1 min-w-0 w-full pl-5" @dblclick.stop="startRename(variant)">
+                        <template v-if="renamingId === variant.id">
+                          <Input ref="renameInputRef" v-model="renameValue" class="h-5 text-xs px-1 py-0 flex-1 min-w-0" @keydown.prevent.enter="confirmRename" @keydown.prevent.escape="renamingId = null" @blur="handleRenameBlur" @click.stop autofocus />
                         </template>
                         <template v-else>
-                          <Play class="mr-2 size-4" /> Play
+                          <span class="flex-1 text-left truncate">{{ variant.name }}</span>
                         </template>
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem @click="startRename(variant)">
-                        <Pencil class="mr-2 size-4" /> Rename
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem @click="handleDeletePreset(variant)" class="text-destructive focus:bg-destructive focus:text-destructive-foreground">
-                        <Trash2 class="mr-2 size-4" /> Delete Variant
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
+                    </div>
+
+                    <div class="flex items-center transition-opacity" :class="selectedPresetId === variant.id ? 'opacity-100' : 'opacity-80 group-hover/var:opacity-100'">
+                        <!-- Preset Type Dropdown -->
+                        <DropdownMenu>
+                          <DropdownMenuTrigger as-child>
+                            <button
+                              type="button"
+                              class="flex items-center justify-center p-1.5 text-xs hover:opacity-100 opacity-60 transition-opacity text-foreground"
+                              :title="getVariantTypeDescription(variant)"
+                              @click.stop
+                            >
+                              <Zap v-if="variant.type === 'flash'" class="size-3.5 shrink-0 text-yellow-500" />
+                              <template v-else-if="variant.type === 'overwrite'">
+                                <Activity class="size-3.5 shrink-0 text-orange-500" />
+                                <span class="ml-1 text-[9px] uppercase font-bold text-orange-500">{{ variant.overwriteTarget?.substring(0, 3) || 'FX' }}</span>
+                              </template>
+                              <Layers v-else class="size-3.5 shrink-0" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent class="w-40">
+                            <DropdownMenuItem :class="{'text-primary': !variant.type || variant.type === 'normal'}" @click.stop="setPresetType(variant, 'normal')">
+                              <Layers class="mr-3 size-4 opacity-70" /> Normal
+                            </DropdownMenuItem>
+                            <DropdownMenuItem :class="{'text-primary': variant.type === 'flash'}" @click.stop="setPresetType(variant, 'flash')">
+                              <Zap class="mr-3 size-4 opacity-70" /> Flash
+                            </DropdownMenuItem>
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger :class="{'text-primary': variant.type === 'overwrite'}">
+                                <Activity class="mr-3 size-4 opacity-70" /> Overwrite
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuPortal>
+                                <DropdownMenuSubContent class="w-32">
+                                  <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'strobe'}" @click.stop="setPresetType(variant, 'overwrite', 'strobe')">
+                                    Strobe
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blind'}" @click.stop="setPresetType(variant, 'overwrite', 'blind')">
+                                    Blind
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem :class="{'text-primary': variant.type === 'overwrite' && variant.overwriteTarget === 'blackout'}" @click.stop="setPresetType(variant, 'overwrite', 'blackout')">
+                                    Blackout
+                                  </DropdownMenuItem>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuPortal>
+                            </DropdownMenuSub>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <!-- Variant Overwrite -->
+                        <button type="button" v-if="selectedPresetId === variant.id && hasUnsaved" class="p-1.5 text-xs hover:opacity-100 opacity-60 text-foreground" @click.stop="handleOverwrite(variant)" title="Overwrite Variant">
+                          <Save class="size-3.5 shrink-0" />
+                        </button>
+                        
+                        <!-- Variant Play/Stop -->
+                        <button type="button" class="pl-2 pr-1 py-1 text-xs hover:opacity-80" @click.stop="togglePresetApply(variant)">
+                          <Square v-if="selectedPresetId === variant.id" class="size-3.5 fill-primary text-primary shrink-0" />
+                          <Play v-else class="size-3.5 text-muted-foreground/50 hover:text-muted-foreground shrink-0 transition-colors" />
+                        </button>
+                    </div>
+                  </div>
 
                   <!-- Variant Categories -->
                   <div class="pl-6 pb-2 relative">
-                     <button v-for="(cat, vIdx) in variant.categories" :key="vIdx" class="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-xs hover:bg-accent/60 transition-colors text-left group/vcat" @click="handleCategoryClick(cat, variant)">
+                    <button v-for="(cat, vIdx) in variant.categories" :key="vIdx" class="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-xs hover:bg-accent/60 transition-colors text-left group/vcat" @click="handleCategoryClick(cat, variant)">
                         <component :is="getCategoryIcon(cat.type)" class="size-3.5 shrink-0 transition-colors" :class="cat.isModifier ? 'text-modifier' : 'text-muted-foreground group-hover/vcat:text-foreground'" />
                         <span class="flex-1 truncate transition-colors" :class="cat.isModifier ? 'text-modifier font-medium' : 'text-muted-foreground group-hover/vcat:text-foreground'">{{ cat.label }}</span>
                         <!-- Variant category info -->
@@ -672,7 +650,7 @@ defineExpose({
                         >
                           {{ cat.isModifier ? '(Effect)' : '(Value)' }}
                         </span>
-                     </button>
+                    </button>
                   </div>
                 </div>
 

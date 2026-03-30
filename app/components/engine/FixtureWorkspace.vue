@@ -8,16 +8,10 @@ import FixtureEditor from './FixtureEditor.vue';
 import DeleteConfirmDialog from './DeleteConfirmDialog.vue';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from './composables/use-history';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuShortcut,
-  ContextMenuSeparator,
-} from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
-import {
+import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
+import { 
+  Trash2, 
   AlignHorizontalDistributeCenter,
   AlignVerticalDistributeCenter,
   AlignCenterHorizontal,
@@ -113,7 +107,76 @@ const emit = defineEmits<{
   (e: 'edit-type', node: SceneNode): void
 }>();
 
+const { openMenu } = useGlobalContextMenu();
 const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
+
+function onWorkspaceContextMenu(e: MouseEvent) {
+  const options: ContextMenuItemOption[] = [];
+
+  if (selectedIds.value.size > 0) {
+    options.push({
+      label: 'Group Selection',
+      shortcut: '⌘G',
+      action: handleGroup,
+    });
+
+    if (hasSelectedGroup.value) {
+      options.push({
+        label: 'Ungroup',
+        shortcut: '⇧⌘G',
+        action: handleUngroupSelected,
+      });
+    }
+
+    if (canEditType.value) {
+      options.push({ isSeparator: true });
+      options.push({
+        label: 'Edit Fixture Type',
+        action: () => emit('edit-type', singleSelectedFixture.value!),
+      });
+    }
+
+    options.push({ isSeparator: true });
+  }
+
+  if (hasUnsavedChanges.value) {
+    options.push({
+      label: 'Create Preset',
+      shortcut: '⇧P',
+      action: () => emit('quick-save'),
+    });
+  }
+
+  if (selectedIds.value.size > 0) {
+    options.push({
+      label: 'Create Preset from Selection',
+      action: () => emit('create-preset-from-selection', selectedIds.value),
+    });
+  }
+
+  if (selectedPresetId.value && hasUnsavedChanges.value) {
+    options.push({
+      label: 'Overwrite Active Preset',
+      shortcut: '⇧S',
+      action: () => emit('overwrite-active-preset'),
+    });
+  }
+
+  if (selectedIds.value.size > 0) {
+    options.push({ isSeparator: true });
+    options.push({
+      label: 'Delete',
+      variant: 'destructive',
+      icon: Trash2,
+      shortcut: 'Del',
+      action: handleDeleteSelected,
+    });
+  }
+
+  if (options.length > 0) {
+    openMenu(e, options);
+  }
+}
 
 // Expose editor upwards so index.vue can trigger zoomTo
 defineExpose({
@@ -148,52 +211,18 @@ defineExpose({
       </Button>
     </div>
 
-    <ContextMenu>
-      <ContextMenuTrigger as-child>
-          <FixtureEditor
-            ref="fixtureEditor"
-            v-model:selected-ids="selectedIds"
-            :fixtures="flatFixtures"
-            style="border-radius: 0;"
-            class="w-full h-full"
-            @delete-fixture="handleDeleteNode"
-            @delete-selected="handleDeleteSelected"
-            @group="handleGroup"
-            @ungroup="handleUngroup"
-          />
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem @click="handleGroup">
-          Group Selection
-          <ContextMenuShortcut>⌘G</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem v-if="hasSelectedGroup" @click="handleUngroupSelected">
-          Ungroup
-          <ContextMenuShortcut>⇧⌘G</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator v-if="canEditType" />
-        <ContextMenuItem v-if="canEditType" @click="emit('edit-type', singleSelectedFixture!)">
-          Edit Fixture Type
-        </ContextMenuItem>
-        <ContextMenuSeparator v-if="selectedIds.size > 0 || hasUnsavedChanges" />
-        <ContextMenuItem v-if="hasUnsavedChanges" @click="emit('quick-save')">
-          Create Preset
-          <ContextMenuShortcut>⇧P</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem v-if="selectedIds.size > 0" @click="emit('create-preset-from-selection', selectedIds)">
-          Create Preset from Selection
-        </ContextMenuItem>
-        <ContextMenuItem v-if="selectedPresetId && hasUnsavedChanges" @click="emit('overwrite-active-preset')">
-          Overwrite Active Preset
-          <ContextMenuShortcut>⇧S</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator v-if="selectedIds.size > 0" />
-        <ContextMenuItem v-if="selectedIds.size > 0" class="text-destructive focus:text-destructive" @click="handleDeleteSelected">
-          Delete
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <FixtureEditor
+      ref="fixtureEditor"
+      v-model:selected-ids="selectedIds"
+      :fixtures="flatFixtures"
+      style="border-radius: 0;"
+      class="w-full h-full"
+      @delete-fixture="handleDeleteNode"
+      @delete-selected="handleDeleteSelected"
+      @group="handleGroup"
+      @ungroup="handleUngroup"
+      @contextmenu.prevent="onWorkspaceContextMenu"
+    />
 
     <DeleteConfirmDialog
       v-model:open="deleteDialogOpen"

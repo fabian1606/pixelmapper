@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useEngineStore } from '~/stores/engine-store';
 import { onMounted } from 'vue';
+import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
 
 const engineStore = useEngineStore();
 
@@ -15,5 +16,6 @@ onMounted(() => {
     <div class="flex-1 min-h-0">
       <NuxtPage />
     </div>
+    <GlobalContextMenu />
   </div>
 </template>
