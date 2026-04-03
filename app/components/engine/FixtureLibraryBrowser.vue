@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import type { FixtureSummary, ManufacturerSummary } from '~/utils/ofl/types';
-import { Search, Loader2, ChevronRight, Plus } from 'lucide-vue-next';
+import { Search, Loader2, ChevronRight, Plus, Sparkles } from 'lucide-vue-next';
 import {
   Accordion,
   AccordionContent,
@@ -16,6 +16,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', item: FixtureSummary): void;
   (e: 'create-custom-fixture'): void;
+  (e: 'auto-create-fixture'): void;
 }>();
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -65,18 +66,18 @@ async function fetchManufacturers() {
 }
 
 async function loadManufacturerFixtures(mfKey: string) {
-  if (fixtureCache.value[mfKey]?.items.length > 0 || fixtureCache.value[mfKey]?.loading) return;
+  if (fixtureCache.value[mfKey]?.items?.length > 0 || fixtureCache.value[mfKey]?.loading) return;
   if (!fixtureCache.value[mfKey]) {
     fixtureCache.value[mfKey] = { items: [], loading: false };
   }
-  fixtureCache.value[mfKey].loading = true;
+  fixtureCache.value[mfKey]!.loading = true;
   try {
     const data = await $fetch<{ items: FixtureSummary[] }>(`/api/fixtures?mode=fixtures&manufacturer=${mfKey}`);
-    fixtureCache.value[mfKey].items = data.items;
+    fixtureCache.value[mfKey]!.items = data.items;
   } catch (err) {
     console.error(`Failed to load fixtures for ${mfKey}:`, err);
   } finally {
-    fixtureCache.value[mfKey].loading = false;
+    fixtureCache.value[mfKey]!.loading = false;
   }
 }
 
@@ -112,8 +113,10 @@ function debouncedSearch() {
 
 // ─── Callbacks ────────────────────────────────────────────────────────────────
 
-function handleAccordionUpdate(values: string[]) {
-  values.forEach(val => {
+function handleAccordionUpdate(values: string | string[] | undefined) {
+  if (!values) return;
+  const vals = Array.isArray(values) ? values : [values];
+  vals.forEach(val => {
     loadManufacturerFixtures(val);
   });
 }
@@ -139,13 +142,24 @@ onMounted(fetchManufacturers);
             class="w-full h-9 pl-9 pr-3 text-sm rounded-md bg-background border border-border focus:ring-1 focus:ring-primary focus:outline-none text-foreground placeholder:text-muted-foreground"
           />
         </div>
-        <button
-          class="shrink-0 h-9 px-3 flex items-center justify-center gap-2 rounded-md bg-accent hover:bg-accent/80 text-accent-foreground text-xs font-medium transition-colors border border-border"
-          @click="emit('create-custom-fixture')"
-        >
-          <Plus class="size-3.5" />
-          Create custom fixture
-        </button>
+        <div class="flex gap-2">
+          <button
+            class="shrink-0 h-9 px-3 flex items-center justify-center gap-2 rounded-md bg-accent hover:bg-accent/80 text-accent-foreground text-xs font-medium transition-colors border border-border"
+            @click="emit('create-custom-fixture')"
+          >
+            <Plus class="size-3.5" />
+            Create custom fixture
+          </button>
+          
+          <button
+            class="shrink-0 h-9 px-3 flex items-center justify-center gap-2 rounded-md bg-accent hover:bg-accent/80 text-accent-foreground text-xs font-medium transition-colors border border-border"
+            @click="emit('auto-create-fixture')"
+            title="Import from PDF manual using AI"
+          >
+            <span class="text-base">🪄</span>
+            Auto create Fixture
+          </button>
+        </div>
       </div>
       
       <!-- Category filter pills -->

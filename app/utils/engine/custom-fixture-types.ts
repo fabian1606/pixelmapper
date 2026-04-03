@@ -132,6 +132,14 @@ export const DMX_CONNECTORS = [
   '3.5mm stereo jack', 'RJ45',
 ] as const;
 
+export const OFL_FIXTURE_CATEGORIES = [
+  'Moving Head', 'Color Changer', 'Dimmer', 'Blinder', 'Strobe',
+  'Scanner', 'Barrel Scanner', 'Laser', 'Effect', 'Flower',
+  'Pixel Bar', 'Matrix', 'Smoke', 'Hazer', 'Fan', 'Stand', 'Other',
+] as const;
+
+export type OflFixtureCategory = typeof OFL_FIXTURE_CATEGORIES[number];
+
 /**
  * Zod schema for the custom fixture general-info form state.
  * All fields are annotated with `.describe()` so an LLM can understand
@@ -142,6 +150,28 @@ export const CustomFixtureFormSchema = z.object({
   shortName:        z.string().describe('Abbreviated name used in tight UI spaces (e.g. "R100W"). Max ~10 chars.').optional().default(''),
   manufacturer:     z.string().describe('Brand or manufacturer name (e.g. "Chauvet DJ", "Martin", "Robe")').optional().default(''),
   comment:          z.string().describe('Any additional notes about this fixture, e.g. revision, known quirks').optional().default(''),
+
+  // Primary classification — choose the SINGLE best-matching category:
+  //   Moving Head   = motorized pan/tilt fixture (e.g. Sharpy, Pointe)
+  //   Color Changer = static LED wash / PAR that changes color (RGBW, etc.) — USE THIS for LED wash/pars that do NOT move
+  //   Dimmer        = simple dimmer pack (no color changing)
+  //   Blinder       = high-output blinder / audience blinder
+  //   Strobe        = dedicated strobe with few extra functions
+  //   Scanner       = mirror-scan fixture (motor moves the mirror only)
+  //   Barrel Scanner= rotating barrel / prism scanner
+  //   Laser         = dedicated laser projector
+  //   Effect        = derby, moon flower, other effect light (NOT laser)
+  //   Flower        = Flower-style rotating color petal light
+  //   Pixel Bar     = linear addressable LED bar (e.g. ADJ Pixel Bar series)
+  //   Matrix        = 2-D addressable LED pixel grid
+  //   Smoke         = smoke / fog machine
+  //   Hazer         = haze machine
+  //   Fan           = DMX-controlled fan
+  //   Stand         = structural stand / truss accessory
+  //   Other         = use ONLY if nothing else fits
+  category: z.enum(OFL_FIXTURE_CATEGORIES)
+    .describe('OFL fixture category — pick the single most fitting value from the enum. An LED PAR or RGBW wash that cannot move is "Color Changer", not "Other".')
+    .optional().default('Other'),
 
   fixtureWidth:     z.number().min(1).max(5000).describe('Physical width of the fixture housing in millimetres').optional().default(300),
   fixtureHeight:    z.number().min(1).max(5000).describe('Physical height of the fixture housing in millimetres').optional().default(300),
@@ -155,6 +185,7 @@ export const CustomFixtureFormSchema = z.object({
   beamAngleMin:     z.number().min(0).max(360).describe('Minimum beam angle in degrees (narrow end of zoom range)').optional().default(0),
   beamAngleMax:     z.number().min(0).max(360).describe('Maximum beam angle in degrees (wide end of zoom range). Equal to Min if no zoom.').optional().default(0),
 });
+
 
 /** All editable state for the custom fixture general-info form. Derived from the Zod schema. */
 export type CustomFixtureFormState = z.infer<typeof CustomFixtureFormSchema>;

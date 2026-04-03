@@ -37,6 +37,13 @@ The Custom Fixture Editor (`CustomFixtureEditorDialog.vue`) allows creating fixt
 - Layout: `CustomFixtureCanvas` (flex-1, left) + `CustomFixtureSidebar` (fixed w-72, right).
 - Shared types: `app/utils/engine/custom-fixture-types.ts`.
 
+### 5. AI Backend Service
+The `aiBackendService` is an Express + LangGraph based backend designed to automate data extraction (e.g., Fixture Manuals).
+- **LangGraph Workflow**: Uses a state machine (`ExtractionState`) to process PDF texts sequentially.
+- **Node Pattern**: Each extraction step (e.g., General Info, Channels, Modes) is isolated into its own LangGraph node (`extractGeneralInfo.ts`, `extractChannels.ts`, `extractModes.ts`).
+- **Tool Calling**: When parsing complex nested arrays (like DMX Channels and Modes), the LLM uses structured Tool Calling bound to Zod schemas (e.g., `OflChannelSchema`). This splits the context payload and ensures strictly typed outputs.
+- **SSE Streaming**: The backend streams Server-Sent Events (SSE) back to the frontend (`CustomFixtureEditorDialog.vue`), updating the UI with real-time status messages before returning the final assembled `OflFixture`.
+
 ## Software Patterns & Guidelines
 - **Modularity**: Large files (>200 lines) should be split into smaller, focused modules.
 - **Pure Functions for Engine Logic**: Functions like diffing presets or merging variants should be pure functions that take inputs and return new objects. This makes them easily testable and avoids side-effects.

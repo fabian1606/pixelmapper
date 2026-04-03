@@ -11,7 +11,7 @@ export async function extractTextFromPdf(state: ExtractionState, config?: Runnab
     return {};
   }
 
-  await dispatchCustomEvent("status", { message: "Konvertiere PDF zu Text mittels Mistral OCR..." }, config);
+  await dispatchCustomEvent("status", { message: "Converting PDF to text via Mistral OCR..." }, config);
 
   const { name, buffer } = state.pdfFile;
   const manualText = await extractTextWithMistralOcr(name, buffer);

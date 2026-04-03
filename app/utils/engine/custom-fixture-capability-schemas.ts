@@ -113,6 +113,12 @@ const HVAngleFields = {
   verticalAngleUnit:    z.enum(['deg', 'percent']).optional().default('deg').describe('Unit for vertical angle'),
 };
 
+const ColorFields = {
+  colors:      z.array(z.string()).optional().describe('List of color hex codes (e.g. ["#ff0000"])'),
+  colorsStart: z.array(z.string()).optional().describe('Start colors for a graduated range'),
+  colorsEnd:   z.array(z.string()).optional().describe('End colors for a graduated range'),
+};
+
 const BladeFields = {
   blade:          z.enum(['Top','Right','Bottom','Left','Thrust','Swivel']).optional().describe('Which blade is controlled'),
   insertionStart: z.number().optional().describe('Blade insertion at start of range'),
@@ -142,7 +148,7 @@ export const IndigoCapabilitySchema             = z.object({ ...RangeBase, type:
 
 // Color control
 export const ColorWheelCapabilitySchema         = z.object({ ...RangeBase, type: z.literal('COLOR_WHEEL'),         ...WheelSlotRefFields, ...SpeedFields, ...WheelShakeFields });
-export const ColorPresetCapabilitySchema        = z.object({ ...RangeBase, type: z.literal('COLOR_PRESET'),        ...ParameterFields });
+export const ColorPresetCapabilitySchema        = z.object({ ...RangeBase, type: z.literal('COLOR_PRESET'),        ...ParameterFields, ...ColorFields });
 export const ColorTemperatureCapabilitySchema   = z.object({ ...RangeBase, type: z.literal('COLOR_TEMPERATURE'),   ...ColorTempFields });
 
 // Beam / intensity
@@ -389,12 +395,15 @@ export const UNIT_OPTION_MAP: Record<string, UnitOption[]> = {
   soundSensitivity: [
     { value: 'percent', label: '%',      min: 0,    max: 100,   step: 1,    defaultFixed: 100,  defaultStart: 0,    defaultEnd: 100  },
   ],
+  colors: [
+    { value: 'hex', label: 'HEX', min: 0, max: 0, step: 0, defaultFixed: 0, defaultStart: 0, defaultEnd: 0 },
+  ],
 };
 
 export type CapabilityFieldSpec = {
   key: string;
   label: string;
-  kind: 'text' | 'number' | 'select';
+  kind: 'text' | 'number' | 'select' | 'color-array';
   options?: readonly string[];
   min?: number;
   max?: number;
@@ -469,6 +478,9 @@ export function schemaToFieldSpecs(schema: z.ZodObject<any>): CapabilityFieldSpe
 
     if (innerDef.type === 'string') {
       specs.push({ key, label: keyToLabel(key), kind: 'text', description });
+    } else if (innerDef.type === 'array' && innerDef.minLength === undefined && (innerDef as any).element?.def?.type === 'string') {
+      // Deducing 'color-array' for any array of strings (like colors, colorsStart)
+      specs.push({ key, label: keyToLabel(key), kind: 'color-array' as any, description });
     } else if (innerDef.type === 'number') {
       const dragLabel = keyToLabel(key).toUpperCase();
       if (unitOptions) {

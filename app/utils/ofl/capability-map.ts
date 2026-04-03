@@ -127,7 +127,8 @@ export function mapOflCapabilityToChannel(
     case 'WheelRotation':
     case 'WheelSlotRotation': {
       // Prefer the explicit wheel name from the capability, otherwise fall back to channel name
-      const wheelName = (capability.wheel ?? channelName).toLowerCase();
+      const rawWheel = capability.wheel ?? channelName;
+      const wheelName = (Array.isArray(rawWheel) ? rawWheel[0] : rawWheel)?.toLowerCase() ?? '';
       if (wheelName.includes('color')) {
         return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
       }
@@ -197,6 +198,7 @@ function heuristicFallbackMap(channelName: string, defaultValue: number): Mapped
   if (name.includes('frost')) return { type: 'FROST', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('prism')) return { type: 'PRISM', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('gobo')) return { type: 'GOBO_WHEEL', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('color') && (name.includes('preset') || name.includes('macro'))) return { type: 'COLOR_PRESET', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
   if (name.includes('color')) return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
   if (name.includes('macro')) return { type: 'GENERIC', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('control') || name.includes('reset') || name.includes('blackout on move')) return { type: 'MAINTENANCE', role: 'NONE', colorValue: '#888888', defaultValue };

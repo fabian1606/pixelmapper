@@ -11,6 +11,12 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/tailwind.css'],
 
+  runtimeConfig: {
+    public: {
+      aiBackendUrl: process.env.NUXT_PUBLIC_AI_BACKEND_URL || 'http://localhost:4000',
+    }
+  },
+
   vite: {
     plugins: [
       //@ts-ignore

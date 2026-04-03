@@ -21,7 +21,7 @@ const CapabilityBase = {
 
 export const OflCapabilitySchema = z.discriminatedUnion('type', [
   // NoFunction
-  z.object({ type: z.literal('NoFunction'), ...CapabilityBase }),
+  z.object({ type: z.literal('NoFunction'), ...CapabilityBase }).describe('Used for DMX ranges with no effect, blackout, or unused slots.'),
 
   // ShutterStrobe
   z.object({
@@ -36,7 +36,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     durationStart: z.string().optional(),
     durationEnd: z.string().optional(),
     ...CapabilityBase,
-  }),
+  }).describe('For master shutter or strobe channels. Use "Strobe" for standard blinking effects.'),
 
   // StrobeSpeed
   z.object({
@@ -63,7 +63,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     brightnessStart: z.string().optional(),
     brightnessEnd: z.string().optional(),
     ...CapabilityBase,
-  }),
+  }).describe('For master dimmer or brightness channels (white/white-only fixtures).'),
 
   // ColorIntensity
   z.object({
@@ -73,7 +73,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     brightnessStart: z.string().optional(),
     brightnessEnd: z.string().optional(),
     ...CapabilityBase,
-  }),
+  }).describe('CRITICAL: Use this for individual Red, Green, Blue, Amber, White, etc., DMX channels in an RGB/RGBW fixture.'),
 
   // ColorPreset
   z.object({
@@ -85,7 +85,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     colorTemperatureStart: z.string().optional(),
     colorTemperatureEnd: z.string().optional(),
     ...CapabilityBase,
-  }),
+  }).describe('CRITICAL: Use this for "Color Macro", "Static Color", or "Color Wheel" channels that pick fixed color presets. Provide HEX values in the colors array.'),
 
   // ColorTemperature
   z.object({
@@ -219,7 +219,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     soundSensitivityStart: z.string().optional(),
     soundSensitivityEnd: z.string().optional(),
     ...CapabilityBase,
-  }),
+  }).describe('CRITICAL: Use this for "Internal Programs", "Built-in Effects", "Macros", or "Auto Modes" channels. Provide a descriptive label in effectName.'),
 
   // EffectSpeed
   z.object({

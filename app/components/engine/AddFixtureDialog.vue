@@ -42,11 +42,19 @@ const fullFixtureData = ref<OflFixture | null>(null);
 const loadingDetails = ref(false);
 const isCustomFixtureEditorOpen = ref(false);
 
+const customFixtureStartWithAi = ref(false);
+
 const engineStore = useEngineStore();
+
+function triggerPdfUpload() {
+  customFixtureStartWithAi.value = true;
+  isCustomFixtureEditorOpen.value = true;
+}
 
 function handleAddCustomFixtures(fixtures: Fixture[]) {
   emit('add', fixtures);
   isCustomFixtureEditorOpen.value = false;
+  customFixtureStartWithAi.value = false;
   emit('update:open', false);
 }
 
@@ -176,6 +184,7 @@ function handleAdd() {
 function resetState() {
   selectedSummary.value = null;
   fullFixtureData.value = null;
+  customFixtureStartWithAi.value = false;
   config.value = {
     modeIndex: '0',
     universe: 1,
@@ -212,7 +221,8 @@ watch(() => props.open, (isOpen) => {
             class="flex-1"
             :selected-key="selectedSummary?.key"
             @select="handleSelect"
-            @create-custom-fixture="isCustomFixtureEditorOpen = true"
+            @create-custom-fixture="isCustomFixtureEditorOpen = true; customFixtureStartWithAi = false"
+            @auto-create-fixture="triggerPdfUpload"
           />
         </div>
 
@@ -249,6 +259,7 @@ watch(() => props.open, (isOpen) => {
 
   <CustomFixtureEditorDialog 
     v-model:open="isCustomFixtureEditorOpen"
+    :startWithAiUpload="customFixtureStartWithAi"
     @add="handleAddCustomFixtures"
   />
 </template>

@@ -16,6 +16,21 @@ export const ExtractionStateAnnotation = Annotation.Root({
     reducer: (x, y) => y ?? x,
     default: () => null,
   }),
+  // Extracted DMX Channels
+  channels: Annotation<any[]>({
+    reducer: (x, y) => x.concat(y),
+    default: () => [],
+  }),
+  // Extracted DMX Modes
+  modes: Annotation<any[]>({
+    reducer: (x, y) => x.concat(y),
+    default: () => [],
+  }),
+  // Final assembled OFL document
+  oflDocument: Annotation<any | null>({
+    reducer: (x, y) => y ?? x,
+    default: () => null,
+  }),
 });
 
 export type ExtractionState = typeof ExtractionStateAnnotation.State;

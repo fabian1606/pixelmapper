@@ -6,8 +6,9 @@ import {
   type UnitOption,
 } from '~/utils/engine/custom-fixture-types';
 import type { ChannelType } from '~/utils/engine/types';
-import { ArrowLeftRight } from 'lucide-vue-next';
+import { ArrowLeftRight, Plus, Trash2 } from 'lucide-vue-next';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import { Input } from '@/components/ui/input';
 
 const props = defineProps<{
   range: CapabilityRange;
@@ -100,6 +101,24 @@ function swapRangeEnds(group: CombinedGroup) {
     [group.rangeSpecs[1].key]: (props.range as any)[group.rangeSpecs[0].key],
   });
 }
+
+function updateColor(key: string, index: number, value: string) {
+  const current = [...((props.range as any)[key] ?? [])];
+  current[index] = value;
+  emit('patch', { [key]: current });
+}
+
+function addColor(key: string) {
+  const current = [...((props.range as any)[key] ?? [])];
+  current.push('#ffffff');
+  emit('patch', { [key]: current });
+}
+
+function removeColor(key: string, index: number) {
+  const current = [...((props.range as any)[key] ?? [])];
+  current.splice(index, 1);
+  emit('patch', { [key]: current });
+}
 </script>
 
 <template>
@@ -125,14 +144,45 @@ function swapRangeEnds(group: CombinedGroup) {
 
       <div class="grid grid-cols-2 gap-1.5 items-center">
         <template v-if="isRangeMode(range, group) && group.rangeSpecs">
-          <DraggableNumberInput :label="group.rangeSpecs[0].dragLabel ?? 'Start'" :model-value="(range as any)[group.rangeSpecs[0].key]" @update:model-value="emit('patch', { [group.rangeSpecs![0].key]: $event })" :min="group.rangeSpecs[0].min" :max="group.rangeSpecs[0].max" :step="group.rangeSpecs[0].step" />
-          <div class="flex items-center gap-1.5">
-            <DraggableNumberInput :label="group.rangeSpecs[1].dragLabel ?? 'End'" :model-value="(range as any)[group.rangeSpecs[1].key]" @update:model-value="emit('patch', { [group.rangeSpecs![1].key]: $event })" :min="group.rangeSpecs[1].min" :max="group.rangeSpecs[1].max" :step="group.rangeSpecs[1].step" class="flex-1" />
-            <button class="text-muted-foreground/30 hover:text-foreground shrink-0" @click="swapRangeEnds(group)"><ArrowLeftRight class="size-3" /></button>
+          <div v-if="group.rangeSpecs[0].kind === 'color-array'" class="col-span-2 space-y-2">
+            <div class="space-y-1">
+              <label class="text-[8px] uppercase text-muted-foreground/50 font-bold ml-1">{{ group.rangeSpecs[0].label }}</label>
+              <div class="flex flex-wrap gap-1.5 items-center bg-muted/20 p-1.5 rounded-md border border-border/40">
+                <div v-for="(color, idx) in ((range as any)[group.rangeSpecs[0].key] ?? [])" :key="idx" class="flex items-center gap-1">
+                  <input type="color" :value="color" @input="updateColor(group.rangeSpecs![0].key, (idx as number), ($event.target as HTMLInputElement).value)" class="size-5 rounded border-0 bg-transparent cursor-pointer p-0" />
+                  <button @click="removeColor(group.rangeSpecs![0].key, (idx as number))" class="text-muted-foreground/30 hover:text-destructive"><Trash2 class="size-3" /></button>
+                </div>
+                <button @click="addColor(group.rangeSpecs![0].key)" class="size-5 flex items-center justify-center rounded border border-dashed border-border/50 hover:border-primary/50 text-muted-foreground/40 hover:text-primary"><Plus class="size-3" /></button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <label class="text-[8px] uppercase text-muted-foreground/50 font-bold ml-1">{{ group.rangeSpecs[1].label }}</label>
+              <div class="flex flex-wrap gap-1.5 items-center bg-muted/20 p-1.5 rounded-md border border-border/40">
+                <div v-for="(color, idx) in ((range as any)[group.rangeSpecs[1].key] ?? [])" :key="idx" class="flex items-center gap-1">
+                  <input type="color" :value="color" @input="updateColor(group.rangeSpecs![1].key, (idx as number), ($event.target as HTMLInputElement).value)" class="size-5 rounded border-0 bg-transparent cursor-pointer p-0" />
+                  <button @click="removeColor(group.rangeSpecs![1].key, (idx as number))" class="text-muted-foreground/30 hover:text-destructive"><Trash2 class="size-3" /></button>
+                </div>
+                <button @click="addColor(group.rangeSpecs![1].key)" class="size-5 flex items-center justify-center rounded border border-dashed border-border/50 hover:border-primary/50 text-muted-foreground/40 hover:text-primary"><Plus class="size-3" /></button>
+              </div>
+            </div>
           </div>
+          <template v-else>
+            <DraggableNumberInput :label="group.rangeSpecs[0].dragLabel ?? 'Start'" :model-value="(range as any)[group.rangeSpecs[0].key]" @update:model-value="emit('patch', { [group.rangeSpecs![0].key]: $event })" :min="(group.rangeSpecs[0].min as number)" :max="(group.rangeSpecs[0].max as number)" :step="(group.rangeSpecs[0].step as number)" />
+            <div class="flex items-center gap-1.5">
+              <DraggableNumberInput :label="group.rangeSpecs[1].dragLabel ?? 'End'" :model-value="(range as any)[group.rangeSpecs[1].key]" @update:model-value="emit('patch', { [group.rangeSpecs![1].key]: $event })" :min="(group.rangeSpecs[1].min as number)" :max="(group.rangeSpecs[1].max as number)" :step="(group.rangeSpecs[1].step as number)" class="flex-1" />
+              <button class="text-muted-foreground/30 hover:text-foreground shrink-0" @click="swapRangeEnds(group)"><ArrowLeftRight class="size-3" /></button>
+            </div>
+          </template>
         </template>
         <template v-else-if="group.fixedSpec">
-          <DraggableNumberInput :label="group.fixedSpec.dragLabel ?? 'Value'" :model-value="(range as any)[group.fixedSpec.key]" @update:model-value="emit('patch', { [group.fixedSpec!.key]: $event })" :min="group.fixedSpec.min" :max="group.fixedSpec.max" :step="group.fixedSpec.step" class="col-span-1" />
+          <div v-if="group.fixedSpec.kind === 'color-array'" class="col-span-2 flex flex-wrap gap-1.5 items-center bg-muted/20 p-2 rounded-md border border-border/40">
+            <div v-for="(color, idx) in ((range as any)[group.fixedSpec.key] ?? [])" :key="idx" class="flex items-center gap-1">
+              <input type="color" :value="color" @input="updateColor(group.fixedSpec!.key, (idx as number), ($event.target as HTMLInputElement).value)" class="size-6 rounded border-0 bg-transparent cursor-pointer p-0" />
+              <button @click="removeColor(group.fixedSpec!.key, (idx as number))" class="text-muted-foreground/30 hover:text-destructive"><Trash2 class="size-3" /></button>
+            </div>
+            <button @click="addColor(group.fixedSpec.key)" class="size-6 flex items-center justify-center rounded border border-dashed border-border/50 hover:border-primary/50 text-muted-foreground/40 hover:text-primary"><Plus class="size-3" /></button>
+          </div>
+          <DraggableNumberInput v-else :label="group.fixedSpec.dragLabel ?? 'Value'" :model-value="(range as any)[group.fixedSpec.key]" @update:model-value="emit('patch', { [group.fixedSpec!.key]: $event })" :min="(group.fixedSpec.min as number)" :max="(group.fixedSpec.max as number)" :step="(group.fixedSpec.step as number)" class="col-span-1" />
         </template>
       </div>
     </div>

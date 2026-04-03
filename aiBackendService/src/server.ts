@@ -23,7 +23,7 @@ app.post("/extract-fixture-pdf", upload.single('manualPdf'), async (req, res) =>
 
   try {
     console.log("Starting LangGraph pipeline with PDF upload...");
-    res.write(`data: ${JSON.stringify({ status: "Starte Mistral OCR Verarbeitung..." })}\n\n`);
+    res.write(`data: ${JSON.stringify({ status: "Starting Mistral OCR processing..." })}\n\n`);
     
     const initialState = {
       pdfFile: {
@@ -37,7 +37,7 @@ app.post("/extract-fixture-pdf", upload.single('manualPdf'), async (req, res) =>
     const stream = await extractionGraph.stream(initialState, {
       streamMode: ["updates", "custom"]
     });
-    let finalInfo = null;
+    let finalDoc = null;
 
     for await (const [mode, chunk] of stream) {
       if (mode === "custom") {
@@ -45,14 +45,14 @@ app.post("/extract-fixture-pdf", upload.single('manualPdf'), async (req, res) =>
           res.write(`data: ${JSON.stringify({ status: chunk.data.message })}\n\n`);
         }
       } else if (mode === "updates") {
-        if (chunk.extractGeneralInfo) {
-          finalInfo = chunk.extractGeneralInfo.generalInfo;
+        if (chunk.assembleOflDocument) {
+          finalDoc = chunk.assembleOflDocument.oflDocument;
         }
       }
     }
 
     console.log("Pipeline finished successfully.");
-    res.write(`data: ${JSON.stringify({ success: true, data: finalInfo })}\n\n`);
+    res.write(`data: ${JSON.stringify({ success: true, data: finalDoc })}\n\n`);
     res.end();
   } catch (error: any) {
     console.error("Error during PDF extraction:", error);
@@ -75,7 +75,7 @@ app.post("/extract-fixture", async (req, res) => {
 
   try {
     console.log("Starting fixture extraction pipeline...");
-    res.write(`data: ${JSON.stringify({ status: "Extrahiere General Info..." })}\n\n`);
+    res.write(`data: ${JSON.stringify({ status: "Extracting General Info..." })}\n\n`);
 
     const initialState = {
       pdfFile: null,
@@ -86,7 +86,7 @@ app.post("/extract-fixture", async (req, res) => {
     const stream = await extractionGraph.stream(initialState, {
       streamMode: ["updates", "custom"]
     });
-    let finalInfo = null;
+    let finalDoc = null;
 
     for await (const [mode, chunk] of stream) {
       if (mode === "custom") {
@@ -94,14 +94,14 @@ app.post("/extract-fixture", async (req, res) => {
           res.write(`data: ${JSON.stringify({ status: chunk.data.message })}\n\n`);
         }
       } else if (mode === "updates") {
-        if (chunk.extractGeneralInfo) {
-          finalInfo = chunk.extractGeneralInfo.generalInfo;
+        if (chunk.assembleOflDocument) {
+          finalDoc = chunk.assembleOflDocument.oflDocument;
         }
       }
     }
 
     console.log("Extraction finished successfully.");
-    res.write(`data: ${JSON.stringify({ success: true, data: finalInfo })}\n\n`);
+    res.write(`data: ${JSON.stringify({ success: true, data: finalDoc })}\n\n`);
     res.end();
   } catch (error: any) {
     console.error("Error during extraction:", error);
