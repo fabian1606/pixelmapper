@@ -4,6 +4,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Interaction } from './composables/use-selection';
 import type { Camera } from './composables/use-camera';
 import type { EffectEngine } from '~/utils/engine/engine';
+import { useEngineStore } from '~/stores/engine-store';
 
 import initWasm, { WasmCanvas } from 'rs-engine-canvas';
 import wasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
@@ -25,6 +26,7 @@ const props = defineProps<Props>();
 // Pull dmxBuffer directly from the engine — never via prop (prop is captured at render time,
 // effectEngine.dmxBuffer is reassigned after async WASM init and after each render call).
 const effectEngine = inject<EffectEngine | undefined>('effectEngine');
+const engineStore = useEngineStore();
 
 // Plain JS variable — intentionally bypasses Vue's reactivity proxy.
 let wasmCanvas: WasmCanvas | null = null;
@@ -110,10 +112,11 @@ function syncSelected() {
   wc.set_selected(arr);
 }
 
-// ─── Draw: pull dmxBuffer directly from engine (live WASM memory view) ────────────────────────
+// ─── Draw: use the mixed output buffer (overrides applied on top of engine output) ───────────
 function drawFrame() {
   if (wasmCanvas) {
-    wasmCanvas.draw(effectEngine?.dmxBuffer ?? new Uint8Array());
+    const buf = engineStore.getOutputBuffer();
+    wasmCanvas.draw(buf.length > 0 ? buf : (effectEngine?.dmxBuffer ?? new Uint8Array()));
   }
 }
 

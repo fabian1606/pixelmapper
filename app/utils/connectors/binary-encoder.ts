@@ -4,15 +4,16 @@ import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/consta
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
-export const TYPE_BPM         = 0x10;
-export const TYPE_VERSION_REQ = 0x11;
-export const TYPE_TIMESYNC    = 0x13;
-export const TYPE_LAYOUT_BIN  = 0x14;
-export const TYPE_CHAN_BIN    = 0x15;
-export const TYPE_FX_BIN      = 0x16;
-export const TYPE_OTA_BEGIN   = 0x15;
-export const TYPE_OTA_CHUNK   = 0x16;
-export const TYPE_OTA_END     = 0x17;
+export const TYPE_BPM           = 0x10;
+export const TYPE_VERSION_REQ   = 0x11;
+export const TYPE_TIMESYNC      = 0x13;
+export const TYPE_LAYOUT_BIN    = 0x14;
+export const TYPE_CHAN_BIN      = 0x15;
+export const TYPE_FX_BIN        = 0x16;
+export const TYPE_OTA_BEGIN     = 0x15;
+export const TYPE_OTA_CHUNK     = 0x16;
+export const TYPE_OTA_END       = 0x17;
+export const TYPE_UNIVERSE_MAP  = 0x18;
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -106,6 +107,17 @@ export function buildOtaChunkPacket(chunk: Uint8Array): Uint8Array {
 export function buildOtaEndPacket(): Uint8Array {
   const w = new BufWriter();
   return w.toPacket(TYPE_OTA_END);
+}
+
+// ── Universe map packet (TYPE_UNIVERSE_MAP 0x18) ──────────────────────────────
+// Tells the ESP32 which DMX universes it should render and output.
+// Payload: [count, universe1, universe2, ...]
+
+export function buildUniverseMapPacket(universes: number[]): Uint8Array {
+  const w = new BufWriter();
+  w.u8(universes.length);
+  for (const u of universes) w.u8(u);
+  return w.toPacket(TYPE_UNIVERSE_MAP);
 }
 
 // ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────

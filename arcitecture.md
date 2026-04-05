@@ -48,11 +48,16 @@ The `aiBackendService` is an Express + LangGraph based backend designed to autom
 - **Modularity**: Large files (>200 lines) should be split into smaller, focused modules.
 - **Pure Functions for Engine Logic**: Functions like diffing presets or merging variants should be pure functions that take inputs and return new objects. This makes them easily testable and avoids side-effects.
 - **Composables**: Vue UI logic should be encapsulated in composables (`use-presets.ts`, `use-global-context-menu.ts`, etc.) to keep components clean. Use composables for global UI states like Context Menus or Modals.
+- **v-model components**: Use the `defineModel()` macro (Vue 3.4+) for implementing components with `v-model`. This simplifies prop and emit declarations and allows direct assignment.
 - **Context Menus**: Use the global programmatic approach (`useGlobalContextMenu`) to trigger menus on demand. Avoid local wrapper components like `<ContextMenuTrigger>`.
   - Trigger: `@contextmenu.prevent="openMenu($event, options)"`
   - Root Component: `GlobalContextMenu.vue` (placed in `app.vue`)
   - State: `app/composables/useGlobalContextMenu.ts`
   - Pattern: Define menu options including labels, icons, and callback actions direktly at the trigger source for maximum flexibility.
+- **Universe Inspector**: A specialized UI for direct DMX control.
+  - **Banner Pattern**: Fixtures are grouped horizontally with a continuous banner showing the fixture name above their assigned channels.
+  - **Fader Component**: `DmxChannelFader.vue` provides a vertical slider, a preview box with function-icons (reacting to value/color), and a popover for selecting OFL capabilities.
+  - **Data Flow**: Direct overrides are stored in `engineStore.overrideMap`. Interaction involves drag (set), double-click (clear), and numeric input (fine-tune).
 - **Documentation**: Write JSDoc comments for all major interfaces, classes, and exported functions.
 
 ## Adding New Features

@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildOtaBeginPacket, buildOtaChunkPacket, buildOtaEndPacket } from '~/utils/connectors/binary-encoder';
+import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildOtaBeginPacket, buildOtaChunkPacket, buildOtaEndPacket, buildUniverseMapPacket } from '~/utils/connectors/binary-encoder';
 import { BaseConnector, type ConnectorMeta, type EngineConnectorState } from './base-connector';
 
 // ── SerialConnector ───────────────────────────────────────────────────────────
@@ -44,12 +44,14 @@ export class SerialConnector extends BaseConnector {
   private cachedLayout   = -1;
   private cachedChannels = -1;
   private cachedEffects  = -1;
+  private cachedUniverseMap = '';
   private frameCount     = 0;
   private readonly TIMESYNC_INTERVAL = 120;
 
   constructor(id: string, baudRate = 921600) {
     super(id);
     this.baudRate = baudRate;
+    this.initOutputs(8);
   }
 
   async connect() {
@@ -65,6 +67,7 @@ export class SerialConnector extends BaseConnector {
       this.cachedLayout       = -1;
       this.cachedChannels     = -1;
       this.cachedEffects      = -1;
+      this.cachedUniverseMap  = '';
       this.firmwareVersion.value = null;
       this.startReadLoop();
       this.fetchLatestVersion();
@@ -126,6 +129,15 @@ export class SerialConnector extends BaseConnector {
     if (this.status.value !== 'connected' || !this.writer) return;
 
     const first = this.frameCount === 0;
+
+    // Send universe map on first frame or when it changes
+    const universeMapKey = this.outputMapping.value.join(',');
+    if (first || universeMapKey !== this.cachedUniverseMap) {
+      const universes = this.getActiveUniverses();
+      this.send(buildUniverseMapPacket(universes));
+      this.cachedUniverseMap = universeMapKey;
+      if (first) this.pushLog(`[sync] universe_map=${universes.length > 0 ? universes.join(',') : 'none'}`);
+    }
 
     if (first || state.bpm !== this.cachedBpm) {
       this.send(buildBpmPacket(state.bpm));
@@ -215,6 +227,7 @@ export class SerialConnector extends BaseConnector {
       this.cachedLayout   = -1;
       this.cachedChannels = -1;
       this.cachedEffects  = -1;
+      this.cachedUniverseMap = '';
       this.pushLog(`[flash] update complete — running v${this.firmwareVersion.value}`);
     } catch (e: any) {
       const msg = e?.message ?? String(e);

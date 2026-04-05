@@ -70,3 +70,10 @@ To aid in the creation of fixtures, an Express-based AI backend service powered 
 - **Concept:** Provide a manual text (later OCR'd PDF) to an endpoint `/extract-fixture`.
 - **Pipeline:** A LangGraph pipeline directs the text through specific extraction nodes (currently just General Info), utilizing `withStructuredOutput` to enforce correct schemas.
 - **Goal:** Feed the extracted data straight into the Custom Fixture Editor to dramatically speed up fixture authoring.
+
+## Direct DMX Control (Universe Inspector)
+
+The Universe Panel (`UniversePanel.vue`) provides direct, low-level access to the DMX buffer.
+- **Banner Grouping**: Fixtures appear as cohesive units with a single header.
+- **Fader Components**: `DmxChannelFader.vue` enables per-channel manipulation with horizontal icon previews, capability selection (popover), and precise numeric entry.
+- **Overrides**: All manual adjustments create high-priority overrides in the `engineStore`, bypassing effects until cleared.

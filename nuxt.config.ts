@@ -8,6 +8,9 @@ export default defineNuxtConfig({
       },
     },
   },
+  devtools: {
+    enabled: false // or false to disable
+  },
 
   css: ['~/assets/css/tailwind.css'],
 

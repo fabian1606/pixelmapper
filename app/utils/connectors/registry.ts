@@ -8,7 +8,7 @@ export interface ConnectorRegistryEntry {
   create: (id: string) => BaseConnector;
 }
 
-export const CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
+export const OUTPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
   {
     type: 'serial',
     label: 'USB Serial (ESP32)',
@@ -18,5 +18,10 @@ export const CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
   // Future entries — add class + one line here:
   // { type: 'artnet',  label: 'ArtNet',   icon: 'Network', create: (id) => new ArtNetConnector(id) },
   // { type: 'dmx-usb', label: 'DMX USB',  icon: 'Plug',    create: (id) => new DmxUsbConnector(id) },
-  // { type: 'osc',     label: 'OSC',      icon: 'Radio',   create: (id) => new OscConnector(id) },
 ];
+
+/** Input connector registry (ArtNet In, MIDI, OSC — coming soon). */
+export const INPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [];
+
+/** @deprecated Use OUTPUT_CONNECTOR_REGISTRY */
+export const CONNECTOR_REGISTRY = OUTPUT_CONNECTOR_REGISTRY;

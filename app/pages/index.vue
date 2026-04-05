@@ -18,6 +18,8 @@ import AddFixtureDialog from '~/components/engine/AddFixtureDialog.vue';
 import CustomFixtureEditorDialog from '~/components/engine/custom-fixture-editor/CustomFixtureEditorDialog.vue';
 import FixtureWorkspace from '~/components/engine/FixtureWorkspace.vue';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
+import ViewportModeSwitcher, { type ViewportMode } from '~/components/design/ViewportModeSwitcher.vue';
+import UniverseInspector from '~/components/design/UniverseInspector.vue';
 
 import { storeToRefs } from 'pinia';
 import { useEngineStore } from '~/stores/engine-store';
@@ -42,6 +44,8 @@ const updateSize = () => {
     windowHeight.value = window.innerHeight;
   }
 };
+
+const viewportMode = ref<ViewportMode>('2d');
 
 const workspaceRef = ref<InstanceType<typeof FixtureWorkspace> | null>(null);
 
@@ -194,7 +198,7 @@ useShortcuts([
 
 <template>
   <SidebarProvider>
-    <div class="flex h-full w-screen bg-background overflow-hidden text-foreground font-sans m-0 p-0">
+    <div class="flex h-full w-full bg-background overflow-hidden text-foreground font-sans m-0 p-0">
       <FixtureSidebar
         ref="fixtureSidebarRef"
         class="shrink-0"
@@ -212,15 +216,46 @@ useShortcuts([
         @select-fixtures="handleSelectFixtures"
         @open-properties-tab="handleOpenPropertiesTab"
       />
-      <main class="flex-1 relative flex">
+      <main class="flex-1 relative flex min-w-0 overflow-hidden">
+        <!-- 2D Canvas -->
         <FixtureWorkspace
+          v-show="viewportMode === '2d'"
           ref="workspaceRef"
+          class="flex-1 min-w-0"
           @quick-save="() => fixtureSidebarRef?.quickSave()"
           @overwrite-active-preset="() => fixtureSidebarRef?.overwriteActivePreset()"
           @create-preset-from-selection="(ids) => fixtureSidebarRef?.createPresetFromSelection(ids)"
           @edit-type="handleEditFixtureType"
         />
-        <FixturePropertiesSidebar ref="propertiesSidebarRef" :selected-ids="selectedIds" :fixtures="flatFixtures" :nodes="sceneNodes" />
+
+        <!-- Faders (Universe Inspector) -->
+        <UniverseInspector
+          v-show="viewportMode === 'raw'"
+          :active="viewportMode === 'raw'"
+          class="flex-1 min-w-0"
+        />
+
+        <!-- 3D placeholder (future) -->
+        <div
+          v-show="viewportMode === '3d'"
+          class="flex-1 flex items-center justify-center text-muted-foreground/40 text-sm"
+        >
+          3D-Ansicht — bald verfügbar
+        </div>
+
+        <!-- Floating mode switcher -->
+        <ViewportModeSwitcher v-model="viewportMode" />
+
+        <!-- Spacer that reserves space for the absolute-positioned properties sidebar tab strip (w-12) -->
+        <div class="w-12 shrink-0" />
+
+        <!-- Right properties sidebar (absolute overlay, positions itself) -->
+        <FixturePropertiesSidebar
+          ref="propertiesSidebarRef"
+          :selected-ids="selectedIds"
+          :fixtures="flatFixtures"
+          :nodes="sceneNodes"
+        />
       </main>
     </div>
   </SidebarProvider>

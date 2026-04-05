@@ -46,6 +46,34 @@ export const useEngineStore = defineStore('engine', () => {
 
   const currentElapsed = ref(0);
 
+  // ── Universe tracking ─────────────────────────────────────────────────────
+
+  /** Universe numbers currently used by fixtures (derived from startAddress). */
+  const usedUniverses = computed(() => {
+    const universes = new Set<number>();
+    for (const fixture of flatFixtures.value) {
+      universes.add(fixture.universe);
+    }
+    return Array.from(universes).sort((a, b) => a - b);
+  });
+
+  /** Total number of 512-channel universes the engine buffer can hold. */
+  const totalUniverses = computed(() => {
+    return Math.max(1, Math.ceil(engine.dmxBuffer.length / 512));
+  });
+
+  // Trigger reactive updates when the buffer grows after WASM render
+  const bufferLength = ref(512);
+  /** Incremented every render frame — lets fader computeds track individual DMX byte changes. */
+  const bufferRevision = ref(0);
+  watch(() => engine.dmxBuffer.length, (len) => {
+    bufferLength.value = len;
+  });
+
+  const reactiveTotalUniverses = computed(() => {
+    return Math.max(1, Math.ceil(bufferLength.value / 512));
+  });
+
   // ── Binary packet cache + revision counters ───────────────────────────────
 
   let layoutPacket:   Uint8Array = new Uint8Array(0);
@@ -55,6 +83,53 @@ export const useEngineStore = defineStore('engine', () => {
   const layoutRevision   = ref(0);
   const channelsRevision = ref(0);
   const effectsRevision  = ref(0);
+
+  // ── Override layer ────────────────────────────────────────────────────────
+
+  /**
+   * Priority 1 (highest): Manual channel overrides from the Simple Desk.
+   * Key = 0-based buffer index, value = 0–255.
+   * Future layers (programmer, background) will be inserted below this.
+   */
+  const overrideMap = shallowRef(new Map<number, number>());
+
+  /** SSR-safe accessor — Pinia hydration can strip Map objects to undefined. */
+  function getOverrideMap(): Map<number, number> {
+    return overrideMap.value ?? new Map();
+  }
+
+  /** Mixed output buffer (all layers combined). Read by faders + connectors. */
+  let outputBuffer = new Uint8Array(0);
+  /** Accessor for the current mixed output buffer (not reactive — use bufferRevision). */
+  function getOutputBuffer(): Uint8Array { return outputBuffer; }
+
+  function setOverride(bufferIndex: number, value: number) {
+    const next = new Map(getOverrideMap());
+    next.set(bufferIndex, Math.max(0, Math.min(255, Math.round(value))));
+    overrideMap.value = next;
+  }
+
+  function clearOverride(bufferIndex: number) {
+    const cur = getOverrideMap();
+    if (!cur.has(bufferIndex)) return;
+    const next = new Map(cur);
+    next.delete(bufferIndex);
+    overrideMap.value = next;
+  }
+
+  function clearAllOverrides() {
+    overrideMap.value = new Map();
+  }
+
+  function clearUniverseOverrides(universe: number) {
+    const start = (universe - 1) * 512;
+    const end = start + 512;
+    const next = new Map(getOverrideMap());
+    for (const key of next.keys()) {
+      if (key >= start && key < end) next.delete(key);
+    }
+    overrideMap.value = next;
+  }
 
   // ── Render loop state ─────────────────────────────────────────────────────
 
@@ -183,8 +258,23 @@ export const useEngineStore = defineStore('engine', () => {
         }
 
         engine.render(elapsed, delta);
+        bufferLength.value = engine.dmxBuffer.length;
+        bufferRevision.value++;
         currentElapsed.value = elapsed;
-        connectionsStore.sendFrame(engine.dmxBuffer);
+
+        // Mix output layers: SCENE (base) → OVERRIDE (top)
+        if (outputBuffer.length !== engine.dmxBuffer.length) {
+          outputBuffer = new Uint8Array(engine.dmxBuffer.length);
+        }
+        outputBuffer.set(engine.dmxBuffer);
+        const overrides = getOverrideMap();
+        if (overrides.size > 0) {
+          for (const [idx, val] of overrides) {
+            if (idx < outputBuffer.length) outputBuffer[idx] = val;
+          }
+        }
+
+        connectionsStore.sendFrame(outputBuffer);
         try {
           connectionsStore.notifyEngineState({
             bpm: engine.globalBpm.value,
@@ -224,6 +314,15 @@ export const useEngineStore = defineStore('engine', () => {
     flatFixtures,
     globalBases,
     currentElapsed,
+    usedUniverses,
+    totalUniverses: reactiveTotalUniverses,
+    bufferRevision,
+    overrideMap,
+    setOverride,
+    clearOverride,
+    clearAllOverrides,
+    clearUniverseOverrides,
+    getOutputBuffer,
     initEngine,
     _syncTrigger,
     triggerCanvasSync,
