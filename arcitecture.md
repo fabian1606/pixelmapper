@@ -60,6 +60,13 @@ The `aiBackendService` is an Express + LangGraph based backend designed to autom
   - **Banner Pattern**: Fixtures are grouped horizontally with a continuous banner showing the fixture name above their assigned channels.
   - **Fader Component**: `DmxChannelFader.vue` provides a vertical slider, a preview box with function-icons (reacting to value/color), and a popover for selecting OFL capabilities.
   - **Data Flow**: Direct overrides are stored in `engineStore.overrideMap`. Interaction involves drag (set), double-click (clear), and numeric input (fine-tune).
+  - **High-Resolution DMX (16/24-bit)**:
+    - Fine channels are synthesized as independent `GENERIC` channels during parsing.
+    - The UI represents them as separate faders for precise manual control.
+    - The Rust engine calculates effects on the coarse channel using a float-based `render_buffer` and packs the resulting high-precision value into the respective byte slots.
+  - **Patching & Boundaries**:
+    - Fixtures are strictly prevented from crossing the 512-channel universe boundary.
+    - Drag-and-drop in the `AddressGrid` enforces these boundaries with a live address label and conflict highlighting.
 - **Documentation**: Write JSDoc comments for all major interfaces, classes, and exported functions.
 
 ## Adding New Features

@@ -22,6 +22,8 @@ export interface Channel {
   resolution?: 1 | 2 | 3;
   /** Offsets for the fine and ultra-fine channels, if resolution > 1. */
   fineAddressOffsets?: number[];
+  /** True if this channel represents a lower byte/fine alias of another channel. */
+  isFine?: boolean;
 
   /**
    * Current DMX output value (0–255), written each frame by the EffectEngine.

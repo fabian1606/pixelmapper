@@ -147,15 +147,19 @@ watch(firstFixture, (fix) => {
 
 function updateDmx() {
   if (!firstFixture.value) return;
-  
+
   const newGlobalAddress = ((universe.value - 1) * 512) + localAddress.value;
   if (newGlobalAddress === firstFixture.value.startAddress) return;
   if (newGlobalAddress < 1 || newGlobalAddress > 16384) return;
 
+  // Reject if the fixture would extend beyond the 512-channel boundary of its universe
+  const localStart = ((newGlobalAddress - 1) % 512) + 1;
+  if (localStart + firstFixture.value.channels.length - 1 > 512) return;
+
   history.execute(new UpdateDmxCommand(
     firstFixture.value,
     firstFixture.value.startAddress,
-    newGlobalAddress
+    newGlobalAddress,
   ));
 }
 

@@ -25,13 +25,28 @@ export function useWorkspaceOperations(
       if (fMax > maxAddress) maxAddress = fMax;
     }
 
+    // currentAddress is the next free 1-based global address.
+    let currentAddress = maxAddress + 1;
+
     fixtures.forEach((f, i) => {
       f.id = `ofl-${nextFixtureId++}`;
-      f.startAddress = maxAddress + 1;
-      maxAddress += f.channels.length;
+
+      const channelCount = f.channels.length;
+
+      // If this fixture would cross the 512 boundary of its current universe, move to
+      // the start of the next universe to avoid split fixtures.
+      const localAddr = ((currentAddress - 1) % 512) + 1; // 1-based within universe
+      if (localAddr + channelCount - 1 > 512) {
+        const universeStart = Math.floor((currentAddress - 1) / 512) * 512 + 1;
+        currentAddress = universeStart + 512; // first address of next universe
+      }
+
+      f.startAddress = currentAddress;
+      currentAddress += channelCount;
+
       f.fixturePosition = {
         x: 0.5 + (i * 0.02),
-        y: 0.5 + (i * 0.02)
+        y: 0.5 + (i * 0.02),
       };
     });
 

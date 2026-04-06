@@ -8,6 +8,8 @@ pub struct LayoutChannelEntry {
     pub channel_type_id: u8,
     pub world_x: f32,
     pub world_y: f32,
+    pub resolution: u8,
+    pub fine_offsets: [usize; 2],
 }
 
 pub struct LayoutEntry {
@@ -25,6 +27,7 @@ pub struct ChannelEntry {
 pub struct EffectEngine {
     pub dmx_buffer: Vec<u8>,
     pub base_buffer: Vec<f32>,
+    pub render_buffer: Vec<f32>,
     pub global_bpm: f32,
     pub targets: Vec<RenderTarget>,
     pub effects: Vec<Box<dyn Effect>>,
@@ -63,6 +66,7 @@ impl EffectEngine {
         Self {
             dmx_buffer: vec![0; 512],
             base_buffer: vec![0.0; 512],
+            render_buffer: vec![0.0; 512],
             global_bpm: 120.0,
             targets: Vec::new(),
             effects: Vec::new(),
@@ -137,6 +141,8 @@ impl EffectEngine {
                     world_x: ch.world_x,
                     world_y: ch.world_y,
                     chaser_config: preserved,
+                    resolution: ch.resolution,
+                    fine_offsets: ch.fine_offsets,
                 });
             }
         }
@@ -149,6 +155,7 @@ impl EffectEngine {
         if self.dmx_buffer.len() != new_size {
             self.dmx_buffer.resize(new_size, 0);
             self.base_buffer.resize(new_size, 0.0);
+            self.render_buffer.resize(new_size, 0.0);
         }
     }
 
@@ -178,6 +185,7 @@ impl EffectEngine {
         // 0. Clear buffers so unpatched channels return to 0
         self.dmx_buffer.fill(0);
         self.base_buffer.fill(0.0);
+        self.render_buffer.fill(0.0);
 
         // 1. Update effects
         let global_bpm = self.global_bpm;
@@ -236,14 +244,20 @@ impl EffectEngine {
                 }
             }
 
-            self.base_buffer[dmx_index] = calculated_base;
-            self.dmx_buffer[dmx_index] = calculated_base.clamp(0.0, 255.0) as u8;
+            // Both buffers are clamped to 0-255. base_buffer is used by effects for
+            // computing target_min/max — storing raw out-of-range values (e.g. 32768
+            // from old 16-bit OFL defaults) would make the effect math produce extreme
+            // negative offsets that clamp everything to 0.
+            self.base_buffer[dmx_index] = calculated_base.clamp(0.0, 255.0);
+            self.render_buffer[dmx_index] = calculated_base.clamp(0.0, 255.0);
         }
 
         // 3. Apply effects
+        // Fine channels (resolution == 0) are skipped — they have no independent effect layer.
+        // Effects target the coarse channel only and use its 0-255 render_buffer slot.
         for target in &self.targets {
             let dmx_index = target.dmx_index;
-            if dmx_index >= self.dmx_buffer.len() {
+            if dmx_index >= self.dmx_buffer.len() || target.resolution == 0 {
                 continue;
             }
 
@@ -270,10 +284,24 @@ impl EffectEngine {
                 let mapped_value = target_min + ((wave_value + 1.0) / 2.0) * (target_max - target_min);
                 let offset = mapped_value - base_value;
 
-                // Additively blend the effect on top of what was already in dmxBuffer
-                let current_dmx = self.dmx_buffer[dmx_index] as f32;
-                self.dmx_buffer[dmx_index] = (current_dmx + offset).clamp(0.0, 255.0) as u8;
+                // Additively blend the effect on top of what was already in renderBuffer
+                let current_dmx = self.render_buffer[dmx_index];
+                self.render_buffer[dmx_index] = (current_dmx + offset).clamp(0.0, 255.0);
             }
+        }
+
+        // 4. Write render_buffer floats to dmx_buffer bytes.
+        //    Each byte slot is written from its OWN render_buffer slot — no cross-slot derivation.
+        //    Coarse (resolution 1-3): writes MSB from render_buffer[coarse_idx]
+        //    Fine  (resolution 0)   : writes its own render_buffer slot directly
+        //    This gives full independent control: Coarse slider → MSB, Fine slider → LSB.
+        for target in &self.targets {
+            let dmx_index = target.dmx_index;
+            if dmx_index >= self.dmx_buffer.len() {
+                continue;
+            }
+            // All channels (coarse AND fine) simply map their 0-255 float to a byte.
+            self.dmx_buffer[dmx_index] = self.render_buffer[dmx_index].clamp(0.0, 255.0) as u8;
         }
     }
 }

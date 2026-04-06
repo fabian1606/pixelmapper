@@ -142,38 +142,39 @@ function handleAdd() {
 
   const fixtures: Fixture[] = [];
   for (let i = 0; i < count; i++) {
+    // Check BEFORE placing: if this fixture would cross the 512 boundary, wrap to next universe
+    if (currentLocalAddress + channelCount - 1 > 512) {
+      currentUniverse++;
+      currentLocalAddress = 1;
+    }
+
     const fixture = createFixtureFromOfl(
-      fullFixtureData.value, 
+      fullFixtureData.value,
       modeIdx,
       undefined,
-      selectedSummary.value?.manufacturer
+      selectedSummary.value?.manufacturer,
     );
-    
+
     // Compute absolute address across dynamic universes
     fixture.startAddress = (currentUniverse - 1) * 512 + currentLocalAddress;
 
     // Tag with DMX info
     (fixture as any).dmxConfig = {
       universe: currentUniverse,
-      address: currentLocalAddress
+      address: currentLocalAddress,
     };
 
     // If adding multiple, uniquely name them if they don't have a unique name already
     if (count > 1) {
       fixture.name = `${fixture.name} ${i + 1}`;
     }
-    
+
     fixtures.push(fixture);
 
-    // Increment address for the next fixture
+    // Advance address for the next fixture
     currentLocalAddress += channelCount;
-
-    // Auto-wrap Universe if local address overflows
-    if (currentLocalAddress + channelCount - 1 > 512) {
-      currentUniverse++;
-      currentLocalAddress = 1;
-    }
   }
+
   
   emit('add', fixtures);
   

@@ -51,7 +51,14 @@ pub struct RenderTarget {
     pub world_y: f32,
     #[serde(rename = "chaserConfig")]
     pub chaser_config: Option<ChaserConfig>,
+    #[serde(default = "default_resolution")]
+    pub resolution: u8,
+    #[serde(rename = "fineOffsets", default)]
+    pub fine_offsets: [usize; 2],
 }
+
+fn default_resolution() -> u8 { 1 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectDirection {

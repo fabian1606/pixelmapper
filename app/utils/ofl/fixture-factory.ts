@@ -246,9 +246,14 @@ export function createFixtureFromOfl(
   // ── 2. Build Channel objects ──────────────────────────────────────────────
   const channels: Channel[] = [];
 
+  // Pre-computed fine default bytes: keyed by fine alias name.
+  // Populated when we process a coarse 16/24-bit channel so the fine
+  // channel gets the correct LSB default (instead of hardcoded 0).
+  const fineDefaults = new Map<string, number>();
+
   for (let dmxIndex = 0; dmxIndex < expandedKeys.length; dmxIndex++) {
     const item = expandedKeys[dmxIndex]!;
-    if (isFineChannel(item.key, item.templateKey, oflFixture)) continue;
+    const isFine = isFineChannel(item.key, item.templateKey, oflFixture);
 
     // Lookup order:
     // 1. availableChannels by exact key (normal channels)
@@ -256,6 +261,34 @@ export function createFixtureFromOfl(
     const channelDef =
       (oflFixture.availableChannels ?? {})[item.key] ??
       (item.templateKey ? oflFixture.templateChannels?.[item.templateKey] : undefined);
+
+    if (isFine) {
+      // Synthesize a basic channel for the fine component so the UI has a fader for it.
+      // Fine channels don't process effects directly, so we give them a basic configuration.
+      // Look up any pre-computed default byte from the parent coarse channel.
+      const fineDefault = fineDefaults.get(item.key) ?? fineDefaults.get(item.templateKey ?? '') ?? 0;
+      channels.push({
+        type: 'GENERIC', // Will just show up as a standard fader
+        addressOffset: dmxIndex,
+        isFine: true,
+        role: 'NONE',
+        colorValue: '#ffffff',
+        defaultValue: fineDefault,
+        oflChannelName: item.key,
+        beamId: item.beamId,
+        oflCapabilities: [],
+        oflWheels: {},
+        chaserConfig: reactive({
+          stepValues: [fineDefault],
+          stepsCount: 1,
+          activeEditStep: 0,
+          isPlaying: false,
+          stepDuration: { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 },
+          fadeDuration: { mode: 'time', timeMs: 0, beatValue: 0, beatOffset: 0 },
+        }),
+      });
+      continue;
+    }
 
     if (!channelDef) continue;
 
@@ -267,6 +300,8 @@ export function createFixtureFromOfl(
 
     let resolution: 1 | 2 | 3 = 1;
     const fineAddressOffsets: number[] = [];
+    let coarseDefault = mapped.defaultValue;
+
     if (channelDef.dmxValueResolution === '16bit' || channelDef.dmxValueResolution === '24bit') {
       const aliases = channelDef.fineChannelAliases ?? [];
       for (const alias of aliases) {
@@ -274,14 +309,32 @@ export function createFixtureFromOfl(
         // might need to be resolved against the pixelKey. OFL matrix channels typically
         // just append " fine" or provide a template. For simplicity, we search the expanded
         // keys for one whose templateKey matches the alias OR whose key exactly matches the alias for this beam.
-        const fineIdx = expandedKeys.findIndex(e => 
-          (e.key === alias || e.templateKey === alias) && e.beamId === item.beamId
+        const fineIdx = expandedKeys.findIndex(e =>
+          (e.key === alias || e.templateKey === alias) && e.beamId === item.beamId,
         );
         if (fineIdx !== -1) {
           fineAddressOffsets.push(fineIdx);
         }
       }
       resolution = (1 + fineAddressOffsets.length) as 1 | 2 | 3;
+
+      // OFL defaultValue for multi-resolution channels is given in the channel's full range
+      // (e.g. 32768 for a 16-bit center, 0-65535). Split it into byte components (MSB first)
+      // so coarse and fine faders both start at a sensible position.
+      const rawDef = typeof channelDef.defaultValue === 'number' ? channelDef.defaultValue : null;
+      if (rawDef !== null && rawDef > 255) {
+        if (resolution === 2) {
+          coarseDefault = (rawDef >> 8) & 0xFF;           // high byte
+          const fineByte  = rawDef & 0xFF;                  // low byte
+          if (aliases[0]) fineDefaults.set(aliases[0], fineByte);
+        } else if (resolution === 3) {
+          coarseDefault = (rawDef >> 16) & 0xFF;           // highest byte
+          const midByte   = (rawDef >> 8) & 0xFF;
+          const lsb       = rawDef & 0xFF;
+          if (aliases[0]) fineDefaults.set(aliases[0], midByte);
+          if (aliases[1]) fineDefaults.set(aliases[1], lsb);
+        }
+      }
     }
 
     channels.push({
@@ -291,13 +344,13 @@ export function createFixtureFromOfl(
       fineAddressOffsets: fineAddressOffsets.length > 0 ? fineAddressOffsets : undefined,
       role: mapped.role,
       colorValue: mapped.colorValue,
-      defaultValue: mapped.defaultValue,
+      defaultValue: coarseDefault,
       oflChannelName: item.key,
       beamId: item.beamId,
       oflCapabilities: caps,
       oflWheels: oflFixture.wheels ?? {},
       chaserConfig: reactive({
-        stepValues: [mapped.defaultValue],
+        stepValues: [coarseDefault],
         stepsCount: 1,
         activeEditStep: 0,
         isPlaying: false,

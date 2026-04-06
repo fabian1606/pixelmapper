@@ -161,6 +161,12 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       w.u8(CHANNEL_TYPE_ID[ch.type] ?? 255);
       w.f32(worldX);
       w.f32(worldY);
+      
+      // Send resolution and fine offsets for 16-bit / 24-bit packing
+      const res = ch.isFine ? 0 : (ch.resolution ?? 1);
+      w.u8(res);
+      w.u16(ch.fineAddressOffsets?.[0] !== undefined ? f.startAddress - 1 + ch.fineAddressOffsets[0] : 0xFFFF);
+      w.u16(ch.fineAddressOffsets?.[1] !== undefined ? f.startAddress - 1 + ch.fineAddressOffsets[1] : 0xFFFF);
     }
   }
 
