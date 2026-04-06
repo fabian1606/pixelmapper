@@ -101,12 +101,44 @@ const cellsCache = computed(() => {
   return result;
 });
 
-// ─── Live buffer — evaluated once per frame, gated by active prop ─────────────
-const liveBuffer = computed((): Uint8Array | number[] => {
-  if (!props.active) return [];
-  engineStore.bufferRevision; // reactive tick
-  return engineStore.getOutputBuffer();
+// ─── Direct DOM Updates for Performance ──────────────────────────────────────
+const gridContainerRef = ref<HTMLElement | null>(null);
+const cachedLabels: Record<number, { el: HTMLElement; idx: number }[]> = {};
+const visibleUniverses = ref(new Set<number>());
+
+// Update any visible DMX value labels directly on buffer change
+watchEffect(() => {
+  engineStore.bufferRevision; // schedule trigger
+  const buf = engineStore.getOutputBuffer();
+  if (!buf || buf.length === 0) return;
+
+  for (const u of visibleUniverses.value) {
+    const list = cachedLabels[u];
+    if (!list) continue;
+    for (const { el, idx } of list) {
+      if (idx < buf.length) {
+        const val = buf[idx]!;
+        if (el.textContent !== String(val)) el.textContent = String(val);
+      }
+    }
+  }
 });
+
+// Re-cache labels when the grid structure changes (e.g., fixtures added/moved)
+watch([cellsCache, gridContainerRef], async () => {
+  await nextTick();
+  const container = gridContainerRef.value;
+  if (!container) return;
+
+  for (const u of usedUniverses.value) {
+    const selector = `[data-universe-labels="${u}"] [data-buf-idx]`;
+    const nodes = container.querySelectorAll(selector);
+    cachedLabels[u] = Array.from(nodes).map(el => ({
+      el: el as HTMLElement,
+      idx: parseInt((el as HTMLElement).dataset.bufIdx!, 10)
+    }));
+  }
+}, { immediate: true, deep: true });
 
 // ─── Drag ─────────────────────────────────────────────────────────────────────
 const dragFixture = ref<Fixture | null>(null);
@@ -233,13 +265,17 @@ function setupVisibilityTracking() {
   const io = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
+        const u = Number((entry.target as HTMLElement).dataset.universe);
+        if (!u) continue;
         if (entry.isIntersecting) {
-          const u = Number((entry.target as HTMLElement).dataset.universe);
-          if (u) emit('update:visibleUniverse', u);
+          visibleUniverses.value.add(u);
+          emit('update:visibleUniverse', u);
+        } else {
+          visibleUniverses.value.delete(u);
         }
       }
     },
-    { root: container, threshold: 0.5 }
+    { root: container, threshold: 0.1 }
   );
   for (const u of usedUniverses.value) {
     const el = universeRowRefs[u];
@@ -262,7 +298,8 @@ const ghostIsConflict = computed(() => {
 </script>
 
 <template>
-  <div ref="scrollContainerRef" class="shrink-0 border-b border-border/40 bg-background overflow-y-auto" style="max-height: 320px">
+  <div ref="gridContainerRef" class="flex-1 min-h-0 min-w-0 border-b border-border/40 bg-background flex flex-col">
+    <div ref="scrollContainerRef" class="flex-1 overflow-y-auto min-h-0">
     <div class="p-2 flex flex-col gap-2">
       <div
         v-for="universe in usedUniverses"
@@ -277,6 +314,7 @@ const ghostIsConflict = computed(() => {
 
         <div
           :ref="(el) => setStripRef(universe, el as HTMLElement | null)"
+          :data-universe-labels="universe"
           class="flex flex-wrap flex-1"
           @pointermove="onStripPointerMove($event, universe)"
           @pointerup="onStripPointerUp($event, universe)"
@@ -303,7 +341,7 @@ const ghostIsConflict = computed(() => {
               ]"
               :style="{
                 top: '1px', bottom: '1px',
-                background: engineStore.selectedIds.has(cell.fixture.id) ? 'hsl(217 50% 38%)' : 'hsl(217 33% 28%)',
+                background: engineStore.selectedIds.has(cell.fixture.id) ? 'rgba(251, 191, 36, 0.25)' : '#2a2a2a',
               }"
             />
 
@@ -317,19 +355,24 @@ const ghostIsConflict = computed(() => {
               ]"
               :style="{
                 top: '1px', bottom: '1px', left: '0', right: '0',
-                borderTop: '1px solid hsl(217 70% 55%)',
-                borderBottom: '1px solid hsl(217 70% 55%)',
-                borderLeft: cell.isFirstInFixture ? '1px solid hsl(217 70% 55%)' : 'none',
-                borderRight: cell.isLastInFixture ? '1px solid hsl(217 70% 55%)' : 'none',
+                borderTop: '1px solid rgb(251 191 36)',
+                borderBottom: '1px solid rgb(251 191 36)',
+                borderLeft: cell.isFirstInFixture ? '1px solid rgb(251 191 36)' : 'none',
+                borderRight: cell.isLastInFixture ? '1px solid rgb(251 191 36)' : 'none',
               }"
             />
 
             <!-- Empty cell: border + address -->
             <template v-else>
               <div class="absolute inset-0 border border-border/10" />
-              <span class="absolute inset-0 flex items-center justify-center text-[7px] text-muted-foreground/25 leading-none pointer-events-none select-none tabular-nums">
+              <span class="absolute top-0 left-0 px-1 pt-[3px] text-[7px] text-muted-foreground/30 leading-tight pointer-events-none select-none tabular-nums">
                 {{ cell.localAddr }}
               </span>
+              <span
+                class="absolute left-0 right-0 text-center text-[7px] text-muted-foreground/20 leading-none pointer-events-none z-10 tabular-nums"
+                style="bottom: 4px"
+                :data-buf-idx="cell.bufIdx"
+              />
             </template>
 
             <!-- Ghost overlay -->
@@ -358,11 +401,11 @@ const ghostIsConflict = computed(() => {
               v-if="cell.fixture"
               class="absolute left-0 right-0 text-center text-[7px] text-white/40 leading-none pointer-events-none z-10 tabular-nums"
               style="bottom: 4px"
-            >
-              {{ liveBuffer[cell.bufIdx] ?? 0 }}
-            </span>
+              :data-buf-idx="cell.bufIdx"
+            />
           </div>
         </div>
+      </div>
       </div>
     </div>
   </div>

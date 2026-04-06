@@ -1,4 +1,6 @@
-import tailwindcss from '@tailwindcss/vite'
+import tailwindcss from '@tailwindcss/vite';
+import wasm from 'vite-plugin-wasm';
+import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineNuxtConfig({
   typescript: {
@@ -22,9 +24,14 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [
+      wasm(),
+      topLevelAwait(),
       //@ts-ignore
       tailwindcss(),
     ],
+    build: {
+      target: 'esnext', // required for top-level await support
+    },
     optimizeDeps: {
       exclude: ['rs-engine-canvas', 'rs-engine-core'],
     },

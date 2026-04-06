@@ -77,3 +77,9 @@ The Universe Panel (`UniversePanel.vue`) provides direct, low-level access to th
 - **Banner Grouping**: Fixtures appear as cohesive units with a single header.
 - **Fader Components**: `DmxChannelFader.vue` enables per-channel manipulation with horizontal icon previews, capability selection (popover), and precise numeric entry.
 - **Overrides**: All manual adjustments create high-priority overrides in the `engineStore`, bypassing effects until cleared.
+- **High-Frequency Performance**: To ensure 60fps even with 512+ reactive DMX values, the Grid and Faders use a "Bypass Reactivity" pattern. Instead of Vue template interpolation (which triggers expensive virtual DOM patches), values are pushed directly to cached DOM nodes via `requestAnimationFrame` using the `bufferRevision` reactive trigger only for the initial scheduling.
+- **Dual View Modes**:
+    - **Grid View**: A visual, bit-packed representation of the universe helpful for identifying overlaps and gaps.
+    - **Table View (`PatchTable.vue`)**: A structured list optimized for auditing fixture settings (ID, Name, Type, Mode, Address, etc.).
+    - **Selection Sync**: Both views are fully synchronized with the `engineStore.selectedIds` and the 2D Workspace.
+

@@ -8,6 +8,7 @@ This document outlines the core architectural patterns of the Pixelmapper applic
 - **Framework**: Nuxt 3 / Vue 3
 - **State Management**: Pinia
 - **Core Engine**: Custom TypeScript engine for DMX/Fixture management, Effects, and Presets. (Partially Rust WASM for rendering/canvas)
+  - **WASM Integration**: Requires `vite-plugin-wasm` and `vite-plugin-top-level-await` in `nuxt.config.ts` to support ESM-style loading of compiled Rust packages.
 
 ## Core Concepts
 
@@ -55,6 +56,7 @@ The `aiBackendService` is an Express + LangGraph based backend designed to autom
   - State: `app/composables/useGlobalContextMenu.ts`
   - Pattern: Define menu options including labels, icons, and callback actions direktly at the trigger source for maximum flexibility.
 - **Universe Inspector**: A specialized UI for direct DMX control.
+  - **View Switching Pattern**: Users can toggle between a visual `AddressGrid` and a structured `PatchTable`. The Grid uses `v-show` to preserve scroll state, while the Table uses `v-if`.
   - **Banner Pattern**: Fixtures are grouped horizontally with a continuous banner showing the fixture name above their assigned channels.
   - **Fader Component**: `DmxChannelFader.vue` provides a vertical slider, a preview box with function-icons (reacting to value/color), and a popover for selecting OFL capabilities.
   - **Data Flow**: Direct overrides are stored in `engineStore.overrideMap`. Interaction involves drag (set), double-click (clear), and numeric input (fine-tune).

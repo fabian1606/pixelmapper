@@ -19,6 +19,11 @@ function handleFaderUpdate(bufferIndex: number, value: number) {
   setOverride(bufferIndex, value);
 }
 
+function groupIsSelected(group: any) {
+  if (!group.isAssigned) return false;
+  return group.channels.some((ch: any) => ch.fixture && engineStore.selectedIds.has(ch.fixture.id));
+}
+
 function scrollToChannel(bufferIndex: number) {
   const container = faderContainerRef.value;
   if (!container) return;
@@ -40,7 +45,10 @@ defineExpose({ scrollToChannel });
           <!-- Group banner (only if assigned) -->
           <div
             v-if="group.isAssigned"
-            class="text-[10px] font-bold text-center px-2 py-1 mb-1 rounded-sm truncate bg-muted/40 text-muted-foreground border border-border/40"
+            class="text-[10px] font-bold text-center px-2 py-1 mb-1 rounded-sm truncate border transition-all"
+            :class="groupIsSelected(group) 
+              ? 'bg-amber-400/20 text-amber-400 border-amber-500/40 shadow-[0_0_10px_rgba(251,191,36,0.1)]' 
+              : 'bg-muted/40 text-muted-foreground border-border/40'"
             :title="group.label"
             :style="{ width: group.channels.length * 36 + (group.channels.length - 1) * 2 + 'px' }"
           >

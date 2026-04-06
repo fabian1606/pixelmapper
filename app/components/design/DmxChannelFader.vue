@@ -38,16 +38,15 @@ const displayValue = computed(() => {
   return idx < buf.length ? buf[idx]! : 0;
 });
 
-// Push value to DOM only when not dragging and value actually changed
-let lastWrittenValue = -1;
 watchEffect(() => {
-  if (!props.active || isDragging.value) return;
+  const slider = sliderRef.value;
+  const input = valueInputRef.value;
+  if (!props.active || isDragging.value || !slider || !input) return;
+  
   const v = displayValue.value;
-  if (v !== lastWrittenValue) {
-    lastWrittenValue = v;
-    if (sliderRef.value) sliderRef.value.value = String(v);
-    if (valueInputRef.value) valueInputRef.value.value = String(v);
-  }
+  const vStr = String(v);
+  if (slider.value !== vStr) slider.value = vStr;
+  if (input.value !== vStr) input.value = vStr;
 });
 
 function onPointerDown() {
@@ -123,6 +122,11 @@ const previewStyle = computed(() => {
   };
 });
 
+const isSelected = computed(() => {
+  const fid = props.channelInfo.fixture?.id;
+  return fid !== undefined && engineStore.selectedIds.has(fid);
+});
+
 const sliderStyle = computed(() => {
   const percent = (displayValue.value / 255) * 100;
   return {
@@ -140,7 +144,10 @@ const sliderStyle = computed(() => {
 <template>
   <div
     class="dmx-fader flex flex-col items-center select-none shrink-0 rounded transition-colors pb-1"
-    :class="isOverridden ? 'is-overridden bg-amber-400/5' : ''"
+    :class="[
+      isOverridden ? 'is-overridden bg-amber-400/5' : '',
+      isSelected ? 'is-selected bg-amber-400/5' : ''
+    ]"
   >
     <!-- Preview Box with Popover -->
     <div class="px-1 py-1 w-full flex justify-center">
@@ -308,17 +315,30 @@ const sliderStyle = computed(() => {
   transform: scale(0.95);
 }
 
-/* Overridden thumb state */
+.dmx-fader.is-overridden {
+  box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.05);
+}
+
+.dmx-fader.is-selected {
+  box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.05);
+  background-color: rgba(251, 191, 36, 0.03);
+}
+
+/* Overridden and Selected thumb states */
 .fader-range.overridden::-webkit-slider-thumb {
   background: rgb(251 191 36); /* amber-400 */
-  border-color: rgb(251 191 36);
+  border-color: rgb(245 158 11); /* amber-500 */
   box-shadow: 0 0 15px rgba(251, 191, 36, 0.4);
+}
+
+.dmx-fader.is-selected:not(.is-overridden) .fader-range::-webkit-slider-thumb {
+  background: var(--muted-foreground);
+  border-color: color-mix(in srgb, var(--foreground) 20%, transparent);
 }
 
 .fader-range.overridden::-webkit-slider-thumb:hover {
   background: rgb(252 211 77); /* amber-300 */
 }
-
 
 /* Firefox styles */
 .fader-range::-moz-range-track {
@@ -346,7 +366,6 @@ const sliderStyle = computed(() => {
   background: rgb(251 191 36);
 }
 
-
 /* Chrome/Safari: hide spin buttons */
 .value-input::-webkit-outer-spin-button,
 .value-input::-webkit-inner-spin-button {
@@ -364,15 +383,12 @@ const sliderStyle = computed(() => {
   cursor: default;
 }
 
-.dmx-fader:not(.is-overridden) .fader-range {
+.dmx-fader:not(.is-overridden):not(.is-selected) .fader-range {
   opacity: 0.6;
 }
 
-.dmx-fader.is-overridden .fader-range {
+.dmx-fader.is-overridden .fader-range,
+.dmx-fader.is-selected .fader-range {
   opacity: 1;
-}
-
-.dmx-fader.is-overridden {
-  box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.05);
 }
 </style>

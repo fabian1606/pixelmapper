@@ -265,9 +265,30 @@ export function createFixtureFromOfl(
     const mapped = resolveOflChannel(channelDef, resolveKey);
     const caps = channelDef.capabilities ?? (channelDef.capability ? [channelDef.capability] : []);
 
+    let resolution: 1 | 2 | 3 = 1;
+    const fineAddressOffsets: number[] = [];
+    if (channelDef.dmxValueResolution === '16bit' || channelDef.dmxValueResolution === '24bit') {
+      const aliases = channelDef.fineChannelAliases ?? [];
+      for (const alias of aliases) {
+        // If this is a matrix channel, the alias in the definition (e.g. "Red fine")
+        // might need to be resolved against the pixelKey. OFL matrix channels typically
+        // just append " fine" or provide a template. For simplicity, we search the expanded
+        // keys for one whose templateKey matches the alias OR whose key exactly matches the alias for this beam.
+        const fineIdx = expandedKeys.findIndex(e => 
+          (e.key === alias || e.templateKey === alias) && e.beamId === item.beamId
+        );
+        if (fineIdx !== -1) {
+          fineAddressOffsets.push(fineIdx);
+        }
+      }
+      resolution = (1 + fineAddressOffsets.length) as 1 | 2 | 3;
+    }
+
     channels.push({
       type: mapped.type,
       addressOffset: dmxIndex,
+      resolution,
+      fineAddressOffsets: fineAddressOffsets.length > 0 ? fineAddressOffsets : undefined,
       role: mapped.role,
       colorValue: mapped.colorValue,
       defaultValue: mapped.defaultValue,

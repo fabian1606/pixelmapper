@@ -175,6 +175,10 @@ impl EffectEngine {
     }
 
     pub fn render(&mut self, time_ms: f32, delta_time_ms: f32) {
+        // 0. Clear buffers so unpatched channels return to 0
+        self.dmx_buffer.fill(0);
+        self.base_buffer.fill(0.0);
+
         // 1. Update effects
         let global_bpm = self.global_bpm;
         for effect in &mut self.effects {

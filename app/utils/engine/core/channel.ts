@@ -18,6 +18,10 @@ export interface Channel {
   type: ChannelType;
   /** 0-based index offset from the fixture's startAddress */
   addressOffset: number;
+  /** Number of DMX bytes this channel spans (1 = 8-bit, 2 = 16-bit, 3 = 24-bit). Default is 1. */
+  resolution?: 1 | 2 | 3;
+  /** Offsets for the fine and ultra-fine channels, if resolution > 1. */
+  fineAddressOffsets?: number[];
 
   /**
    * Current DMX output value (0–255), written each frame by the EffectEngine.
