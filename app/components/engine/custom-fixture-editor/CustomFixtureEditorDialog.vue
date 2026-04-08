@@ -71,16 +71,24 @@ async function handleAIPdfUpload(file: File) {
     
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    // Buffer accumulates incomplete lines across chunks
+    let buffer = '';
     
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      // Append decoded chunk to buffer and split on double newlines (SSE event boundary)
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
       
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
+      // All parts except the last are complete SSE events; the last may be incomplete
+      buffer = parts.pop() ?? '';
+      
+      for (const part of parts) {
+        // Each SSE event block may contain multiple lines; find the data: line
+        for (const line of part.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
           try {
             const json = JSON.parse(line.substring(6));
             if (json.status) {
@@ -114,6 +122,9 @@ async function handleAIPdfUpload(file: File) {
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
+    aiUploadPending.value = false;
+    extractError.value = '';
+    isExtracting.value = false;
     if (props.startWithAiUpload) {
       // Clear data first
       channels.value = [];

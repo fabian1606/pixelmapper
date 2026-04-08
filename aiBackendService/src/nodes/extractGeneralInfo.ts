@@ -1,10 +1,15 @@
 import type { ExtractionState } from "../state.js";
 import { getHaikuModel } from "../model.js";
 import { CustomFixtureFormSchema } from "../../../app/utils/engine/custom-fixture-types.ts";
-import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
-import type { RunnableConfig } from "@langchain/core/runnables";
-import { tool } from "@langchain/core/tools";
+import { toGeminiJsonSchema } from "../utils/gemini-schema.js";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import { ToolMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
+
+// Pre-convert CustomFixtureFormSchema to Gemini-compatible JSON schema.
+// This is the single source of truth — toGeminiJsonSchema patches 'const' and empty enum values.
+const geminiGeneralInfoJsonSchema = toGeminiJsonSchema(CustomFixtureFormSchema);
+
 
 // A system prompt explaining the task
 const systemPrompt = `You are an expert at extracting lighting fixture definitions from user manuals.
@@ -27,17 +32,17 @@ IMPORTANT INSTRUCTIONS FOR REASONING AND LOGICAL DEDUCTION:
 /**
  * Node to extract general information using Claude Haiku.
  */
-export async function extractGeneralInfo(state: ExtractionState, config?: RunnableConfig): Promise<Partial<ExtractionState>> {
-  await dispatchCustomEvent("status", { message: "Extracting General Info..." }, config);
+export async function extractGeneralInfo(state: ExtractionState, config?: LangGraphRunnableConfig): Promise<Partial<ExtractionState>> {
+  config?.writer?.({ message: "Extracting General Info..." });
 
-  const extractTool = tool(
-    async (input) => JSON.stringify(input),
-    {
-      name: "extract_general_info",
-      description: "Extract the required general and physical information of the fixture.",
-      schema: CustomFixtureFormSchema
-    }
-  );
+  // DynamicStructuredTool accepts a pre-computed JSON schema object, bypassing
+  // LangChain's internal zodToJsonSchema which would re-introduce 'const' from z.literal().
+  const extractTool = new DynamicStructuredTool({
+    name: "extract_general_info",
+    description: "Extract the required general and physical information of the fixture.",
+    schema: geminiGeneralInfoJsonSchema as any,
+    func: async (input: any) => JSON.stringify(input),
+  });
 
   const model = getHaikuModel().bindTools([extractTool]);
 

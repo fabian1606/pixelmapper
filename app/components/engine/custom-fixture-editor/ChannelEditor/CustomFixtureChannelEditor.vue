@@ -96,9 +96,11 @@ function isChannelInMode(channelId: string) {
       <ModeTabs :modes="modes" :active-mode-idx="activeModeIdx" @update:active-mode-idx="activeModeIdx = $event" @add="addMode" @rename="(idx, name) => modesArr[idx]!.name = name" />
       
       <!-- Box for available channels (Tag-based assignment UI) -->
-      <div class="border-b border-border/50 bg-background p-3 flex flex-col gap-2 shrink-0">
-        <p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Available Channels</p>
-        <div class="flex flex-wrap gap-1.5" v-if="channels.length > 0">
+      <div class="border-b border-border/50 bg-background flex flex-col shrink-0 max-h-48">
+        <div class="p-3 pb-2 shrink-0 border-b border-border/10">
+          <p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Available Channels</p>
+        </div>
+        <div class="flex flex-wrap content-start gap-1.5 p-3 pt-2 overflow-y-auto min-h-0" v-if="channels.length > 0">
           <button 
             v-for="ch in channels" 
             :key="ch.id"
@@ -113,7 +115,9 @@ function isChannelInMode(channelId: string) {
             <span class="font-medium">{{ ch.name }}</span>
           </button>
         </div>
-        <p v-else class="text-[10px] text-muted-foreground/50 italic">Create channels first to add them to a mode.</p>
+        <div v-else class="p-3 pt-2">
+          <p class="text-[10px] text-muted-foreground/50 italic">Create channels first to add them to a mode.</p>
+        </div>
       </div>
 
       <ModeDmxAddressList v-if="modes[activeModeIdx]" :mode="modes[activeModeIdx]!" :channels="channels" :head-count="headCount" :entry-start-address="entryStartAddress" :addr-of="addrOf" @remove-entry="removeEntry" @patch-entry="patchEntry" @reorder="handleReorder" />

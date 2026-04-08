@@ -21,12 +21,12 @@ const CapabilityBase = {
 
 export const OflCapabilitySchema = z.discriminatedUnion('type', [
   // NoFunction
-  z.object({ type: z.literal('NoFunction'), ...CapabilityBase }).describe('Used for DMX ranges with no effect, blackout, or unused slots.'),
+  z.object({ type: z.literal('NoFunction'), ...CapabilityBase }).describe('Used for DMX ranges with no effect, blackout, or unused slots. type MUST be exactly "NoFunction".'),
 
   // ShutterStrobe
   z.object({
     type: z.literal('ShutterStrobe'),
-    shutterEffect: z.enum(['Open', 'Closed', 'Strobe', 'Pulse', 'RampUp', 'RampDown', 'RampUpDown', 'Lightning', 'Spikes', 'Burst']),
+    shutterEffect: z.enum(['Open', 'Closed', 'Strobe', 'Pulse', 'RampUp', 'RampDown', 'RampUpDown', 'Lightning', 'Spikes', 'Burst']).describe('MUST be exactly one of: "Open", "Closed", "Strobe", "Pulse", "RampUp", "RampDown", "RampUpDown", "Lightning", "Spikes", "Burst". Use "Open" for shutter-open / lamp-on. Use "Closed" for blackout. Use "Strobe" for standard blinking.'),
     soundControlled: z.boolean().optional(),
     randomTiming: z.boolean().optional(),
     speed: z.string().optional(),
@@ -36,7 +36,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     durationStart: z.string().optional(),
     durationEnd: z.string().optional(),
     ...CapabilityBase,
-  }).describe('For master shutter or strobe channels. Use "Strobe" for standard blinking effects.'),
+  }).describe('For master shutter or strobe channels. type MUST be exactly "ShutterStrobe". shutterEffect MUST be one of the listed enum values — do NOT invent values like "strobe" or "STROBE".'),
 
   // StrobeSpeed
   z.object({
@@ -68,12 +68,12 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
   // ColorIntensity
   z.object({
     type: z.literal('ColorIntensity'),
-    color: z.enum(['Red', 'Green', 'Blue', 'Cyan', 'Magenta', 'Yellow', 'Amber', 'White', 'Warm White', 'Cold White', 'UV', 'Lime', 'Indigo']),
+    color: z.enum(['Red', 'Green', 'Blue', 'Cyan', 'Magenta', 'Yellow', 'Amber', 'White', 'Warm White', 'Cold White', 'UV', 'Lime', 'Indigo']).describe('MUST be exactly one of: "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow", "Amber", "White", "Warm White", "Cold White", "UV", "Lime", "Indigo". Case-sensitive, no abbreviations.'),
     brightness: z.string().optional(),
     brightnessStart: z.string().optional(),
     brightnessEnd: z.string().optional(),
     ...CapabilityBase,
-  }).describe('CRITICAL: Use this for individual Red, Green, Blue, Amber, White, etc., DMX channels in an RGB/RGBW fixture.'),
+  }).describe('CRITICAL: Use this for individual Red, Green, Blue, Amber, White, UV etc. DMX channels in an RGBW/RGBWA fixture. type MUST be exactly "ColorIntensity". color MUST be one of the listed enum values.'),
 
   // ColorPreset
   z.object({
@@ -219,7 +219,7 @@ export const OflCapabilitySchema = z.discriminatedUnion('type', [
     soundSensitivityStart: z.string().optional(),
     soundSensitivityEnd: z.string().optional(),
     ...CapabilityBase,
-  }).describe('CRITICAL: Use this for "Internal Programs", "Built-in Effects", "Macros", or "Auto Modes" channels. Provide a descriptive label in effectName.'),
+  }).describe('CRITICAL: Use this for "Internal Programs", "Built-in Effects", "Macros", or "Auto Modes" channels. type MUST be exactly "Effect". Provide a descriptive label in effectName.'),
 
   // EffectSpeed
   z.object({
@@ -474,8 +474,8 @@ export const OflChannelSchema = z.object({
   highlightValue: z.union([z.number().int(), z.string()]).optional(),
   constant: z.boolean().optional(),
   precedence: z.enum(['HTP', 'LTP']).optional(),
-  capability: OflCapabilitySchema.optional(),
-  capabilities: z.array(OflCapabilitySchema).optional(),
+  capability: OflCapabilitySchema.optional().describe('Use this (singular) ONLY when the entire 0–255 DMX range is a single function (e.g. a pure dimmer or pure color channel). Do NOT use if there are multiple ranges.'),
+  capabilities: z.array(OflCapabilitySchema).optional().describe('Use this (plural array) when the channel has multiple DMX ranges with different functions. Each element MUST have a dmxRange [start, end] and a valid type from the discriminated union. type values MUST match exactly: "NoFunction", "ShutterStrobe", "Intensity", "ColorIntensity", "ColorPreset", "Effect", etc. — no lowercase, no underscores.'),
 });
 
 export type OflChannel = z.infer<typeof OflChannelSchema>;

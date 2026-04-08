@@ -41,8 +41,9 @@ app.post("/extract-fixture-pdf", upload.single('manualPdf'), async (req, res) =>
 
     for await (const [mode, chunk] of stream) {
       if (mode === "custom") {
-        if (chunk.name === "status" && chunk.data) {
-          res.write(`data: ${JSON.stringify({ status: chunk.data.message })}\n\n`);
+        // config.writer(payload) sends payload directly as chunk
+        if (chunk?.message) {
+          res.write(`data: ${JSON.stringify({ status: chunk.message })}\n\n`);
         }
       } else if (mode === "updates") {
         if (chunk.assembleOflDocument) {
@@ -90,8 +91,9 @@ app.post("/extract-fixture", async (req, res) => {
 
     for await (const [mode, chunk] of stream) {
       if (mode === "custom") {
-        if (chunk.name === "status" && chunk.data) {
-          res.write(`data: ${JSON.stringify({ status: chunk.data.message })}\n\n`);
+        // config.writer(payload) sends payload directly as chunk
+        if (chunk?.message) {
+          res.write(`data: ${JSON.stringify({ status: chunk.message })}\n\n`);
         }
       } else if (mode === "updates") {
         if (chunk.assembleOflDocument) {

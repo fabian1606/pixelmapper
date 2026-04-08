@@ -21,6 +21,11 @@ export const ExtractionStateAnnotation = Annotation.Root({
     reducer: (x, y) => x.concat(y),
     default: () => [],
   }),
+  // Identified Channels for map-reduce
+  identifiedChannels: Annotation<{name: string, type: string}[]>({
+    reducer: (x, y) => y ?? x,
+    default: () => [],
+  }),
   // Extracted DMX Modes
   modes: Annotation<any[]>({
     reducer: (x, y) => x.concat(y),

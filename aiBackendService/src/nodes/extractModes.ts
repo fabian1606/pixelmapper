@@ -1,9 +1,14 @@
-import { tool } from "@langchain/core/tools";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import { getHaikuModel } from "../model.js";
 import type { ExtractionState } from "../state.js";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { OflModeSchema } from "../../../app/utils/ofl/schemas.js";
-import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
-import type { RunnableConfig } from "@langchain/core/runnables";
+import { toGeminiJsonSchema } from "../utils/gemini-schema.js";
+
+// Pre-convert OflModeSchema to Gemini-compatible JSON schema (single source of truth).
+// We use DynamicStructuredTool with the pre-converted JSON schema so that LangChain's
+// internal zod-to-json-schema converter (which produces 'const') is never called.
+const geminiModeJsonSchema = toGeminiJsonSchema(OflModeSchema);
 
 const systemPrompt = `You are an expert at extracting DMX mode configurations from lighting fixture manuals.
 Your task is to analyze the provided manual text and extract the available DMX Modes (e.g. '16 Channel Mode', '8 Channel Mode', 'Basic Mode', 'Extended Mode').
@@ -15,17 +20,17 @@ IMPORTANT INSTRUCTIONS FOR REASONING AND LOGICAL DEDUCTION:
 4. If a channel within a mode is mapped to nothing or acts as a dummy/fine channel not present in your extracted list, simply omit it or use null (if allowed) to maintain the absolute channel offset order.
 5. After your <thinking> analysis is complete, call the 'add_mode' tool ONCE for EACH mode found in the manual.`;
 
-export async function extractModes(state: ExtractionState, config?: RunnableConfig): Promise<Partial<ExtractionState>> {
-  await dispatchCustomEvent("status", { message: "Extracting DMX Modes..." }, config);
+export async function extractModes(state: ExtractionState, config?: LangGraphRunnableConfig): Promise<Partial<ExtractionState>> {
+  config?.writer?.({ message: "Extracting DMX Modes..." });
 
-  const addModeTool = tool(
-    async (input) => JSON.stringify(input),
-    {
-      name: "add_mode",
-      description: "Appends a DMX Mode (e.g. '16 Channel Mode') to the fixture. Call this tool for every mode you find in the manual or tables.",
-      schema: OflModeSchema
-    }
-  );
+  // DynamicStructuredTool accepts a pre-computed JSON schema object, bypassing
+  // LangChain's internal zodToJsonSchema call that would re-introduce 'const'.
+  const addModeTool = new DynamicStructuredTool({
+    name: "add_mode",
+    description: "Appends a DMX Mode (e.g. '16 Channel Mode') to the fixture. Call this tool for every mode you find in the manual or tables.",
+    schema: geminiModeJsonSchema as any,
+    func: async (input: any) => JSON.stringify(input),
+  });
 
   const model = getHaikuModel().bindTools([addModeTool]);
 

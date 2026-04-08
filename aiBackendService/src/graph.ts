@@ -1,8 +1,9 @@
-import { StateGraph, START, END } from "@langchain/langgraph";
+import { StateGraph, START, END, Send } from "@langchain/langgraph";
 import { ExtractionStateAnnotation, type ExtractionState } from "./state.js";
 import { extractGeneralInfo } from "./nodes/extractGeneralInfo.js";
 import { extractTextFromPdf } from "./nodes/extractTextFromPdf.js";
-import { extractChannels } from "./nodes/extractChannels.js";
+import { identifyChannels } from "./nodes/identifyChannels.js";
+import { extractSingleChannel } from "./nodes/extractSingleChannel.js";
 import { extractModes } from "./nodes/extractModes.js";
 import { assembleOflDocument } from "./nodes/assembleOflDocument.js";
 
@@ -14,20 +15,29 @@ const routeBasedOnInput = (state: ExtractionState) => {
   return "extractGeneralInfo";
 };
 
+// Route identify to extract single via Send API map-reduce
+const continueToExtractChannels = (state: ExtractionState) => {
+  return state.identifiedChannels.map((channel) => 
+    new Send("extractSingleChannel", { channelToExtract: channel, manualText: state.manualText })
+  );
+};
+
 // Initialize the state graph
 const builder = new StateGraph(ExtractionStateAnnotation)
   // Add nodes
   .addNode("extractTextFromPdf", extractTextFromPdf)
   .addNode("extractGeneralInfo", extractGeneralInfo)
-  .addNode("extractChannels", extractChannels)
+  .addNode("identifyChannels", identifyChannels)
+  .addNode("extractSingleChannel", extractSingleChannel)
   .addNode("extractModes", extractModes)
   .addNode("assembleOflDocument", assembleOflDocument)
   
   // Define edges
   .addConditionalEdges(START, routeBasedOnInput)
   .addEdge("extractTextFromPdf", "extractGeneralInfo")
-  .addEdge("extractGeneralInfo", "extractChannels")
-  .addEdge("extractChannels", "extractModes")
+  .addEdge("extractGeneralInfo", "identifyChannels")
+  .addConditionalEdges("identifyChannels", continueToExtractChannels)
+  .addEdge("extractSingleChannel", "extractModes")
   .addEdge("extractModes", "assembleOflDocument")
   .addEdge("assembleOflDocument", END);
 
