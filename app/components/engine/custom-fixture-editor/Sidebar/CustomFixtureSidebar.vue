@@ -13,7 +13,16 @@ interface Props {
   fixtureCategory: OflCategory;
   pixelColumns: number;
   pixelRows: number;
+  headCount: number;
+  useCustomSvg: boolean;
+  headKeys: string[];
+  activeHeadKey: string;
+  headToElementMap: Record<string, string>;
   isLastStep: boolean;
+  hoveredElementId?: string | null;
+  hoveredHeadKey?: string | null;
+  suggestedMapping?: Record<string, string>;
+  isPreviewingMapping?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -24,8 +33,14 @@ const emit = defineEmits<{
   (e: 'update:fixtureCategory', value: OflCategory): void;
   (e: 'update:pixelColumns', value: number): void;
   (e: 'update:pixelRows', value: number): void;
-  (e: 'uploadSvg', file: File): void;
+  (e: 'update:headCount', value: number): void;
+  (e: 'update:activeHeadKey', value: string): void;
+  (e: 'clearHeadAssignment', headKey: string): void;
   (e: 'next'): void;
+  (e: 'update:hoveredHeadKey', key: string | null): void;
+  (e: 'applySuggestedMapping'): void;
+  (e: 'clearSuggestedMapping'): void;
+  (e: 'update:isPreviewingMapping', value: boolean): void;
 }>();
 
 const generalInfoRef = ref<InstanceType<typeof SidebarGeneralInfo> | null>(null);
@@ -49,11 +64,26 @@ function handleNext() {
         :fixture-category="fixtureCategory"
         :pixel-columns="pixelColumns"
         :pixel-rows="pixelRows"
+        :head-count="headCount"
+        :use-custom-svg="useCustomSvg"
+        :head-keys="headKeys"
+        :active-head-key="activeHeadKey"
+        :head-to-element-map="headToElementMap"
+        :hovered-element-id="hoveredElementId"
+        :hovered-head-key="hoveredHeadKey"
+        :suggested-mapping="suggestedMapping"
+        :is-previewing-mapping="isPreviewingMapping"
         @update:form-state="emit('update:formState', $event)"
         @update:fixture-category="emit('update:fixtureCategory', $event)"
         @update:pixel-columns="emit('update:pixelColumns', $event)"
         @update:pixel-rows="emit('update:pixelRows', $event)"
-        @upload-svg="emit('uploadSvg', $event)"
+        @update:head-count="emit('update:headCount', $event)"
+        @update:active-head-key="emit('update:activeHeadKey', $event)"
+        @clear-head-assignment="emit('clearHeadAssignment', $event)"
+        @update:hovered-head-key="emit('update:hoveredHeadKey', $event)"
+        @apply-suggested-mapping="emit('applySuggestedMapping')"
+        @clear-suggested-mapping="emit('clearSuggestedMapping')"
+        @update:is-previewing-mapping="emit('update:isPreviewingMapping', $event)"
       />
 
       <!-- Step 3: DMX Mapping Summary -->

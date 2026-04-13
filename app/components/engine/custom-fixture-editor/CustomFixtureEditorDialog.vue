@@ -39,8 +39,11 @@ const isLastStep = computed(() => currentStepIdx.value === STEPS.length - 1);
 const {
   formState, channels, modes, selectedChannelId, wheels,
   channelsRaw, fixtureCategory, pixelColumns, pixelRows,
-  customSvgData, headSelections, headCount,
-  handleUploadSvg, handleToggleHeadSelection
+  headCountManual, useCustomSvg, customSvgData, customSvgError,
+  activeHeadKey, headToElementMap, suggestedMapping,
+  hoveredElementId, hoveredHeadKey, headKeys, highlightedElementIds, headCount,
+  handleUploadSvg, assignElementToActiveHead, clearHeadAssignment, setUseCustomSvg,
+  applySuggestedMapping, clearSuggestedMapping,
 } = useCustomFixtureForm();
 
 // AI Processing State
@@ -102,6 +105,10 @@ async function handleAIPdfUpload(file: File) {
               fixtureCategory.value = init.category;
               pixelColumns.value = init.pixelCols;
               pixelRows.value = init.pixelRows;
+              headCountManual.value = init.headCount;
+              useCustomSvg.value = init.useCustomSvg;
+              customSvgData.value = init.customSvgData;
+              headToElementMap.value = init.headToElementMap;
               currentStepIdx.value = 0;
             } else if (json.error) {
               extractError.value = json.error;
@@ -130,6 +137,10 @@ watch(() => props.open, (isOpen) => {
       channels.value = [];
       modes.value = [];
       wheels.value = [];
+      customSvgData.value = null;
+      headCountManual.value = 1;
+      useCustomSvg.value = false;
+      headToElementMap.value = {};
       aiUploadPending.value = true;
     } else if (props.fixtureToEdit) {
       try {
@@ -141,12 +152,21 @@ watch(() => props.open, (isOpen) => {
         fixtureCategory.value = init.category;
         pixelColumns.value = init.pixelCols;
         pixelRows.value = init.pixelRows;
+        headCountManual.value = init.headCount;
+        useCustomSvg.value = init.useCustomSvg;
+        customSvgData.value = init.customSvgData;
+        headToElementMap.value = init.headToElementMap;
         currentStepIdx.value = 0;
       } catch (err: any) {
         console.error('Failed to init from OFL Fixture:', err);
         alert('An error occurred while loading the fixture: ' + err.message);
         emit('update:open', false);
       }
+    } else {
+      customSvgData.value = null;
+      headCountManual.value = 1;
+      useCustomSvg.value = false;
+      headToElementMap.value = {};
     }
   }
 });
@@ -159,7 +179,8 @@ function goNext() {
 function handleSave() {
   const ofl = buildOflFixture(
     formState, channels.value, modes.value, wheels.value, 
-    fixtureCategory.value, pixelColumns.value, pixelRows.value, customSvgData.value
+    fixtureCategory.value, pixelColumns.value, pixelRows.value,
+    customSvgData.value, headToElementMap.value, headCountManual.value, useCustomSvg.value,
   );
 
   if (props.fixtureToEdit) {
@@ -260,10 +281,25 @@ function handleSave() {
           :fixtureHeight="formState.fixtureHeight"
           :pixelColumns="pixelColumns"
           :pixelRows="pixelRows"
+          :head-count="headCount"
+          :use-custom-svg="useCustomSvg"
           :customSvgData="customSvgData"
-          :headSelections="headSelections"
-          @uploadSvg="handleUploadSvg"
-          @toggleHeadSelection="handleToggleHeadSelection"
+          :customSvgError="customSvgError"
+          :highlighted-element-ids="highlightedElementIds"
+          :active-head-key="activeHeadKey"
+          :head-to-element-map="headToElementMap"
+          :suggested-mapping="suggestedMapping"
+          :suggested-mapping-ids="suggestedMappingIds"
+          :is-previewing-mapping="isPreviewingMapping"
+          :hovered-element-id="hoveredElementId"
+          :hovered-head-key="hoveredHeadKey"
+          @update:hovered-element-id="hoveredElementId = $event"
+          @upload-svg="handleUploadSvg"
+          @update:use-custom-svg="setUseCustomSvg"
+          @assign-element-to-active-head="assignElementToActiveHead"
+          @apply-suggested-mapping="applySuggestedMapping"
+          @clear-suggested-mapping="clearSuggestedMapping"
+          @clear-svg="customSvgData = null; setUseCustomSvg(false)"
         />
 
         <CustomFixtureSidebar
@@ -275,7 +311,22 @@ function handleSave() {
           v-model:fixtureCategory="fixtureCategory"
           v-model:pixelColumns="pixelColumns"
           v-model:pixelRows="pixelRows"
+          v-model:headCount="headCountManual"
+          :use-custom-svg="useCustomSvg"
+          :head-keys="headKeys"
+          :active-head-key="activeHeadKey"
+          :head-to-element-map="headToElementMap"
+          :hovered-element-id="hoveredElementId"
+          :hovered-head-key="hoveredHeadKey"
+          :suggested-mapping="suggestedMapping"
+          :is-previewing-mapping="isPreviewingMapping"
+          @update:is-previewing-mapping="isPreviewingMapping = $event"
+          @update:hovered-head-key="hoveredHeadKey = $event"
           :is-last-step="isLastStep"
+          @update:active-head-key="activeHeadKey = $event"
+          @clear-head-assignment="clearHeadAssignment"
+          @apply-suggested-mapping="applySuggestedMapping"
+          @clear-suggested-mapping="clearSuggestedMapping"
           @next="goNext"
         />
       </div>

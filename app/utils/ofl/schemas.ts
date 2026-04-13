@@ -611,6 +611,19 @@ export const OflFixtureSchema = z.object({
   templateChannels: z.record(z.string(), OflChannelSchema).optional(),
   modes: z.array(OflModeSchema),
   matrix: OflMatrixSchema.optional(),
+  pixelmapper: z.object({
+    customSvg: z.object({
+      enabled: z.boolean().optional(),
+      data: z.string(),
+      headToElement: z.record(z.string(), z.string()),
+      headCount: z.number().int().min(1).optional(),
+    }).optional(),
+    headLayout: z.object({
+      headCount: z.number().int().min(1),
+      gridCols: z.number().int().min(1).optional(),
+      gridRows: z.number().int().min(1).optional(),
+    }).optional(),
+  }).optional(),
 });
 
 export type OflFixture = z.infer<typeof OflFixtureSchema>;

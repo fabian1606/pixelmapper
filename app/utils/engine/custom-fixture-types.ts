@@ -10,7 +10,6 @@
  *  - Single beam   → circle  (Color Changer, Moving Head, Blinder, etc.)
  *  - N×1 beams     → pixel bar  (Pixel Bar)
  *  - N×M beams     → matrix grid (Matrix)
- *  - Custom SVG    → user-uploaded shape with head selection
  */
 
 export type OflCategory =
@@ -30,11 +29,10 @@ export type OflCategory =
   | 'Smoke'
   | 'Stand'
   | 'Strobe'
-  | 'Other'
-  | 'Custom SVG';
+  | 'Other';
 
 /** Which canvas rendering mode a category uses. */
-export type CanvasRenderMode = 'single' | 'bar' | 'matrix' | 'custom_svg';
+export type CanvasRenderMode = 'single' | 'bar' | 'matrix';
 
 /** Metadata about a fixture category shown in the sidebar. */
 export interface FixtureCategoryMeta {
@@ -64,7 +62,6 @@ export const FIXTURE_CATEGORIES: Record<OflCategory, FixtureCategoryMeta> = {
   'Fan':            { label: 'Fan',            icon: 'wind',         renderMode: 'single',     hasPixelDensity: false },
   'Stand':          { label: 'Stand',          icon: 'box',          renderMode: 'single',     hasPixelDensity: false },
   'Other':          { label: 'Other',          icon: 'circle',       renderMode: 'single',     hasPixelDensity: false },
-  'Custom SVG':     { label: 'Custom SVG',     icon: 'image',        renderMode: 'custom_svg', hasPixelDensity: false },
 };
 
 // ─── Schema-driven form field descriptors ────────────────────────────────────
@@ -278,7 +275,6 @@ export const CATEGORY_OPTIONS: OflCategory[] = [
   'Fan',
   'Stand',
   'Other',
-  'Custom SVG',
 ];
 
 // ─── Re-exports from split modules ───────────────────────────────────────────

@@ -101,6 +101,9 @@ export function buildOflFixture(
   pixelCols: number,
   pixelRows: number,
   customSvgData?: string | null,
+  headToElementMap: Record<string, string> = {},
+  headCount = 1,
+  useCustomSvg = false,
 ): OflFixture {
   // ── Determine which channels are per-pixel ────────────────────────────────
   // A channel is per-pixel when it appears as perHead:true in at least one mode.
@@ -193,10 +196,38 @@ export function buildOflFixture(
     };
   }
 
+  const effectiveHeadCount = Math.max(1, headCount);
+  const matrixMode = category === 'Matrix';
+  const barMode = category === 'Pixel Bar';
   // Persist pixel grid dimensions so they survive round-trip editing.
   // OFL matrix.pixelCount is [cols, rows, layers] — we always use 1 layer.
-  const hasMatrix = pixelCols > 1 || pixelRows > 1;
+  const matrixCols = matrixMode
+    ? Math.max(1, Math.min(effectiveHeadCount, pixelCols || effectiveHeadCount))
+    : barMode
+      ? effectiveHeadCount
+      : Math.max(1, Math.ceil(Math.sqrt(effectiveHeadCount)));
+  const matrixRows = matrixMode
+    ? Math.max(1, Math.ceil(effectiveHeadCount / matrixCols))
+    : barMode
+      ? 1
+      : Math.max(1, Math.ceil(effectiveHeadCount / matrixCols));
+  const hasMatrix = true;
   const hasTemplates = Object.keys(templateChannelMap).length > 0;
+  const customHeadKeys = Array.from({ length: effectiveHeadCount }, (_, i) => `head-${i + 1}`);
+  const filteredHeadToElementMap = customHeadKeys.reduce<Record<string, string>>((acc, key) => {
+        const elementId = headToElementMap[key];
+        if (elementId) acc[key] = elementId;
+        return acc;
+      }, {});
+  const pixelKeyRows: (string | null)[][] = [];
+  for (let row = 0; row < matrixRows; row++) {
+    const rowKeys: (string | null)[] = [];
+    for (let col = 0; col < matrixCols; col++) {
+      const idx = row * matrixCols + col;
+      rowKeys.push(customHeadKeys[idx] ?? null);
+    }
+    pixelKeyRows.push(rowKeys);
+  }
 
   return {
     $schema:
@@ -236,8 +267,26 @@ export function buildOflFixture(
     // Store pixel grid so the editor can restore it on re-open.
     matrix:
       hasMatrix || hasTemplates
-        ? { pixelCount: [pixelCols, pixelRows, 1] }
+        ? {
+            pixelCount: [matrixCols, matrixRows, 1],
+            pixelKeys: [pixelKeyRows],
+          }
         : undefined,
+    pixelmapper: {
+      headLayout: {
+        headCount: effectiveHeadCount,
+        gridCols: matrixCols,
+        gridRows: matrixRows,
+      },
+      customSvg: useCustomSvg && customSvgData
+        ? {
+            enabled: true,
+            data: customSvgData,
+            headToElement: filteredHeadToElementMap,
+            headCount: effectiveHeadCount,
+          }
+        : undefined,
+    },
   };
 }
 
@@ -289,7 +338,8 @@ export function initFromOflFixture(ofl: OflFixture) {
     beamAngleMax: ofl.physical?.lens?.degreesMinMax?.[1] || 0,
   };
 
-  const category = (ofl.categories?.[0] as OflCategory) || 'Other';
+  const rawCategory = ofl.categories?.[0];
+  const category = (rawCategory === 'Custom SVG' ? 'Other' : rawCategory) as OflCategory || 'Other';
 
   // ── Channels ──────────────────────────────────────────────────────────────
   const channels: ChannelDraft[] = [];
@@ -435,6 +485,27 @@ export function initFromOflFixture(ofl: OflFixture) {
   // Falls back to 1×1 for single-head fixtures that have no matrix block.
   const pixelCols = ofl.matrix?.pixelCount?.[0] ?? 1;
   const pixelRows = ofl.matrix?.pixelCount?.[1] ?? 1;
+  const headCount = Math.max(
+    1,
+    ofl.pixelmapper?.headLayout?.headCount
+      ?? ofl.pixelmapper?.customSvg?.headCount
+      ?? ((pixelCols || 1) * (pixelRows || 1)),
+  );
+  const customSvgData = ofl.pixelmapper?.customSvg?.data ?? null;
+  const useCustomSvg = Boolean(ofl.pixelmapper?.customSvg?.enabled && customSvgData);
+  const headToElementMap = ofl.pixelmapper?.customSvg?.headToElement ?? {};
 
-  return { state, channels, modes, wheels, category, pixelCols, pixelRows };
+  return {
+    state,
+    channels,
+    modes,
+    wheels,
+    category,
+    pixelCols,
+    pixelRows,
+    headCount,
+    useCustomSvg,
+    customSvgData,
+    headToElementMap,
+  };
 }
