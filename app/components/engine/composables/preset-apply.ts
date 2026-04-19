@@ -1,7 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import type { Preset, PresetModifierSnapshot } from '~/utils/engine/preset-types';
-import { SineEffect } from '~/utils/engine/effects/sine-effect';
+import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -23,8 +23,9 @@ export function resetFixtureChannels(fixtures: Fixture[]): void {
 
 /** Reconstructs a live Effect instance from a saved PresetModifierSnapshot. */
 export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
-  if (snap.effectType === 'SineEffect') {
-    const eff = new SineEffect();
+  // Support both legacy 'SineEffect' and new 'WaveformEffect' snapshot types
+  if (snap.effectType === 'SineEffect' || snap.effectType === 'WaveformEffect') {
+    const eff = new WaveformEffect();
     eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
     eff.targetChannels = [...snap.targetChannels];
     eff.targetFixtureIds = [...snap.targetFixtureIds];
@@ -36,9 +37,10 @@ export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
     eff.originX = snap.originX ?? 0.5;
     eff.originY = snap.originY ?? 0.5;
     eff.angle = snap.angle ?? 0;
+    eff.waveformShape = snap.waveformShape ?? 'sine';
+    eff.waveformParams = snap.waveformParams ? { ...snap.waveformParams } : { param: 0.5, start: 0, end: 1 };
     return eff;
   }
-  // Future effect types can be added here
   return null;
 }
 

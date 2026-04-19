@@ -66,6 +66,52 @@ To support custom, highly visual, or non-standard fixtures, the architecture pro
 - **Rendering Robustness:** The editor renders custom SVGs as inline SVG nodes in the canvas (not via `foreignObject` HTML injection), improving compatibility for exported SVG files from design tools.
 - **Integration:** The `CustomFixtureEditorDialog` provides a workspace where SVGs can be imported visually, parsed, and configured to generate standard `Fixture` objects (augmented with SVG definition data) before being injected into the main `FixtureWorkspace`.
 
+### Channel Type Round-Trip
+
+Custom fixtures store channels as OFL JSON (`availableChannels` / `templateChannels`). OFL uses a different capability vocabulary than the editor's internal `ChannelType` enum:
+
+| Editor enum | OFL capability type | OFL color field |
+|---|---|---|
+| `RED` | `ColorIntensity` | `Red` |
+| `GREEN` | `ColorIntensity` | `Green` |
+| `DIMMER` | `Intensity` | — |
+| `PAN` | `Pan` | — |
+| … | … | … |
+
+**Save path** (`buildOflFixture` in `custom-fixture-omapping.ts`): `editorTypeToOflCap()` translates editor enums → OFL types. If a channel has no user-defined sub-ranges, a default full-range capability is synthesized from `capabilityType` so the OFL JSON always carries a classifiable capability.
+
+**Load path** (`initFromOflFixture`): `parseOflCapabilities()` calls `oflCapToEditorType()` to translate OFL types back to editor enums before storing them in `CapabilityRange.type`. This is the critical step — without it, `CapabilityRange.type` would hold OFL strings like `'ColorIntensity'`, which `editorTypeToOflCap` cannot handle, corrupting the next save.
+
+**Idempotency:** `oflCapToEditorType` checks against `EDITOR_TYPE_SET` (all known `ChannelType` values) before translating. If the value is already an editor enum it passes through unchanged, making the function safe to call multiple times.
+
+### SVG Workspace Overlay Rendering
+
+Custom SVG fixtures are rendered as HTML div overlays (not on the WebGL canvas) in `FixtureCanvas.vue`. Key design decisions:
+
+- **Positioning:** Each wrapper div uses `position: absolute` with world-coordinate `left`/`top` values. The parent container applies the camera transform (`translate + scale`) via inline style. The parent must **not** have `overflow: hidden` — SVG world coordinates routinely exceed the viewport's pixel size, and clipping at the parent's content box would hide fixtures at large world offsets.
+- **Style precedence:** Many exported SVGs (Illustrator, Figma, Inkscape) carry inline `style="stroke:none"` or embedded `<style>` blocks. SVG presentation attributes (`setAttribute('stroke', …)`) lose to CSS. All stroke/fill overrides therefore use `el.style.setProperty(…, 'important')` to reliably win the cascade.
+- **Init guard:** On first render (`wrapper.dataset.initDone`), a uniform `rgba(255,255,255,0.22)` stroke is applied to all shapes so they remain visible even when their fill is black. Subsequent frames only update DMX-mapped element fills.
+- **DMX color application:** `applyDmxColorToSvgElement` also uses `style.setProperty('fill', …, 'important')` for the same CSS specificity reason.
+
+### SVG-Based Head Position Calculation
+
+For modifier fanning (sine-wave effects that spread phase across fixture heads), the engine needs accurate per-head world positions. Standard matrix fixtures use a uniform grid, but custom SVG fixtures can have arbitrarily shaped arrangements (circles, fans, irregular grids).
+
+**Problem:** The OFL matrix always generates head positions from a uniform grid. A 12-head fixture arranged in a ring would appear as a straight row to the modifier engine, making directional fanning meaningless.
+
+**Solution:** At save-time, `computeHeadElementCentroids()` (`app/utils/engine/svg-element-positions.ts`) uses the browser DOM to measure the true centroid of every mapped SVG element:
+
+1. The SVG string is parsed and appended off-screen (fixed, 500×500, visibility:hidden)
+2. `getBBox()` is called on each element — reliable for all shape types including `<path>`
+3. Centers are normalized to [0,1] relative to the SVG's `viewBox`
+4. The result is stored as `pixelmapper.customSvg.headPositions: Record<string, {x,y}>` in the OFL JSON
+
+**Beam positioning in `fixture-factory.ts`:** When `headPositions` is present, `localX = (pos.x − 0.5) × 0.95` and `localY = (pos.y − 0.5) × 0.95`. The 0.95 factor keeps the outermost heads just inside the fixture's visual border. Without `headPositions` the classic uniform grid is used as fallback.
+
+**`buildLayoutBin` is unchanged** — it always converts `beam.localX/localY` to `world_x/world_y` via the rotation transform, so modifier fanning automatically benefits from the corrected beam positions.
+
+> **Note:** Existing fixtures need to be re-saved through the Custom Fixture Editor to have `headPositions` computed and stored.
+
 ## AI Backend Service (aiBackendService)
 
 To aid in the creation of fixtures, an Express-based AI backend service powered by LangGraph uses LLMs to parse fixture manuals and automatically extract physical dimensions, features, and DMX mappings.

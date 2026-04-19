@@ -3,10 +3,11 @@ import { Plus, Trash2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from '@/components/ui/select';
-import type { Effect, ChannelType } from '~/utils/engine/types';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, SpeedConfig } from '~/utils/engine/types';
 import ChaserFanningControl from './ChaserFanningControl.vue';
 import SpeedControl from './SpeedControl.vue';
+import WaveformEditor from './WaveformEditor.vue';
 
 defineProps<{
   activeModifiers: Effect[];
@@ -25,6 +26,15 @@ const emit = defineEmits<{
   (e: 'add-modifier'): void;
   (e: 'dropdown-open-change', open: boolean): void;
 }>();
+
+function waveformShape(modifier: Effect): WaveformShape {
+  return (modifier as any).waveformShape ?? 'sine';
+}
+
+function waveformParams(modifier: Effect): WaveformShapeParams {
+  return (modifier as any).waveformParams ?? { param: 0.5 };
+}
+
 </script>
 
 <template>
@@ -36,45 +46,41 @@ const emit = defineEmits<{
       </span>
     </div>
 
-    <div 
-      v-for="(modifier, i) in activeModifiers" 
-      :key="i" 
+    <div
+      v-for="(modifier, i) in activeModifiers"
+      :key="i"
       class="border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col cursor-pointer transition-colors"
       :class="activeModifier === modifier ? 'border-primary ring-1 ring-primary' : 'border-border/60 hover:border-primary/50'"
       @click="emit('select-modifier', modifier)"
     >
-      <!-- Modifier Header with Dropdown -->
+      <!-- Modifier Header with Effect Type Dropdown -->
       <div class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20">
-        <Select :model-value="'Sine Effect'">
-          <SelectTrigger class="w-[140px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors">
+        <Select :model-value="'Waveform'" @update:model-value="() => {}">
+          <SelectTrigger class="w-[140px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" @click.stop>
             <SelectValue placeholder="Select Effect" />
           </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectLabel class="text-xs text-muted-foreground">Waveforms</SelectLabel>
-              <SelectItem value="Sine Effect" class="text-xs">Sine Wave</SelectItem>
-            </SelectGroup>
+          <SelectContent @pointerdown.stop>
+            <SelectItem value="Waveform" class="text-xs">Waveform</SelectItem>
           </SelectContent>
         </Select>
-
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click.stop="emit('remove-modifier', modifier)">
           <Trash2 class="h-4 w-4" />
         </Button>
       </div>
-      
+
       <div class="p-3 space-y-4">
-        <!-- Channels Multi-select -->
+        <!-- Target Channels (above waveform) -->
         <div class="space-y-2">
           <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>
           <div class="flex flex-wrap gap-1.5">
-            <button 
-              v-for="type in availableChannelTypes" 
+            <button
+              v-for="type in availableChannelTypes"
               :key="type"
-              @click="emit('toggle-target-channel', modifier, type)"
+              @click.stop="emit('toggle-target-channel', modifier, type)"
               class="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-all"
               :class="[
-                modifier.targetChannels.includes(type) 
-                  ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20' 
+                modifier.targetChannels.includes(type)
+                  ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
                   : 'bg-transparent text-muted-foreground border-border hover:border-muted-foreground/50 hover:bg-muted/30',
                 (modifier.targetChannels.includes(type) && modifier.targetChannels.length <= 1) ? 'opacity-50 cursor-not-allowed' : ''
               ]"
@@ -84,7 +90,25 @@ const emit = defineEmits<{
             </button>
           </div>
         </div>
-        
+
+        <!-- Waveform section header -->
+        <div class="pt-1 border-t border-border/40">
+          <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Waveform</Label>
+        </div>
+
+        <!-- Combined waveform editor (shape picker + start/end/peak handles) -->
+        <WaveformEditor
+          :shape="waveformShape(modifier)"
+          :params="waveformParams(modifier)"
+          :strength="modifier.strength"
+          :speed="(modifier as any).speed"
+          @update:shape="(s: WaveformShape) => { emit('update-modifier', modifier, 'waveformShape', s); emit('handle-modifier-drag-end', 'Update Waveform Shape') }"
+          @update:params="(p: WaveformShapeParams) => emit('update-modifier', modifier, 'waveformParams', p)"
+          @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+          @change-end="emit('handle-modifier-drag-end', 'Update Waveform')"
+          @click.stop
+        />
+
         <div class="space-y-3 pt-3 border-t border-border/40">
           <!-- Parameters Grid -->
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -101,15 +125,15 @@ const emit = defineEmits<{
             </div>
             <!-- Speed -->
             <div class="space-y-1.5 flex flex-col justify-start">
-              <SpeedControl 
+              <SpeedControl
                 label="Speed"
                 :disable-infinite="true"
-                :model-value="(modifier as any).speed" 
-                @update:model-value="emit('update-modifier', modifier, 'speed', $event); emit('handle-modifier-drag-end', 'Update Modifier Speed')" 
+                :model-value="(modifier as any).speed"
+                @update:model-value="emit('update-modifier', modifier, 'speed', $event); emit('handle-modifier-drag-end', 'Update Modifier Speed')"
                 @dropdown-open-change="v => emit('dropdown-open-change', v)"
               />
             </div>
-            <!-- Direction & Reverse Control Extracted -->
+            <!-- Direction & Reverse Control -->
             <div class="col-span-2">
               <ChaserFanningControl
                 :fanning="modifier.fanning || 0"
@@ -121,14 +145,15 @@ const emit = defineEmits<{
             </div>
           </div>
         </div>
+
       </div>
     </div>
 
     <div class="flex justify-center pt-2">
-      <Button 
+      <Button
         variant="outline"
         class="hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all gap-2"
-        @click="emit('add-modifier')" 
+        @click="emit('add-modifier')"
       >
         <Plus class="h-4 w-4" /> Add Modifier
       </Button>

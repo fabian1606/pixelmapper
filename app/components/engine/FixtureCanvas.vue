@@ -77,6 +77,7 @@ function syncFixtures() {
       height: f.fixtureSize?.y ?? 1,
       rotation: f.rotation || 0,
       selected: isSelected(f),
+      svg: f.definition?.pixelmapper?.customSvg?.enabled ? (f.definition?.pixelmapper?.customSvg?.data ?? null) : null,
       channelStart: f.startAddress,
       rIndex:      chIdx('RED'),
       gIndex:      chIdx('GREEN'),
@@ -86,6 +87,7 @@ function syncFixtures() {
         id: String(b.id),
         localX: b.localX,
         localY: b.localY,
+        svgElementId: f.definition?.pixelmapper?.customSvg?.headToElement?.[b.id] ?? null,
         rIndex:      chIdx('RED',    String(b.id)),
         gIndex:      chIdx('GREEN',  String(b.id)),
         bIndex:      chIdx('BLUE',   String(b.id)),
@@ -116,7 +118,8 @@ function syncSelected() {
 function drawFrame() {
   if (wasmCanvas) {
     const buf = engineStore.getOutputBuffer();
-    wasmCanvas.draw(buf.length > 0 ? buf : (effectEngine?.dmxBuffer ?? new Uint8Array()));
+    const finalBuf = buf.length > 0 ? buf : (effectEngine?.dmxBuffer ?? new Uint8Array());
+    wasmCanvas.draw(finalBuf);
   }
 }
 
@@ -181,18 +184,12 @@ defineExpose({
 </script>
 
 <template>
-  <canvas
-    ref="canvasEl"
-    class="fixture-canvas rounded-none"
-    :width="viewportWidth"
-    :height="viewportHeight"
-  />
+  <div class="relative w-full h-full pointer-events-none">
+    <canvas
+      ref="canvasEl"
+      class="absolute inset-0 rounded-none mix-blend-screen"
+      :width="viewportWidth"
+      :height="viewportHeight"
+    />
+  </div>
 </template>
-
-<style scoped>
-.fixture-canvas {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-</style>

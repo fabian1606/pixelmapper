@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use femtovg::{Canvas, renderer::OpenGl};
 use crate::spatial::SpatialIndex;
 use crate::types::FixtureCanvasData;
+use crate::svg_render::{SvgCachedFixture, parse_svg};
 
 const FIXTURE_RADIUS: f32 = 18.0;
 
@@ -15,6 +17,8 @@ pub struct WasmCanvas {
     pub fixtures: Vec<FixtureCanvasData>,
     #[wasm_bindgen(skip)]
     pub render_state: crate::render::RenderState,
+    #[wasm_bindgen(skip)]
+    pub svg_cache: HashMap<String, SvgCachedFixture>,
 }
 
 #[wasm_bindgen]
@@ -29,6 +33,7 @@ impl WasmCanvas {
             spatial_index: SpatialIndex::new(),
             fixtures: Vec::new(),
             render_state: crate::render::RenderState::default(),
+            svg_cache: HashMap::new(),
         }
     }
 
@@ -54,6 +59,21 @@ impl WasmCanvas {
     pub fn sync_fixtures(&mut self, serialized_fixtures: &str) -> Result<(), JsValue> {
         let fixtures: Vec<FixtureCanvasData> = serde_json::from_str(serialized_fixtures)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse fixtures: {}", e)))?;
+
+        // Rebuild SVG cache: parse new/changed SVGs, drop removed ones
+        let mut new_cache: HashMap<String, SvgCachedFixture> = HashMap::new();
+        for f in &fixtures {
+            if let Some(svg_data) = &f.svg {
+                // Reuse existing cached entry if the fixture id is already present
+                // (SVG string doesn't change unless the fixture definition changed)
+                if let Some(cached) = self.svg_cache.remove(&f.id) {
+                    new_cache.insert(f.id.clone(), cached);
+                } else if let Some(parsed) = parse_svg(svg_data, &f.beams) {
+                    new_cache.insert(f.id.clone(), parsed);
+                }
+            }
+        }
+        self.svg_cache = new_cache;
 
         self.fixtures = fixtures;
         self.spatial_index.rebuild(
@@ -105,7 +125,7 @@ impl WasmCanvas {
     #[wasm_bindgen]
     pub fn draw(&mut self, dmx_buffer: &[u8]) {
         if let Some(canvas) = &mut self.canvas {
-            crate::render::draw_frame(canvas, &self.render_state, &self.fixtures, dmx_buffer);
+            crate::render::draw_frame(canvas, &self.render_state, &self.fixtures, &self.svg_cache, dmx_buffer);
         }
     }
 

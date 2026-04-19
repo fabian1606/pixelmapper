@@ -45,8 +45,18 @@ Each channel is structural metadata — an offset pointer into the DMX universe.
 
 A `Beam` lives inside a `Fixture` and represents a single output point of light.
 
-- **`id`** — Identifier within the fixture.
-- **`localX`, `localY`** — Offset relative to the fixture's world position, in local fixture space.
+- **`id`** — Identifier within the fixture. For matrix/custom SVG fixtures this equals the OFL pixel key (e.g. `head-1`, `head-2`, …).
+- **`localX`, `localY`** — Offset relative to the fixture's world position, in local fixture space (range roughly −0.5 … +0.5).
+
+### Beam position sources
+
+| Fixture type | localX / localY source |
+|---|---|
+| Standard matrix | Uniform grid: `(x / (n−1) − 0.5) × spreadFactor` |
+| Custom SVG (with `headPositions`) | SVG element centroid: `(pos.x − 0.5) × 0.95` |
+| Custom SVG (legacy, no `headPositions`) | Uniform grid fallback |
+
+For custom SVG fixtures the true element centroid is computed once at save-time (see `computeHeadElementCentroids` in `app/utils/engine/svg-element-positions.ts`) and stored in `pixelmapper.customSvg.headPositions`. This ensures modifier fanning spreads phase correctly even for non-linear arrangements (circles, fans, etc.).
 
 When `buildLayoutBin` computes `world_x/world_y` for each channel, it applies the fixture's rotation to the beam's local offset:
 

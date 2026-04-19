@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{ChaserConfig, EffectConfig, EffectDirection, SpeedConfig, SpeedMode};
+use crate::types::{ChaserConfig, EffectConfig, EffectDirection, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -192,9 +192,23 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         let strength         = match c.read_f32_le() { Some(v) => v,      None => return -1 };
         let reverse          = match c.read_u8()     { Some(v) => v != 0, None => return -1 };
         let fanning          = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let effect_type_byte = match c.read_u8()     { Some(v) => v,      None => return -1 };
-        let effect_type      = match effect_type_byte { 0 => "Sine", _ => "Sine" }.to_string();
-        let speed            = match c.read_speed_config() { Some(v) => v, None => return -1 };
+        let shape_byte        = match c.read_u8()     { Some(v) => v, None => return -1 };
+        let shape_param       = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_start       = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_end         = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_start_level = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_end_level   = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let waveform_shape = match shape_byte {
+            0 => WaveformShape::Sine,
+            1 => WaveformShape::Square,
+            2 => WaveformShape::Triangle,
+            3 => WaveformShape::Sawtooth,
+            4 => WaveformShape::Bounce,
+            5 => WaveformShape::Ramp,
+            6 => WaveformShape::Smooth,
+            _ => WaveformShape::Sine,
+        };
+        let speed = match c.read_speed_config() { Some(v) => v, None => return -1 };
 
         configs.push(EffectConfig {
             target_channels,
@@ -207,7 +221,8 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             reverse,
             fanning,
             speed,
-            effect_type,
+            waveform_shape,
+            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, start_level: shape_start_level, end_level: shape_end_level },
         });
     }
 

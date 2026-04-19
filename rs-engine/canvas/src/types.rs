@@ -16,6 +16,9 @@ pub struct FixtureBeam {
     pub b_index: Option<usize>,
     #[serde(rename = "dimmerIndex", default)]
     pub dimmer_index: Option<usize>,
+    /// ID of the SVG element that this beam is mapped to (custom SVG fixtures only)
+    #[serde(rename = "svgElementId", default)]
+    pub svg_element_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

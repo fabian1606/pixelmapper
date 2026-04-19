@@ -49,7 +49,7 @@ const {
 const {
   activeModifiers,
   availableChannelTypes,
-  addSineModifier,
+  addWaveformModifier,
   handleModifierDragEnd,
   updateModifier,
   updateModifierProperties,
@@ -152,7 +152,7 @@ defineExpose({
           @update-modifier-properties="updateModifierProperties"
           @reverse-direction="reverseDirection"
           @handle-modifier-drag-end="handleModifierDragEnd"
-          @add-modifier="addSineModifier"
+          @add-modifier="addWaveformModifier"
           @dropdown-open-change="handleDropdownOpenChange"
         />
       </div>

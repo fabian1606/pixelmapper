@@ -72,6 +72,46 @@ pub enum EffectDirection {
     Symmetrical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WaveformShape {
+    #[serde(rename = "sine")]
+    Sine,
+    #[serde(rename = "square")]
+    Square,
+    #[serde(rename = "triangle")]
+    Triangle,
+    #[serde(rename = "sawtooth")]
+    Sawtooth,
+    #[serde(rename = "bounce")]
+    Bounce,
+    #[serde(rename = "ramp")]
+    Ramp,
+    #[serde(rename = "smooth")]
+    Smooth,
+}
+
+impl Default for WaveformShape {
+    fn default() -> Self { WaveformShape::Sine }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct WaveformShapeParams {
+    /// Normalized 0–1 shape parameter. Meaning depends on shape.
+    pub param: f32,
+    /// Where in the cycle the waveform starts (0–1).
+    pub start: f32,
+    /// Where in the cycle the waveform ends (0–1).
+    pub end: f32,
+    /// Hold value before the active zone [-1, 1]. >2.0 = use natural shape value at t=0.
+    pub start_level: f32,
+    /// Hold value after the active zone [-1, 1]. >2.0 = use natural shape value at t=1.
+    pub end_level: f32,
+}
+
+impl Default for WaveformShapeParams {
+    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, start_level: 999.0, end_level: 999.0 } }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectConfig {
     #[serde(rename = "targetChannels")]
@@ -88,6 +128,8 @@ pub struct EffectConfig {
     pub reverse: bool,
     pub fanning: f32,
     pub speed: SpeedConfig,
-    #[serde(rename = "effectType")]
-    pub effect_type: String, // e.g. "Sine" 
+    #[serde(rename = "waveformShape", default)]
+    pub waveform_shape: WaveformShape,
+    #[serde(rename = "waveformParams", default)]
+    pub waveform_params: WaveformShapeParams,
 }

@@ -1,4 +1,4 @@
-use crate::types::{EffectConfig, EffectDirection, SpeedConfig, SpeedMode};
+use crate::types::{EffectConfig, EffectDirection, SpeedConfig, SpeedMode, WaveformShape};
 
 pub trait Effect {
     fn update(&mut self, delta_time_ms: f32, global_bpm: f32);
@@ -10,11 +10,11 @@ pub struct BaseOscillator {
     config: EffectConfig,
     time_phase: f32,
     offset_phase: f32,
-    shape_fn: fn(f32) -> f32,
+    shape_fn: fn(&EffectConfig, f32) -> f32,
 }
 
 impl BaseOscillator {
-    pub fn new(config: EffectConfig, shape_fn: fn(f32) -> f32) -> Self {
+    pub fn new(config: EffectConfig, shape_fn: fn(&EffectConfig, f32) -> f32) -> Self {
         Self {
             config,
             time_phase: 0.0,
@@ -67,7 +67,7 @@ impl Effect for BaseOscillator {
 
     fn render(&self, world_x: f32, world_y: f32) -> f32 {
         if self.config.fanning == 0.0 || self.config.direction == EffectDirection::None {
-            return (self.shape_fn)(self.time_phase);
+            return (self.shape_fn)(&self.config, self.time_phase);
         }
 
         let dist = self.get_directional_offset(world_x, world_y);
@@ -78,7 +78,7 @@ impl Effect for BaseOscillator {
             phase_offset = -phase_offset;
         }
 
-        (self.shape_fn)(self.time_phase - phase_offset + self.offset_phase)
+        (self.shape_fn)(&self.config, self.time_phase - phase_offset + self.offset_phase)
     }
 
     fn get_config(&self) -> &EffectConfig {
@@ -86,10 +86,80 @@ impl Effect for BaseOscillator {
     }
 }
 
-pub fn create_effect(config: EffectConfig) -> Box<dyn Effect> {
-    match config.effect_type.as_str() {
-        "Sine" => Box::new(BaseOscillator::new(config, |p| p.sin())),
-        // Add other shapes as needed, e.g., "Saw", "Square"
-        _ => Box::new(BaseOscillator::new(config, |p| p.sin())),
+/// Evaluate a single waveform shape at normalized cycle position t ∈ [0, 1).
+fn evaluate_shape(shape: WaveformShape, t: f32, param: f32) -> f32 {
+    match shape {
+        WaveformShape::Sine => (t * core::f32::consts::TAU).sin(),
+        WaveformShape::Square => {
+            let duty = 0.05 + param * 0.9;
+            if t < duty { 1.0 } else { -1.0 }
+        }
+        WaveformShape::Triangle => {
+            let peak = 0.05 + param * 0.9;
+            if t < peak {
+                2.0 * t / peak - 1.0
+            } else {
+                1.0 - 2.0 * (t - peak) / (1.0 - peak)
+            }
+        }
+        WaveformShape::Sawtooth => {
+            if param < 0.5 { 1.0 - 2.0 * t } else { 2.0 * t - 1.0 }
+        }
+        WaveformShape::Bounce => {
+            let count = (1.0 + param * 4.0).round();
+            (count * core::f32::consts::PI * t).sin().abs()
+        }
+        WaveformShape::Ramp => {
+            let softness = 0.1 + param * 9.9;
+            let denom = (softness * 3.0).tanh();
+            if denom.abs() < 1e-6 {
+                if t < 0.5 { -1.0 } else { 1.0 }
+            } else {
+                (softness * (t - 0.5) * 6.0).tanh() / denom
+            }
+        }
+        WaveformShape::Smooth => {
+            let peak = 0.05 + param * 0.9;
+            if t <= peak {
+                -(core::f32::consts::PI * t / peak).cos()
+            } else {
+                (core::f32::consts::PI * (t - peak) / (1.0 - peak)).cos()
+            }
+        }
     }
+}
+
+/// Evaluate phase (radians) against a shape with start/end windowing. Returns [-1, 1].
+fn evaluate_phase(config: &EffectConfig, phase: f32) -> f32 {
+    let tau = core::f32::consts::TAU;
+    let cycle_t = ((phase / tau) % 1.0 + 1.0) % 1.0;
+
+    let start = config.waveform_params.start;
+    let end = config.waveform_params.end;
+
+    if start >= end {
+        return evaluate_shape(config.waveform_shape, cycle_t, config.waveform_params.param);
+    }
+
+    // sentinel >2.0 means "use the shape's natural boundary value"
+    let sl = if config.waveform_params.start_level > 2.0 {
+        evaluate_shape(config.waveform_shape, 0.0, config.waveform_params.param)
+    } else {
+        config.waveform_params.start_level
+    };
+    let el = if config.waveform_params.end_level > 2.0 {
+        evaluate_shape(config.waveform_shape, 1.0, config.waveform_params.param)
+    } else {
+        config.waveform_params.end_level
+    };
+
+    if cycle_t < start { return sl; }
+    if cycle_t > end   { return el; }
+
+    let local_t = (cycle_t - start) / (end - start);
+    evaluate_shape(config.waveform_shape, local_t, config.waveform_params.param)
+}
+
+pub fn create_effect(config: EffectConfig) -> Box<dyn Effect> {
+    Box::new(BaseOscillator::new(config, evaluate_phase))
 }

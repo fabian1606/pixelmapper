@@ -1,3 +1,26 @@
+export type WaveformShape = 'sine' | 'square' | 'triangle' | 'sawtooth' | 'bounce' | 'ramp' | 'smooth';
+
+export interface WaveformShapeParams {
+  /**
+   * Normalized 0–1 parameter controlling the adjustable aspect of the shape.
+   * - sine:     unused (strength is the only control)
+   * - square:   dutyCycle (0.05–0.95, default 0.5)
+   * - triangle: peak position (0.05–0.95, default 0.5)
+   * - sawtooth: direction (< 0.5 = falling, ≥ 0.5 = rising)
+   * - bounce:   bounce count mapped to 1–5 integer
+   * - ramp:     softness (0 = sharp step, 1 = very smooth S-curve)
+   */
+  param: number;
+  /** Where in the cycle the waveform starts (0–1, default 0). */
+  start: number;
+  /** Where in the cycle the waveform ends (0–1, default 1). */
+  end: number;
+  /** Hold value before the active zone [-1, 1]. If undefined, uses the shape's natural value at t=0. */
+  startLevel?: number;
+  /** Hold value after the active zone [-1, 1]. If undefined, uses the shape's natural value at t=1. */
+  endLevel?: number;
+}
+
 export type ChannelType =
   // Color
   | 'RED' | 'GREEN' | 'BLUE' | 'WHITE' | 'WARM_WHITE' | 'COOL_WHITE' | 'AMBER' | 'UV'
@@ -140,6 +163,16 @@ export interface Effect {
    * Speed configuration for the effect.
    */
   speed: SpeedConfig;
+
+  /**
+   * The waveform shape to use. Defaults to 'sine' for backwards compatibility.
+   */
+  waveformShape?: WaveformShape;
+
+  /**
+   * Shape-specific parameter (normalized 0–1). See WaveformShapeParams for details.
+   */
+  waveformParams?: WaveformShapeParams;
 
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).

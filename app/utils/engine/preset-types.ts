@@ -1,4 +1,4 @@
-import type { ChannelType, SpeedConfig, EffectDirection } from './types';
+import type { ChannelType, SpeedConfig, EffectDirection, WaveformShape, WaveformShapeParams } from './types';
 
 /**
  * High-level category grouping for a preset entry.
@@ -19,12 +19,12 @@ export interface PresetChannelSnapshot {
 
 /**
  * A serialized snapshot of one Effect (modifier) as it was at save time.
- * Enough data to recreate it via SineEffect or any future effect class.
+ * Enough data to recreate it via WaveformEffect or any future effect class.
  */
 export interface PresetModifierSnapshot {
   /** Unique ID of this effect instance to allow stacking */
   id: string;
-  /** Effect class name, e.g. "SineEffect" – used to reconstruct the correct subclass */
+  /** Effect class name, e.g. "WaveformEffect" – used to reconstruct the correct subclass */
   effectType: string;
   targetChannels: ChannelType[];
   /** Fixture IDs this modifier was scoped to */
@@ -37,6 +37,8 @@ export interface PresetModifierSnapshot {
   originX?: number;
   originY?: number;
   angle?: number;
+  waveformShape?: WaveformShape;
+  waveformParams?: WaveformShapeParams;
 }
 
 /**

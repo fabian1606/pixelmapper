@@ -391,11 +391,20 @@ export function createFixtureFromOfl(
     // Physical depth is irrelevant for the on-canvas representation: what
     // matters is how many pixels are in each dimension.
     if (xCount > 0 && yCount > 0) {
-      const sizeX = fixture.fixtureSize.x;
-      fixture.fixtureSize = { x: sizeX, y: sizeX * (yCount / xCount) };
+      if (oflFixture.pixelmapper?.customSvg?.enabled) {
+        // Custom SVG fixtures should keep their physical aspect ratio.
+        const [w, h] = physical?.dimensions ?? [300, 300];
+        const hRatio = h / w;
+        fixture.fixtureSize.y = fixture.fixtureSize.x * hRatio;
+      } else {
+        const sizeX = fixture.fixtureSize.x;
+        fixture.fixtureSize.y = sizeX * (yCount / xCount);
+      }
     }
 
     if (xCount > 1 || yCount > 1 || zCount > 1) {
+      const svgHeadPositions = oflFixture.pixelmapper?.customSvg?.headPositions;
+
       const beams: Beam[] = [];
       let idx = 0;
       // Always iterate in Z→Y→X so beam positions match pixel layout
@@ -405,14 +414,24 @@ export function createFixtureFromOfl(
           for (let x = 0; x < xCount; x++) {
             const pixelId = allKeys[idx++];
             if (!pixelId) continue;
-            // Distribute so outer beams are closer to the edge.
-            // A spread factor of `(count - 1)/count` puts the centers such that
-            // the distance from outer center to the edge is exactly 0.5 * spacing.
-            const spreadX = xCount > 1 ? (xCount - 1) / xCount : 0;
-            const spreadY = yCount > 1 ? (yCount - 1) / yCount : 0;
 
-            const localX = xCount > 1 ? (x / (xCount - 1) - 0.5) * spreadX : 0;
-            const localY = yCount > 1 ? (y / (yCount - 1) - 0.5) * spreadY : 0;
+            let localX: number;
+            let localY: number;
+
+            if (svgHeadPositions && svgHeadPositions[pixelId]) {
+              // Use SVG element centroid (normalized 0-1 within viewBox).
+              // localX/localY are offsets relative to fixture center → subtract 0.5.
+              // Multiply by 0.95 to keep outermost elements just inside the fixture border.
+              const pos = svgHeadPositions[pixelId]!;
+              localX = (pos.x - 0.5) * 0.95;
+              localY = (pos.y - 0.5) * 0.95;
+            } else {
+              // Fallback: uniform grid distribution
+              const spreadX = xCount > 1 ? (xCount - 1) / xCount : 0;
+              const spreadY = yCount > 1 ? (yCount - 1) / yCount : 0;
+              localX = xCount > 1 ? (x / (xCount - 1) - 0.5) * spreadX : 0;
+              localY = yCount > 1 ? (y / (yCount - 1) - 0.5) * spreadY : 0;
+            }
 
             beams.push(new Beam(pixelId, localX, localY));
           }

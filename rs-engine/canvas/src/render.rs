@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
 use crate::types::FixtureCanvasData;
+use crate::svg_render::{SvgCachedFixture, draw_svg_fixture};
 
 pub struct RenderState {
     pub cam_x: f32,
@@ -52,7 +54,7 @@ fn read_color(
     )
 }
 
-pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[FixtureCanvasData], dmx_buffer: &[u8]) {
+pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[FixtureCanvasData], svg_cache: &HashMap<String, SvgCachedFixture>, dmx_buffer: &[u8]) {
     canvas.set_size(state.viewport_w as u32, state.viewport_h as u32, 1.0);
     canvas.clear_rect(0, 0, state.viewport_w as u32, state.viewport_h as u32, Color::rgba(0, 0, 0, 0));
     canvas.reset_transform();
@@ -108,7 +110,29 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
         canvas.translate(wx, wy);
         canvas.rotate(fixture.rotation.to_radians());
 
-        if fixture.beams.len() > 1 {
+        if fixture.svg.is_some() {
+            let base = 18.0;
+            let half_w = base * fixture.width;
+            let half_h = base * fixture.height;
+
+            if let Some(cached) = svg_cache.get(&fixture.id) {
+                draw_svg_fixture(canvas, cached, fixture, dmx_buffer, half_w, half_h, state.scale);
+            }
+
+            // Selection ring on top
+            if fixture.selected {
+                let lw = 2.0 / state.scale;
+                let mut ring_path = Path::new();
+                if fixture.beams.len() > 1 {
+                    ring_path.rounded_rect(-half_w, -half_h, half_w * 2.0, half_h * 2.0, 4.0 / state.scale);
+                } else {
+                    ring_path.circle(0.0, 0.0, max_r + lw);
+                }
+                let mut stroke = Paint::color(border_color(true));
+                stroke.set_line_width(lw);
+                canvas.stroke_path(&mut ring_path, &stroke);
+            }
+        } else if fixture.beams.len() > 1 {
             let base = 18.0;
             let half_w = base * fixture.width;
             let half_h = base * fixture.height;

@@ -1,7 +1,7 @@
 import type { Command } from '../composables/use-history';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect } from '~/utils/engine/types';
-import { SineEffect } from '~/utils/engine/effects/sine-effect';
+import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 
 /**
  * Deep clones an array of effects to decouple them from the live engine state.
@@ -9,13 +9,10 @@ import { SineEffect } from '~/utils/engine/effects/sine-effect';
  */
 export function cloneEffectsList(effects: Effect[]): Effect[] {
   return effects.map(effect => {
-    // Currently only SineEffect is implemented, but this is a scalable pattern
     let clone: Effect;
-    if (effect instanceof SineEffect) {
-      clone = new SineEffect();
+    if (effect instanceof WaveformEffect) {
+      clone = new WaveformEffect();
     } else {
-      // Fallback: Attempt to instantiate if it's a known class, or just object spread
-      // (This will need expanding if complex new effect classes are added)
       clone = Object.create(Object.getPrototypeOf(effect));
     }
 
@@ -33,6 +30,8 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
       const spd = (effect as any).speed;
       (clone as any).speed = typeof spd === 'object' ? { ...spd } : spd;
     }
+    if ('waveformShape' in effect) (clone as any).waveformShape = (effect as any).waveformShape;
+    if ('waveformParams' in effect) (clone as any).waveformParams = { ...(effect as any).waveformParams };
 
     // Internal state like timePhase should theoretically be cloned too
     if ('timePhase' in effect) {

@@ -244,7 +244,7 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Ar
     }
     
     for (const idx of targetedIndices) {
-      bitmask[idx >> 3] |= (1 << (idx & 7));
+      bitmask[idx >> 3]! |= (1 << (idx & 7));
     }
     for (const byte of bitmask) w.u8(byte);
 
@@ -252,10 +252,23 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Ar
     w.f32(effect.originX ?? 0.5);
     w.f32(effect.originY ?? 0.5);
     w.f32(effect.angle ?? 0);
-    w.f32(effect.strength);
+    // strength is 0–100% in the UI; Rust engine expects 0–255 DMX units
+    w.f32(effect.strength * 2.55);
     w.u8(effect.reverse ? 1 : 0);
     w.f32(effect.fanning);
-    w.u8(0); // effectType: SINE=0
+    // Shape type: 0=sine,1=square,2=triangle,3=sawtooth,4=bounce,5=ramp,6=smooth
+    const SHAPE_ID: Record<string, number> = {
+      sine: 0, square: 1, triangle: 2, sawtooth: 3, bounce: 4, ramp: 5, smooth: 6,
+    };
+    const waveformShape = (effect as any).waveformShape ?? 'sine';
+    const waveformParams = (effect as any).waveformParams ?? { param: 0.5, start: 0, end: 1 };
+    w.u8(SHAPE_ID[waveformShape] ?? 0);
+    w.f32(waveformParams.param ?? 0.5);
+    w.f32(waveformParams.start ?? 0);
+    w.f32(waveformParams.end ?? 1);
+    // startLevel/endLevel: use explicit value if set, else 999.0 = "use natural shape value"
+    w.f32(waveformParams.startLevel ?? 999.0);
+    w.f32(waveformParams.endLevel ?? 999.0);
     w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
   }
 

@@ -13,6 +13,7 @@ import { useCustomFixtureForm } from '~/composables/engine/useCustomFixtureForm'
 
 import { buildOflFixture, initFromOflFixture } from '~/utils/engine/custom-fixture-omapping';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
+import { computeHeadElementCentroids } from '~/utils/engine/svg-element-positions';
 import type { OflFixture } from '~/utils/ofl/types';
 
 const props = defineProps<{ 
@@ -177,10 +178,18 @@ function goNext() {
 }
 
 function handleSave() {
+  // Compute SVG element centroids so fixture-factory can position beams
+  // correctly (e.g. circular arrangement instead of uniform grid).
+  const headPositions =
+    useCustomSvg.value && customSvgData.value && Object.keys(headToElementMap.value).length > 0
+      ? computeHeadElementCentroids(customSvgData.value, headToElementMap.value)
+      : {};
+
   const ofl = buildOflFixture(
-    formState, channels.value, modes.value, wheels.value, 
+    formState, channels.value, modes.value, wheels.value,
     fixtureCategory.value, pixelColumns.value, pixelRows.value,
     customSvgData.value, headToElementMap.value, headCountManual.value, useCustomSvg.value,
+    headPositions,
   );
 
   if (props.fixtureToEdit) {

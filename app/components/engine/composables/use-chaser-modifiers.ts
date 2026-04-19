@@ -2,7 +2,7 @@ import { computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect, ChannelType } from '~/utils/engine/types';
-import { SineEffect } from '~/utils/engine/effects/sine-effect';
+import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import type { useChaserHistory } from './use-chaser-history';
 
@@ -51,11 +51,11 @@ export function useChaserModifiers(
     });
   });
 
-  function addSineModifier() {
+  function addWaveformModifier() {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new SineEffect();
+    const effect = new WaveformEffect();
     effect.targetChannels = [...availableChannelTypes.value]; // default to all relevant channels
     effect.targetFixtureIds = props.fixtures.map(f => f.id);
     effect.strength = 100;
@@ -77,12 +77,12 @@ export function useChaserModifiers(
     // Assign the proxy from the reactive array to ensure Vue tracks property changes
     effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
     emit('change');
-    commitModifiers(before, 'Add Sine Modifier');
+    commitModifiers(before, 'Add Waveform Modifier');
   }
 
   function cloneModifier(effect: Effect): Effect {
-    if (effect instanceof SineEffect) {
-      const clone = new SineEffect();
+    if (effect instanceof WaveformEffect) {
+      const clone = new WaveformEffect();
       clone.targetChannels = [...(effect.targetChannels || [])];
       clone.targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
       clone.direction = effect.direction;
@@ -90,6 +90,8 @@ export function useChaserModifiers(
       clone.strength = effect.strength;
       clone.fanning = effect.fanning;
       clone.speed = { ...effect.speed };
+      clone.waveformShape = effect.waveformShape;
+      clone.waveformParams = { ...effect.waveformParams };
       (clone as any).timePhase = (effect as any).timePhase;
       return clone;
     }
@@ -297,7 +299,7 @@ export function useChaserModifiers(
   return {
     availableChannelTypes,
     activeModifiers,
-    addSineModifier,
+    addWaveformModifier,
     handleModifierDragEnd,
     updateModifier,
     updateModifierProperties,

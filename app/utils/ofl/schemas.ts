@@ -617,6 +617,9 @@ export const OflFixtureSchema = z.object({
       data: z.string(),
       headToElement: z.record(z.string(), z.string()),
       headCount: z.number().int().min(1).optional(),
+      /** Normalized [0,1] centroid of each mapped SVG element, relative to the SVG viewBox.
+       *  Stored at save-time so fixture-factory can position beams correctly. */
+      headPositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
     }).optional(),
     headLayout: z.object({
       headCount: z.number().int().min(1),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watchEffect, markRaw } from 'vue';
-import { SineEffect } from '~/utils/engine/effects/sine-effect';
+import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';

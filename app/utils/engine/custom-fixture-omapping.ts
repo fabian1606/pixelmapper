@@ -41,6 +41,144 @@ import type {
   OflCategory,
 } from '~/utils/engine/custom-fixture-types';
 import { resolveOflChannel } from '~/utils/ofl/capability-map';
+import type { ChannelType } from '~/utils/engine/types';
+import { CHANNEL_CAPABILITY_TYPES } from '~/utils/engine/custom-fixture-channel-types';
+
+// Set of all editor ChannelType enum values — used for idempotency guard in oflCapToEditorType
+const EDITOR_TYPE_SET = new Set<string>(CHANNEL_CAPABILITY_TYPES);
+
+// ─── Editor ChannelType → OFL capability-type mapping ────────────────────────
+// The editor uses an internal enum (RED, GREEN, DIMMER, …). OFL capability
+// types are different ('ColorIntensity', 'Intensity', …). When emitting OFL
+// JSON we must translate, otherwise downstream channel classification
+// (capability-map.ts) falls back to CUSTOM.
+type OflCapShape = { type: string; color?: string };
+function editorTypeToOflCap(t: ChannelType): OflCapShape {
+  switch (t) {
+    case 'RED':        return { type: 'ColorIntensity', color: 'Red' };
+    case 'GREEN':      return { type: 'ColorIntensity', color: 'Green' };
+    case 'BLUE':       return { type: 'ColorIntensity', color: 'Blue' };
+    case 'WHITE':      return { type: 'ColorIntensity', color: 'White' };
+    case 'WARM_WHITE': return { type: 'ColorIntensity', color: 'Warm White' };
+    case 'COOL_WHITE': return { type: 'ColorIntensity', color: 'Cold White' };
+    case 'AMBER':      return { type: 'ColorIntensity', color: 'Amber' };
+    case 'UV':         return { type: 'ColorIntensity', color: 'UV' };
+    case 'CYAN':       return { type: 'ColorIntensity', color: 'Cyan' };
+    case 'MAGENTA':    return { type: 'ColorIntensity', color: 'Magenta' };
+    case 'YELLOW':     return { type: 'ColorIntensity', color: 'Yellow' };
+    case 'LIME':       return { type: 'ColorIntensity', color: 'Lime' };
+    case 'INDIGO':     return { type: 'ColorIntensity', color: 'Indigo' };
+    case 'DIMMER':            return { type: 'Intensity' };
+    case 'COLOR_PRESET':      return { type: 'ColorPreset' };
+    case 'COLOR_TEMPERATURE': return { type: 'ColorTemperature' };
+    case 'COLOR_WHEEL':       return { type: 'WheelSlot' };
+    case 'GOBO_WHEEL':        return { type: 'WheelSlot' };
+    case 'GOBO_SPIN':         return { type: 'WheelRotation' };
+    case 'PAN':               return { type: 'Pan' };
+    case 'TILT':              return { type: 'Tilt' };
+    case 'PAN_CONTINUOUS':    return { type: 'PanContinuous' };
+    case 'TILT_CONTINUOUS':   return { type: 'TiltContinuous' };
+    case 'PANTILT_SPEED':     return { type: 'PanTiltSpeed' };
+    case 'STROBE':            return { type: 'ShutterStrobe' };
+    case 'STROBE_SPEED':      return { type: 'StrobeSpeed' };
+    case 'STROBE_DURATION':   return { type: 'StrobeDuration' };
+    case 'ZOOM':              return { type: 'Zoom' };
+    case 'FOCUS':             return { type: 'Focus' };
+    case 'IRIS':              return { type: 'Iris' };
+    case 'IRIS_EFFECT':       return { type: 'IrisEffect' };
+    case 'FROST':             return { type: 'Frost' };
+    case 'FROST_EFFECT':      return { type: 'FrostEffect' };
+    case 'BEAM_ANGLE':        return { type: 'BeamAngle' };
+    case 'BEAM_POSITION':     return { type: 'BeamPosition' };
+    case 'PRISM':             return { type: 'Prism' };
+    case 'PRISM_ROTATION':    return { type: 'PrismRotation' };
+    case 'BLADE':             return { type: 'BladeInsertion' };
+    case 'BLADE_ROTATION':    return { type: 'BladeRotation' };
+    case 'BLADE_SYSTEM_ROTATION': return { type: 'BladeSystemRotation' };
+    case 'EFFECT':            return { type: 'Effect' };
+    case 'EFFECT_SPEED':      return { type: 'EffectSpeed' };
+    case 'EFFECT_DURATION':   return { type: 'EffectDuration' };
+    case 'EFFECT_PARAMETER':  return { type: 'EffectParameter' };
+    case 'SOUND_SENSITIVITY': return { type: 'SoundSensitivity' };
+    case 'ROTATION':          return { type: 'Rotation' };
+    case 'SPEED':             return { type: 'Speed' };
+    case 'TIME':              return { type: 'Time' };
+    case 'FOG':               return { type: 'Fog' };
+    case 'FOG_OUTPUT':        return { type: 'FogOutput' };
+    case 'FOG_TYPE':          return { type: 'FogType' };
+    case 'MAINTENANCE':       return { type: 'Maintenance' };
+    case 'NO_FUNCTION':       return { type: 'NoFunction' };
+    case 'GENERIC':
+    case 'CUSTOM':
+    default:                  return { type: 'Generic' };
+  }
+}
+
+// ─── OFL capability-type → Editor ChannelType mapping (reverse of editorTypeToOflCap) ──────────
+
+/**
+ * Translates an OFL capability {type, color?} back into the editor's ChannelType enum.
+ * Idempotent: if oflType is already an editor enum (e.g. already translated), it passes through.
+ * This prevents double-translation on round-trips.
+ */
+function oflCapToEditorType(oflType: string, color?: string): ChannelType {
+  // Already an editor enum — pass through unchanged
+  if (EDITOR_TYPE_SET.has(oflType)) return oflType as ChannelType;
+
+  switch (oflType) {
+    case 'ColorIntensity': {
+      const colorMap: Record<string, ChannelType> = {
+        'Red': 'RED', 'Green': 'GREEN', 'Blue': 'BLUE',
+        'White': 'WHITE', 'Warm White': 'WARM_WHITE', 'Cold White': 'COOL_WHITE',
+        'Amber': 'AMBER', 'UV': 'UV', 'Cyan': 'CYAN', 'Magenta': 'MAGENTA',
+        'Yellow': 'YELLOW', 'Lime': 'LIME', 'Indigo': 'INDIGO',
+      };
+      return (color && colorMap[color]) ? colorMap[color]! : 'CUSTOM';
+    }
+    case 'Intensity':           return 'DIMMER';
+    case 'ColorPreset':         return 'COLOR_PRESET';
+    case 'ColorTemperature':    return 'COLOR_TEMPERATURE';
+    case 'WheelSlot':           return 'COLOR_WHEEL';
+    case 'WheelRotation':
+    case 'WheelSlotRotation':   return 'GOBO_SPIN';
+    case 'Pan':                 return 'PAN';
+    case 'PanContinuous':       return 'PAN_CONTINUOUS';
+    case 'Tilt':                return 'TILT';
+    case 'TiltContinuous':      return 'TILT_CONTINUOUS';
+    case 'PanTiltSpeed':        return 'PANTILT_SPEED';
+    case 'ShutterStrobe':       return 'STROBE';
+    case 'StrobeSpeed':         return 'STROBE_SPEED';
+    case 'StrobeDuration':      return 'STROBE_DURATION';
+    case 'Zoom':                return 'ZOOM';
+    case 'Focus':               return 'FOCUS';
+    case 'Iris':                return 'IRIS';
+    case 'IrisEffect':          return 'IRIS_EFFECT';
+    case 'Frost':               return 'FROST';
+    case 'FrostEffect':         return 'FROST_EFFECT';
+    case 'BeamAngle':           return 'BEAM_ANGLE';
+    case 'BeamPosition':        return 'BEAM_POSITION';
+    case 'Prism':               return 'PRISM';
+    case 'PrismRotation':       return 'PRISM_ROTATION';
+    case 'BladeInsertion':      return 'BLADE';
+    case 'BladeRotation':       return 'BLADE_ROTATION';
+    case 'BladeSystemRotation': return 'BLADE_SYSTEM_ROTATION';
+    case 'Effect':              return 'EFFECT';
+    case 'EffectSpeed':         return 'EFFECT_SPEED';
+    case 'EffectDuration':      return 'EFFECT_DURATION';
+    case 'EffectParameter':     return 'EFFECT_PARAMETER';
+    case 'SoundSensitivity':    return 'SOUND_SENSITIVITY';
+    case 'Rotation':            return 'ROTATION';
+    case 'Speed':               return 'SPEED';
+    case 'Time':                return 'TIME';
+    case 'Fog':                 return 'FOG';
+    case 'FogOutput':           return 'FOG_OUTPUT';
+    case 'FogType':             return 'FOG_TYPE';
+    case 'Maintenance':         return 'MAINTENANCE';
+    case 'NoFunction':          return 'NO_FUNCTION';
+    case 'Generic':             return 'GENERIC';
+    default:                    return 'CUSTOM';
+  }
+}
 
 // ─── Shared helper ────────────────────────────────────────────────────────────
 
@@ -68,7 +206,10 @@ function parseOflCapabilities(ch: OflChannel): CapabilityRange[] {
     }
     // OFL uses "comment"; editor uses "label"
     copy.label = c.comment || '';
-    if (!copy.type) copy.type = 'GENERIC';
+    // Always translate to editor ChannelType enum. OFL stores 'ColorIntensity',
+    // 'Intensity', etc. — the editor expects 'RED', 'DIMMER', etc. Without this
+    // translation, buildOflFixture corrupts the type on the next save.
+    copy.type = oflCapToEditorType(c.type ?? '', (c as any).color);
     return copy as CapabilityRange;
   });
 }
@@ -104,6 +245,7 @@ export function buildOflFixture(
   headToElementMap: Record<string, string> = {},
   headCount = 1,
   useCustomSvg = false,
+  headPositions: Record<string, { x: number; y: number }> = {},
 ): OflFixture {
   // ── Determine which channels are per-pixel ────────────────────────────────
   // A channel is per-pixel when it appears as perHead:true in at least one mode.
@@ -120,6 +262,9 @@ export function buildOflFixture(
 
   for (const ch of channels) {
     // Convert CapabilityRange[] back to OflCapability[]
+    // IMPORTANT: translate editor ChannelType (RED/GREEN/…) into proper OFL
+    // capability shape ({type:'ColorIntensity', color:'Red'}, …). Without this
+    // the downstream resolver falls back to 'CUSTOM' for all custom fixtures.
     const caps: OflCapability[] = ch.capabilities.map((r) => {
       const cap: any = { ...r };
       delete cap.rangeId;
@@ -130,14 +275,29 @@ export function buildOflFixture(
       cap.dmxRange = [cap.dmxMin, cap.dmxMax];
       delete cap.dmxMin;
       delete cap.dmxMax;
+      // Translate the editor's internal type enum to OFL's vocabulary.
+      const mapped = editorTypeToOflCap(cap.type as ChannelType);
+      cap.type = mapped.type;
+      if (mapped.color && !cap.color) cap.color = mapped.color;
       return cap as OflCapability;
     });
+
+    // If no sub-ranges were defined, synthesize a single full-range capability
+    // from the channel's capabilityType. Required so the factory can classify
+    // the channel (RED/GREEN/DIMMER/…) — without a capability it falls back
+    // to heuristic name-matching which fails for names like "Red"/"Green".
+    if (caps.length === 0) {
+      const mapped = editorTypeToOflCap(ch.capabilityType);
+      const synth: any = { type: mapped.type, dmxRange: [0, 255] };
+      if (mapped.color) synth.color = mapped.color;
+      caps.push(synth as OflCapability);
+    }
 
     const oflCh: OflChannel = {
       name: ch.name,
       defaultValue: ch.defaultValue,
       dmxValueResolution: ch.resolution,
-      capabilities: caps.length > 0 ? caps : undefined,
+      capabilities: caps,
     };
 
     if (perHeadChannelIds.has(ch.id)) {
@@ -284,6 +444,7 @@ export function buildOflFixture(
             data: customSvgData,
             headToElement: filteredHeadToElementMap,
             headCount: effectiveHeadCount,
+            headPositions: Object.keys(headPositions).length > 0 ? headPositions : undefined,
           }
         : undefined,
     },
