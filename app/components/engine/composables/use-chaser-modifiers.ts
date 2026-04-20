@@ -2,10 +2,12 @@ import { computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect, ChannelType } from '~/utils/engine/types';
+import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
+import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import type { useChaserHistory } from './use-chaser-history';
 
 export function useChaserModifiers(
@@ -324,6 +326,21 @@ export function useChaserModifiers(
     commitModifiers(before, 'Add Sequencer Modifier');
   }
 
+  function addPinnedModifier(snapshot: PresetModifierSnapshot) {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const pinnedStore = usePinnedModifiersStore();
+    const effect = pinnedStore.applyPinnedModifier(snapshot);
+    if (!effect) return;
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Pinned Modifier');
+  }
+
   function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer') {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
@@ -401,6 +418,7 @@ export function useChaserModifiers(
     addWaveformModifier,
     addNoiseModifier,
     addSequencerModifier,
+    addPinnedModifier,
     switchModifierType,
     handleModifierDragEnd,
     updateModifier,

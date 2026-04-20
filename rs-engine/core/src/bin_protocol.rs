@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{ChannelMode, ChaserConfig, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
+use crate::types::{BlendMode, ChannelMode, ChaserConfig, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -141,6 +141,14 @@ pub fn parse_channels_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
 /// TYPE_EFFECTS_BIN (0x16): effect parameters
 pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
     let mut c = Cursor::new(data);
+    let blend_byte = match c.read_u8() { Some(v) => v, None => return -1 };
+    engine.stack_blend_mode = match blend_byte {
+        1 => BlendMode::Override,
+        2 => BlendMode::Multiply,
+        3 => BlendMode::Max,
+        4 => BlendMode::Min,
+        _ => BlendMode::Add,
+    };
     let effect_count = match c.read_u8() { Some(v) => v as usize, None => return -1 };
     let mut configs = Vec::with_capacity(effect_count);
 

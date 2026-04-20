@@ -223,9 +223,9 @@ export const useEngineStore = defineStore('engine', () => {
       channelsRevision.value++;
     }, { deep: true });
 
-    // Watch effects or fixture list changes (for bitmask sizes) → rebuild effects packet
-    watch([activeEffects, flatFixtures], () => {
-      effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value);
+    // Watch effects, fixtures, or blend mode changes → rebuild effects packet
+    watch([activeEffects, flatFixtures, engine.stackBlendMode], () => {
+      effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
       effectsRevision.value++;
     }, { deep: true, immediate: true });
 

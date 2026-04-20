@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum BlendMode {
+    #[default] Add,
+    Override,
+    Multiply,
+    Max,
+    Min,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpeedMode {
     #[serde(rename = "time")]

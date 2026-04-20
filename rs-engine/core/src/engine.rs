@@ -1,4 +1,4 @@
-use crate::types::{ChaserConfig, RenderTarget, SpeedMode, SpeedConfig};
+use crate::types::{BlendMode, ChaserConfig, RenderTarget, SpeedMode, SpeedConfig};
 use crate::effects::{create_effect, Effect};
 
 // ── Internal structs for binary-decoded layout/channel data ──────────────────
@@ -31,6 +31,7 @@ pub struct EffectEngine {
     pub global_bpm: f32,
     pub targets: Vec<RenderTarget>,
     pub effects: Vec<Box<dyn Effect>>,
+    pub stack_blend_mode: BlendMode,
 }
 
 impl Default for EffectEngine {
@@ -70,6 +71,7 @@ impl EffectEngine {
             global_bpm: 120.0,
             targets: Vec::new(),
             effects: Vec::new(),
+            stack_blend_mode: BlendMode::Add,
         }
     }
 
@@ -305,11 +307,14 @@ impl EffectEngine {
                     let target_min = (base_value - config.strength).max(0.0);
                     target_min + ((wave_value + 1.0) / 2.0) * (target_max - target_min)
                 };
-                let offset = mapped_value - base_value;
-
-                // Additively blend the effect on top of what was already in renderBuffer
-                let current_dmx = self.render_buffer[dmx_index];
-                self.render_buffer[dmx_index] = (current_dmx + offset).clamp(0.0, 255.0);
+                let prev = self.render_buffer[dmx_index];
+                self.render_buffer[dmx_index] = match self.stack_blend_mode {
+                    BlendMode::Add      => (prev + (mapped_value - base_value)).clamp(0.0, 255.0),
+                    BlendMode::Override => mapped_value.clamp(0.0, 255.0),
+                    BlendMode::Multiply => (prev * (mapped_value / 255.0)).clamp(0.0, 255.0),
+                    BlendMode::Max      => prev.max(mapped_value),
+                    BlendMode::Min      => prev.min(mapped_value),
+                };
             }
         }
 

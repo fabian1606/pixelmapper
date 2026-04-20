@@ -211,7 +211,9 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
 
 // ── Effects packet (TYPE_FX_BIN 0x16) ────────────────────────────────────────
 
-export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Array {
+const BLEND_MODE_ID: Record<string, number> = { add: 0, override: 1, multiply: 2, max: 3, min: 4 };
+
+export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBlendMode: import('~/utils/engine/types').BlendMode = 'add'): Uint8Array {
   // Bitmask size derived from fixture count — both sides compute the same value
   // after layout sync. Bit i = fixture with group_index i is targeted.
   const fixtureCount = fixtures.length;
@@ -221,6 +223,7 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Ar
   fixtures.forEach((f, i) => idToIndex.set(f.id, i));
 
   const w = new BufWriter();
+  w.u8(BLEND_MODE_ID[stackBlendMode] ?? 0);
   w.u8(effects.length);
 
   for (const effect of effects) {

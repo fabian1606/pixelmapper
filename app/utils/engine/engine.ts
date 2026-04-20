@@ -7,6 +7,7 @@ let isWasmInitialized = false;
 
 export class EffectEngine {
   public effects = reactive<import('~/utils/engine/types').Effect[]>([]);
+  public stackBlendMode = ref<import('~/utils/engine/types').BlendMode>('add');
   public activeModifier: Ref<import('~/utils/engine/types').Effect | null> = ref(null);
 
   /**

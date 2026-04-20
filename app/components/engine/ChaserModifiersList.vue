@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { Plus, Trash2, ChevronDown } from 'lucide-vue-next';
+import { Plus, Trash2, ChevronDown, Star } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams } from '~/utils/engine/types';
+import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
+import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import ChaserFanningControl from './ChaserFanningControl.vue';
 import SpeedControl from './SpeedControl.vue';
 import WaveformEditor from './WaveformEditor.vue';
@@ -16,6 +18,8 @@ defineProps<{
   activeModifiers: Effect[];
   activeModifier: Effect | null | undefined;
   availableChannelTypes: ChannelType[];
+  pinnedModifiers: PinnedModifier[];
+  pinnedEffectIds: Set<string>;
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +33,8 @@ const emit = defineEmits<{
   (e: 'add-modifier'): void;
   (e: 'add-noise-modifier'): void;
   (e: 'add-sequencer-modifier'): void;
+  (e: 'add-pinned-modifier', snapshot: PresetModifierSnapshot): void;
+  (e: 'pin-modifier', effect: Effect): void;
   (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer'): void;
   (e: 'dropdown-open-change', open: boolean): void;
 }>();
@@ -98,6 +104,9 @@ function modifierTypeName(modifier: Effect): string {
             <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
           </SelectContent>
         </Select>
+        <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-yellow-400" @click.stop="emit('pin-modifier', modifier)">
+          <Star class="h-4 w-4" :class="pinnedEffectIds.has(modifier.id) ? 'fill-yellow-400 text-yellow-400' : ''" />
+        </Button>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click.stop="emit('remove-modifier', modifier)">
           <Trash2 class="h-4 w-4" />
         </Button>
@@ -228,6 +237,18 @@ function modifierTypeName(modifier: Effect): string {
           <DropdownMenuItem @click="emit('add-modifier')">Waveform</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-noise-modifier')">Noise</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-sequencer-modifier')">Sequencer</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger class="gap-2">
+              <Star class="h-4 w-4" /> Pinned
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem v-if="pinnedModifiers.length === 0" disabled class="text-muted-foreground">No pinned modifiers</DropdownMenuItem>
+              <DropdownMenuItem v-for="p in pinnedModifiers" :key="p.id" @click="emit('add-pinned-modifier', p.snapshot)">
+                {{ p.name }}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

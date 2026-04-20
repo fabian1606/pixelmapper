@@ -143,6 +143,8 @@ export interface EffectContext {
   y: number;
 }
 
+export type BlendMode = 'add' | 'override' | 'multiply' | 'max' | 'min';
+
 export interface Effect {
   /**
    * Unique identifier for the effect instance.
