@@ -110,5 +110,7 @@ export function snapshotEffect(effect: Effect): PresetModifierSnapshot {
     angle: effect.angle ?? 0,
     waveformShape: (effect as any).waveformShape ?? 'sine',
     waveformParams: (effect as any).waveformParams ? { ...(effect as any).waveformParams } : { param: 0.5, start: 0, end: 1 },
+    noiseParams: (effect as any).noiseParams ? { ...(effect as any).noiseParams } : undefined,
+    sequencerParams: (effect as any).sequencerParams ? { ...(effect as any).sequencerParams } : undefined,
   };
 }

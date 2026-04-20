@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Plus, Trash2, ChevronDown } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, SpeedConfig } from '~/utils/engine/types';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams } from '~/utils/engine/types';
 import ChaserFanningControl from './ChaserFanningControl.vue';
 import SpeedControl from './SpeedControl.vue';
 import WaveformEditor from './WaveformEditor.vue';
+import NoiseEditor from './NoiseEditor.vue';
+import SequencerEditor from './SequencerEditor.vue';
 
 defineProps<{
   activeModifiers: Effect[];
@@ -24,17 +27,41 @@ const emit = defineEmits<{
   (e: 'reverse-direction', effect: Effect): void;
   (e: 'handle-modifier-drag-end', description: string): void;
   (e: 'add-modifier'): void;
+  (e: 'add-noise-modifier'): void;
+  (e: 'add-sequencer-modifier'): void;
+  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer'): void;
   (e: 'dropdown-open-change', open: boolean): void;
 }>();
+
+function isNoiseModifier(modifier: Effect): boolean {
+  return 'noiseParams' in modifier && !!(modifier as any).noiseParams;
+}
+
+function isSequencerModifier(modifier: Effect): boolean {
+  return 'sequencerParams' in modifier && !!(modifier as any).sequencerParams;
+}
 
 function waveformShape(modifier: Effect): WaveformShape {
   return (modifier as any).waveformShape ?? 'sine';
 }
 
 function waveformParams(modifier: Effect): WaveformShapeParams {
-  return (modifier as any).waveformParams ?? { param: 0.5 };
+  return (modifier as any).waveformParams ?? { param: 0.5, start: 0, end: 1 };
 }
 
+function noiseParams(modifier: Effect): NoiseParams {
+  return (modifier as any).noiseParams ?? { noiseType: 'white', scale: 1, channelMode: 'linked', colorVariation: 0, fade: 0, threshold: 0 };
+}
+
+function sequencerParams(modifier: Effect): SequencerParams {
+  return (modifier as any).sequencerParams ?? { patternType: 'split', originX: 0.5, originY: 0.5, angle: 0, scale: 0.1, count: 4, density: 0.5, invert: false };
+}
+
+function modifierTypeName(modifier: Effect): string {
+  if (isSequencerModifier(modifier)) return 'Sequencer';
+  if (isNoiseModifier(modifier)) return 'Noise';
+  return 'Waveform';
+}
 </script>
 
 <template>
@@ -53,14 +80,22 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
       :class="activeModifier === modifier ? 'border-primary ring-1 ring-primary' : 'border-border/60 hover:border-primary/50'"
       @click="emit('select-modifier', modifier)"
     >
-      <!-- Modifier Header with Effect Type Dropdown -->
+      <!-- Modifier Header -->
       <div class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20">
-        <Select :model-value="'Waveform'" @update:model-value="() => {}">
+        <Select
+          :model-value="modifierTypeName(modifier)"
+          @update:model-value="(v: any) => {
+            const next = v as 'Waveform' | 'Noise' | 'Sequencer';
+            if (next !== modifierTypeName(modifier)) emit('switch-modifier-type', modifier, next);
+          }"
+        >
           <SelectTrigger class="w-[140px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" @click.stop>
             <SelectValue placeholder="Select Effect" />
           </SelectTrigger>
           <SelectContent @pointerdown.stop>
             <SelectItem value="Waveform" class="text-xs">Waveform</SelectItem>
+            <SelectItem value="Noise" class="text-xs">Noise</SelectItem>
+            <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click.stop="emit('remove-modifier', modifier)">
@@ -69,7 +104,7 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
       </div>
 
       <div class="p-3 space-y-4">
-        <!-- Target Channels (above waveform) -->
+        <!-- Target Channels -->
         <div class="space-y-2">
           <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>
           <div class="flex flex-wrap gap-1.5">
@@ -91,28 +126,58 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
           </div>
         </div>
 
-        <!-- Waveform section header -->
-        <div class="pt-1 border-t border-border/40">
-          <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Waveform</Label>
-        </div>
+        <!-- Waveform editor -->
+        <template v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)">
+          <div class="pt-1 border-t border-border/40">
+            <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Waveform</Label>
+          </div>
+          <WaveformEditor
+            :shape="waveformShape(modifier)"
+            :params="waveformParams(modifier)"
+            :strength="modifier.strength"
+            :speed="(modifier as any).speed"
+            @update:shape="(s: WaveformShape) => { emit('update-modifier', modifier, 'waveformShape', s); emit('handle-modifier-drag-end', 'Update Waveform Shape') }"
+            @update:params="(p: WaveformShapeParams) => emit('update-modifier', modifier, 'waveformParams', p)"
+            @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Waveform')"
+            @click.stop
+          />
+        </template>
 
-        <!-- Combined waveform editor (shape picker + start/end/peak handles) -->
-        <WaveformEditor
-          :shape="waveformShape(modifier)"
-          :params="waveformParams(modifier)"
-          :strength="modifier.strength"
-          :speed="(modifier as any).speed"
-          @update:shape="(s: WaveformShape) => { emit('update-modifier', modifier, 'waveformShape', s); emit('handle-modifier-drag-end', 'Update Waveform Shape') }"
-          @update:params="(p: WaveformShapeParams) => emit('update-modifier', modifier, 'waveformParams', p)"
-          @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
-          @change-end="emit('handle-modifier-drag-end', 'Update Waveform')"
-          @click.stop
-        />
+        <!-- Noise editor -->
+        <template v-else-if="isNoiseModifier(modifier)">
+          <div class="pt-1 border-t border-border/40">
+            <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Noise</Label>
+          </div>
+          <NoiseEditor
+            :noise-params="noiseParams(modifier)"
+            :speed="(modifier as any).speed"
+            :strength="modifier.strength"
+            @update:noise-params="(p: NoiseParams) => emit('update-modifier', modifier, 'noiseParams', p)"
+            @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Noise')"
+            @click.stop
+          />
+        </template>
+
+        <!-- Sequencer editor -->
+        <template v-else-if="isSequencerModifier(modifier)">
+          <div class="pt-1 border-t border-border/40">
+            <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Sequencer</Label>
+          </div>
+          <SequencerEditor
+            :sequencer-params="sequencerParams(modifier)"
+            :strength="modifier.strength"
+            @update:sequencer-params="(p: SequencerParams) => emit('update-modifier', modifier, 'sequencerParams', p)"
+            @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Sequencer')"
+            @click.stop
+          />
+        </template>
 
         <div class="space-y-3 pt-3 border-t border-border/40">
-          <!-- Parameters Grid -->
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-            <div class="space-y-1.5">
+            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
               <DraggableNumberInput
                 :model-value="modifier.strength"
@@ -123,7 +188,6 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
                 @change="emit('handle-modifier-drag-end', 'Update Modifier Strength')"
               />
             </div>
-            <!-- Speed -->
             <div class="space-y-1.5 flex flex-col justify-start">
               <SpeedControl
                 label="Speed"
@@ -133,8 +197,8 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
                 @dropdown-open-change="v => emit('dropdown-open-change', v)"
               />
             </div>
-            <!-- Direction & Reverse Control -->
-            <div class="col-span-2">
+            <!-- Fanning only for waveform modifiers -->
+            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)" class="col-span-2">
               <ChaserFanningControl
                 :fanning="modifier.fanning || 0"
                 :direction="modifier.direction"
@@ -149,14 +213,23 @@ function waveformParams(modifier: Effect): WaveformShapeParams {
       </div>
     </div>
 
+    <!-- Add Modifier dropdown -->
     <div class="flex justify-center pt-2">
-      <Button
-        variant="outline"
-        class="hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all gap-2"
-        @click="emit('add-modifier')"
-      >
-        <Plus class="h-4 w-4" /> Add Modifier
-      </Button>
+      <DropdownMenu @update:open="v => emit('dropdown-open-change', v)">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="outline"
+            class="hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all gap-2"
+          >
+            <Plus class="h-4 w-4" /> Add Modifier <ChevronDown class="h-3 w-3 ml-1 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem @click="emit('add-modifier')">Waveform</DropdownMenuItem>
+          <DropdownMenuItem @click="emit('add-noise-modifier')">Noise</DropdownMenuItem>
+          <DropdownMenuItem @click="emit('add-sequencer-modifier')">Sequencer</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   </div>
 </template>

@@ -2,6 +2,8 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import type { Preset, PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
+import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
+import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -41,6 +43,28 @@ export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
     eff.waveformParams = snap.waveformParams ? { ...snap.waveformParams } : { param: 0.5, start: 0, end: 1 };
     return eff;
   }
+
+  if (snap.effectType === 'NoiseEffect') {
+    const eff = new NoiseEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    eff.strength = snap.strength;
+    eff.speed = { ...snap.speed };
+    if (snap.noiseParams) eff.noiseParams = { ...snap.noiseParams };
+    return eff;
+  }
+
+  if (snap.effectType === 'SequencerEffect') {
+    const eff = new SequencerEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    eff.strength = snap.strength;
+    if (snap.sequencerParams) eff.sequencerParams = { ...snap.sequencerParams };
+    return eff;
+  }
+
   return null;
 }
 

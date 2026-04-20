@@ -112,6 +112,98 @@ impl Default for WaveformShapeParams {
     fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, start_level: 999.0, end_level: 999.0 } }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NoiseType {
+    #[default]
+    White,
+    Perlin,
+    Step,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ChannelMode {
+    #[default]
+    Linked,
+    Independent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct NoiseParams {
+    #[serde(rename = "noiseType", default)]
+    pub noise_type: NoiseType,
+    #[serde(default = "noise_scale_default")]
+    pub scale: f32,
+    #[serde(rename = "channelMode", default)]
+    pub channel_mode: ChannelMode,
+    #[serde(rename = "colorVariation", default)]
+    pub color_variation: f32,
+    #[serde(default)]
+    pub fade: f32,
+    #[serde(default)]
+    pub threshold: f32,
+}
+
+fn noise_scale_default() -> f32 { 1.0 }
+
+impl Default for NoiseParams {
+    fn default() -> Self { NoiseParams { noise_type: NoiseType::White, scale: 1.0, channel_mode: ChannelMode::Linked, color_variation: 0.0, fade: 0.0, threshold: 0.0 } }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SequencerPatternType {
+    #[default]
+    Split,
+    Checkerboard,
+    Sections,
+    Scatter,
+    Flow,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SequencerParams {
+    #[serde(rename = "patternType", default)]
+    pub pattern_type: SequencerPatternType,
+    #[serde(rename = "originX", default = "half")]
+    pub origin_x: f32,
+    #[serde(rename = "originY", default = "half")]
+    pub origin_y: f32,
+    #[serde(default)]
+    pub angle: f32,
+    #[serde(default = "default_seq_scale")]
+    pub scale: f32,
+    #[serde(default = "default_seq_count")]
+    pub count: u8,
+    #[serde(default = "half")]
+    pub density: f32,
+    #[serde(rename = "densityVariation", default)]
+    pub density_variation: f32,
+    #[serde(default)]
+    pub invert: bool,
+}
+
+fn half() -> f32 { 0.5 }
+fn default_seq_scale() -> f32 { 0.1 }
+fn default_seq_count() -> u8 { 4 }
+
+impl Default for SequencerParams {
+    fn default() -> Self {
+        SequencerParams {
+            pattern_type: SequencerPatternType::Split,
+            origin_x: 0.5,
+            origin_y: 0.5,
+            angle: 0.0,
+            scale: 0.1,
+            count: 4,
+            density: 0.5,
+            density_variation: 0.0,
+            invert: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectConfig {
     #[serde(rename = "targetChannels")]
@@ -132,4 +224,10 @@ pub struct EffectConfig {
     pub waveform_shape: WaveformShape,
     #[serde(rename = "waveformParams", default)]
     pub waveform_params: WaveformShapeParams,
+    #[serde(rename = "noiseParams", default)]
+    pub noise_params: Option<NoiseParams>,
+    #[serde(rename = "sequencerParams", default)]
+    pub sequencer_params: Option<SequencerParams>,
+    #[serde(rename = "effectType", default)]
+    pub effect_type: String,
 }

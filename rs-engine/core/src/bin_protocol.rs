@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{ChaserConfig, EffectConfig, EffectDirection, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
+use crate::types::{ChannelMode, ChaserConfig, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -210,6 +210,71 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         };
         let speed = match c.read_speed_config() { Some(v) => v, None => return -1 };
 
+        let effect_type_byte    = match c.read_u8()     { Some(v) => v, None => return -1 };
+        let noise_type_byte     = match c.read_u8()     { Some(v) => v, None => return -1 };
+        let noise_scale         = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let channel_mode_byte   = match c.read_u8()     { Some(v) => v, None => return -1 };
+        let color_variation     = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let fade                = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let threshold           = match c.read_f32_le() { Some(v) => v, None => return -1 };
+
+        let (effect_type, noise_params) = if effect_type_byte == 1 {
+            let np = NoiseParams {
+                noise_type: match noise_type_byte {
+                    0 => NoiseType::White,
+                    1 => NoiseType::Perlin,
+                    _ => NoiseType::Step,
+                },
+                scale: noise_scale,
+                channel_mode: if channel_mode_byte == 1 { ChannelMode::Independent } else { ChannelMode::Linked },
+                color_variation,
+                fade,
+                threshold,
+            };
+            ("NoiseEffect".to_string(), Some(np))
+        } else {
+            (String::new(), None)
+        };
+
+        // Sequencer fields
+        let is_sequencer_byte = match c.read_u8() { Some(v) => v, None => return -1 };
+        let sequencer_params = if is_sequencer_byte == 1 {
+            let pattern_byte   = match c.read_u8()     { Some(v) => v,      None => return -1 };
+            let seq_origin_x   = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_origin_y   = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_angle      = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_scale      = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_count             = match c.read_u8()     { Some(v) => v,      None => return -1 };
+            let seq_density           = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_density_variation = match c.read_f32_le() { Some(v) => v,      None => return -1 };
+            let seq_invert            = match c.read_u8()     { Some(v) => v != 0, None => return -1 };
+            Some(SequencerParams {
+                pattern_type: match pattern_byte {
+                    1 => SequencerPatternType::Checkerboard,
+                    2 => SequencerPatternType::Sections,
+                    3 => SequencerPatternType::Scatter,
+                    4 => SequencerPatternType::Flow,
+                    _ => SequencerPatternType::Split,
+                },
+                origin_x: seq_origin_x,
+                origin_y: seq_origin_y,
+                angle: seq_angle,
+                scale: seq_scale,
+                count: seq_count,
+                density: seq_density,
+                density_variation: seq_density_variation,
+                invert: seq_invert,
+            })
+        } else {
+            None
+        };
+
+        let effect_type = if sequencer_params.is_some() {
+            "SequencerEffect".to_string()
+        } else {
+            effect_type
+        };
+
         configs.push(EffectConfig {
             target_channels,
             target_group_indices,
@@ -223,6 +288,9 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             speed,
             waveform_shape,
             waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, start_level: shape_start_level, end_level: shape_end_level },
+            noise_params,
+            sequencer_params,
+            effect_type,
         });
     }
 

@@ -1,5 +1,41 @@
 export type WaveformShape = 'sine' | 'square' | 'triangle' | 'sawtooth' | 'bounce' | 'ramp' | 'smooth';
 
+export type NoiseType = 'white' | 'perlin' | 'step';
+export type ChannelMode = 'linked' | 'independent';
+
+export interface NoiseParams {
+  noiseType: NoiseType;
+  /** Spatial frequency for Perlin noise (0.1–10). Higher = faster change between fixtures. */
+  scale: number;
+  channelMode: ChannelMode;
+  /** 0 = channels correlated (white output), 1 = fully decorrelated (colorful). Only active when channelMode='independent'. */
+  colorVariation: number;
+  /** Crossfade between consecutive random values as fraction of step duration (0 = hard snap, 1 = continuous). */
+  fade: number;
+  /** Only output noise above this level (0–1). Values below become 0 → sparkle/gate effect. */
+  threshold: number;
+}
+
+export type SequencerPatternType = 'split' | 'checkerboard' | 'sections' | 'scatter' | 'flow';
+
+export interface SequencerParams {
+  patternType: SequencerPatternType;
+  /** Pattern anchor in normalized world space (0–1). */
+  originX: number;
+  originY: number;
+  /** Direction of pattern axis in radians. 0 = right (+X). */
+  angle: number;
+  /** Cell/band size relative to world width (0.01–1.0). */
+  scale: number;
+  /** Number of section bands (2–16, sections pattern only). */
+  count: number;
+  /** On-probability for scatter/flow pattern (0–1). */
+  density: number;
+  /** How much density shifts randomly per cycle (0–1, scatter only). */
+  densityVariation: number;
+  invert: boolean;
+}
+
 export interface WaveformShapeParams {
   /**
    * Normalized 0–1 parameter controlling the adjustable aspect of the shape.
@@ -173,6 +209,16 @@ export interface Effect {
    * Shape-specific parameter (normalized 0–1). See WaveformShapeParams for details.
    */
   waveformParams?: WaveformShapeParams;
+
+  /**
+   * Noise-specific parameters. Only present when the effect is a NoiseEffect.
+   */
+  noiseParams?: NoiseParams;
+
+  /**
+   * Sequencer-specific parameters. Only present when the effect is a SequencerEffect.
+   */
+  sequencerParams?: SequencerParams;
 
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).

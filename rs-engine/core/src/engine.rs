@@ -190,7 +190,7 @@ impl EffectEngine {
         // 1. Update effects
         let global_bpm = self.global_bpm;
         for effect in &mut self.effects {
-            effect.update(delta_time_ms, global_bpm);
+            effect.update(delta_time_ms, time_ms, global_bpm);
         }
 
         // 2. Compute base values (Chasers or Defaults)
@@ -275,13 +275,36 @@ impl EffectEngine {
                     }
                 }
 
-                let wave_value = effect.render(target.world_x, target.world_y);
+                // Per-channel seed: FNV-1a of the channel type string so each
+                // channel kind (RED, GREEN, BLUE, DIMMER, ...) decorrelates.
+                let channel_seed: u32 = {
+                    let mut h: u32 = 0x811c9dc5;
+                    for b in target.channel_type.as_bytes() {
+                        h = (h ^ (*b as u32)).wrapping_mul(0x01000193);
+                    }
+                    h
+                };
+                let group_count = match &config.target_group_indices {
+                    Some(indices) => indices.len() as u32,
+                    None => self.targets.iter().map(|t| t.group_index).max().map(|m| m + 1).unwrap_or(0) as u32,
+                };
+                let wave_value = effect.render(target.world_x, target.world_y, channel_seed, target.group_index as u32, group_count);
                 let base_value = self.base_buffer[dmx_index];
 
-                let target_max = (base_value + config.strength).min(255.0);
-                let target_min = (base_value - config.strength).max(0.0);
-
-                let mapped_value = target_min + ((wave_value + 1.0) / 2.0) * (target_max - target_min);
+                let mapped_value = if config.sequencer_params.is_some() {
+                    // Sequencer blend: ON (wave=0) keeps base, OFF (wave=-1) scales toward black.
+                    // strength 0–255 controls how dark the OFF segments go.
+                    let strength_frac = config.strength / 255.0;
+                    if wave_value >= 0.0 {
+                        base_value
+                    } else {
+                        base_value * (1.0 + wave_value * strength_frac)
+                    }
+                } else {
+                    let target_max = (base_value + config.strength).min(255.0);
+                    let target_min = (base_value - config.strength).max(0.0);
+                    target_min + ((wave_value + 1.0) / 2.0) * (target_max - target_min)
+                };
                 let offset = mapped_value - base_value;
 
                 // Additively blend the effect on top of what was already in renderBuffer

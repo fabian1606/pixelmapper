@@ -1,4 +1,4 @@
-import type { ChannelType, SpeedConfig, EffectDirection, WaveformShape, WaveformShapeParams } from './types';
+import type { ChannelType, SpeedConfig, EffectDirection, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams } from './types';
 
 /**
  * High-level category grouping for a preset entry.
@@ -39,6 +39,8 @@ export interface PresetModifierSnapshot {
   angle?: number;
   waveformShape?: WaveformShape;
   waveformParams?: WaveformShapeParams;
+  noiseParams?: NoiseParams;
+  sequencerParams?: SequencerParams;
 }
 
 /**

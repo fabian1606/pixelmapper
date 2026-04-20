@@ -21,6 +21,7 @@ export class EffectEngine {
    * Access via buffer[startAddress - 1 + addressOffset].
    */
   public dmxBuffer: Uint8Array = new Uint8Array(512);
+  public absTimeMs: number = 0;
 
   /** Resolves when WASM is loaded and wasmEngine is ready. */
   public readonly ready: Promise<void>;
@@ -63,6 +64,7 @@ export class EffectEngine {
 
   public render(timeMs: number, deltaTimeMs: number): void {
     if (!this.wasmEngine) return;
+    this.absTimeMs = timeMs;
 
     this.wasmEngine.set_bpm(this.globalBpm.value);
     this.wasmEngine.render(timeMs, deltaTimeMs);

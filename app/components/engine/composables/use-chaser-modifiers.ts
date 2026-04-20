@@ -3,6 +3,8 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect, ChannelType } from '~/utils/engine/types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
+import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
+import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import type { useChaserHistory } from './use-chaser-history';
 
@@ -78,6 +80,21 @@ export function useChaserModifiers(
     effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
     emit('change');
     commitModifiers(before, 'Add Waveform Modifier');
+  }
+
+  function addNoiseModifier() {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const effect = new NoiseEffect();
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effect.strength = 50;
+    effect.speed = { mode: 'time', timeMs: 500, beatValue: 1, beatOffset: 0 };
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Noise Modifier');
   }
 
   function cloneModifier(effect: Effect): Effect {
@@ -285,6 +302,88 @@ export function useChaserModifiers(
     }
   }
 
+  function addSequencerModifier() {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const effect = new SequencerEffect();
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effect.strength = 100;
+    const avgX = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
+      : 0.5;
+    const avgY = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
+      : 0.5;
+    // Default angle π/2 gives a vertical split axis — sensible default for horizontal fixture rows
+    effect.sequencerParams = { ...effect.sequencerParams, originX: avgX, originY: avgY, angle: Math.PI / 2 };
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Sequencer Modifier');
+  }
+
+  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer') {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+
+    const current = effect instanceof SequencerEffect ? 'Sequencer' : effect instanceof NoiseEffect ? 'Noise' : 'Waveform';
+    if (type === current) return;
+
+    const targetChannels = [...(effect.targetChannels || [])];
+    const targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
+    const strength = effect.strength ?? 100;
+    const speed = (effect as any).speed ? { ...(effect as any).speed } : { mode: 'time' as const, timeMs: 500, beatValue: 1, beatOffset: 0 };
+
+    const avgX = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
+      : 0.5;
+    const avgY = props.fixtures.length > 0
+      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
+      : 0.5;
+
+    let replacement: Effect;
+    if (type === 'Noise') {
+      const n = new NoiseEffect();
+      n.targetChannels = targetChannels;
+      n.targetFixtureIds = targetFixtureIds;
+      n.strength = strength;
+      n.speed = speed;
+      replacement = n as unknown as Effect;
+    } else if (type === 'Sequencer') {
+      const s = new SequencerEffect();
+      s.targetChannels = targetChannels;
+      s.targetFixtureIds = targetFixtureIds;
+      s.strength = strength;
+      s.sequencerParams = { ...s.sequencerParams, originX: avgX, originY: avgY, angle: Math.PI / 2 };
+      replacement = s as unknown as Effect;
+    } else {
+      const w = new WaveformEffect();
+      w.targetChannels = targetChannels;
+      w.targetFixtureIds = targetFixtureIds;
+      w.strength = strength;
+      w.speed = speed;
+      w.fanning = 0.1;
+      w.direction = 'LINEAR';
+      w.originX = avgX;
+      w.originY = avgY;
+      w.angle = 0;
+      w.reverse = false;
+      replacement = w as unknown as Effect;
+    }
+
+    const idx = effectEngine.effects.indexOf(effect);
+    if (idx >= 0) {
+      effectEngine.effects.splice(idx, 1, replacement);
+    } else {
+      effectEngine.addEffect(replacement);
+    }
+    effectEngine.activeModifier.value = replacement;
+    emit('change');
+    commitModifiers(before, `Switch Modifier to ${type}`);
+  }
+
   function reverseDirection(effect: Effect) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
@@ -300,6 +399,9 @@ export function useChaserModifiers(
     availableChannelTypes,
     activeModifiers,
     addWaveformModifier,
+    addNoiseModifier,
+    addSequencerModifier,
+    switchModifierType,
     handleModifierDragEnd,
     updateModifier,
     updateModifierProperties,

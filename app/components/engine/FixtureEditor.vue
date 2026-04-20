@@ -228,7 +228,7 @@ function handleMouseUp(e?: MouseEvent) {
     </div>
 
     <FixtureEditorSpatialControls
-      v-if="activeModifier && activeModifier.fanning !== 0"
+      v-if="activeModifier && (activeModifier.fanning !== 0 || !!(activeModifier as any).sequencerParams)"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"

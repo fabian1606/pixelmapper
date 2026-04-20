@@ -295,15 +295,15 @@ defineExpose({ openTab });
 
         <div class="flex-1 min-h-0 flex flex-col">
           <!-- Category Effects Manager (Steps & Modifiers) -->
-          <CategoryEffectsManager 
+          <CategoryEffectsManager
             auto-close
             ref="effectsManager"
             :active-tab="activeTab"
-            :fixtures="getSelectedFixtures()" 
+            :fixtures="getSelectedFixtures()"
           />
-          
+
           <!-- Overlay Content (Faders) -->
-          <ScrollArea v-show="!effectsManager || effectsManager.layerMode === 'steps'" class="flex-1 min-h-0">
+          <ScrollArea v-show="!effectsManager || effectsManager.layerMode !== 'modifiers'" class="flex-1 min-h-0">
             <FixturePropertiesChannelList
               class="p-4"
               :channel-sections="channelSections"

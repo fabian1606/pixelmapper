@@ -1,39 +1,28 @@
-import type { Effect, EffectContext, ChannelType, EffectDirection, SpeedConfig } from "../types";
+import type { EffectContext, EffectDirection, SpeedConfig } from "../types";
 import type { EffectEngine } from "../engine";
+import { BaseEffect } from "./base-effect";
 
-export abstract class BaseOscillatorEffect implements Effect {
-  public id: string;
-  public targetChannels: ChannelType[] = [];
-  public targetFixtureIds?: (string | number)[];
-
+export abstract class BaseOscillatorEffect extends BaseEffect {
   constructor() {
-    this.id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
+    super();
   }
   public direction: EffectDirection = 'LINEAR';
   public originX: number = 0.5;
   public originY: number = 0.5;
   public angle: number = 0;
-  public strength: number = 100;
+  public override strength: number = 100;
   public reverse: boolean = false;
 
-  /**
-   * Speed of the oscillator animation.
-   */
   public speed: SpeedConfig = { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 };
-
-  /**
-   * Frequency (phase offset scaling) across fixtures.
-   */
   public fanning: number = 0.5;
 
   protected timePhase: number = 0;
   protected currentOffsetPhase: number = 0;
 
-  update(deltaTime: number, engine: EffectEngine): void {
-    const durationMs = engine.resolveSpeedToMs(this.speed);
+  override update(deltaTime: number, engine: EffectEngine): void {
+    const durationMs = this.resolveSpeedToMs(this.speed, engine);
 
     if (durationMs === Infinity || durationMs === 0) {
-      // timePhase remains frozen
       return;
     }
 
@@ -45,58 +34,50 @@ export abstract class BaseOscillatorEffect implements Effect {
       this.currentOffsetPhase = 0;
     }
 
-    // Phase scales from 0 to 2π over the full durationMs cycle
     const phaseAdvance = (deltaTime / durationMs) * Math.PI * 2;
     this.timePhase += phaseAdvance;
+  }
+
+  protected resolveSpeedToMs(speed: SpeedConfig, engine: EffectEngine): number {
+    if (speed.mode === 'infinite') return Infinity;
+    if (speed.mode === 'beat') return (60000 / engine.globalBpm.value) * speed.beatValue;
+    return speed.timeMs;
   }
 
   protected getDirectionalOffset(context: EffectContext): number {
     const { x, y } = context;
 
-    // All coordinates are normalized [0-1] world space
     const dx = x - (this.originX ?? 0.5);
     const dy = y - (this.originY ?? 0.5);
     const angle = this.angle ?? 0;
 
     switch (this.direction) {
-      case 'LINEAR': {
-        // Signed projection along the direction vector (origin → endpoint)
+      case 'LINEAR':
         return dx * Math.cos(angle) + dy * Math.sin(angle);
-      }
-      case 'RADIAL': {
-        // Radial distance from origin
+      case 'RADIAL':
         return Math.sqrt(dx * dx + dy * dy);
-      }
-      case 'SYMMETRICAL': {
-        // Mirrored projection
+      case 'SYMMETRICAL':
         return Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));
-      }
       default:
         return dx * Math.cos(angle) + dy * Math.sin(angle);
     }
   }
 
-  render(context: EffectContext): number {
+  override render(context: EffectContext): number {
     if (this.fanning === 0 || this.direction === 'NONE') {
-      return this.getShape(this.timePhase); // All fixtures perfectly synchronized
+      return this.getShape(this.timePhase);
     }
 
-    // Normalized distance of this fixture along the effect direction
     const dist = this.getDirectionalOffset(context);
-
-    // fanning = one full wavelength in normalized world coords.
-    // phase advances by 2π across one wavelength.
     const fanning = Math.max(0.0001, this.fanning);
     let phaseOffset = (dist / fanning) * Math.PI * 2;
 
-    // By default, subtract phaseOffset so waves propagate AWAY from the origin.
-    // If reversed, add phaseOffset so waves propagate TOWARDS the origin.
     if (this.reverse) phaseOffset = -phaseOffset;
 
     return this.getShape(this.timePhase - phaseOffset + this.currentOffsetPhase);
   }
 
-  getPreviewCSS(params: {
+  override getPreviewCSS(params: {
     worldWidth: number;
     worldHeight: number;
     camera: { x: number; y: number; scale: number };
@@ -111,18 +92,15 @@ export abstract class BaseOscillatorEffect implements Effect {
     const ox = (this.originX ?? 0.5) * worldWidth;
     const oy = (this.originY ?? 0.5) * worldHeight;
 
-    // Very subtle dark gray pattern overlay (80% of current)
     const cCrest = 'rgba(255, 255, 255, 0.096)';
     const cTrough = 'rgba(0, 0, 0, 0.48)';
 
-    // Visible screen boundaries in world space coordinates
     const vLeft = -camera.x / camera.scale;
     const vTop = -camera.y / camera.scale;
     const vRight = vLeft + viewportWidth / camera.scale;
     const vBottom = vTop + viewportHeight / camera.scale;
 
     if (this.direction === 'LINEAR' || this.direction === 'SYMMETRICAL') {
-      // Find the furthest visible corner from the origin to ensure the rotated div covers the screen
       const dists = [
         Math.hypot(vLeft - ox, vTop - oy),
         Math.hypot(vRight - ox, vTop - oy),
@@ -130,10 +108,7 @@ export abstract class BaseOscillatorEffect implements Effect {
         Math.hypot(vRight - ox, vBottom - oy)
       ];
       const maxDist = Math.max(...dists);
-      // Double the maximum distance to use as the diameter for our square container
       const minSize = maxDist * 2;
-
-      // Find the next even integer multiple of fanningPx to guarantee the exact center matches 0px phase
       const N = Math.ceil(minSize / (fanningPx * 2));
       const pxC = N * 2 * fanningPx;
 
@@ -148,8 +123,6 @@ export abstract class BaseOscillatorEffect implements Effect {
         backgroundImage: `repeating-linear-gradient(${this.reverse ? -90 : 90}deg, ${cTrough} 0px, ${cCrest} ${fanningPx / 2}px, ${cTrough} ${fanningPx}px)`
       };
     } else if (this.direction === 'RADIAL') {
-      // For radial, we just size the div EXACTLY to the visible viewport bounds in world space
-      // and offset the `circle at` mathematically from the new top left. Zero clipping, 100% optimized.
       const vWidth = viewportWidth / camera.scale;
       const vHeight = viewportHeight / camera.scale;
 
@@ -165,8 +138,5 @@ export abstract class BaseOscillatorEffect implements Effect {
     return {};
   }
 
-  /**
-   * Subclasses must implement this to return a value from -1 to 1 based on phase.
-   */
   abstract getShape(phase: number): number;
 }

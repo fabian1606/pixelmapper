@@ -270,6 +270,36 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[]): Uint8Ar
     w.f32(waveformParams.startLevel ?? 999.0);
     w.f32(waveformParams.endLevel ?? 999.0);
     w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
+
+    // Effect type discriminator + noise parameters (always written; Waveforms use defaults)
+    const noiseParams = (effect as any).noiseParams;
+    const isNoise = !!noiseParams;
+    const NOISE_TYPE_ID: Record<string, number> = { white: 0, perlin: 1, step: 2 };
+    const CHANNEL_MODE_ID: Record<string, number> = { linked: 0, independent: 1 };
+    w.u8(isNoise ? 1 : 0);
+    w.u8(NOISE_TYPE_ID[noiseParams?.noiseType] ?? 0);
+    w.f32(noiseParams?.scale ?? 1);
+    w.u8(CHANNEL_MODE_ID[noiseParams?.channelMode] ?? 0);
+    w.f32(noiseParams?.colorVariation ?? 0);
+    w.f32(noiseParams?.fade ?? 0);
+    w.f32(noiseParams?.threshold ?? 0);
+
+    // Sequencer parameters
+    const seqParams = (effect as any).sequencerParams;
+    const isSeq = !!seqParams;
+    const SEQ_PATTERN_ID: Record<string, number> = { split: 0, checkerboard: 1, sections: 2, scatter: 3, flow: 4 };
+    w.u8(isSeq ? 1 : 0);
+    if (isSeq) {
+      w.u8(SEQ_PATTERN_ID[seqParams.patternType] ?? 0);
+      w.f32(seqParams.originX ?? 0.5);
+      w.f32(seqParams.originY ?? 0.5);
+      w.f32(seqParams.angle ?? 0);
+      w.f32(seqParams.scale ?? 0.1);
+      w.u8(seqParams.count ?? 4);
+      w.f32(seqParams.density ?? 0.5);
+      w.f32(seqParams.densityVariation ?? 0);
+      w.u8(seqParams.invert ? 1 : 0);
+    }
   }
 
   return w.toPacket(TYPE_FX_BIN);

@@ -6,6 +6,7 @@ import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect } from '~/utils/engine/types';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 
+import { ScrollArea } from '@/components/ui/scroll-area';
 import ChaserStepsList from './ChaserStepsList.vue';
 import ChaserModifiersList from './ChaserModifiersList.vue';
 
@@ -50,6 +51,9 @@ const {
   activeModifiers,
   availableChannelTypes,
   addWaveformModifier,
+  addNoiseModifier,
+  addSequencerModifier,
+  switchModifierType,
   handleModifierDragEnd,
   updateModifier,
   updateModifierProperties,
@@ -104,31 +108,33 @@ defineExpose({
 </script>
 
 <template>
-  <div class="px-4 py-3 border-b border-border space-y-4 bg-background">
-    
+  <div class="flex flex-col border-b border-border bg-background" :class="layerMode === 'modifiers' ? 'flex-1 min-h-0' : ''">
+
     <!-- Layer Mode Switch (Always highest level) -->
-    <div class="flex items-center justify-center p-1 bg-muted rounded-md border border-border">
-      <button 
-        @click="layerMode = 'steps'"
-        class="flex-1 text-xs font-semibold py-1.5 rounded-sm transition-all duration-200"
-        :class="layerMode === 'steps' ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground'"
-      >
-        Steps
-      </button>
-      <button 
-        @click="layerMode = 'modifiers'"
-        class="flex-1 text-xs font-semibold py-1.5 rounded-sm transition-all duration-200"
-        :class="layerMode === 'modifiers' ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground'"
-      >
-        Modifiers
-      </button>
+    <div class="px-4 pt-3 pb-3">
+      <div class="flex items-center justify-center p-1 bg-muted rounded-md border border-border">
+        <button
+          @click="layerMode = 'steps'"
+          class="flex-1 text-xs font-semibold py-1.5 rounded-sm transition-all duration-200"
+          :class="layerMode === 'steps' ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground'"
+        >
+          Steps
+        </button>
+        <button
+          @click="layerMode = 'modifiers'"
+          class="flex-1 text-xs font-semibold py-1.5 rounded-sm transition-all duration-200"
+          :class="layerMode === 'modifiers' ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground'"
+        >
+          Modifiers
+        </button>
+      </div>
     </div>
 
     <!-- Active Chaser Config -->
-    <div v-if="activeChaserConfig" class="space-y-4">
-      
+    <template v-if="activeChaserConfig">
+
       <!-- Steps Level -->
-      <div v-if="layerMode === 'steps'" class="space-y-4">
+      <div v-if="layerMode === 'steps'" class="px-4 pb-3 space-y-4">
         <ChaserStepsList
           :active-chaser-config="activeChaserConfig"
           @update-timing="updateTiming"
@@ -139,24 +145,29 @@ defineExpose({
         />
       </div>
 
-      <!-- Modifiers Level (Advanced) -->
-      <div v-else-if="layerMode === 'modifiers'" class="space-y-4">
-        <ChaserModifiersList
-          :active-modifiers="activeModifiers"
-          :active-modifier="effectEngine?.activeModifier?.value ?? null"
-          :available-channel-types="availableChannelTypes"
-          @select-modifier="selectModifier"
-          @remove-modifier="removeModifier"
-          @toggle-target-channel="toggleTargetChannel"
-          @update-modifier="updateModifier"
-          @update-modifier-properties="updateModifierProperties"
-          @reverse-direction="reverseDirection"
-          @handle-modifier-drag-end="handleModifierDragEnd"
-          @add-modifier="addWaveformModifier"
-          @dropdown-open-change="handleDropdownOpenChange"
-        />
-      </div>
-      
-    </div>
+      <!-- Modifiers Level (scrollable) -->
+      <ScrollArea v-else-if="layerMode === 'modifiers'" class="flex-1 min-h-0">
+        <div class="px-4 pb-3 space-y-4">
+          <ChaserModifiersList
+            :active-modifiers="activeModifiers"
+            :active-modifier="effectEngine?.activeModifier?.value ?? null"
+            :available-channel-types="availableChannelTypes"
+            @select-modifier="selectModifier"
+            @remove-modifier="removeModifier"
+            @toggle-target-channel="toggleTargetChannel"
+            @update-modifier="updateModifier"
+            @update-modifier-properties="updateModifierProperties"
+            @reverse-direction="reverseDirection"
+            @handle-modifier-drag-end="handleModifierDragEnd"
+            @add-modifier="addWaveformModifier"
+            @add-noise-modifier="addNoiseModifier"
+            @add-sequencer-modifier="addSequencerModifier"
+            @switch-modifier-type="switchModifierType"
+            @dropdown-open-change="handleDropdownOpenChange"
+          />
+        </div>
+      </ScrollArea>
+
+    </template>
   </div>
 </template>

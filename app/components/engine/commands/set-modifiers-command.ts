@@ -2,6 +2,8 @@ import type { Command } from '../composables/use-history';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect } from '~/utils/engine/types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
+import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
+import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 
 /**
  * Deep clones an array of effects to decouple them from the live engine state.
@@ -10,13 +12,18 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 export function cloneEffectsList(effects: Effect[]): Effect[] {
   return effects.map(effect => {
     let clone: Effect;
-    if (effect instanceof WaveformEffect) {
+    if (effect instanceof SequencerEffect) {
+      clone = new SequencerEffect();
+    } else if (effect instanceof NoiseEffect) {
+      clone = new NoiseEffect();
+    } else if (effect instanceof WaveformEffect) {
       clone = new WaveformEffect();
     } else {
       clone = Object.create(Object.getPrototypeOf(effect));
     }
 
     // Clone all known properties
+    clone.id = effect.id;
     clone.targetChannels = [...(effect.targetChannels || [])];
     clone.targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
     clone.direction = effect.direction;
@@ -32,6 +39,12 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
     }
     if ('waveformShape' in effect) (clone as any).waveformShape = (effect as any).waveformShape;
     if ('waveformParams' in effect) (clone as any).waveformParams = { ...(effect as any).waveformParams };
+    if ('noiseParams' in effect && (effect as any).noiseParams) {
+      (clone as any).noiseParams = { ...(effect as any).noiseParams };
+    }
+    if ('sequencerParams' in effect && (effect as any).sequencerParams) {
+      (clone as any).sequencerParams = { ...(effect as any).sequencerParams };
+    }
 
     // Internal state like timePhase should theoretically be cloned too
     if ('timePhase' in effect) {
