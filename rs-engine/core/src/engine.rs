@@ -1,6 +1,43 @@
 use crate::types::{BlendMode, ChaserConfig, RenderTarget, SpeedMode, SpeedConfig};
 use crate::effects::{create_effect, Effect};
 
+fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < 1e-6 {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
+    } else if max == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    (h, s, l)
+}
+
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 { t += 1.0; }
+    if t > 1.0 { t -= 1.0; }
+    if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+    if t < 1.0 / 2.0 { return q; }
+    if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+    p
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s < 1e-6 {
+        return (l, l, l);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    (hue_to_rgb(p, q, h + 1.0 / 3.0), hue_to_rgb(p, q, h), hue_to_rgb(p, q, h - 1.0 / 3.0))
+}
+
 // ── Internal structs for binary-decoded layout/channel data ──────────────────
 
 pub struct LayoutChannelEntry {
@@ -315,6 +352,42 @@ impl EffectEngine {
                     BlendMode::Max      => prev.max(mapped_value),
                     BlendMode::Min      => prev.min(mapped_value),
                 };
+            }
+        }
+
+        // 3.5 Apply color (hue/saturation) post-processing per fixture
+        for effect in &self.effects {
+            let config = effect.get_config();
+            let cp = match &config.color_params {
+                Some(p) => *p,
+                None => continue,
+            };
+
+            let max_group = self.targets.iter().map(|t| t.group_index).max().unwrap_or(0);
+            let groups: Vec<usize> = match &config.target_group_indices {
+                Some(g) => g.clone(),
+                None => (0..=max_group).collect(),
+            };
+
+            for group_idx in groups {
+                let r_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "RED").map(|t| t.dmx_index);
+                let g_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "GREEN").map(|t| t.dmx_index);
+                let b_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "BLUE").map(|t| t.dmx_index);
+
+                if let (Some(ri), Some(gi), Some(bi)) = (r_idx, g_idx, b_idx) {
+                    let r = self.render_buffer[ri] / 255.0;
+                    let g = self.render_buffer[gi] / 255.0;
+                    let b = self.render_buffer[bi] / 255.0;
+
+                    let (h, s, l) = rgb_to_hsl(r, g, b);
+                    let new_h = (h + cp.hue_shift / 360.0).rem_euclid(1.0);
+                    let new_s = (s * cp.saturation).clamp(0.0, 1.0);
+                    let (nr, ng, nb) = hsl_to_rgb(new_h, new_s, l);
+
+                    self.render_buffer[ri] = (nr * 255.0).clamp(0.0, 255.0);
+                    self.render_buffer[gi] = (ng * 255.0).clamp(0.0, 255.0);
+                    self.render_buffer[bi] = (nb * 255.0).clamp(0.0, 255.0);
+                }
             }
         }
 

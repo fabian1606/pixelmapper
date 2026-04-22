@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{BlendMode, ChannelMode, ChaserConfig, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
+use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -277,7 +277,19 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             None
         };
 
-        let effect_type = if sequencer_params.is_some() {
+        // Color parameters (hue shift + saturation post-process)
+        let is_color_byte = match c.read_u8() { Some(v) => v, None => return -1 };
+        let color_params = if is_color_byte == 1 {
+            let hue_shift  = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let saturation = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            Some(ColorParams { hue_shift, saturation })
+        } else {
+            None
+        };
+
+        let effect_type = if color_params.is_some() {
+            "ColorEffect".to_string()
+        } else if sequencer_params.is_some() {
             "SequencerEffect".to_string()
         } else {
             effect_type
@@ -298,6 +310,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, start_level: shape_start_level, end_level: shape_end_level },
             noise_params,
             sequencer_params,
+            color_params,
             effect_type,
         });
     }

@@ -213,6 +213,22 @@ impl Default for SequencerParams {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ColorParams {
+    /// Hue rotation in degrees (-180 to +180). 0 = no change.
+    #[serde(rename = "hueShift", default)]
+    pub hue_shift: f32,
+    /// Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid.
+    #[serde(default = "one_f32")]
+    pub saturation: f32,
+}
+
+fn one_f32() -> f32 { 1.0 }
+
+impl Default for ColorParams {
+    fn default() -> Self { ColorParams { hue_shift: 0.0, saturation: 1.0 } }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectConfig {
     #[serde(rename = "targetChannels")]
@@ -237,6 +253,8 @@ pub struct EffectConfig {
     pub noise_params: Option<NoiseParams>,
     #[serde(rename = "sequencerParams", default)]
     pub sequencer_params: Option<SequencerParams>,
+    #[serde(rename = "colorParams", default)]
+    pub color_params: Option<ColorParams>,
     #[serde(rename = "effectType", default)]
     pub effect_type: String,
 }

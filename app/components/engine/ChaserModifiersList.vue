@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { Plus, Trash2, ChevronDown, Star } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams } from '~/utils/engine/types';
+import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams } from '~/utils/engine/types';
 import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import ChaserFanningControl from './ChaserFanningControl.vue';
@@ -13,8 +14,9 @@ import SpeedControl from './SpeedControl.vue';
 import WaveformEditor from './WaveformEditor.vue';
 import NoiseEditor from './NoiseEditor.vue';
 import SequencerEditor from './SequencerEditor.vue';
+import ColorEditor from './ColorEditor.vue';
 
-defineProps<{
+const props = defineProps<{
   activeModifiers: Effect[];
   activeModifier: Effect | null | undefined;
   availableChannelTypes: ChannelType[];
@@ -35,9 +37,46 @@ const emit = defineEmits<{
   (e: 'add-sequencer-modifier'): void;
   (e: 'add-pinned-modifier', snapshot: PresetModifierSnapshot): void;
   (e: 'pin-modifier', effect: Effect): void;
-  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer'): void;
+  (e: 'add-color-modifier'): void;
+  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color'): void;
   (e: 'dropdown-open-change', open: boolean): void;
+  (e: 'reorder-modifiers', fromIndex: number, toIndex: number): void;
 }>();
+
+// ── Drag-to-reorder ───────────────────────────────────────────────────────────
+const dragFromIndex = ref<number | null>(null);
+const dragOverIndex = ref<number | null>(null);
+
+function onDragHandleMousedown(e: MouseEvent, index: number) {
+  e.preventDefault();
+  e.stopPropagation();
+  dragFromIndex.value = index;
+  dragOverIndex.value = index;
+
+  const onMousemove = (me: MouseEvent) => {
+    const cards = document.querySelectorAll('[data-modifier-card]');
+    for (let i = 0; i < cards.length; i++) {
+      const rect = cards[i]!.getBoundingClientRect();
+      if (me.clientY >= rect.top && me.clientY <= rect.bottom) {
+        dragOverIndex.value = i;
+        break;
+      }
+    }
+  };
+
+  const onMouseup = () => {
+    window.removeEventListener('mousemove', onMousemove);
+    window.removeEventListener('mouseup', onMouseup);
+    if (dragFromIndex.value !== null && dragOverIndex.value !== null && dragFromIndex.value !== dragOverIndex.value) {
+      emit('reorder-modifiers', dragFromIndex.value, dragOverIndex.value);
+    }
+    dragFromIndex.value = null;
+    dragOverIndex.value = null;
+  };
+
+  window.addEventListener('mousemove', onMousemove);
+  window.addEventListener('mouseup', onMouseup);
+}
 
 function isNoiseModifier(modifier: Effect): boolean {
   return 'noiseParams' in modifier && !!(modifier as any).noiseParams;
@@ -45,6 +84,14 @@ function isNoiseModifier(modifier: Effect): boolean {
 
 function isSequencerModifier(modifier: Effect): boolean {
   return 'sequencerParams' in modifier && !!(modifier as any).sequencerParams;
+}
+
+function isColorModifier(modifier: Effect): boolean {
+  return 'colorParams' in modifier && !!(modifier as any).colorParams;
+}
+
+function colorParams(modifier: Effect): ColorParams {
+  return (modifier as any).colorParams ?? { hueShift: 0, saturation: 1 };
 }
 
 function waveformShape(modifier: Effect): WaveformShape {
@@ -64,6 +111,7 @@ function sequencerParams(modifier: Effect): SequencerParams {
 }
 
 function modifierTypeName(modifier: Effect): string {
+  if (isColorModifier(modifier)) return 'Color';
   if (isSequencerModifier(modifier)) return 'Sequencer';
   if (isNoiseModifier(modifier)) return 'Noise';
   return 'Waveform';
@@ -81,17 +129,25 @@ function modifierTypeName(modifier: Effect): string {
 
     <div
       v-for="(modifier, i) in activeModifiers"
-      :key="i"
+      :key="modifier.id"
+      data-modifier-card
       class="border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col cursor-pointer transition-colors"
-      :class="activeModifier === modifier ? 'border-primary ring-1 ring-primary' : 'border-border/60 hover:border-primary/50'"
+      :class="[
+        activeModifier === modifier ? 'border-primary ring-1 ring-primary' : 'border-border/60 hover:border-primary/50',
+        dragFromIndex !== null && dragOverIndex === i && dragFromIndex !== i ? 'ring-2 ring-primary/60' : '',
+      ]"
       @click="emit('select-modifier', modifier)"
     >
       <!-- Modifier Header -->
-      <div class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20">
+      <div
+        class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20"
+        :class="dragFromIndex === i ? 'cursor-grabbing' : 'cursor-grab'"
+        @mousedown="onDragHandleMousedown($event, i)"
+      >
         <Select
           :model-value="modifierTypeName(modifier)"
           @update:model-value="(v: any) => {
-            const next = v as 'Waveform' | 'Noise' | 'Sequencer';
+            const next = v as 'Waveform' | 'Noise' | 'Sequencer' | 'Color';
             if (next !== modifierTypeName(modifier)) emit('switch-modifier-type', modifier, next);
           }"
         >
@@ -102,6 +158,7 @@ function modifierTypeName(modifier: Effect): string {
             <SelectItem value="Waveform" class="text-xs">Waveform</SelectItem>
             <SelectItem value="Noise" class="text-xs">Noise</SelectItem>
             <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
+            <SelectItem value="Color" class="text-xs">Color</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-yellow-400" @click.stop="emit('pin-modifier', modifier)">
@@ -135,8 +192,21 @@ function modifierTypeName(modifier: Effect): string {
           </div>
         </div>
 
+        <!-- Color editor -->
+        <template v-if="isColorModifier(modifier)">
+          <div class="pt-1 border-t border-border/40">
+            <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Color</Label>
+          </div>
+          <ColorEditor
+            :color-params="colorParams(modifier)"
+            @update:color-params="(p: ColorParams) => emit('update-modifier', modifier, 'colorParams', p)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Color')"
+            @click.stop
+          />
+        </template>
+
         <!-- Waveform editor -->
-        <template v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)">
+        <template v-else-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)">
           <div class="pt-1 border-t border-border/40">
             <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Waveform</Label>
           </div>
@@ -184,7 +254,7 @@ function modifierTypeName(modifier: Effect): string {
           />
         </template>
 
-        <div class="space-y-3 pt-3 border-t border-border/40">
+        <div v-if="!isColorModifier(modifier)" class="space-y-3 pt-3 border-t border-border/40">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
@@ -237,6 +307,7 @@ function modifierTypeName(modifier: Effect): string {
           <DropdownMenuItem @click="emit('add-modifier')">Waveform</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-noise-modifier')">Noise</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-sequencer-modifier')">Sequencer</DropdownMenuItem>
+          <DropdownMenuItem @click="emit('add-color-modifier')">Color</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger class="gap-2">

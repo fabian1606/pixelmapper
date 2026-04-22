@@ -13,6 +13,13 @@ export interface PinnedModifier {
 }
 
 function autoName(snap: PresetModifierSnapshot): string {
+  if (snap.effectType === 'ColorEffect') {
+    const hs = snap.colorParams?.hueShift ?? 0;
+    const sat = snap.colorParams?.saturation ?? 1;
+    if (sat <= 0.05) return 'Grayscale';
+    if (Math.abs(hs) > 5) return `Hue +${Math.round(hs)}°`;
+    return 'Color Adjust';
+  }
   if (snap.effectType === 'SequencerEffect') {
     const pt = snap.sequencerParams?.patternType ?? 'split';
     const labels: Record<string, string> = {

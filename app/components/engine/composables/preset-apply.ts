@@ -4,6 +4,7 @@ import type { Preset, PresetModifierSnapshot } from '~/utils/engine/preset-types
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
+import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -62,6 +63,16 @@ export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
     eff.targetFixtureIds = [...snap.targetFixtureIds];
     eff.strength = snap.strength;
     if (snap.sequencerParams) eff.sequencerParams = { ...snap.sequencerParams };
+    return eff;
+  }
+
+  if (snap.effectType === 'ColorEffect') {
+    const eff = new ColorEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    eff.strength = snap.strength;
+    if (snap.colorParams) eff.colorParams = { ...snap.colorParams };
     return eff;
   }
 

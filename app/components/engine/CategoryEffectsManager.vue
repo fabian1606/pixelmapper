@@ -70,6 +70,7 @@ const {
   addWaveformModifier,
   addNoiseModifier,
   addSequencerModifier,
+  addColorModifier,
   addPinnedModifier,
   switchModifierType,
   handleModifierDragEnd,
@@ -78,7 +79,8 @@ const {
   toggleTargetChannel,
   removeModifier,
   selectModifier,
-  reverseDirection
+  reverseDirection,
+  reorderModifiers,
 } = useChaserModifiers(props, effectEngine, historyTools, tabChannelFilter, () => emit('change'));
 
 const pinnedStore = usePinnedModifiersStore();
@@ -221,10 +223,12 @@ defineExpose({
             @add-modifier="addWaveformModifier"
             @add-noise-modifier="addNoiseModifier"
             @add-sequencer-modifier="addSequencerModifier"
+            @add-color-modifier="addColorModifier"
             @add-pinned-modifier="handleAddPinnedModifier"
             @pin-modifier="handlePinModifier"
             @switch-modifier-type="switchModifierType"
             @dropdown-open-change="handleDropdownOpenChange"
+            @reorder-modifiers="reorderModifiers"
           />
         </div>
       </ScrollArea>

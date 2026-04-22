@@ -6,6 +6,7 @@ import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
+import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import type { useChaserHistory } from './use-chaser-history';
@@ -326,6 +327,20 @@ export function useChaserModifiers(
     commitModifiers(before, 'Add Sequencer Modifier');
   }
 
+  function addColorModifier() {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const effect = new ColorEffect();
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effect.colorParams = { hueShift: 0, saturation: 1 };
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Color Modifier');
+  }
+
   function addPinnedModifier(snapshot: PresetModifierSnapshot) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
@@ -341,11 +356,11 @@ export function useChaserModifiers(
     commitModifiers(before, 'Add Pinned Modifier');
   }
 
-  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer') {
+  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color') {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
 
-    const current = effect instanceof SequencerEffect ? 'Sequencer' : effect instanceof NoiseEffect ? 'Noise' : 'Waveform';
+    const current = effect instanceof ColorEffect ? 'Color' : effect instanceof SequencerEffect ? 'Sequencer' : effect instanceof NoiseEffect ? 'Noise' : 'Waveform';
     if (type === current) return;
 
     const targetChannels = [...(effect.targetChannels || [])];
@@ -375,6 +390,12 @@ export function useChaserModifiers(
       s.strength = strength;
       s.sequencerParams = { ...s.sequencerParams, originX: avgX, originY: avgY, angle: Math.PI / 2 };
       replacement = s as unknown as Effect;
+    } else if (type === 'Color') {
+      const col = new ColorEffect();
+      col.targetChannels = targetChannels;
+      col.targetFixtureIds = targetFixtureIds;
+      col.strength = strength;
+      replacement = col as unknown as Effect;
     } else {
       const w = new WaveformEffect();
       w.targetChannels = targetChannels;
@@ -406,10 +427,26 @@ export function useChaserModifiers(
     if (!effectEngine || !before) return;
     const selectedIds = props.fixtures.map(f => f.id);
     const safeEff = getSafeEffectToMutate(effect, selectedIds);
-    // Toggle the new reverse property
     safeEff.reverse = !safeEff.reverse;
     emit('change');
     commitModifiers(before, 'Reverse Modifier Direction');
+  }
+
+  function reorderModifiers(fromIndex: number, toIndex: number) {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    // `activeModifiers` is a filtered view; we need to move within the full effects array
+    const allEffects = effectEngine.effects;
+    const fromEffect = activeModifiers.value[fromIndex];
+    const toEffect = activeModifiers.value[toIndex];
+    if (!fromEffect || !toEffect) return;
+    const fromGlobal = allEffects.indexOf(fromEffect as Effect);
+    const toGlobal = allEffects.indexOf(toEffect as Effect);
+    if (fromGlobal < 0 || toGlobal < 0) return;
+    const [moved] = allEffects.splice(fromGlobal, 1);
+    allEffects.splice(toGlobal, 0, moved!);
+    emit('change');
+    commitModifiers(before, 'Reorder Modifiers');
   }
 
   return {
@@ -418,6 +455,7 @@ export function useChaserModifiers(
     addWaveformModifier,
     addNoiseModifier,
     addSequencerModifier,
+    addColorModifier,
     addPinnedModifier,
     switchModifierType,
     handleModifierDragEnd,
@@ -426,6 +464,7 @@ export function useChaserModifiers(
     toggleTargetChannel,
     removeModifier,
     selectModifier,
-    reverseDirection
+    reverseDirection,
+    reorderModifiers,
   };
 }

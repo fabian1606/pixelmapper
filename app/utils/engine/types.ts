@@ -16,6 +16,13 @@ export interface NoiseParams {
   threshold: number;
 }
 
+export interface ColorParams {
+  /** Hue rotation in degrees (-180 to +180). 0 = no change. */
+  hueShift: number;
+  /** Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid. */
+  saturation: number;
+}
+
 export type SequencerPatternType = 'split' | 'checkerboard' | 'sections' | 'scatter' | 'flow';
 
 export interface SequencerParams {
@@ -221,6 +228,11 @@ export interface Effect {
    * Sequencer-specific parameters. Only present when the effect is a SequencerEffect.
    */
   sequencerParams?: SequencerParams;
+
+  /**
+   * Color-specific parameters. Only present when the effect is a ColorEffect.
+   */
+  colorParams?: ColorParams;
 
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).

@@ -303,6 +303,15 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBle
       w.f32(seqParams.densityVariation ?? 0);
       w.u8(seqParams.invert ? 1 : 0);
     }
+
+    // Color parameters (hue shift + saturation)
+    const colorP = (effect as any).colorParams;
+    const isColor = !!colorP;
+    w.u8(isColor ? 1 : 0);
+    if (isColor) {
+      w.f32(colorP.hueShift ?? 0);
+      w.f32(colorP.saturation ?? 1);
+    }
   }
 
   return w.toPacket(TYPE_FX_BIN);
