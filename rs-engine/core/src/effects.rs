@@ -4,6 +4,8 @@ pub trait Effect {
     fn update(&mut self, delta_time_ms: f32, abs_time_ms: f32, global_bpm: f32);
     fn render(&self, world_x: f32, world_y: f32, channel_seed: u32, group_index: u32, group_count: u32) -> f32;
     fn get_config(&self) -> &EffectConfig;
+    fn eval_cycle(&self) -> f32 { 0.0 }
+    fn eval_cycle_at(&self, world_x: f32, world_y: f32) -> f32 { let _ = (world_x, world_y); self.eval_cycle() }
 }
 
 pub struct BaseOscillator {
@@ -477,8 +479,66 @@ impl Effect for SequencerEffect {
     }
 }
 
+// ─── Color Effect ─────────────────────────────────────────────────────────────
+
+pub struct ColorEffect {
+    config: EffectConfig,
+    time_phase: f32,
+}
+
+impl ColorEffect {
+    pub fn new(config: EffectConfig) -> Self {
+        Self { config, time_phase: 0.0 }
+    }
+
+    fn resolve_duration_ms(config: &EffectConfig, global_bpm: f32) -> f32 {
+        match config.speed.mode {
+            SpeedMode::Infinite => f32::INFINITY,
+            SpeedMode::Time => config.speed.time_ms,
+            SpeedMode::Beat => (60000.0 / global_bpm) * config.speed.beat_value,
+        }
+    }
+}
+
+impl Effect for ColorEffect {
+    fn update(&mut self, delta_time_ms: f32, _abs_time_ms: f32, global_bpm: f32) {
+        let dur = Self::resolve_duration_ms(&self.config, global_bpm);
+        if dur.is_infinite() || dur <= 0.0 { return; }
+        self.time_phase += (delta_time_ms / dur) * core::f32::consts::TAU;
+    }
+    fn render(&self, _world_x: f32, _world_y: f32, _channel_seed: u32, _group_index: u32, _group_count: u32) -> f32 {
+        0.0
+    }
+    fn get_config(&self) -> &EffectConfig { &self.config }
+    fn eval_cycle(&self) -> f32 { evaluate_phase(&self.config, self.time_phase) }
+    fn eval_cycle_at(&self, world_x: f32, world_y: f32) -> f32 {
+        if self.config.fanning == 0.0 || self.config.direction == EffectDirection::None {
+            return evaluate_phase(&self.config, self.time_phase);
+        }
+        let dx = world_x - self.config.origin_x;
+        let dy = world_y - self.config.origin_y;
+        let angle = self.config.angle;
+        let dist = match self.config.direction {
+            EffectDirection::Linear     => dx * angle.cos() + dy * angle.sin(),
+            EffectDirection::Radial     => (dx * dx + dy * dy).sqrt(),
+            EffectDirection::Symmetrical => (dx * angle.cos() + dy * angle.sin()).abs(),
+            EffectDirection::None       => 0.0,
+        };
+        let fanning = self.config.fanning.max(0.0001);
+        // PI/2 factor: fanning = world-units that span a quarter-wave (half hue range).
+        // e.g. fanning=0.5 → leftmost fixture at -hueRange, rightmost at +hueRange.
+        let mut spatial_phase = (dist / fanning) * core::f32::consts::FRAC_PI_2;
+        if self.config.reverse { spatial_phase = -spatial_phase; }
+        evaluate_phase(&self.config, self.time_phase + spatial_phase)
+    }
+}
+
+// ─── Effect factory ───────────────────────────────────────────────────────────
+
 pub fn create_effect(config: EffectConfig) -> Box<dyn Effect> {
-    if config.effect_type == "SequencerEffect" || config.sequencer_params.is_some() {
+    if config.effect_type == "ColorEffect" || config.color_params.is_some() {
+        Box::new(ColorEffect::new(config))
+    } else if config.effect_type == "SequencerEffect" || config.sequencer_params.is_some() {
         Box::new(SequencerEffect::new(config))
     } else if config.effect_type == "NoiseEffect" || config.noise_params.is_some() {
         Box::new(NoiseEffect::new(config))

@@ -221,12 +221,18 @@ pub struct ColorParams {
     /// Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid.
     #[serde(default = "one_f32")]
     pub saturation: f32,
+    /// Hue cycle range in degrees (0..180). Waveform oscillates hue_shift ± hue_range.
+    #[serde(rename = "hueRange", default)]
+    pub hue_range: f32,
+    /// Saturation cycle range (0..1). Waveform oscillates saturation ± sat_range.
+    #[serde(rename = "satRange", default)]
+    pub sat_range: f32,
 }
 
 fn one_f32() -> f32 { 1.0 }
 
 impl Default for ColorParams {
-    fn default() -> Self { ColorParams { hue_shift: 0.0, saturation: 1.0 } }
+    fn default() -> Self { ColorParams { hue_shift: 0.0, saturation: 1.0, hue_range: 0.0, sat_range: 0.0 } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

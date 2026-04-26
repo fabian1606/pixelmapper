@@ -5,7 +5,7 @@ export class ColorEffect extends BaseEffect {
   public override fanning: number = 0;
   public override speed: SpeedConfig = { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 };
 
-  public colorParams: ColorParams = { hueShift: 0, saturation: 1 };
+  public colorParams: ColorParams = { hueShift: 0, saturation: 1, hueRange: 0, satRange: 0 };
 
   override update(_deltaTime: number, _engine: any): void {}
 

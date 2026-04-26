@@ -21,6 +21,10 @@ export interface ColorParams {
   hueShift: number;
   /** Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid. */
   saturation: number;
+  /** Hue cycle range in degrees (0–180). Waveform oscillates hueShift ± hueRange. */
+  hueRange?: number;
+  /** Saturation cycle range (0–1). Waveform oscillates saturation ± satRange. */
+  satRange?: number;
 }
 
 export type SequencerPatternType = 'split' | 'checkerboard' | 'sections' | 'scatter' | 'flow';

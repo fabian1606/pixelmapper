@@ -54,6 +54,25 @@ function handleDropdownOpenChange(open: boolean) {
 
 const historyTools = useChaserHistory(props, effectEngine);
 
+// Compute base hue from the first fixture's active step RGB for ColorEditor strip anchoring
+const baseHue = computed<number>(() => {
+  const f = props.fixtures[0];
+  if (!f) return 0;
+  const step = f.channels.find(c => c.type === 'RED')?.chaserConfig.activeEditStep ?? 0;
+  const r = (f.channels.find(c => c.type === 'RED')?.chaserConfig.stepValues[step] ?? 0) / 255;
+  const g = (f.channels.find(c => c.type === 'GREEN')?.chaserConfig.stepValues[step] ?? 0) / 255;
+  const b = (f.channels.find(c => c.type === 'BLUE')?.chaserConfig.stepValues[step] ?? 0) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h = 0;
+  if (max === r) h = ((g - b) / d + 6) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return h * 60;
+});
+
 const { 
   activeChaserConfig, 
   tabChannelFilter, 
@@ -213,6 +232,7 @@ defineExpose({
             :available-channel-types="availableChannelTypes"
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
+            :base-hue="baseHue"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
             @toggle-target-channel="toggleTargetChannel"

@@ -4,6 +4,7 @@ import type { Effect } from '~/utils/engine/types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
+import { ColorEffect } from '~/utils/engine/effects/color-effect';
 
 /**
  * Deep clones an array of effects to decouple them from the live engine state.
@@ -12,7 +13,9 @@ import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 export function cloneEffectsList(effects: Effect[]): Effect[] {
   return effects.map(effect => {
     let clone: Effect;
-    if (effect instanceof SequencerEffect) {
+    if (effect instanceof ColorEffect) {
+      clone = new ColorEffect();
+    } else if (effect instanceof SequencerEffect) {
       clone = new SequencerEffect();
     } else if (effect instanceof NoiseEffect) {
       clone = new NoiseEffect();
@@ -44,6 +47,9 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
     }
     if ('sequencerParams' in effect && (effect as any).sequencerParams) {
       (clone as any).sequencerParams = { ...(effect as any).sequencerParams };
+    }
+    if ('colorParams' in effect && (effect as any).colorParams) {
+      (clone as any).colorParams = { ...(effect as any).colorParams };
     }
 
     // Internal state like timePhase should theoretically be cloned too

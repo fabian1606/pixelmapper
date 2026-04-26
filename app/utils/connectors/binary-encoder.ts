@@ -311,6 +311,8 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBle
     if (isColor) {
       w.f32(colorP.hueShift ?? 0);
       w.f32(colorP.saturation ?? 1);
+      w.f32(colorP.hueRange ?? 0);
+      w.f32(colorP.satRange ?? 0);
     }
   }
 

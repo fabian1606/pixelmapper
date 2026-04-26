@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, toRaw } from 'vue';
+import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
+import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
+import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
+import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { Plus, Trash2, ChevronDown, Star } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
@@ -22,6 +26,7 @@ const props = defineProps<{
   availableChannelTypes: ChannelType[];
   pinnedModifiers: PinnedModifier[];
   pinnedEffectIds: Set<string>;
+  baseHue?: number;  // 0..360, current fixture hue for ColorEditor strip anchoring
 }>();
 
 const emit = defineEmits<{
@@ -79,15 +84,15 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
 }
 
 function isNoiseModifier(modifier: Effect): boolean {
-  return 'noiseParams' in modifier && !!(modifier as any).noiseParams;
+  return toRaw(modifier) instanceof NoiseEffect;
 }
 
 function isSequencerModifier(modifier: Effect): boolean {
-  return 'sequencerParams' in modifier && !!(modifier as any).sequencerParams;
+  return toRaw(modifier) instanceof SequencerEffect;
 }
 
 function isColorModifier(modifier: Effect): boolean {
-  return 'colorParams' in modifier && !!(modifier as any).colorParams;
+  return toRaw(modifier) instanceof ColorEffect;
 }
 
 function colorParams(modifier: Effect): ColorParams {
@@ -108,6 +113,11 @@ function noiseParams(modifier: Effect): NoiseParams {
 
 function sequencerParams(modifier: Effect): SequencerParams {
   return (modifier as any).sequencerParams ?? { patternType: 'split', originX: 0.5, originY: 0.5, angle: 0, scale: 0.1, count: 4, density: 0.5, invert: false };
+}
+
+function hasColorCycle(modifier: Effect): boolean {
+  const cp = (modifier as any).colorParams;
+  return ((cp?.hueRange ?? 0) > 0) || ((cp?.satRange ?? 0) > 0);
 }
 
 function modifierTypeName(modifier: Effect): string {
@@ -199,7 +209,10 @@ function modifierTypeName(modifier: Effect): string {
           </div>
           <ColorEditor
             :color-params="colorParams(modifier)"
+            :waveform-shape="waveformShape(modifier)"
+            :base-hue="props.baseHue"
             @update:color-params="(p: ColorParams) => emit('update-modifier', modifier, 'colorParams', p)"
+            @update:waveform-shape="(s: WaveformShape) => { emit('update-modifier', modifier, 'waveformShape', s); emit('handle-modifier-drag-end', 'Update Color Shape') }"
             @change-end="emit('handle-modifier-drag-end', 'Update Color')"
             @click.stop
           />
@@ -254,9 +267,9 @@ function modifierTypeName(modifier: Effect): string {
           />
         </template>
 
-        <div v-if="!isColorModifier(modifier)" class="space-y-3 pt-3 border-t border-border/40">
+        <div v-if="!isColorModifier(modifier) || hasColorCycle(modifier)" class="space-y-3 pt-3 border-t border-border/40">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)" class="space-y-1.5">
+            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier) && !isColorModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
               <DraggableNumberInput
                 :model-value="modifier.strength"
@@ -276,8 +289,8 @@ function modifierTypeName(modifier: Effect): string {
                 @dropdown-open-change="v => emit('dropdown-open-change', v)"
               />
             </div>
-            <!-- Fanning only for waveform modifiers -->
-            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier)" class="col-span-2">
+            <!-- Fanning for waveform modifiers and color modifiers with active cycle -->
+            <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier) && (!isColorModifier(modifier) || hasColorCycle(modifier))" class="col-span-2">
               <ChaserFanningControl
                 :fanning="modifier.fanning || 0"
                 :direction="modifier.direction"

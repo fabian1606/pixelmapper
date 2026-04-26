@@ -303,6 +303,11 @@ impl EffectEngine {
             for effect in &self.effects {
                 let config = effect.get_config();
 
+                // ColorEffects are pure post-process (Step 3.5) — skip per-channel contribution.
+                if config.color_params.is_some() {
+                    continue;
+                }
+
                 // Empty target_channels means "all channel types"
                 if !config.target_channels.is_empty() && !config.target_channels.contains(&target.channel_type) {
                     continue;
@@ -370,7 +375,8 @@ impl EffectEngine {
             };
 
             for group_idx in groups {
-                let r_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "RED").map(|t| t.dmx_index);
+                let r_target = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "RED");
+                let r_idx = r_target.map(|t| t.dmx_index);
                 let g_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "GREEN").map(|t| t.dmx_index);
                 let b_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "BLUE").map(|t| t.dmx_index);
 
@@ -379,9 +385,15 @@ impl EffectEngine {
                     let g = self.render_buffer[gi] / 255.0;
                     let b = self.render_buffer[bi] / 255.0;
 
+                    let (wx, wy) = r_target.map(|t| (t.world_x, t.world_y)).unwrap_or((0.5, 0.5));
+                    let cycle = effect.eval_cycle_at(wx, wy);
+                    let eff_hue = cp.hue_shift + cycle * cp.hue_range;
+                    let eff_sat = (cp.saturation + cycle * cp.sat_range).clamp(0.0, 2.0);
+
                     let (h, s, l) = rgb_to_hsl(r, g, b);
-                    let new_h = (h + cp.hue_shift / 360.0).rem_euclid(1.0);
-                    let new_s = (s * cp.saturation).clamp(0.0, 1.0);
+                    // Skip hue shift on near-black — hue is meaningless at L≈0.
+                    let new_h = if l < 1e-3 { h } else { (h + eff_hue / 360.0).rem_euclid(1.0) };
+                    let new_s = (s * eff_sat).clamp(0.0, 1.0);
                     let (nr, ng, nb) = hsl_to_rgb(new_h, new_s, l);
 
                     self.render_buffer[ri] = (nr * 255.0).clamp(0.0, 255.0);

@@ -282,7 +282,9 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         let color_params = if is_color_byte == 1 {
             let hue_shift  = match c.read_f32_le() { Some(v) => v, None => return -1 };
             let saturation = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            Some(ColorParams { hue_shift, saturation })
+            let hue_range  = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let sat_range  = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            Some(ColorParams { hue_shift, saturation, hue_range, sat_range })
         } else {
             None
         };

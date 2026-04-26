@@ -1,4 +1,4 @@
-import { computed } from 'vue';
+import { computed, toRaw } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect, ChannelType } from '~/utils/engine/types';
@@ -360,7 +360,8 @@ export function useChaserModifiers(
     const before = captureModifiers();
     if (!effectEngine || !before) return;
 
-    const current = effect instanceof ColorEffect ? 'Color' : effect instanceof SequencerEffect ? 'Sequencer' : effect instanceof NoiseEffect ? 'Noise' : 'Waveform';
+    const raw = toRaw(effect);
+    const current = raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
     if (type === current) return;
 
     const targetChannels = [...(effect.targetChannels || [])];

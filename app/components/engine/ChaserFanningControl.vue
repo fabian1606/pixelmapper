@@ -23,9 +23,9 @@ function onDirectionChange(val: any) {
   if (val === 'NONE') {
     emit('update:properties', { fanning: 0 });
   } else if (typeof val === 'string') {
-    emit('update:properties', { 
-      fanning: props.fanning === 0 ? 0.1 : props.fanning, 
-      direction: val as EffectDirection 
+    emit('update:properties', {
+      fanning: props.fanning === 0 ? 0.5 : props.fanning,
+      direction: val as EffectDirection
     });
   }
 }
