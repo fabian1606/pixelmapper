@@ -1,12 +1,14 @@
 import type { Command } from '../composables/use-history';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import { type SerializableCommand, registerCommand } from './serializable-command';
 
 /**
  * Reversible command for updating a fixture's DMX start address.
  * Since universe is derived from startAddress, this covers both.
  */
-export class UpdateDmxCommand implements Command {
+export class UpdateDmxCommand implements SerializableCommand {
+    readonly commandType = 'UpdateDmx';
     readonly description: string;
 
     constructor(
@@ -15,6 +17,14 @@ export class UpdateDmxCommand implements Command {
         private readonly afterAddress: number,
     ) {
         this.description = `Update DMX for ${fixture.name}`;
+    }
+
+    toPayload() {
+        return {
+            fixtureId: this.fixture.id,
+            beforeAddress: this.beforeAddress,
+            afterAddress: this.afterAddress,
+        };
     }
 
     private oldOverrides = new Map<number, number>();
@@ -46,7 +56,7 @@ export class UpdateDmxCommand implements Command {
 
     undo() {
         this.fixture.startAddress = this.beforeAddress;
-        
+
         const store = useEngineStore();
         for (const [newBufIdx, _] of this.newOverrides) {
             store.clearOverride(newBufIdx);
@@ -56,3 +66,9 @@ export class UpdateDmxCommand implements Command {
         }
     }
 }
+
+registerCommand('UpdateDmx', (payload, ctx) => {
+    const fixture = ctx.flatFixtures.find(f => f.id === payload.fixtureId);
+    if (!fixture) return { description: 'UpdateDmx (missing)', execute() {}, undo() {} };
+    return new UpdateDmxCommand(fixture, payload.beforeAddress, payload.afterAddress);
+});

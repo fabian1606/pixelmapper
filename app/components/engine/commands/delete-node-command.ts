@@ -1,5 +1,8 @@
 import type { Command } from '../composables/use-history';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
+import { Fixture } from '~/utils/engine/core/fixture';
+import { type SerializableCommand, registerCommand } from './serializable-command';
+import { deserializeFixture, type SerializedNode } from '~/utils/engine/serialize';
 
 interface RestorePoint {
   node: SceneNode;
@@ -12,7 +15,8 @@ interface RestorePoint {
  * from the scene tree. Remembers the original parent + index for each so they can be 
  * restored precisely on undo.
  */
-export class DeleteNodesCommand implements Command {
+export class DeleteNodesCommand implements SerializableCommand {
+  readonly commandType = 'DeleteNodes';
   description = 'Delete Items';
 
   private restorePoints: RestorePoint[] = [];
@@ -21,6 +25,12 @@ export class DeleteNodesCommand implements Command {
     private rootNodes: SceneNode[],
     private nodesToDelete: SceneNode[]
   ) { }
+
+  toPayload() {
+    // Payload carries node IDs so the delete can be replayed (the snapshot
+    // taken before execute is used to restore on undo during live sessions).
+    return { nodeIds: this.nodesToDelete.map(n => n.id) };
+  }
 
   execute() {
     // 1. Record original locations BEFORE any removal to ensure indices are correct
@@ -60,3 +70,19 @@ export class DeleteNodesCommand implements Command {
     }
   }
 }
+
+registerCommand('DeleteNodes', (payload, ctx) => {
+  function findNodes(ids: (string | number)[], nodes: SceneNode[]): SceneNode[] {
+    const found: SceneNode[] = [];
+    function walk(list: SceneNode[]) {
+      for (const n of list) {
+        if (ids.includes(n.id)) found.push(n);
+        if (n instanceof FixtureGroup) walk(n.children);
+      }
+    }
+    walk(nodes);
+    return found;
+  }
+  const nodes = findNodes(payload.nodeIds, ctx.sceneNodes);
+  return new DeleteNodesCommand(ctx.sceneNodes, nodes);
+});

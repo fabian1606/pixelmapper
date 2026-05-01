@@ -1,12 +1,14 @@
 import type { Command } from '../composables/use-history';
 import type { Preset, PresetCategory } from '~/utils/engine/preset-types';
 import type { Ref } from 'vue';
+import { type SerializableCommand, registerCommand } from './serializable-command';
 
 /**
  * Undoable command for creating a preset.
  * Undo removes the preset from the saved list; redo re-adds it.
  */
-export class SavePresetCommand implements Command {
+export class SavePresetCommand implements SerializableCommand {
+  readonly commandType = 'SavePreset';
   description: string;
 
   constructor(
@@ -19,13 +21,17 @@ export class SavePresetCommand implements Command {
     this.description = `Save Preset "${preset.name}"`;
   }
 
-  execute() {
+  toPayload() {
+    return { preset: JSON.parse(JSON.stringify(this.preset)) };
+  }
+
+  execute(silent = false) {
     const presets = [...this.getSavedPresets()];
     if (!presets.find((p) => p.id === this.preset.id)) {
       presets.push(this.preset);
       this.setSavedPresets(presets);
     }
-    this.setSelectedId(this.preset.id);
+    if (!silent) this.setSelectedId(this.preset.id);
   }
 
   undo() {
@@ -45,7 +51,18 @@ export class SavePresetCommand implements Command {
  * Undoable command for deleting a preset.
  * Records the preset's position so undo can restore it in the same slot.
  */
-export class DeletePresetCommand implements Command {
+registerCommand('SavePreset', (payload, ctx) => {
+  return new SavePresetCommand(
+    payload.preset,
+    () => ctx.savedPresets,
+    ctx.setSavedPresets,
+    ctx.getSelectedPresetId,
+    ctx.setSelectedPresetId,
+  );
+});
+
+export class DeletePresetCommand implements SerializableCommand {
+  readonly commandType = 'DeletePreset';
   description: string;
   private deletedIndex: number = -1;
 
@@ -57,6 +74,10 @@ export class DeletePresetCommand implements Command {
     private setSelectedId: (id: string | null) => void
   ) {
     this.description = `Delete Preset "${preset.name}"`;
+  }
+
+  toPayload() {
+    return { preset: JSON.parse(JSON.stringify(this.preset)) };
   }
 
   execute() {
@@ -84,7 +105,18 @@ export class DeletePresetCommand implements Command {
  * Undoable command for overwriting a preset.
  * Saves the old categories before overwriting to allow undoing.
  */
-export class OverwritePresetCommand implements Command {
+registerCommand('DeletePreset', (payload, ctx) => {
+  return new DeletePresetCommand(
+    payload.preset,
+    () => ctx.savedPresets,
+    ctx.setSavedPresets,
+    ctx.getSelectedPresetId,
+    ctx.setSelectedPresetId,
+  );
+});
+
+export class OverwritePresetCommand implements SerializableCommand {
+  readonly commandType = 'OverwritePreset';
   description: string;
   private readonly oldCategories: PresetCategory[];
   private readonly newCategories: PresetCategory[];
@@ -101,6 +133,15 @@ export class OverwritePresetCommand implements Command {
     // Deep clone to ensure no references are mutually updated
     this.oldCategories = JSON.parse(JSON.stringify(oldCats));
     this.newCategories = JSON.parse(JSON.stringify(newCats));
+  }
+
+  toPayload() {
+    return {
+      presetId: this.presetId,
+      presetName: this.presetName,
+      oldCats: this.oldCategories,
+      newCats: this.newCategories,
+    };
   }
 
   execute() {
@@ -121,3 +162,14 @@ export class OverwritePresetCommand implements Command {
     }
   }
 }
+
+registerCommand('OverwritePreset', (payload, ctx) => {
+  return new OverwritePresetCommand(
+    payload.presetId,
+    payload.presetName,
+    payload.oldCats,
+    payload.newCats,
+    () => ctx.savedPresets,
+    ctx.setSavedPresets,
+  );
+});

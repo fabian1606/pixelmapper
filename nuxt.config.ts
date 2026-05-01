@@ -42,7 +42,15 @@ export default defineNuxtConfig({
     },
   },
 
-  modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt'],
+  modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt', '@nuxtjs/supabase'],
+
+  supabase: {
+    redirectOptions: {
+      login: '/auth/login',
+      callback: '/auth/confirm',
+      exclude: ['/auth/*'],
+    },
+  },
   colorMode: {
     classSuffix: '',
     preference: 'dark',

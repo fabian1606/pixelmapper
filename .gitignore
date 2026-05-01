@@ -23,6 +23,8 @@ logs
 .env.*
 !.env.example
 
+.mcp.json
+
 # Open Fixture Library clone (local data source, not committed)
 ofl-data/
 

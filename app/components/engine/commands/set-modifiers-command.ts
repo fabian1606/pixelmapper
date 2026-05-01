@@ -1,4 +1,5 @@
 import type { Command } from '../composables/use-history';
+import { type SerializableCommand, registerCommand } from './serializable-command';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { Effect } from '~/utils/engine/types';
 import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
@@ -64,7 +65,16 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
 /**
  * Snapshot-based command for undoing/redoing any changes to the global Modifiers (Effects) list.
  */
-export class SetModifiersCommand implements Command {
+export class SetModifiersCommand implements SerializableCommand {
+  readonly commandType = 'SetModifiers';
+
+  toPayload() {
+    return {
+      before: JSON.parse(JSON.stringify(this.beforeEffects)),
+      after: JSON.parse(JSON.stringify(this.afterEffects)),
+    };
+  }
+
   constructor(
     private effectEngine: EffectEngine,
     private beforeEffects: Effect[],
@@ -85,3 +95,6 @@ export class SetModifiersCommand implements Command {
     toApply.forEach(eff => this.effectEngine.addEffect(eff));
   }
 }
+
+// SetModifiers replay requires a live EffectEngine — registered lazily in engine-store.ts
+// instead of here to avoid circular dependencies.

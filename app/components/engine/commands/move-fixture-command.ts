@@ -1,5 +1,6 @@
 import type { Command } from '../composables/use-history';
 import type { Fixture } from '~/utils/engine/core/fixture';
+import { type SerializableCommand, registerCommand } from './serializable-command';
 
 export interface FixturePositionSnapshot {
   id: string | number;
@@ -14,7 +15,8 @@ export interface FixturePositionSnapshot {
  * To add new undoable actions in the future, create a new file in
  * `/commands/` and implement the `Command` interface.
  */
-export class MoveFixtureCommand implements Command {
+export class MoveFixtureCommand implements SerializableCommand {
+  readonly commandType = 'MoveFixture';
   readonly description: string;
 
   constructor(
@@ -37,6 +39,10 @@ export class MoveFixtureCommand implements Command {
     this.applySnapshots(this.before);
   }
 
+  toPayload() {
+    return { before: this.before, after: this.after };
+  }
+
   private applySnapshots(snapshots: FixturePositionSnapshot[]) {
     for (const snap of snapshots) {
       const f = this.fixtures.find(f => f.id === snap.id);
@@ -47,3 +53,10 @@ export class MoveFixtureCommand implements Command {
     }
   }
 }
+
+registerCommand('MoveFixture', (payload, ctx) => {
+  const fixtures = ctx.flatFixtures.filter(f =>
+    payload.after.some((s: FixturePositionSnapshot) => s.id === f.id)
+  );
+  return new MoveFixtureCommand(fixtures, payload.before, payload.after);
+});

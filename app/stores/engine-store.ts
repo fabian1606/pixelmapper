@@ -4,12 +4,20 @@ import type { Preset } from '~/utils/engine/preset-types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
-import { useHistory } from '~/components/engine/composables/use-history';
+import { useHistory, setPersistenceHooks } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_FX_BIN,
   buildLayoutBin, buildChannelsBin, buildEffectsBin,
 } from '~/utils/connectors/binary-encoder';
+import {
+  serializeProject,
+  deserializeProject,
+  type ProjectSnapshot,
+} from '~/utils/engine/serialize';
+import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
+import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
+import { registerCommand } from '~/components/engine/commands/serializable-command';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -304,6 +312,132 @@ export const useEngineStore = defineStore('engine', () => {
     _syncTrigger.value++;
   };
 
+  // ── Project persistence ───────────────────────────────────────────────────
+
+  const currentProjectId = ref<string | null>(null);
+  const projectLoading = ref(false);
+  const projectError = ref<'unauthorized' | 'error' | null>(null);
+
+  // Register SetModifiers replay here to avoid circular imports
+  registerCommand('SetModifiers', (payload, _ctx) => {
+    const before = cloneEffectsList(payload.before ?? []);
+    const after  = cloneEffectsList(payload.after  ?? []);
+    return new SetModifiersCommand(engine, before, after, 'SetModifiers (replay)');
+  });
+
+  function getReplayContext(): ReplayContext {
+    return {
+      sceneNodes: sceneNodes.value,
+      flatFixtures: flatFixtures.value,
+      activeEffects: activeEffects.value,
+      savedPresets: savedPresets.value,
+      setSavedPresets: (p) => { savedPresets.value = p; },
+      getSelectedPresetId: () => selectedPresetId.value,
+      setSelectedPresetId: (id) => { selectedPresetId.value = id; },
+    };
+  }
+
+  function applyProjectSnapshot(snapshot: ProjectSnapshot) {
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects } = deserializeProject(snapshot);
+    sceneNodes.value = nodes;
+    savedPresets.value = presets;
+    globalBases.value = bases;
+    activeEffects.value = effects;
+    engine.effects = activeEffects.value;
+    triggerRef(sceneNodes);
+  }
+
+  async function loadProject(projectId: string) {
+    const supabase = useSupabaseClient();
+    currentProjectId.value = projectId;
+    projectLoading.value = true;
+    projectError.value = null;
+
+    const { data, error } = await supabase.functions.invoke('load-project', {
+      body: { projectId },
+    });
+    if (error || !data) {
+      console.error('[engine] loadProject failed:', error);
+      projectLoading.value = false;
+      const status = error?.context?.status ?? 0;
+      if (status === 401) {
+        const router = useRouter();
+        await supabase.auth.signOut();
+        router.push(`/auth/login?redirect=/project/${projectId}`);
+      } else if (status === 403) {
+        projectError.value = 'unauthorized';
+      } else {
+        projectError.value = 'error';
+      }
+      return;
+    }
+
+    // Clear default fixtures so the project starts from a clean slate
+    sceneNodes.value = [];
+    savedPresets.value = [];
+    selectedPresetId.value = null;
+
+    // Apply the base snapshot if present
+    if (data.snapshot) {
+      applyProjectSnapshot(data.snapshot);
+    }
+
+    // Replay the tail: changes after the snapshot's sequence_number
+    for (const change of (data.tail ?? [])) {
+      const cmd = commandFromPayload(change.command_type, change.payload, getReplayContext());
+      if (cmd) (cmd as any).execute(true);
+    }
+    triggerRef(sceneNodes);
+
+    // Wire up persistence hooks so future commands are pushed to Supabase
+    setPersistenceHooks({
+      pushChange: async (commandType, payload) => {
+        await supabase.functions.invoke('push-change', {
+          body: { projectId, commandType, payload },
+        });
+      },
+      saveSnapshot: async () => {
+        const user = (await supabase.auth.getUser()).data.user;
+        const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
+          data: m.usePinnedModifiersStore(),
+        }));
+        const snapshot = serializeProject(
+          sceneNodes.value,
+          savedPresets.value,
+          pinnedStore.pinnedModifiers,
+          globalBases.value,
+          activeEffects.value,
+        );
+        // Get the latest sequence_number from the last push-change call
+        const { data: seqData } = await supabase
+          .from('project_changes')
+          .select('sequence_number')
+          .eq('project_id', projectId)
+          .order('sequence_number', { ascending: false })
+          .limit(1)
+          .single();
+
+        await supabase.functions.invoke('save-snapshot', {
+          body: {
+            projectId,
+            snapshot,
+            sequenceNumber: seqData?.sequence_number ?? 0,
+          },
+        });
+      },
+    });
+
+    projectLoading.value = false;
+
+    // Force snapshot on page unload to keep tail short
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', () => {
+        // Best-effort synchronous snapshot hint — actual save is async
+        navigator.sendBeacon?.(`/api/noop`); // placeholder; real save via saveSnapshot above
+      }, { once: true });
+    }
+  }
+
   return {
     savedPresets,
     selectedPresetId,
@@ -326,5 +460,9 @@ export const useEngineStore = defineStore('engine', () => {
     initEngine,
     _syncTrigger,
     triggerCanvasSync,
+    currentProjectId,
+    projectLoading,
+    loadProject,
+    applyProjectSnapshot,
   };
 });

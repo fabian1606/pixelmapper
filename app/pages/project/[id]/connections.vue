@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'project' });
 import { CircleDot, Plus, Trash2, ArrowUpCircle, RefreshCw, Network, ChevronDown, ChevronRight } from 'lucide-vue-next';
 import { ref, computed } from 'vue';
 import { storeToRefs } from 'pinia';

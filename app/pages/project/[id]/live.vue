@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'project' });
 import { computed, ref, watch, nextTick } from 'vue';
 import { useConnectionsStore } from '~/stores/connections-store';
 

@@ -1,7 +1,9 @@
 import type { Command } from '../composables/use-history';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
+import { type SerializableCommand, registerCommand } from './serializable-command';
 
-export class GroupNodesCommand implements Command {
+export class GroupNodesCommand implements SerializableCommand {
+  readonly commandType = 'GroupNodes';
   description = 'Group Items';
 
   private restorePoints: { node: SceneNode, parent: FixtureGroup | null, index: number }[] = [];
@@ -11,6 +13,14 @@ export class GroupNodesCommand implements Command {
     private nodesToGroup: SceneNode[],
     private newGroup: FixtureGroup
   ) { }
+
+  toPayload() {
+    return {
+      nodeIds: this.nodesToGroup.map(n => n.id),
+      groupId: this.newGroup.id,
+      groupName: this.newGroup.name,
+    };
+  }
 
   execute() {
     // 1. Record original locations BEFORE any removal
@@ -83,7 +93,25 @@ export class GroupNodesCommand implements Command {
   }
 }
 
-export class UngroupNodesCommand implements Command {
+registerCommand('GroupNodes', (payload, ctx) => {
+  function findNodes(ids: (string | number)[], nodes: SceneNode[]): SceneNode[] {
+    const found: SceneNode[] = [];
+    function walk(list: SceneNode[]) {
+      for (const n of list) {
+        if (ids.includes(n.id)) found.push(n);
+        if (n instanceof FixtureGroup) walk(n.children);
+      }
+    }
+    walk(nodes);
+    return found;
+  }
+  const nodes = findNodes(payload.nodeIds, ctx.sceneNodes);
+  const group = new FixtureGroup(payload.groupId, payload.groupName);
+  return new GroupNodesCommand(ctx.sceneNodes, nodes, group);
+});
+
+export class UngroupNodesCommand implements SerializableCommand {
+  readonly commandType = 'UngroupNodes';
   description = 'Ungroup Items';
 
   private parent: FixtureGroup | null = null;
@@ -94,6 +122,10 @@ export class UngroupNodesCommand implements Command {
     private rootNodes: SceneNode[],
     private groupToUngroup: FixtureGroup
   ) { }
+
+  toPayload() {
+    return { groupId: this.groupToUngroup.id };
+  }
 
   execute() {
     this.parent = this.groupToUngroup.parent;
@@ -144,3 +176,19 @@ export class UngroupNodesCommand implements Command {
     }
   }
 }
+
+registerCommand('UngroupNodes', (payload, ctx) => {
+  function findGroup(id: string | number, nodes: SceneNode[]): FixtureGroup | null {
+    for (const n of nodes) {
+      if (n instanceof FixtureGroup) {
+        if (n.id === id) return n;
+        const found = findGroup(id, n.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  const group = findGroup(payload.groupId, ctx.sceneNodes);
+  if (!group) return { description: 'UngroupNodes (missing)', execute() {}, undo() {} };
+  return new UngroupNodesCommand(ctx.sceneNodes, group);
+});

@@ -1,6 +1,8 @@
 import type { Command } from '../composables/use-history';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Channel } from '~/utils/engine/core/channel';
+import { type SerializableCommand, registerCommand } from './serializable-command';
+import { reactive } from 'vue';
 
 export interface ChannelSnapshot {
   stepValues: number[];
@@ -33,11 +35,31 @@ export function createSnapshot(channel: Channel): ChannelSnapshot {
  * Because channel changes can be sweeping (multi-select, drag-to-set), this command takes deeply-cloned
  * snapshots of exactly what changed, and wholesale replaces the channel state on undo/redo.
  */
-export class SetChannelValuesCommand implements Command {
+export class SetChannelValuesCommand implements SerializableCommand {
+  readonly commandType = 'SetChannelValues';
+
   constructor(
     private snapshots: SnapshotMap,
     public description: string = 'Change Values'
   ) { }
+
+  toPayload() {
+    const changes: Array<{
+      fixtureId: string | number;
+      channelIndex: number;
+      before: ChannelSnapshot;
+      after: ChannelSnapshot;
+    }> = [];
+    for (const [ref, state] of this.snapshots.entries()) {
+      changes.push({
+        fixtureId: ref.fixture.id,
+        channelIndex: ref.channelIndex,
+        before: state.before,
+        after: state.after,
+      });
+    }
+    return { changes };
+  }
 
   execute() {
     for (const [ref, state] of this.snapshots.entries()) {
@@ -59,3 +81,16 @@ export class SetChannelValuesCommand implements Command {
     }
   }
 }
+
+registerCommand('SetChannelValues', (payload, ctx) => {
+  const snapshots: SnapshotMap = new Map();
+  for (const change of payload.changes) {
+    const fixture = ctx.flatFixtures.find(f => f.id === change.fixtureId);
+    if (!fixture) continue;
+    snapshots.set(
+      { fixture, channelIndex: change.channelIndex },
+      { before: change.before, after: change.after },
+    );
+  }
+  return new SetChannelValuesCommand(snapshots);
+});
