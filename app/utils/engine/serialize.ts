@@ -6,6 +6,7 @@ import type { Preset } from './preset-types'
 import type { Effect } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
 import { reactive } from 'vue'
+import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command'
 
 // ─── Serialized types (plain JSON-safe objects) ───────────────────────────────
 
@@ -187,6 +188,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
     globalBases: { ...snapshot.globalBases },
-    activeEffects: JSON.parse(JSON.stringify(snapshot.activeEffects)),
+    // Reconstruct Effect class instances from plain JSON so instanceof checks work
+    activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
   }
 }

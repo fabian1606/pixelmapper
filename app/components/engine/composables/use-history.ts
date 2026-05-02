@@ -1,12 +1,7 @@
 import { ref, computed } from 'vue';
 import { isSerializable } from '../commands/serializable-command';
 
-/**
- * A reversible operation. Implement this interface for any action that
- * should be undoable in the editor (e.g. moving fixtures, renaming, etc.)
- */
 export interface Command {
-  /** Human-readable label, shown e.g. in a future Edit menu */
   description: string;
   execute(): void;
   undo(): void;
@@ -21,24 +16,21 @@ const future = ref<Command[]>([]);
 const version = ref(0);
 const commandsSinceSnapshot = ref(0);
 
-/**
- * Called by the persistence layer (engine-store) to inject push/snapshot hooks.
- * Kept as a plain ref so the store can set them after initialization without
- * creating circular import chains.
- */
+export const lastSeenSequenceNumber = ref<number>(0);
+
 const persistenceHooks = {
-  pushChange: null as ((commandType: string, payload: object) => Promise<void>) | null,
+  pushChange: null as ((commandType: string, payload: object) => Promise<number | undefined>) | null,
   saveSnapshot: null as (() => Promise<void>) | null,
 };
 
-export function setPersistenceHooks(hooks: typeof persistenceHooks) {
+export function setPersistenceHooks(hooks: {
+  pushChange: (commandType: string, payload: object) => Promise<number | undefined>;
+  saveSnapshot: () => Promise<void>;
+}) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
 }
 
-/**
- * Global undo/redo history stack (singleton).
- */
 export function useHistory() {
   const canUndo = computed(() => past.value.length > 0);
   const canRedo = computed(() => future.value.length > 0);
@@ -51,10 +43,10 @@ export function useHistory() {
     future.value = [];
     version.value++;
 
-    // Persist to Supabase if hooks are wired up and command is serializable
     if (isSerializable(command) && persistenceHooks.pushChange) {
       const payload = command.toPayload();
-      persistenceHooks.pushChange(command.commandType, payload).then(() => {
+      persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
+        if (seq != null) lastSeenSequenceNumber.value = seq;
         commandsSinceSnapshot.value++;
         if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
           commandsSinceSnapshot.value = 0;
@@ -64,6 +56,15 @@ export function useHistory() {
         console.warn('[history] persist failed:', err);
       });
     }
+  }
+
+  function executeRemote(command: Command) {
+    command.execute();
+    past.value.push(command);
+    if (past.value.length > MAX_SIZE) past.value.shift();
+    future.value = [];
+    version.value++;
+    // No persistence — command came from Realtime, already in DB
   }
 
   function undo() {
@@ -82,7 +83,7 @@ export function useHistory() {
     version.value++;
   }
 
-  return { execute, undo, redo, canUndo, canRedo, lastDescription, version };
+  return { execute, executeRemote, undo, redo, canUndo, canRedo, lastDescription, version };
 }
 
 export type History = ReturnType<typeof useHistory>;

@@ -173,10 +173,17 @@ watch(() => props.fixtures.length, syncFixtures);
 watch(() => props.selectedIds, syncSelected);
 
 // ─── Public API ───────────────────────────────────────────────────────────────────────────────
+function syncRemoteSelections(entries: Array<{ id: string; r: number; g: number; b: number }>) {
+  const wc = wasmCanvas;
+  if (!wc) return;
+  wc.set_remote_selections(JSON.stringify(entries));
+}
+
 defineExpose({
   // sync() is called from handleMouseMove during drag to push updated fixture positions
   sync: syncFixtures,
   draw: drawFrame,
+  syncRemoteSelections,
   hitTest: (x: number, y: number) => wasmCanvas?.hit_test(x, y),
   hitTestRotationZone: (x: number, y: number) => wasmCanvas?.hit_test_rotation_zone(x, y),
   marqueeSelect: (sx: number, sy: number, ex: number, ey: number) => wasmCanvas?.marquee_select(sx, sy, ex, ey),

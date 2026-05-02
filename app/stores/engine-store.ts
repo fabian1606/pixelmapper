@@ -4,7 +4,7 @@ import type { Preset } from '~/utils/engine/preset-types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
-import { useHistory, setPersistenceHooks } from '~/components/engine/composables/use-history';
+import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_FX_BIN,
@@ -18,6 +18,8 @@ import {
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
+import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
+import { useLiveBusStore } from '~/stores/live-bus-store';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -141,6 +143,9 @@ export const useEngineStore = defineStore('engine', () => {
 
   // ── Render loop state ─────────────────────────────────────────────────────
 
+  const clockEpoch = ref(Date.now());
+  function setClockEpoch(ms: number) { clockEpoch.value = ms; }
+
   let initialized = false;
   let animFrameId: number;
   let startTime: number;
@@ -222,6 +227,7 @@ export const useEngineStore = defineStore('engine', () => {
       channelsPacket = buildChannelsBin(flatFixtures.value);
       layoutRevision.value++;
       channelsRevision.value++;
+      if (!useLiveBusStore().isApplyingRemote()) dispatchChannelUpdate(flatFixtures.value);
     }, { deep: true, immediate: true });
 
     // globalBases bakes into stepValues via watchEffect above; an explicit watch
@@ -243,7 +249,7 @@ export const useEngineStore = defineStore('engine', () => {
 
     const renderLoop = (time: number) => {
       try {
-        const elapsed = time - startTime;
+        const elapsed = Date.now() - clockEpoch.value;
         const delta   = time - lastTime;
         lastTime = time;
 
@@ -383,21 +389,27 @@ export const useEngineStore = defineStore('engine', () => {
     }
 
     // Replay the tail: changes after the snapshot's sequence_number
-    for (const change of (data.tail ?? [])) {
+    const tail: Array<{ command_type: string; payload: any; sequence_number: number; user_id: string }> = data.tail ?? [];
+    for (const change of tail) {
       const cmd = commandFromPayload(change.command_type, change.payload, getReplayContext());
-      if (cmd) (cmd as any).execute(true);
+      if (cmd) cmd.execute();
+    }
+    if (tail.length > 0) {
+      lastSeenSequenceNumber.value = tail[tail.length - 1].sequence_number;
+    } else if (data.snapshot?.sequence_number) {
+      lastSeenSequenceNumber.value = data.snapshot.sequence_number;
     }
     triggerRef(sceneNodes);
 
     // Wire up persistence hooks so future commands are pushed to Supabase
     setPersistenceHooks({
       pushChange: async (commandType, payload) => {
-        await supabase.functions.invoke('push-change', {
+        const { data: pushData, error } = await supabase.functions.invoke('push-change', {
           body: { projectId, commandType, payload },
         });
+        if (!error && pushData?.sequenceNumber != null) return pushData.sequenceNumber as number;
       },
       saveSnapshot: async () => {
-        const user = (await supabase.auth.getUser()).data.user;
         const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
           data: m.usePinnedModifiersStore(),
         }));
@@ -408,20 +420,11 @@ export const useEngineStore = defineStore('engine', () => {
           globalBases.value,
           activeEffects.value,
         );
-        // Get the latest sequence_number from the last push-change call
-        const { data: seqData } = await supabase
-          .from('project_changes')
-          .select('sequence_number')
-          .eq('project_id', projectId)
-          .order('sequence_number', { ascending: false })
-          .limit(1)
-          .single();
-
         await supabase.functions.invoke('save-snapshot', {
           body: {
             projectId,
             snapshot,
-            sequenceNumber: seqData?.sequence_number ?? 0,
+            sequenceNumber: lastSeenSequenceNumber.value,
           },
         });
       },
@@ -441,6 +444,8 @@ export const useEngineStore = defineStore('engine', () => {
   return {
     savedPresets,
     selectedPresetId,
+    clockEpoch,
+    setClockEpoch,
     engine,
     activeEffects,
     sceneNodes,
@@ -462,7 +467,9 @@ export const useEngineStore = defineStore('engine', () => {
     triggerCanvasSync,
     currentProjectId,
     projectLoading,
+    projectError,
     loadProject,
     applyProjectSnapshot,
+    getReplayContext,
   };
 });

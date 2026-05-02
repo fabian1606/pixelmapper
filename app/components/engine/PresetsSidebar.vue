@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
+import { useLiveBusStore } from '~/stores/live-bus-store';
 import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { useHistory } from '~/components/engine/composables/use-history';
@@ -280,9 +281,11 @@ watch(activeBaseId, (baseId) => {
 function togglePresetApply(preset: Preset) {
   if (selectedPresetId.value === preset.id) {
     stopPreset(preset, props.fixtures, props.effects);
+    useLiveBusStore().dispatch('preset.deactivate', { presetId: preset.id });
   } else {
     applyPreset(preset, props.fixtures, props.effects);
     openPreset.value = preset.basePresetId || preset.id;
+    useLiveBusStore().dispatch('preset.activate', { presetId: preset.id });
   }
 }
 

@@ -1,0 +1,314 @@
+import { defineStore } from 'pinia';
+import { ref, shallowRef, triggerRef, nextTick } from 'vue';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { useEngineStore } from '~/stores/engine-store';
+import { userColor } from '~/composables/live-ops/colors';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface LiveContext {
+  cursors: Map<string, CursorState>;
+  remoteSelections: Map<string, Set<string | number>>;
+  remoteEditingModifier: Map<string, string | null>;
+  remoteEditSteps: Map<string, number>;        // key: `${userId}:${fixtureId}`
+  triggerCursorUpdate: () => void;
+  triggerSelectionUpdate: () => void;
+  triggerEditingModifierUpdate: () => void;
+  triggerEditStepUpdate: () => void;
+  displayNameOf: (userId: string) => string;
+  colorOf: (userId: string) => string;
+  engineStore: ReturnType<typeof useEngineStore>;
+}
+
+export interface CursorState {
+  userId: string;
+  sessionId: string;
+  displayName: string;
+  color: string;
+  wx: number;
+  wy: number;
+}
+
+export interface CollaboratorPresence {
+  userId: string;
+  sessionId: string;
+  displayName: string;
+  color: string;
+}
+
+export interface LiveOpConfig<T = any> {
+  scope: 'shared' | 'per-user';
+  throttle: 'raf' | 'immediate' | number;
+  /** Replace pending op of same type (default), or append (e.g. queue of distinct events) */
+  merge?: 'replace' | 'append';
+  apply: (payload: T, userId: string, ctx: LiveContext, sessionId: string) => void;
+}
+
+export interface LiveOp<T = any> {
+  type: string;
+  payload: T;
+  userId: string;
+  sessionId?: string;
+}
+
+// ─── Registry (module-level; populated by live-ops/*.ts at import time) ───────
+
+const registry = new Map<string, LiveOpConfig>();
+
+export function registerLiveOp<T>(type: string, config: LiveOpConfig<T>) {
+  registry.set(type, config as LiveOpConfig);
+}
+
+export function getLiveOpConfig(type: string): LiveOpConfig | undefined {
+  return registry.get(type);
+}
+
+// ─── Pinia Store ──────────────────────────────────────────────────────────────
+
+// Unique per browser tab — used to filter own echoes without blocking same-user multi-tab
+// Also exported so the presence layer (use-collaboration) can use it as the presence key,
+// so each tab/connection appears as its own presence entry.
+export const TAB_SESSION_ID = Math.random().toString(36).slice(2);
+
+export const useLiveBusStore = defineStore('live-bus', () => {
+  // Channel + connection state
+  let channel: RealtimeChannel | null = null;
+  let currentUserId: string | null = null;
+  let presenceDisplayNames = new Map<string, string>();
+  const isConnected = ref(false);
+
+  // Per-user awareness state (Schicht B)
+  const cursors = shallowRef(new Map<string, CursorState>());
+  const remoteSelections = shallowRef(new Map<string, Set<string | number>>());
+  const remoteEditingModifier = shallowRef(new Map<string, string | null>());
+  const remoteEditSteps = shallowRef(new Map<string, number>());
+
+  // Presence (online users)
+  const presenceUsers = ref<CollaboratorPresence[]>([]);
+
+  // Pending outbound ops (batched per rAF)
+  // For 'replace' merge: latest op per type wins
+  // For 'append' merge: ops accumulate in array
+  const pendingReplace = new Map<string, any>();
+  const pendingAppend: Array<LiveOp> = [];
+  let rafScheduled = false;
+
+  // ─── Context passed to apply handlers ─────────────────────────────────────
+  function getContext(): LiveContext {
+    return {
+      cursors: cursors.value,
+      remoteSelections: remoteSelections.value,
+      remoteEditingModifier: remoteEditingModifier.value,
+      remoteEditSteps: remoteEditSteps.value,
+      triggerCursorUpdate: () => triggerRef(cursors),
+      triggerSelectionUpdate: () => triggerRef(remoteSelections),
+      triggerEditingModifierUpdate: () => triggerRef(remoteEditingModifier),
+      triggerEditStepUpdate: () => triggerRef(remoteEditSteps),
+      displayNameOf: (userId: string) => presenceDisplayNames.get(userId) ?? '',
+      colorOf: (userId: string) => userColor(userId),
+      engineStore: useEngineStore(),
+    };
+  }
+
+  // ─── Outbound dispatch ─────────────────────────────────────────────────────
+  function dispatch<T>(type: string, payload: T) {
+    const config = registry.get(type);
+    if (!config) {
+      console.warn(`[LiveBus] No config for op "${type}"`);
+      return;
+    }
+    if (!isConnected.value || !channel || !currentUserId) {
+      // Drop silently — per-design we only sync while connected
+      return;
+    }
+
+    const op: LiveOp<T> = { type, payload, userId: currentUserId, sessionId: TAB_SESSION_ID };
+
+    if (config.throttle === 'immediate') {
+      sendOps([op]);
+      return;
+    }
+
+    if (config.merge === 'append') {
+      pendingAppend.push(op);
+    } else {
+      pendingReplace.set(type, op);
+    }
+
+    if (config.throttle === 'raf') {
+      scheduleRafFlush();
+    } else if (typeof config.throttle === 'number') {
+      // Simple timer-based throttle (per-type)
+      scheduleTimerFlush(type, config.throttle);
+    }
+  }
+
+  function scheduleRafFlush() {
+    if (rafScheduled) return;
+    rafScheduled = true;
+    requestAnimationFrame(flushPending);
+  }
+
+  const timerHandles = new Map<string, ReturnType<typeof setTimeout>>();
+  function scheduleTimerFlush(type: string, ms: number) {
+    if (timerHandles.has(type)) return;
+    const handle = setTimeout(() => {
+      timerHandles.delete(type);
+      flushPending();
+    }, ms);
+    timerHandles.set(type, handle);
+  }
+
+  function flushPending() {
+    rafScheduled = false;
+    const ops: LiveOp[] = [];
+    for (const op of pendingReplace.values()) ops.push(op);
+    pendingReplace.clear();
+    if (pendingAppend.length > 0) {
+      ops.push(...pendingAppend);
+      pendingAppend.length = 0;
+    }
+    if (ops.length === 0) return;
+    sendOps(ops);
+  }
+
+  function sendOps(ops: LiveOp[]) {
+    if (!channel) return;
+    channel.send({ type: 'broadcast', event: 'live_ops', payload: { ops } });
+  }
+
+  // ─── Inbound handler ───────────────────────────────────────────────────────
+  let _applyingRemote = false;
+
+  /** True while a remote op's apply() is running — used to suppress echo-dispatch */
+  function isApplyingRemote() { return _applyingRemote; }
+
+  function handleIncoming(ops: LiveOp[]) {
+    if (!Array.isArray(ops)) return;
+    const ctx = getContext();
+    let touched = false;
+    for (const op of ops) {
+      if (!op?.type || !op.userId) continue;
+      if (op.sessionId === TAB_SESSION_ID) continue;
+      const config = registry.get(op.type);
+      if (!config) {
+        console.warn(`[LiveBus] Received unknown op "${op.type}"`);
+        continue;
+      }
+      try {
+        _applyingRemote = true;
+        touched = true;
+        config.apply(op.payload, op.userId, ctx, op.sessionId ?? '');
+      } catch (e) {
+        console.error(`[LiveBus] apply failed for "${op.type}":`, e);
+      }
+    }
+    // Hold the flag until Vue's reactive watchers have fired so the central
+    // channel-sync watcher in engine-store sees isApplyingRemote() === true
+    // and skips the echo dispatch.
+    if (touched) {
+      nextTick(() => { _applyingRemote = false; });
+    } else {
+      _applyingRemote = false;
+    }
+  }
+
+  // ─── Connect / Disconnect ──────────────────────────────────────────────────
+  function connect(opts: {
+    channel: RealtimeChannel;
+    userId: string;
+  }) {
+    channel = opts.channel;
+    currentUserId = opts.userId;
+
+    channel.on('broadcast', { event: 'live_ops' }, ({ payload }) => {
+      handleIncoming(payload?.ops ?? []);
+    });
+
+    isConnected.value = true;
+    console.info(`[LiveBus] connected — session=${TAB_SESSION_ID} user=${opts.userId}`);
+  }
+
+  function setPresence(users: CollaboratorPresence[]) {
+    presenceUsers.value = users;
+    const names = new Map<string, string>();
+    for (const u of users) {
+      // Last-write-wins for users with multiple sessions; all sessions of the
+      // same user track the same displayName so this is fine.
+      names.set(u.userId, u.displayName);
+    }
+    presenceDisplayNames = names;
+
+    // GC any per-session / per-user state for connections that have left.
+    // Sync fires after every join/leave, so this is the single source of truth
+    // for which sessions/users are still around.
+    const aliveSessions = new Set(users.map(u => u.sessionId));
+    const aliveUserIds = new Set(users.map(u => u.userId));
+
+    let cursorDirty = false;
+    for (const key of cursors.value.keys()) {
+      if (!aliveSessions.has(key)) {
+        cursors.value.delete(key);
+        cursorDirty = true;
+      }
+    }
+    if (cursorDirty) triggerRef(cursors);
+
+    let selDirty = false;
+    for (const uid of remoteSelections.value.keys()) {
+      if (!aliveUserIds.has(uid)) {
+        remoteSelections.value.delete(uid);
+        selDirty = true;
+      }
+    }
+    if (selDirty) triggerRef(remoteSelections);
+
+    let modDirty = false;
+    for (const uid of remoteEditingModifier.value.keys()) {
+      if (!aliveUserIds.has(uid)) {
+        remoteEditingModifier.value.delete(uid);
+        modDirty = true;
+      }
+    }
+    if (modDirty) triggerRef(remoteEditingModifier);
+
+    let stepDirty = false;
+    for (const k of remoteEditSteps.value.keys()) {
+      const uid = k.split(':')[0];
+      if (!aliveUserIds.has(uid)) {
+        remoteEditSteps.value.delete(k);
+        stepDirty = true;
+      }
+    }
+    if (stepDirty) triggerRef(remoteEditSteps);
+  }
+
+  function disconnect() {
+    isConnected.value = false;
+    channel = null;
+    currentUserId = null;
+    pendingReplace.clear();
+    pendingAppend.length = 0;
+    for (const h of timerHandles.values()) clearTimeout(h);
+    timerHandles.clear();
+    cursors.value = new Map();
+    remoteSelections.value = new Map();
+    remoteEditingModifier.value = new Map();
+    remoteEditSteps.value = new Map();
+    presenceUsers.value = [];
+  }
+
+  return {
+    isConnected,
+    cursors,
+    remoteSelections,
+    remoteEditingModifier,
+    remoteEditSteps,
+    presenceUsers,
+    dispatch,
+    connect,
+    disconnect,
+    setPresence,
+    isApplyingRemote,
+  };
+});

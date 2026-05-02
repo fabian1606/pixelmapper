@@ -61,11 +61,23 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ collaborators: collaborators || [] }), { status: 200, headers: corsHeaders });
     }
 
+    const userIds = (collaborators || []).map(c => c.user_id);
+    const { data: profiles } = await adminClient
+      .from('profiles')
+      .select('id, display_name')
+      .in('id', userIds);
+    const displayNameById = new Map<string, string>();
+    for (const p of profiles ?? []) {
+      if (p.display_name) displayNameById.set(p.id, p.display_name);
+    }
+
     const enrichedCollaborators = (collaborators || []).map(collab => {
       const authUser = users?.find(u => u.id === collab.user_id);
+      const email = authUser?.email || 'unknown@example.com';
       return {
         ...collab,
-        email: authUser?.email || 'unknown@example.com',
+        email,
+        display_name: displayNameById.get(collab.user_id) ?? email.split('@')[0],
       };
     });
 

@@ -40,6 +40,10 @@ pub struct FixtureCanvasData {
     #[serde(default)]
     pub selected: bool,
 
+    /// Remote collaborator selection color [r, g, b] — None if not selected by a remote user
+    #[serde(skip)]
+    pub remote_selection_color: Option<[u8; 3]>,
+
     pub svg: Option<String>,
 
     #[serde(default)]

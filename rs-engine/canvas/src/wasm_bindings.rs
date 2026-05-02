@@ -19,6 +19,8 @@ pub struct WasmCanvas {
     pub render_state: crate::render::RenderState,
     #[wasm_bindgen(skip)]
     pub svg_cache: HashMap<String, SvgCachedFixture>,
+    #[wasm_bindgen(skip)]
+    pub remote_selection_colors: HashMap<String, [u8; 3]>,
 }
 
 #[wasm_bindgen]
@@ -34,6 +36,7 @@ impl WasmCanvas {
             fixtures: Vec::new(),
             render_state: crate::render::RenderState::default(),
             svg_cache: HashMap::new(),
+            remote_selection_colors: HashMap::new(),
         }
     }
 
@@ -76,6 +79,10 @@ impl WasmCanvas {
         self.svg_cache = new_cache;
 
         self.fixtures = fixtures;
+        // Reapply remote selection colors (lost during deserialization since field is #[serde(skip)])
+        for f in &mut self.fixtures {
+            f.remote_selection_color = self.remote_selection_colors.get(&f.id).copied();
+        }
         self.spatial_index.rebuild(
             &self.fixtures,
             self.render_state.world_w,
@@ -91,6 +98,18 @@ impl WasmCanvas {
             ids.iter().filter_map(|v| v.as_string()).collect();
         for f in &mut self.fixtures {
             f.selected = id_set.contains(&f.id);
+        }
+    }
+
+    /// Update remote collaborator selections. Accepts JSON: [{id, r, g, b}]
+    #[wasm_bindgen]
+    pub fn set_remote_selections(&mut self, json: &str) {
+        #[derive(serde::Deserialize)]
+        struct Entry { id: String, r: u8, g: u8, b: u8 }
+        let entries: Vec<Entry> = serde_json::from_str(json).unwrap_or_default();
+        self.remote_selection_colors = entries.into_iter().map(|e| (e.id, [e.r, e.g, e.b])).collect();
+        for f in &mut self.fixtures {
+            f.remote_selection_color = self.remote_selection_colors.get(&f.id).copied();
         }
     }
 

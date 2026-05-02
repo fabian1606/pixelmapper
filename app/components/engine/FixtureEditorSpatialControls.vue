@@ -2,6 +2,9 @@
 import { computed } from 'vue';
 import type { Effect, SpatialVector } from '~/utils/engine/types';
 import SpatialHandle from './SpatialHandle.vue';
+import { useLiveBusStore } from '~/stores/live-bus-store';
+
+const liveBus = useLiveBusStore();
 
 const props = defineProps<{
   viewportEl: HTMLElement | null;
@@ -100,6 +103,23 @@ function handleWindowMouseMove(e: MouseEvent) {
     m.angle = Math.atan2(dy, dx);
     // fanning = one wavelength = raw normalized distance from origin to endpoint
     m.fanning = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / props.worldWidth);
+  }
+
+  // Broadcast live spatial change so other clients see the modifier preview move
+  if ((m as any).id) {
+    if (isSequencer(m)) {
+      const sp = (m as any).sequencerParams;
+      liveBus.dispatch('modifier.update', {
+        effectId: (m as any).id,
+        changes: {},
+        sequencerChanges: { originX: sp.originX, originY: sp.originY, angle: sp.angle, scale: sp.scale },
+      });
+    } else {
+      liveBus.dispatch('modifier.update', {
+        effectId: (m as any).id,
+        changes: { originX: m.originX, originY: m.originY, angle: m.angle, fanning: m.fanning },
+      });
+    }
   }
 
   emit('redraw');

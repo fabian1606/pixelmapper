@@ -32,9 +32,11 @@ impl Default for RenderState {
     }
 }
 
-fn border_color(selected: bool) -> Color {
+fn border_color(selected: bool, remote_color: Option<[u8; 3]>) -> Color {
     if selected {
-        Color::rgba(251, 191, 36, 255) // --primary yellow
+        Color::rgba(251, 191, 36, 255) // --primary yellow (local selection)
+    } else if let Some([r, g, b]) = remote_color {
+        Color::rgba(r, g, b, 200) // remote collaborator color
     } else {
         Color::rgba(255, 255, 255, 56) // 0.22 alpha white
     }
@@ -128,7 +130,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
                 } else {
                     ring_path.circle(0.0, 0.0, max_r + lw);
                 }
-                let mut stroke = Paint::color(border_color(true));
+                let mut stroke = Paint::color(border_color(true, None));
                 stroke.set_line_width(lw);
                 canvas.stroke_path(&mut ring_path, &stroke);
             }
@@ -162,7 +164,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             }
 
             // Border ring (rounded rect)
-            let ring_color = border_color(fixture.selected);
+            let ring_color = border_color(fixture.selected, fixture.remote_selection_color);
             let lw = 2.0 / state.scale;
             let mut ring_path = Path::new();
             ring_path.rounded_rect(-half_w, -half_h, half_w * 2.0, half_h * 2.0, 4.0 / state.scale);
@@ -189,7 +191,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             canvas.restore();
 
             // Border ring (circle, no inner scale)
-            let ring_color = border_color(fixture.selected);
+            let ring_color = border_color(fixture.selected, fixture.remote_selection_color);
             let lw = 2.0 / state.scale;
             let mut ring_path = Path::new();
             ring_path.circle(0.0, 0.0, max_r + lw);

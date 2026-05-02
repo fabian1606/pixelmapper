@@ -8,7 +8,9 @@ import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
+import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
+import { useLiveBusStore } from '~/stores/live-bus-store';
 import type { useChaserHistory } from './use-chaser-history';
 
 export function useChaserModifiers(
@@ -101,21 +103,7 @@ export function useChaserModifiers(
   }
 
   function cloneModifier(effect: Effect): Effect {
-    if (effect instanceof WaveformEffect) {
-      const clone = new WaveformEffect();
-      clone.targetChannels = [...(effect.targetChannels || [])];
-      clone.targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
-      clone.direction = effect.direction;
-      clone.reverse = effect.reverse;
-      clone.strength = effect.strength;
-      clone.fanning = effect.fanning;
-      clone.speed = { ...effect.speed };
-      clone.waveformShape = effect.waveformShape;
-      clone.waveformParams = { ...effect.waveformParams };
-      (clone as any).timePhase = (effect as any).timePhase;
-      return clone;
-    }
-    return effect;
+    return cloneEffectsList([effect])[0]!;
   }
 
   function resolveStaleEffect(effect: Effect, selectedIds: (string | number)[]): Effect {
@@ -130,18 +118,20 @@ export function useChaserModifiers(
     return effect;
   }
 
-  function getSafeEffectToMutate(effect: Effect, selectedIds: (string | number)[]): Effect {
+  function getSafeEffectToMutate(effect: Effect, selectedIds: (string | number)[]): { eff: Effect; didSplit: boolean } {
     const eff = resolveStaleEffect(effect, selectedIds);
 
     if (eff.targetFixtureIds) {
       const unselectedTargets = eff.targetFixtureIds.filter(id => !selectedIds.includes(id));
       if (unselectedTargets.length > 0) {
-        // Split!
+        // Split — keep unselected fixtures on the original, clone for the edited subset
         eff.targetFixtureIds = unselectedTargets;
         const clone = cloneModifier(eff);
+        // New id so remote can distinguish the two effects after modifier.sync
+        (clone as any).id = crypto.randomUUID();
         clone.targetFixtureIds = [...selectedIds];
         effectEngine!.addEffect(clone);
-        return clone;
+        return { eff: clone, didSplit: true };
       } else {
         // Mutate in place & expand to all selected
         const newlyAddedIds = selectedIds.filter(id => !eff.targetFixtureIds!.includes(id));
@@ -176,7 +166,17 @@ export function useChaserModifiers(
         }
       }
     }
-    return eff;
+    return { eff, didSplit: false };
+  }
+
+  function dispatchModifierUpdate(eff: Effect, changes: Record<string, any>, didSplit: boolean) {
+    const liveBus = useLiveBusStore();
+    if (didSplit && effectEngine) {
+      // Structural change — remote must replace their full effects list
+      liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effectEngine.effects)) });
+    } else if ((eff as any).id) {
+      liveBus.dispatch('modifier.update', { effectId: (eff as any).id, changes });
+    }
   }
 
   function handleModifierDragEnd(description: string) {
@@ -211,11 +211,13 @@ export function useChaserModifiers(
     }
 
     const selectedIds = props.fixtures.map(f => f.id);
-    const safeEff = getSafeEffectToMutate(effect, selectedIds);
+    const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
     // Guard against NaN from half-typed numbers (e.g. "-" or empty input)
     if (typeof value === 'number' && isNaN(value)) return;
     (safeEff as any)[key] = value;
     emit('change');
+
+    dispatchModifierUpdate(safeEff, { [key]: value }, didSplit);
 
     if (isDirection && before) {
       commitModifiers(before, 'Change Modifier Direction');
@@ -236,15 +238,17 @@ export function useChaserModifiers(
       }, 400);
 
       const selectedIds = props.fixtures.map(f => f.id);
-      const safeEff = getSafeEffectToMutate(effect, selectedIds);
+      const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
       Object.assign(safeEff, updates);
       emit('change');
+      dispatchModifierUpdate(safeEff, updates as Record<string, any>, didSplit);
     } else {
       const before = captureModifiers();
       const selectedIds = props.fixtures.map(f => f.id);
-      const safeEff = getSafeEffectToMutate(effect, selectedIds);
+      const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
       Object.assign(safeEff, updates);
       emit('change');
+      dispatchModifierUpdate(safeEff, updates as Record<string, any>, didSplit);
       if (before) commitModifiers(before, historyLabel);
     }
   }
@@ -260,7 +264,7 @@ export function useChaserModifiers(
     }
 
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const safeEff = getSafeEffectToMutate(effect, selectedIds);
+    const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
 
     const idx = safeEff.targetChannels.indexOf(type);
     if (idx >= 0) {
@@ -269,6 +273,7 @@ export function useChaserModifiers(
       safeEff.targetChannels.push(type);
     }
     emit('change');
+    dispatchModifierUpdate(safeEff, { targetChannels: [...safeEff.targetChannels] }, didSplit);
     commitModifiers(before, 'Toggle Modifier Channel');
   }
 
@@ -427,9 +432,10 @@ export function useChaserModifiers(
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     const selectedIds = props.fixtures.map(f => f.id);
-    const safeEff = getSafeEffectToMutate(effect, selectedIds);
+    const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
     safeEff.reverse = !safeEff.reverse;
     emit('change');
+    dispatchModifierUpdate(safeEff, { reverse: safeEff.reverse }, didSplit);
     commitModifiers(before, 'Reverse Modifier Direction');
   }
 

@@ -11,20 +11,23 @@ import { ColorEffect } from '~/utils/engine/effects/color-effect';
  * Deep clones an array of effects to decouple them from the live engine state.
  * This is crucial for history snapshots so that future mutations don't alter past history.
  */
+/** Detects the Effect class from either a live instance or a plain JSON object. */
+function instantiateEffect(effect: any): Effect {
+  // Live class instances
+  if (effect instanceof ColorEffect) return new ColorEffect();
+  if (effect instanceof SequencerEffect) return new SequencerEffect();
+  if (effect instanceof NoiseEffect) return new NoiseEffect();
+  if (effect instanceof WaveformEffect) return new WaveformEffect();
+  // Plain JSON (after JSON.parse(JSON.stringify(...))) — detect by property fingerprint
+  if (effect?.colorParams) return new ColorEffect();
+  if (effect?.sequencerParams) return new SequencerEffect();
+  if (effect?.noiseParams) return new NoiseEffect();
+  return new WaveformEffect();
+}
+
 export function cloneEffectsList(effects: Effect[]): Effect[] {
   return effects.map(effect => {
-    let clone: Effect;
-    if (effect instanceof ColorEffect) {
-      clone = new ColorEffect();
-    } else if (effect instanceof SequencerEffect) {
-      clone = new SequencerEffect();
-    } else if (effect instanceof NoiseEffect) {
-      clone = new NoiseEffect();
-    } else if (effect instanceof WaveformEffect) {
-      clone = new WaveformEffect();
-    } else {
-      clone = Object.create(Object.getPrototypeOf(effect));
-    }
+    const clone: Effect = instantiateEffect(effect);
 
     // Clone all known properties
     clone.id = effect.id;

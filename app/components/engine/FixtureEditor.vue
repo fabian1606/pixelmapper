@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineOptions({ inheritAttrs: false });
 import { ref, computed, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
@@ -13,6 +14,9 @@ import { MoveFixtureCommand } from './commands/move-fixture-command';
 import { RotateFixtureCommand } from './commands/rotate-fixture-command';
 import { inject } from 'vue';
 import type { EffectEngine } from '~/utils/engine/engine';
+import { useLiveBusStore } from '~/stores/live-bus-store';
+import { userColor } from '~/composables/live-ops/colors';
+import CollaboratorCursors from './CollaboratorCursors.vue';
 import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
 import type { Effect } from '~/utils/engine/types';
 
@@ -103,6 +107,8 @@ const { selectedIds, interaction, onViewportMouseDown, onMouseMove, onMouseUp } 
   );
 
 const effectEngine = inject<EffectEngine>('effectEngine');
+const liveBus = useLiveBusStore();
+const { remoteSelections } = storeToRefs(liveBus);
 
 const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
 
@@ -113,10 +119,25 @@ watch(selectedIdsModel, (newVal) => {
   if (effectEngine && newVal.size === 0) {
     effectEngine.activeModifier.value = null;
   }
+  liveBus.dispatch('selection.set', { ids: Array.from(newVal) });
 });
 
 watch([() => engineStore._syncTrigger, () => history.version.value], () => {
   fixtureCanvas.value?.sync();
+});
+
+watch(remoteSelections, (sel) => {
+  const entries: Array<{ id: string; r: number; g: number; b: number }> = [];
+  for (const [userId, ids] of sel.entries()) {
+    const hex = userColor(userId).replace('#', '');
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    for (const id of ids) {
+      entries.push({ id: String(id), r, g, b });
+    }
+  }
+  fixtureCanvas.value?.syncRemoteSelections(entries);
 });
 
 function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
@@ -169,6 +190,23 @@ function handleMouseMove(e: MouseEvent) {
   const t = interaction.value.type;
   if (t === 'drag' || t === 'rotate') fixtureCanvas.value?.sync();
   updateCursor(e);
+
+  // Broadcast cursor position (bus throttles via rAF internally)
+  const r = rect();
+  const world = viewportToWorld(e.clientX - r.left, e.clientY - r.top);
+  liveBus.dispatch('cursor.move', { wx: world.x, wy: world.y });
+
+  // Broadcast live drag positions if dragging
+  if (interaction.value.type === 'drag') {
+    const iv = interaction.value;
+    const fixtures: Array<{ id: string | number; x: number; y: number }> = [];
+    for (const f of props.fixtures) {
+      if (iv.startPositions.has(f.id)) {
+        fixtures.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
+      }
+    }
+    if (fixtures.length > 0) liveBus.dispatch('fixture.drag', { fixtures });
+  }
 }
 function handleMouseUp(e?: MouseEvent) {
   const t = interaction.value.type;
@@ -203,6 +241,9 @@ function handleMouseUp(e?: MouseEvent) {
       :viewport-width="editorWidth"
       :viewport-height="editorHeight"
     />
+
+    <!-- Collaborator cursors + remote selections -->
+    <CollaboratorCursors :camera="camera" />
 
     <!-- Effect Spatial Preview -->
     <div

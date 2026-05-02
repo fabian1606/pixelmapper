@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import { storeToRefs } from 'pinia';
+import { useLiveBusStore } from '~/stores/live-bus-store';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -16,6 +18,7 @@ interface Collaborator {
   user_id: string;
   accepted_at: string | null;
   email: string;
+  display_name: string;
 }
 
 interface Props {
@@ -43,6 +46,14 @@ const currentUserRole = computed(() => {
 
 const _currentUserId = ref<string | null>(null);
 const isOwner = computed(() => currentUserRole.value === 'owner');
+
+const liveBus = useLiveBusStore();
+const { presenceUsers } = storeToRefs(liveBus);
+const onlineIds = computed(() => new Set(presenceUsers.value.map(p => p.userId)));
+
+function getInitialsFromUserId(userId: string): string {
+  return userId.slice(0, 2).toUpperCase();
+}
 
 async function loadCollaborators() {
   loading.value = true;
@@ -118,9 +129,14 @@ async function inviteCollaborators() {
   await loadCollaborators();
 }
 
-function getInitials(email: string): string {
-  const parts = email.split('@')[0].split('.');
-  return parts.map(p => p[0].toUpperCase()).join('').slice(0, 2);
+function getInitials(name: string): string {
+  if (!name) return '';
+  // For "first.last" / "first last" / "first-last" — first letter of each segment.
+  // For an email, drop the domain first.
+  const local = name.includes('@') ? name.split('@')[0] : name;
+  const parts = local.split(/[.\s\-_]+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  return parts.map(p => p[0]?.toUpperCase() ?? '').join('').slice(0, 2);
 }
 
 function getAvatarColor(email: string): string {
@@ -138,16 +154,20 @@ onMounted(loadCollaborators);
 
 <template>
   <div class="flex items-center gap-2">
-    <!-- Avatar stack -->
+    <!-- Avatar stack: one entry per WebSocket connection (tab) with its cursor color -->
     <div class="flex items-center -space-x-2">
       <div
-        v-for="collab in collaborators"
-        :key="collab.user_id"
-        :title="collab.email"
-        :class="getAvatarColor(collab.email)"
-        class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white border-2 border-sidebar shrink-0"
+        v-for="user in presenceUsers"
+        :key="user.sessionId"
+        :title="user.displayName || user.userId"
+        class="relative"
       >
-        {{ getInitials(collab.email) }}
+        <div
+          :style="{ backgroundColor: user.color }"
+          class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white border-2 border-sidebar shrink-0"
+        >
+          {{ user.displayName ? getInitials(user.displayName) : getInitialsFromUserId(user.userId) }}
+        </div>
       </div>
     </div>
 
@@ -172,27 +192,35 @@ onMounted(loadCollaborators);
           <!-- Member list -->
           <div class="space-y-1">
             <div
-              v-for="collab in collaborators"
-              :key="collab.user_id"
+              v-for="member in collaborators"
+              :key="member.user_id"
               class="flex items-center gap-3 py-2 px-1 rounded-md group"
             >
-              <div
-                :class="getAvatarColor(collab.email)"
-                class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-              >
-                {{ getInitials(collab.email) }}
+              <div class="relative shrink-0">
+                <div
+                  :class="getAvatarColor(member.email)"
+                  class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white"
+                >
+                  {{ getInitials(member.display_name || member.email) }}
+                </div>
+                <span
+                  v-if="onlineIds.has(member.user_id)"
+                  class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border border-background"
+                />
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium truncate">{{ collab.email }}</p>
-                <p class="text-xs text-muted-foreground capitalize">{{ collab.role }}</p>
+                <p class="text-sm font-medium truncate">{{ member.display_name || member.email }}</p>
+                <p class="text-xs text-muted-foreground truncate">
+                  {{ member.email }} · <span class="capitalize">{{ member.role }}</span>
+                </p>
               </div>
               <Button
-                v-if="isOwner && collab.role !== 'owner'"
+                v-if="isOwner && member.role !== 'owner'"
                 variant="ghost"
                 size="sm"
                 class="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                :disabled="removingId === collab.user_id"
-                @click="removeCollaborator(collab.user_id)"
+                :disabled="removingId === member.user_id"
+                @click="removeCollaborator(member.user_id)"
               >
                 <X :size="14" />
               </Button>

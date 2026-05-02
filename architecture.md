@@ -55,6 +55,7 @@ Detailed documentation per subsystem:
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
+- [Live Collaboration](architecture/live-collaboration.md)
 
 ## Custom Fixtures (SVG Based)
 
