@@ -6,6 +6,22 @@ interface CursorMovePayload {
   wy: number;
 }
 
+interface CameraSyncPayload {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+registerLiveOp<CameraSyncPayload>('camera.sync', {
+  scope: 'per-user',
+  throttle: 'raf',
+  merge: 'replace',
+  apply: ({ x, y, scale }, _userId, ctx, sessionId) => {
+    ctx.remoteCameras.set(sessionId, { x, y, scale });
+    ctx.triggerCameraUpdate();
+  },
+});
+
 // Cursors are keyed by sessionId (one per WebSocket connection / tab) so that
 // multiple tabs of the same user produce distinct cursors with distinct colors.
 registerLiveOp<CursorMovePayload>('cursor.move', {

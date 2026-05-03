@@ -16,27 +16,53 @@ Deno.serve(async (req: Request) => {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return new Response('Unauthorized', { status: 401 });
 
-  const { projectId, commandType, payload } = await req.json();
-  if (!projectId || !commandType || payload === undefined) {
-    return new Response(JSON.stringify({ error: 'projectId, commandType, payload required' }), { status: 400 });
+  const body = await req.json();
+  const projectId: string | undefined = body.projectId;
+  if (!projectId) {
+    return new Response(JSON.stringify({ error: 'projectId required' }), { status: 400 });
   }
+
+  // Accept both single-form { commandType, payload } and array-form { changes: [...] }.
+  // Array form: a single bulk INSERT preserves caller order in returned sequence_numbers.
+  type Change = { commandType: string; payload: unknown };
+  let changes: Change[];
+  if (Array.isArray(body.changes)) {
+    changes = body.changes;
+  } else if (body.commandType && body.payload !== undefined) {
+    changes = [{ commandType: body.commandType, payload: body.payload }];
+  } else {
+    return new Response(
+      JSON.stringify({ error: 'either { commandType, payload } or { changes: [...] } required' }),
+      { status: 400 },
+    );
+  }
+  if (changes.length === 0) {
+    return new Response(JSON.stringify({ sequenceNumbers: [] }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const rows = changes.map(c => ({
+    project_id: projectId,
+    user_id: user.id,
+    command_type: c.commandType,
+    payload: c.payload,
+  }));
 
   const { data, error } = await supabase
     .from('project_changes')
-    .insert({
-      project_id: projectId,
-      user_id: user.id,
-      command_type: commandType,
-      payload,
-    })
-    .select('sequence_number')
-    .single();
+    .insert(rows)
+    .select('sequence_number');
 
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 
-  return new Response(JSON.stringify({ sequenceNumber: data.sequence_number }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const sequenceNumbers = (data ?? []).map(r => r.sequence_number as number);
+  // Backwards-compatible: also emit `sequenceNumber` (singular) for legacy callers
+  // that send the single-form body.
+  return new Response(
+    JSON.stringify({ sequenceNumbers, sequenceNumber: sequenceNumbers[0] }),
+    { headers: { 'Content-Type': 'application/json' } },
+  );
 });

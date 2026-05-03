@@ -113,6 +113,14 @@ export const useEngineStore = defineStore('engine', () => {
   /** Accessor for the current mixed output buffer (not reactive — use bufferRevision). */
   function getOutputBuffer(): Uint8Array { return outputBuffer; }
 
+  /**
+   * Flush any queued, unsent pushChange commands. Set inside loadProject when
+   * persistence hooks are wired up. Call from drag-end / unmount / beforeunload
+   * to ensure no commands are lost in the settle window.
+   */
+  let commitPendingChanges: () => Promise<void> = async () => {};
+  function commitPendingPersistence() { return commitPendingChanges(); }
+
   function setOverride(bufferIndex: number, value: number) {
     const next = new Map(getOverrideMap());
     next.set(bufferIndex, Math.max(0, Math.min(255, Math.round(value))));
@@ -277,12 +285,18 @@ export const useEngineStore = defineStore('engine', () => {
         currentElapsed.value = elapsed;
 
         // Mix output layers: SCENE (base) → OVERRIDE (top)
-        if (outputBuffer.length !== engine.dmxBuffer.length) {
-          outputBuffer = new Uint8Array(engine.dmxBuffer.length);
-        }
-        outputBuffer.set(engine.dmxBuffer);
+        // Fast path: no overrides → alias engine.dmxBuffer directly (no copy).
+        // Consumers of getOutputBuffer() are read-only; verified.
         const overrides = getOverrideMap();
-        if (overrides.size > 0) {
+        if (overrides.size === 0) {
+          outputBuffer = engine.dmxBuffer;
+        } else {
+          // We may currently be aliasing the engine buffer — allocate a
+          // separate buffer so .set() doesn't write into WASM memory.
+          if (outputBuffer === engine.dmxBuffer || outputBuffer.length !== engine.dmxBuffer.length) {
+            outputBuffer = new Uint8Array(engine.dmxBuffer.length);
+          }
+          outputBuffer.set(engine.dmxBuffer);
           for (const [idx, val] of overrides) {
             if (idx < outputBuffer.length) outputBuffer[idx] = val;
           }
@@ -401,15 +415,55 @@ export const useEngineStore = defineStore('engine', () => {
     }
     triggerRef(sceneNodes);
 
+    // ── Persistence: batched pushChange ──────────────────────────────────────
+    // Commands queue locally and flush as one bulk INSERT after a short settle
+    // window. A 60 Hz drag → 1 edge-function call instead of ~60.
+    type PendingChange = {
+      commandType: string;
+      payload: object;
+      resolve: (seq: number | undefined) => void;
+      reject: (err: unknown) => void;
+    };
+    let pendingChanges: PendingChange[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const FLUSH_SETTLE_MS = 250;
+
+    async function flushPendingChanges() {
+      if (flushTimer != null) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (pendingChanges.length === 0) return;
+      const batch = pendingChanges;
+      pendingChanges = [];
+      try {
+        const { data, error } = await supabase.functions.invoke('push-change', {
+          body: {
+            projectId,
+            changes: batch.map(c => ({ commandType: c.commandType, payload: c.payload })),
+          },
+        });
+        if (error) throw error;
+        const seqs: number[] = data?.sequenceNumbers ?? [];
+        for (let i = 0; i < batch.length; i++) batch[i].resolve(seqs[i]);
+      } catch (err) {
+        for (const c of batch) c.reject(err);
+      }
+    }
+    commitPendingChanges = flushPendingChanges;
+
     // Wire up persistence hooks so future commands are pushed to Supabase
     setPersistenceHooks({
-      pushChange: async (commandType, payload) => {
-        const { data: pushData, error } = await supabase.functions.invoke('push-change', {
-          body: { projectId, commandType, payload },
-        });
-        if (!error && pushData?.sequenceNumber != null) return pushData.sequenceNumber as number;
-      },
+      pushChange: (commandType, payload) =>
+        new Promise<number | undefined>((resolve, reject) => {
+          pendingChanges.push({ commandType, payload, resolve, reject });
+          if (flushTimer != null) clearTimeout(flushTimer);
+          flushTimer = setTimeout(flushPendingChanges, FLUSH_SETTLE_MS);
+        }),
       saveSnapshot: async () => {
+        // Drain any queued commands first so lastSeenSequenceNumber matches
+        // the state the snapshot is about to capture.
+        await flushPendingChanges();
         const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
           data: m.usePinnedModifiersStore(),
         }));
@@ -435,6 +489,8 @@ export const useEngineStore = defineStore('engine', () => {
     // Force snapshot on page unload to keep tail short
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
+        // Flush any queued commands (best-effort; the fetch is fire-and-forget at this point).
+        flushPendingChanges();
         // Best-effort synchronous snapshot hint — actual save is async
         navigator.sendBeacon?.(`/api/noop`); // placeholder; real save via saveSnapshot above
       }, { once: true });
@@ -471,5 +527,6 @@ export const useEngineStore = defineStore('engine', () => {
     loadProject,
     applyProjectSnapshot,
     getReplayContext,
+    commitPendingPersistence,
   };
 });

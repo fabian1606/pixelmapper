@@ -43,6 +43,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // Flush any queued persistence writes before tearing down realtime channel.
+  engineStore.commitPendingPersistence()
   collab.cleanup()
 })
 

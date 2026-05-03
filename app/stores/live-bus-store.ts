@@ -11,10 +11,12 @@ export interface LiveContext {
   remoteSelections: Map<string, Set<string | number>>;
   remoteEditingModifier: Map<string, string | null>;
   remoteEditSteps: Map<string, number>;        // key: `${userId}:${fixtureId}`
+  remoteCameras: Map<string, { x: number; y: number; scale: number }>;
   triggerCursorUpdate: () => void;
   triggerSelectionUpdate: () => void;
   triggerEditingModifierUpdate: () => void;
   triggerEditStepUpdate: () => void;
+  triggerCameraUpdate: () => void;
   displayNameOf: (userId: string) => string;
   colorOf: (userId: string) => string;
   engineStore: ReturnType<typeof useEngineStore>;
@@ -82,9 +84,13 @@ export const useLiveBusStore = defineStore('live-bus', () => {
   const remoteSelections = shallowRef(new Map<string, Set<string | number>>());
   const remoteEditingModifier = shallowRef(new Map<string, string | null>());
   const remoteEditSteps = shallowRef(new Map<string, number>());
+  const remoteCameras = shallowRef(new Map<string, { x: number; y: number; scale: number }>());
 
   // Presence (online users)
   const presenceUsers = ref<CollaboratorPresence[]>([]);
+
+  // Follow mode — sessionId of the remote user we're tracking
+  const followedSessionId = ref<string | null>(null);
 
   // Pending outbound ops (batched per rAF)
   // For 'replace' merge: latest op per type wins
@@ -94,20 +100,28 @@ export const useLiveBusStore = defineStore('live-bus', () => {
   let rafScheduled = false;
 
   // ─── Context passed to apply handlers ─────────────────────────────────────
+  // Built lazily once and reused — getters keep the values up-to-date even
+  // when shallowRef .value is reassigned (e.g. on disconnect()).
+  let cachedContext: LiveContext | null = null;
   function getContext(): LiveContext {
-    return {
-      cursors: cursors.value,
-      remoteSelections: remoteSelections.value,
-      remoteEditingModifier: remoteEditingModifier.value,
-      remoteEditSteps: remoteEditSteps.value,
+    if (cachedContext) return cachedContext;
+    const eng = useEngineStore();
+    cachedContext = {
+      get cursors() { return cursors.value; },
+      get remoteSelections() { return remoteSelections.value; },
+      get remoteEditingModifier() { return remoteEditingModifier.value; },
+      get remoteEditSteps() { return remoteEditSteps.value; },
+      get remoteCameras() { return remoteCameras.value; },
       triggerCursorUpdate: () => triggerRef(cursors),
       triggerSelectionUpdate: () => triggerRef(remoteSelections),
       triggerEditingModifierUpdate: () => triggerRef(remoteEditingModifier),
       triggerEditStepUpdate: () => triggerRef(remoteEditSteps),
+      triggerCameraUpdate: () => triggerRef(remoteCameras),
       displayNameOf: (userId: string) => presenceDisplayNames.get(userId) ?? '',
       colorOf: (userId: string) => userColor(userId),
-      engineStore: useEngineStore(),
-    };
+      engineStore: eng,
+    } as LiveContext;
+    return cachedContext;
   }
 
   // ─── Outbound dispatch ─────────────────────────────────────────────────────
@@ -295,7 +309,12 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     remoteSelections.value = new Map();
     remoteEditingModifier.value = new Map();
     remoteEditSteps.value = new Map();
+    remoteCameras.value = new Map();
     presenceUsers.value = [];
+  }
+
+  function toggleFollow(sessionId: string) {
+    followedSessionId.value = followedSessionId.value === sessionId ? null : sessionId;
   }
 
   return {
@@ -304,7 +323,10 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     remoteSelections,
     remoteEditingModifier,
     remoteEditSteps,
+    remoteCameras,
     presenceUsers,
+    followedSessionId,
+    toggleFollow,
     dispatch,
     connect,
     disconnect,

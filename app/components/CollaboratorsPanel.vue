@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useLiveBusStore } from '~/stores/live-bus-store';
+import { useLiveBusStore, TAB_SESSION_ID } from '~/stores/live-bus-store';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -48,7 +48,7 @@ const _currentUserId = ref<string | null>(null);
 const isOwner = computed(() => currentUserRole.value === 'owner');
 
 const liveBus = useLiveBusStore();
-const { presenceUsers } = storeToRefs(liveBus);
+const { presenceUsers, followedSessionId } = storeToRefs(liveBus);
 const onlineIds = computed(() => new Set(presenceUsers.value.map(p => p.userId)));
 
 function getInitialsFromUserId(userId: string): string {
@@ -159,12 +159,17 @@ onMounted(loadCollaborators);
       <div
         v-for="user in presenceUsers"
         :key="user.sessionId"
-        :title="user.displayName || user.userId"
+        :title="user.sessionId === TAB_SESSION_ID ? (user.displayName || 'You') : followedSessionId === user.sessionId ? `Following ${user.displayName || user.userId}` : (user.displayName || user.userId)"
+        :class="user.sessionId !== TAB_SESSION_ID ? 'cursor-pointer' : 'cursor-default'"
         class="relative"
+        @click="user.sessionId !== TAB_SESSION_ID && liveBus.toggleFollow(user.sessionId)"
       >
         <div
-          :style="{ backgroundColor: user.color }"
-          class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white border-2 border-sidebar shrink-0"
+          :style="{
+            backgroundColor: user.sessionId === TAB_SESSION_ID ? '#eab308' : user.color,
+            boxShadow: followedSessionId === user.sessionId ? `0 0 0 2px white, 0 0 0 4px ${user.color}` : 'none'
+          }"
+          class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white border-2 border-sidebar shrink-0 transition-shadow"
         >
           {{ user.displayName ? getInitials(user.displayName) : getInitialsFromUserId(user.userId) }}
         </div>

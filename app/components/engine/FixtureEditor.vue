@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ inheritAttrs: false });
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, watchEffect } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
@@ -108,7 +108,25 @@ const { selectedIds, interaction, onViewportMouseDown, onMouseMove, onMouseUp } 
 
 const effectEngine = inject<EffectEngine>('effectEngine');
 const liveBus = useLiveBusStore();
-const { remoteSelections } = storeToRefs(liveBus);
+const { remoteSelections, remoteCameras, followedSessionId } = storeToRefs(liveBus);
+
+// Follow mode: mirror the remote user's full camera state (position + zoom)
+watchEffect(() => {
+  const sid = followedSessionId.value;
+  if (!sid) return;
+  const remote = remoteCameras.value.get(sid);
+  if (!remote) return;
+  camera.x = remote.x;
+  camera.y = remote.y;
+  camera.scale = remote.scale;
+});
+
+// Broadcast camera state so followers can mirror our viewport
+watch(camera, (c) => {
+  if (!followedSessionId.value) {
+    liveBus.dispatch('camera.sync', { x: c.x, y: c.y, scale: c.scale });
+  }
+}, { deep: true });
 
 const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
 
@@ -183,8 +201,15 @@ function updateCursor(e: MouseEvent) {
 }
 
 // ─── Viewport event delegation ─────────────────────────────────────────────────
-function handleWheel(e: WheelEvent)     { onWheel(e, rect()); }
-function handleMouseDown(e: MouseEvent) { onViewportMouseDown(e, rect()); }
+function handleWheel(e: WheelEvent) {
+  liveBus.followedSessionId = null; // user navigated → stop following
+  onWheel(e, rect());
+}
+function handleMouseDown(e: MouseEvent) {
+  // Middle-mouse or space-drag pans the viewport — stop following
+  if (e.button === 1) liveBus.followedSessionId = null;
+  onViewportMouseDown(e, rect());
+}
 function handleMouseMove(e: MouseEvent) {
   onMouseMove(e, rect());
   const t = interaction.value.type;
