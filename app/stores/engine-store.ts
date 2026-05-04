@@ -369,6 +369,7 @@ export const useEngineStore = defineStore('engine', () => {
 
   async function loadProject(projectId: string) {
     const supabase = useSupabaseClient();
+    const runtimeConfig = useRuntimeConfig();
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
@@ -486,13 +487,34 @@ export const useEngineStore = defineStore('engine', () => {
 
     projectLoading.value = false;
 
-    // Force snapshot on page unload to keep tail short
+    // Cache the JWT so the unload handler can use it synchronously.
+    // keepalive fetch requires a token at fire time, not after an async getSession().
+    let cachedToken = (await supabase.auth.getSession()).data.session?.access_token ?? '';
+    supabase.auth.onAuthStateChange((_, session) => {
+      if (session?.access_token) cachedToken = session.access_token;
+    });
+    const supabaseUrl: string = (runtimeConfig.public as any).supabase?.url
+      ?? (supabase as any).supabaseUrl
+      ?? '';
+    const pushChangeUrl = `${supabaseUrl}/functions/v1/push-change`;
+
+    // On unload: flush any commands still waiting in the debounce window.
+    // fetch({ keepalive: true }) is sent by the browser even after the page tears down,
+    // unlike a normal async fetch which the browser cancels on navigation/reload.
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
-        // Flush any queued commands (best-effort; the fetch is fire-and-forget at this point).
-        flushPendingChanges();
-        // Best-effort synchronous snapshot hint — actual save is async
-        navigator.sendBeacon?.(`/api/noop`); // placeholder; real save via saveSnapshot above
+        if (flushTimer != null) clearTimeout(flushTimer);
+        if (pendingChanges.length === 0 || !cachedToken) return;
+        const body = JSON.stringify({
+          projectId,
+          changes: pendingChanges.map(c => ({ commandType: c.commandType, payload: c.payload })),
+        });
+        fetch(pushChangeUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        });
       }, { once: true });
     }
   }

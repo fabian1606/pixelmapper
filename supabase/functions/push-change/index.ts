@@ -1,8 +1,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
 Deno.serve(async (req: Request) => {
-  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: corsHeaders });
 
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) return new Response('Unauthorized', { status: 401 });
@@ -19,7 +28,7 @@ Deno.serve(async (req: Request) => {
   const body = await req.json();
   const projectId: string | undefined = body.projectId;
   if (!projectId) {
-    return new Response(JSON.stringify({ error: 'projectId required' }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'projectId required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   // Accept both single-form { commandType, payload } and array-form { changes: [...] }.
@@ -33,12 +42,12 @@ Deno.serve(async (req: Request) => {
   } else {
     return new Response(
       JSON.stringify({ error: 'either { commandType, payload } or { changes: [...] } required' }),
-      { status: 400 },
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }
   if (changes.length === 0) {
     return new Response(JSON.stringify({ sequenceNumbers: [] }), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
@@ -55,14 +64,12 @@ Deno.serve(async (req: Request) => {
     .select('sequence_number');
 
   if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   const sequenceNumbers = (data ?? []).map(r => r.sequence_number as number);
-  // Backwards-compatible: also emit `sequenceNumber` (singular) for legacy callers
-  // that send the single-form body.
   return new Response(
     JSON.stringify({ sequenceNumbers, sequenceNumber: sequenceNumbers[0] }),
-    { headers: { 'Content-Type': 'application/json' } },
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   );
 });

@@ -4,6 +4,7 @@ import { commandFromPayload } from '~/components/engine/commands/serializable-co
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore, type CollaboratorPresence, TAB_SESSION_ID } from '~/stores/live-bus-store';
 import { userColor } from '~/composables/live-ops/colors';
+import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 
 // Side-effect import: registers all live ops
 import '~/composables/live-ops';
@@ -31,6 +32,11 @@ export function useCollaboration(projectId: string): CollaborationContext {
     },
   });
 
+  // Becomes true once we have seen our own session in a presence:sync. From that
+  // point on, any presence:join is a genuinely new peer (not part of the initial
+  // flood of joins Supabase fires for already-present sessions when we subscribe).
+  let initialPresenceSettled = false;
+
   // ── Presence ──────────────────────────────────────────────────────────────
   channel.on('presence', { event: 'sync' }, () => {
     const state = channel.presenceState<{ displayName: string; userId: string; sessionId: string; clockEpoch?: number }>();
@@ -47,6 +53,11 @@ export function useCollaboration(projectId: string): CollaborationContext {
     }
     liveBus.setPresence(users);
 
+    // Mark the channel as bootstrapped once our own track has propagated.
+    if (!initialPresenceSettled && state[TAB_SESSION_ID]) {
+      initialPresenceSettled = true;
+    }
+
     // Converge to the earliest clockEpoch across all collaborators so noise/chaser
     // patterns stay in sync. Earliest wins because Date.now() is wall-clock time.
     let minEpoch = engineStore.clockEpoch;
@@ -56,6 +67,33 @@ export function useCollaboration(projectId: string): CollaborationContext {
     }
     if (minEpoch < engineStore.clockEpoch) {
       engineStore.setClockEpoch(minEpoch);
+    }
+  });
+
+  // ── Presence join: push full live state to newly connected clients ────────
+  // Only fires for genuinely new peers — the initial flood of joins for already-
+  // present sessions is gated by `initialPresenceSettled`. This prevents a
+  // reloading client from pushing its stale snapshot to existing live clients.
+  channel.on('presence', { event: 'join' }, ({ key }: any) => {
+    if (!liveBus.isConnected) return;
+    if (!initialPresenceSettled) return;
+    if (key === TAB_SESSION_ID) return;
+
+    // Push fixture positions
+    const flat = engineStore.flatFixtures;
+    if (flat.length) {
+      liveBus.dispatch('fixture.drag', {
+        fixtures: flat.map((f: any) => ({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y })),
+      });
+    }
+
+    // Push channel state (stepValues / colorValue)
+    dispatchChannelUpdate(flat);
+
+    // Push modifier/effect state
+    const effects = engineStore.activeEffects;
+    if (effects?.length) {
+      liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effects)) });
     }
   });
 
