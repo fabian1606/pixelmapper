@@ -29,6 +29,8 @@ export interface LiveWidget {
   // controller-twin specific
   controllerKey?: string
   controllerWidgets?: LiveWidget[]
+  // Flat group association: widgets sharing the same groupId are grouped.
+  groupId?: string
 }
 
 export interface LivePage {

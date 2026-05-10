@@ -1,10 +1,14 @@
 import { ref, computed } from 'vue';
-import { isSerializable } from '../commands/serializable-command';
+import { isSerializable, type SerializableCommand } from '../commands/serializable-command';
 
 export interface Command {
   description: string;
   execute(): void;
   undo(): void;
+  /** Optional: returns a new forward command that, when executed, will undo this one.
+   *  When present, undo() pushes this inverse to the DB so the change persists
+   *  across reloads and syncs to other clients. */
+  inverse?(): Command | null;
 }
 
 // ─── Module-level singleton state ────────────────────────────────────────────
@@ -73,6 +77,24 @@ export function useHistory() {
     command.undo();
     future.value.push(command);
     version.value++;
+
+    // Persist the undo by pushing an inverse forward-command to the DB so
+    // (a) the change survives reload and (b) collaborators see the undo too.
+    // Only commands that opt-in via inverse() participate; others stay local.
+    if (command.inverse && persistenceHooks.pushChange) {
+      const inv = command.inverse();
+      if (inv && isSerializable(inv)) {
+        const sCmd = inv as SerializableCommand;
+        persistenceHooks.pushChange(sCmd.commandType, sCmd.toPayload()).then((seq) => {
+          if (seq != null) lastSeenSequenceNumber.value = seq;
+          commandsSinceSnapshot.value++;
+          if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
+            commandsSinceSnapshot.value = 0;
+            persistenceHooks.saveSnapshot();
+          }
+        }).catch(err => console.warn('[history] persist undo failed:', err));
+      }
+    }
   }
 
   function redo() {
@@ -81,6 +103,19 @@ export function useHistory() {
     command.execute();
     past.value.push(command);
     version.value++;
+
+    // Persist the redo too — same pattern as forward execute.
+    if (isSerializable(command) && persistenceHooks.pushChange) {
+      const payload = command.toPayload();
+      persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
+        if (seq != null) lastSeenSequenceNumber.value = seq;
+        commandsSinceSnapshot.value++;
+        if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
+          commandsSinceSnapshot.value = 0;
+          persistenceHooks.saveSnapshot();
+        }
+      }).catch(err => console.warn('[history] persist redo failed:', err));
+    }
   }
 
   return { execute, executeRemote, undo, redo, canUndo, canRedo, lastDescription, version };

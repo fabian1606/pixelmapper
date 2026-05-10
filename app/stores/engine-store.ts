@@ -16,6 +16,7 @@ import {
   type ProjectSnapshot,
 } from '~/utils/engine/serialize';
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
+import { useLiveModeStore } from '~/stores/live-mode-store';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
@@ -365,10 +366,10 @@ export const useEngineStore = defineStore('engine', () => {
     activeEffects.value = effects;
     engine.effects = activeEffects.value;
     triggerRef(sceneNodes);
-    // Wire live pages into live-mode store (lazy import avoids circular deps)
-    import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
-      useLiveModeStore().loadPages(livePages);
-    });
+    // Load live pages SYNCHRONOUSLY so the tail replay (which runs immediately
+    // after this in loadProject) sees the pages and can mutate them. Earlier
+    // dynamic-import version dropped any tail live-widget commands silently.
+    useLiveModeStore().loadPages(livePages);
   }
 
   async function loadProject(projectId: string) {
@@ -472,7 +473,6 @@ export const useEngineStore = defineStore('engine', () => {
         const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
           data: m.usePinnedModifiersStore(),
         }));
-        const { useLiveModeStore } = await import('~/stores/live-mode-store');
         const liveStore = useLiveModeStore();
         const snapshot = serializeProject(
           sceneNodes.value,

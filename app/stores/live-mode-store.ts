@@ -9,6 +9,10 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   const selectedWidgetIds = ref<Set<string>>(new Set());
   // Clipboard: deep-cloned widget snapshots from the last copy/cut.
   const clipboard = ref<LiveWidget[]>([]);
+  // Isolation: when set, the user has "entered" a group via double-click.
+  // While isolated, clicks select individual group members instead of the
+  // whole group, like Figma/Sketch group editing.
+  const isolatedGroupId = ref<string | null>(null);
 
   const activePage = computed(() => pages.value.find(p => p.id === activePageId.value) ?? null);
 
@@ -22,10 +26,19 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     activePageId.value = null;
     editMode.value = true;
     selectedWidgetIds.value = new Set();
+    isolatedGroupId.value = null;
+  }
+
+  function exitIsolation() {
+    isolatedGroupId.value = null;
   }
 
   function setActivePage(id: string) {
-    if (pages.value.some(p => p.id === id)) activePageId.value = id;
+    if (pages.value.some(p => p.id === id)) {
+      activePageId.value = id;
+      isolatedGroupId.value = null;
+      selectedWidgetIds.value = new Set();
+    }
   }
 
   function addPage(page: LivePage) {
@@ -71,15 +84,25 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     if (widget) Object.assign(widget, patch);
   }
 
+  function setWidgetGroupId(pageId: string, widgetId: string, groupId: string | null) {
+    const page = pages.value.find(p => p.id === pageId);
+    const widget = page?.widgets.find(w => w.id === widgetId);
+    if (!widget) return;
+    if (groupId === null) delete widget.groupId;
+    else widget.groupId = groupId;
+  }
+
   return {
     pages,
     activePageId,
     editMode,
     selectedWidgetIds,
     clipboard,
+    isolatedGroupId,
     activePage,
     loadPages,
     reset,
+    exitIsolation,
     setActivePage,
     addPage,
     removePage,
@@ -88,5 +111,6 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     removeWidget,
     moveResizeWidget,
     updateWidgetMapping,
+    setWidgetGroupId,
   };
 });

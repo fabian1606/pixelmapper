@@ -129,21 +129,48 @@ function handleWheel(event: WheelEvent) {
   cameraOnWheel(event, rect);
 }
 
-// ── Middle-mouse pan ──────────────────────────────────────────────────────────
+// ── Middle-mouse pan + marquee selection ─────────────────────────────────────
 
 let isPanning = false;
 let panStartX = 0, panStartY = 0;
 let panStartCamX = 0, panStartCamY = 0;
 
+// Marquee state, in canvas-local pixels (so it scales with camera)
+const marquee = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+let marqueeStartShift = false;
+let marqueePrevSelection: Set<string> = new Set();
+
+function clientToCanvasLocal(clientX: number, clientY: number): { x: number; y: number } | null {
+  if (!canvasRef.value) return null;
+  const rect = canvasRef.value.getBoundingClientRect();
+  const s = camera.scale || 1;
+  return { x: (clientX - rect.left) / s, y: (clientY - rect.top) / s };
+}
+
 function handleMouseDown(e: MouseEvent) {
+  // Middle-mouse pan
   if (e.button === 1 && store.editMode) {
-    liveBus.followedSessionId = null; // user-initiated pan → stop following
+    liveBus.followedSessionId = null;
     isPanning = true;
     panStartX = e.clientX;
     panStartY = e.clientY;
     panStartCamX = camera.x;
     panStartCamY = camera.y;
     e.preventDefault();
+    return;
+  }
+
+  // Left-click on empty canvas → start marquee selection + exit any group isolation.
+  // We only get here when no LiveWidget intercepted the event (each widget
+  // calls e.stopPropagation() in its own mousedown).
+  if (e.button === 0 && store.editMode && store.activePage) {
+    const local = clientToCanvasLocal(e.clientX, e.clientY);
+    if (!local) return;
+    if (store.isolatedGroupId !== null) store.exitIsolation();
+    marqueeStartShift = e.shiftKey || e.metaKey || e.ctrlKey;
+    marqueePrevSelection = marqueeStartShift ? new Set(store.selectedWidgetIds) : new Set();
+    if (!marqueeStartShift) store.selectedWidgetIds = new Set();
+    marquee.value = { x1: local.x, y1: local.y, x2: local.x, y2: local.y };
   }
 }
 
@@ -151,11 +178,51 @@ function handleMouseMove(e: MouseEvent) {
   if (isPanning) {
     camera.x = panStartCamX + (e.clientX - panStartX);
     camera.y = panStartCamY + (e.clientY - panStartY);
+    return;
+  }
+  if (marquee.value) {
+    const local = clientToCanvasLocal(e.clientX, e.clientY);
+    if (!local || !store.activePage) return;
+    marquee.value = { ...marquee.value, x2: local.x, y2: local.y };
+
+    // Recompute selection: every widget whose box intersects the marquee.
+    const m = marquee.value;
+    const minX = Math.min(m.x1, m.x2);
+    const maxX = Math.max(m.x1, m.x2);
+    const minY = Math.min(m.y1, m.y2);
+    const maxY = Math.max(m.y1, m.y2);
+    const gs = store.activePage.gridSize;
+
+    const next = new Set(marqueePrevSelection);
+    const added = new Set<string>();
+    for (const w of store.activePage.widgets) {
+      const wx1 = w.gridX * gs;
+      const wy1 = w.gridY * gs;
+      const wx2 = wx1 + w.gridW * gs;
+      const wy2 = wy1 + w.gridH * gs;
+      const intersects = wx1 < maxX && wx2 > minX && wy1 < maxY && wy2 > minY;
+      if (intersects) added.add(w.id);
+    }
+    // Group-aware: if any selected widget belongs to a group, pull in its peers.
+    const groupIds = new Set<string>();
+    for (const id of added) {
+      const w = store.activePage.widgets.find(x => x.id === id);
+      if (w?.groupId) groupIds.add(w.groupId);
+    }
+    for (const w of store.activePage.widgets) {
+      if (w.groupId && groupIds.has(w.groupId)) added.add(w.id);
+    }
+    for (const id of added) next.add(id);
+    store.selectedWidgetIds = next;
   }
 }
 
 function handleMouseUp(e: MouseEvent) {
   if (e.button === 1) isPanning = false;
+  if (e.button === 0 && marquee.value) {
+    marquee.value = null;
+    marqueePrevSelection = new Set();
+  }
 }
 
 // ── Cursor tracking ───────────────────────────────────────────────────────────
@@ -279,6 +346,19 @@ watch(
         :canvas-scale="camera.scale"
       />
       <LiveCollaboratorCursors v-if="store.editMode" :page-id="store.activePage.id" :scale="camera.scale" />
+
+      <!-- Marquee selection rectangle (canvas-local pixel coords) -->
+      <div
+        v-if="marquee"
+        class="absolute pointer-events-none border border-primary bg-primary/15"
+        :style="{
+          left: `${Math.min(marquee.x1, marquee.x2)}px`,
+          top: `${Math.min(marquee.y1, marquee.y2)}px`,
+          width: `${Math.abs(marquee.x2 - marquee.x1)}px`,
+          height: `${Math.abs(marquee.y2 - marquee.y1)}px`,
+          zIndex: 9000,
+        }"
+      />
     </div>
   </div>
 </template>

@@ -4,6 +4,8 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import {
   AddLiveWidgetCommand,
   RemoveLiveWidgetCommand,
+  GroupLiveWidgetsCommand,
+  UngroupLiveWidgetsCommand,
 } from '~/components/engine/commands/live-widget-commands';
 import type { LiveWidget } from '~/utils/live/types';
 
@@ -124,7 +126,40 @@ export function useLiveShortcuts() {
   }
 
   function clearSelection() {
+    // First press of Escape exits any group isolation; if not isolated, clear selection.
+    if (store.isolatedGroupId !== null) {
+      store.isolatedGroupId = null;
+      return;
+    }
     store.selectedWidgetIds = new Set();
+  }
+
+  function groupSelected() {
+    if (!store.editMode) return;
+    const page = store.activePage;
+    if (!page) return;
+    const widgets = getSelectedWidgets();
+    if (widgets.length < 2) return; // Nothing to group
+    const groupId = crypto.randomUUID();
+    history.execute(new GroupLiveWidgetsCommand(page.id, widgets.map(w => w.id), groupId));
+  }
+
+  function ungroupSelected() {
+    if (!store.editMode) return;
+    const page = store.activePage;
+    if (!page) return;
+    const widgets = getSelectedWidgets();
+    // Pull in every widget that shares a group with any selected widget so a
+    // partial selection still ungroups the whole group cleanly.
+    const groupIds = new Set<string>();
+    for (const w of widgets) if (w.groupId) groupIds.add(w.groupId);
+    if (groupIds.size === 0) return;
+    const ids: string[] = [];
+    for (const w of page.widgets) {
+      if (w.groupId && groupIds.has(w.groupId)) ids.push(w.id);
+    }
+    if (ids.length === 0) return;
+    history.execute(new UngroupLiveWidgetsCommand(page.id, ids));
   }
 
   useShortcuts([
@@ -136,6 +171,8 @@ export function useLiveShortcuts() {
     { key: 'x', ctrl: true,              label: 'Cut',           handler: cutSelected },
     { key: 'd', ctrl: true,              label: 'Duplicate',     handler: duplicateSelected },
     { key: 'a', ctrl: true,              label: 'Select All',    handler: selectAll },
+    { key: 'g', ctrl: true,              label: 'Group',         handler: groupSelected },
+    { key: 'g', ctrl: true, shift: true, label: 'Ungroup',       handler: ungroupSelected },
     { key: 'Delete',                     label: 'Delete',        handler: deleteSelected },
     { key: 'Backspace',                  label: 'Delete',        handler: deleteSelected },
     { key: 'Escape',                     label: 'Clear Sel.',    handler: clearSelection },
@@ -149,5 +186,7 @@ export function useLiveShortcuts() {
     deleteSelected,
     selectAll,
     clearSelection,
+    groupSelected,
+    ungroupSelected,
   };
 }
