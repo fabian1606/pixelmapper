@@ -11,7 +11,7 @@ export interface LiveContext {
   remoteSelections: Map<string, Set<string | number>>;
   remoteEditingModifier: Map<string, string | null>;
   remoteEditSteps: Map<string, number>;        // key: `${userId}:${fixtureId}`
-  remoteCameras: Map<string, { x: number; y: number; scale: number }>;
+  remoteCameras: Map<string, { x: number; y: number; scale: number; context?: 'editor' | 'live'; livePageId?: string }>;
   triggerCursorUpdate: () => void;
   triggerSelectionUpdate: () => void;
   triggerEditingModifierUpdate: () => void;
@@ -29,6 +29,8 @@ export interface CursorState {
   color: string;
   wx: number;
   wy: number;
+  context?: 'editor' | 'live';
+  livePageId?: string;
 }
 
 export interface CollaboratorPresence {
@@ -36,6 +38,8 @@ export interface CollaboratorPresence {
   sessionId: string;
   displayName: string;
   color: string;
+  viewMode?: 'editor' | 'live';
+  livePageId?: string;
 }
 
 export interface LiveOpConfig<T = any> {
@@ -73,9 +77,15 @@ export function getLiveOpConfig(type: string): LiveOpConfig | undefined {
 export const TAB_SESSION_ID = Math.random().toString(36).slice(2);
 
 export const useLiveBusStore = defineStore('live-bus', () => {
+  // Capture Nuxt app refs at setup time so they remain valid when accessed
+  // later from non-component callbacks (e.g. Supabase channel events).
+  const router = useRouter();
+  const currentRoute = useRoute();
+
   // Channel + connection state
   let channel: RealtimeChannel | null = null;
   let currentUserId: string | null = null;
+  let currentProjectId: string | null = null;
   let presenceDisplayNames = new Map<string, string>();
   const isConnected = ref(false);
 
@@ -84,13 +94,17 @@ export const useLiveBusStore = defineStore('live-bus', () => {
   const remoteSelections = shallowRef(new Map<string, Set<string | number>>());
   const remoteEditingModifier = shallowRef(new Map<string, string | null>());
   const remoteEditSteps = shallowRef(new Map<string, number>());
-  const remoteCameras = shallowRef(new Map<string, { x: number; y: number; scale: number }>());
+  const remoteCameras = shallowRef(new Map<string, { x: number; y: number; scale: number; context?: 'editor' | 'live'; livePageId?: string }>());
 
   // Presence (online users)
   const presenceUsers = ref<CollaboratorPresence[]>([]);
 
   // Follow mode — sessionId of the remote user we're tracking
   const followedSessionId = ref<string | null>(null);
+  // Last-known location of the followed user. We only auto-navigate when this
+  // changes, so the local user can manually navigate away without being yanked
+  // back by every presence sync.
+  let lastFollowedLocation: { viewMode?: 'editor' | 'live'; livePageId?: string } | null = null;
 
   // Pending outbound ops (batched per rAF)
   // For 'replace' merge: latest op per type wins
@@ -231,9 +245,11 @@ export const useLiveBusStore = defineStore('live-bus', () => {
   function connect(opts: {
     channel: RealtimeChannel;
     userId: string;
+    projectId: string;
   }) {
     channel = opts.channel;
     currentUserId = opts.userId;
+    currentProjectId = opts.projectId;
 
     channel.on('broadcast', { event: 'live_ops' }, ({ payload }) => {
       handleIncoming(payload?.ops ?? []);
@@ -247,11 +263,14 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     presenceUsers.value = users;
     const names = new Map<string, string>();
     for (const u of users) {
-      // Last-write-wins for users with multiple sessions; all sessions of the
-      // same user track the same displayName so this is fine.
       names.set(u.userId, u.displayName);
     }
     presenceDisplayNames = names;
+
+    // Follow-mode navigation is now driven by the explicit `user.pageChange`
+    // event (see handlePageChange). Presence is only used for the avatars and
+    // initial follow target — not to drive automatic navigation, otherwise
+    // every presence sync would yank the local user back.
 
     // GC any per-session / per-user state for connections that have left.
     // Sync fires after every join/leave, so this is the single source of truth
@@ -301,6 +320,8 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     isConnected.value = false;
     channel = null;
     currentUserId = null;
+    currentProjectId = null;
+    lastFollowedLocation = null;
     pendingReplace.clear();
     pendingAppend.length = 0;
     for (const h of timerHandles.values()) clearTimeout(h);
@@ -309,12 +330,69 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     remoteSelections.value = new Map();
     remoteEditingModifier.value = new Map();
     remoteEditSteps.value = new Map();
-    remoteCameras.value = new Map();
+    remoteCameras.value = new Map<string, { x: number; y: number; scale: number; context?: 'editor' | 'live'; livePageId?: string }>();
     presenceUsers.value = [];
   }
 
+  // Called by the user.pageChange live op when a remote user navigates between
+  // editor/live or switches the active live page. If we're following them,
+  // navigate locally to match.
+  function handlePageChange(
+    sessionId: string,
+    payload: { viewMode: 'editor' | 'live'; livePageId?: string },
+  ) {
+    if (followedSessionId.value !== sessionId) return;
+    if (!currentProjectId) return;
+    if (!currentRoute.path.startsWith(`/project/${currentProjectId}`)) return;
+
+    lastFollowedLocation = { viewMode: payload.viewMode, livePageId: payload.livePageId };
+    const targetPath = payload.viewMode === 'live'
+      ? `/project/${currentProjectId}/live`
+      : `/project/${currentProjectId}`;
+    if (currentRoute.path !== targetPath) {
+      router.push(targetPath);
+    }
+    if (payload.viewMode === 'live' && payload.livePageId) {
+      import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
+        const liveStore = useLiveModeStore();
+        if (liveStore.activePageId !== payload.livePageId) {
+          liveStore.setActivePage(payload.livePageId!);
+        }
+      });
+    }
+  }
+
   function toggleFollow(sessionId: string) {
-    followedSessionId.value = followedSessionId.value === sessionId ? null : sessionId;
+    const turningOn = followedSessionId.value !== sessionId;
+    followedSessionId.value = turningOn ? sessionId : null;
+
+    if (!turningOn) {
+      // Unfollow → clear the snapshot so re-following someone in the same
+      // location later is treated as a "change" and triggers navigation again.
+      lastFollowedLocation = null;
+      return;
+    }
+
+    // Just started following — jump to their location once.
+    if (!currentProjectId) return;
+    const followed = presenceUsers.value.find(u => u.sessionId === sessionId);
+    if (!followed?.viewMode) {
+      lastFollowedLocation = null;
+      return;
+    }
+
+    lastFollowedLocation = { viewMode: followed.viewMode, livePageId: followed.livePageId };
+    const targetPath = followed.viewMode === 'live'
+      ? `/project/${currentProjectId}/live`
+      : `/project/${currentProjectId}`;
+    if (currentRoute.path !== targetPath) {
+      router.push(targetPath);
+    }
+    if (followed.viewMode === 'live' && followed.livePageId) {
+      import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
+        useLiveModeStore().setActivePage(followed.livePageId!);
+      });
+    }
   }
 
   return {
@@ -327,6 +405,7 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     presenceUsers,
     followedSessionId,
     toggleFollow,
+    handlePageChange,
     dispatch,
     connect,
     disconnect,

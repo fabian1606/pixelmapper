@@ -1,51 +1,73 @@
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue';
+import { Pencil, Maximize, Minimize } from 'lucide-vue-next';
+import LiveCanvas from '~/components/live/LiveCanvas.vue';
+import LivePageSelector from '~/components/live/LivePageSelector.vue';
+import LiveAddSidebar from '~/components/live/LiveAddSidebar.vue';
+import LiveEditSidebar from '~/components/live/LiveEditSidebar.vue';
+import { useLiveModeStore } from '~/stores/live-mode-store';
+import { useLiveShortcuts } from '~/composables/use-live-shortcuts';
+
 definePageMeta({ layout: 'project' });
-import { computed, ref, watch, nextTick } from 'vue';
-import { useConnectionsStore } from '~/stores/connections-store';
 
-const store = useConnectionsStore();
+const store = useLiveModeStore();
+useLiveShortcuts();
 
-// Aggregate logs from all connectors, sorted by timestamp
-const logs = computed(() => {
-  return store.connectors
-    .flatMap(c => c.logs.map(l => ({ ...l, label: c.meta.label })))
-    .sort((a, b) => a.ts - b.ts)
-    .slice(-500);
-});
+const isFullscreen = ref(false);
 
-const bottomRef = ref<HTMLElement | null>(null);
-
-watch(logs, async () => {
-  await nextTick();
-  bottomRef.value?.scrollIntoView({ behavior: 'instant' });
-}, { deep: true });
-
-function formatTime(ts: number) {
-  return new Date(ts).toLocaleTimeString('de-DE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    await document.documentElement.requestFullscreen();
+  } else {
+    await document.exitFullscreen();
+  }
 }
+
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement;
+}
+
+onMounted(() => document.addEventListener('fullscreenchange', onFullscreenChange));
+onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenChange));
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-background font-mono text-xs">
-    <div v-if="!store.connectors.length" class="flex-1 flex items-center justify-center text-muted-foreground">
-      Keine Connectoren aktiv — gehe zu <NuxtLink to="/connections" class="underline mx-1">Connections</NuxtLink> um einen hinzuzufügen.
-    </div>
+  <div class="flex h-full w-full bg-background overflow-hidden">
+    <!-- Left: Add widget sidebar (edit mode only) -->
+    <LiveAddSidebar v-if="store.editMode" />
 
-    <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-muted-foreground">
-      Warte auf Daten…
-    </div>
+    <!-- Center: Canvas with floating overlays -->
+    <div class="flex-1 relative overflow-hidden">
+      <LiveCanvas />
 
-    <div v-else class="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
-      <div
-        v-for="(line, i) in logs"
-        :key="i"
-        class="flex gap-3 leading-5"
-      >
-        <span class="text-muted-foreground/50 shrink-0 select-none">{{ formatTime(line.ts) }}</span>
-        <span class="text-muted-foreground/60 shrink-0 select-none">[{{ line.label }}]</span>
-        <span class="text-foreground/80 break-all">{{ line.text }}</span>
+      <!-- Floating page selector bottom center -->
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+        <div class="pointer-events-auto">
+          <LivePageSelector />
+        </div>
       </div>
-      <div ref="bottomRef" />
+
+      <!-- Floating buttons (play mode only) -->
+      <div v-if="!store.editMode" class="absolute top-4 right-4 z-10 flex items-center gap-1.5">
+        <button
+          class="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium bg-background/90 backdrop-blur-sm border border-border/60 shadow-lg text-muted-foreground hover:text-foreground transition-colors"
+          @click="store.editMode = true"
+        >
+          <Pencil class="size-3.5" />
+          Edit
+        </button>
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-md bg-background/90 backdrop-blur-sm border border-border/60 shadow-lg text-muted-foreground hover:text-foreground transition-colors"
+          :title="isFullscreen ? 'Vollbild beenden' : 'Vollbild'"
+          @click="toggleFullscreen"
+        >
+          <Minimize v-if="isFullscreen" class="size-3.5" />
+          <Maximize v-else class="size-3.5" />
+        </button>
+      </div>
     </div>
+
+    <!-- Right: Edit sidebar (edit mode only) -->
+    <LiveEditSidebar v-if="store.editMode" />
   </div>
 </template>

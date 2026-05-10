@@ -4,20 +4,24 @@ import { userColor } from '~/composables/live-ops/colors';
 interface CursorMovePayload {
   wx: number;
   wy: number;
+  context?: 'editor' | 'live';
+  livePageId?: string;
 }
 
 interface CameraSyncPayload {
   x: number;
   y: number;
   scale: number;
+  context?: 'editor' | 'live';
+  livePageId?: string;
 }
 
 registerLiveOp<CameraSyncPayload>('camera.sync', {
   scope: 'per-user',
   throttle: 'raf',
   merge: 'replace',
-  apply: ({ x, y, scale }, _userId, ctx, sessionId) => {
-    ctx.remoteCameras.set(sessionId, { x, y, scale });
+  apply: ({ x, y, scale, context, livePageId }, _userId, ctx, sessionId) => {
+    ctx.remoteCameras.set(sessionId, { x, y, scale, context, livePageId });
     ctx.triggerCameraUpdate();
   },
 });
@@ -28,7 +32,7 @@ registerLiveOp<CursorMovePayload>('cursor.move', {
   scope: 'per-user',
   throttle: 'raf',
   merge: 'replace',
-  apply: ({ wx, wy }, userId, ctx, sessionId) => {
+  apply: ({ wx, wy, context, livePageId }, userId, ctx, sessionId) => {
     ctx.cursors.set(sessionId, {
       userId,
       sessionId,
@@ -36,6 +40,8 @@ registerLiveOp<CursorMovePayload>('cursor.move', {
       color: userColor(sessionId),
       wx,
       wy,
+      context,
+      livePageId,
     });
     ctx.triggerCursorUpdate();
   },

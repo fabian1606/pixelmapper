@@ -5,6 +5,7 @@ import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
 import type { Effect } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
+import type { LivePage } from '~/utils/live/types'
 import { reactive } from 'vue'
 import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command'
 
@@ -61,6 +62,7 @@ export interface ProjectSnapshot {
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
   activeEffects: Effect[]
+  livePages?: LivePage[]
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -121,6 +123,7 @@ export function serializeProject(
   pinnedModifiers: PinnedModifier[],
   globalBases: Record<string, number>,
   activeEffects: Effect[],
+  livePages: LivePage[] = [],
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -128,6 +131,7 @@ export function serializeProject(
     pinnedModifiers: JSON.parse(JSON.stringify(pinnedModifiers)),
     globalBases: { ...globalBases },
     activeEffects: JSON.parse(JSON.stringify(activeEffects)),
+    livePages: JSON.parse(JSON.stringify(livePages)),
   }
 }
 
@@ -182,13 +186,14 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
   activeEffects: Effect[]
+  livePages: LivePage[]
 } {
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
     globalBases: { ...snapshot.globalBases },
-    // Reconstruct Effect class instances from plain JSON so instanceof checks work
     activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
+    livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
   }
 }

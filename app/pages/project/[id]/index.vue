@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, shallowRef, computed, nextTick, provide, watch } from 'vue';
+import { ref, shallowRef, computed, nextTick } from 'vue';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import DeleteConfirmDialog from '~/components/engine/DeleteConfirmDialog.vue';
@@ -19,34 +19,13 @@ import ViewportModeSwitcher, { type ViewportMode } from '~/components/design/Vie
 import UniverseInspector from '~/components/design/UniverseInspector.vue';
 import { storeToRefs } from 'pinia';
 import { useEngineStore } from '~/stores/engine-store';
-import { useCollaboration } from '~/composables/use-collaboration';
 
 definePageMeta({ layout: 'project' })
 
-const route = useRoute()
-const projectId = route.params.id as string
-
 const engineStore = useEngineStore()
-engineStore.initEngine()
-
-const { sceneNodes, flatFixtures, selectedIds, projectLoading, projectError } = storeToRefs(engineStore)
+const { sceneNodes, flatFixtures, selectedIds } = storeToRefs(engineStore)
 const engine = engineStore.engine
 const history = useHistory()
-
-provide('effectEngine', engine)
-
-const collab = useCollaboration(projectId)
-
-onMounted(async () => {
-  await engineStore.loadProject(projectId)
-  collab.connect()
-})
-
-onUnmounted(() => {
-  // Flush any queued persistence writes before tearing down realtime channel.
-  engineStore.commitPendingPersistence()
-  collab.cleanup()
-})
 
 // Window sizing
 const windowWidth = ref(1024)
@@ -177,28 +156,7 @@ useShortcuts([
 </script>
 
 <template>
-  <div v-if="projectLoading" class="flex items-center justify-center h-full text-muted-foreground text-sm">
-    Loading project…
-  </div>
-
-  <div v-else-if="projectError === 'unauthorized'" class="flex items-center justify-center h-full">
-    <div class="text-center space-y-3 max-w-sm px-4">
-      <div class="text-4xl">🔒</div>
-      <h2 class="text-lg font-semibold">No access</h2>
-      <p class="text-sm text-muted-foreground">You don't have permission to view this project. Ask the owner to invite you.</p>
-      <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
-    </div>
-  </div>
-
-  <div v-else-if="projectError === 'error'" class="flex items-center justify-center h-full">
-    <div class="text-center space-y-3 max-w-sm px-4">
-      <h2 class="text-lg font-semibold">Failed to load project</h2>
-      <p class="text-sm text-muted-foreground">Something went wrong. Please try again.</p>
-      <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
-    </div>
-  </div>
-
-  <SidebarProvider v-else>
+  <SidebarProvider>
     <div class="flex h-full w-full bg-background overflow-hidden text-foreground font-sans m-0 p-0">
       <FixtureSidebar
         ref="fixtureSidebarRef"

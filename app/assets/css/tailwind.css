@@ -132,3 +132,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+:fullscreen .fullscreen-hide,
+:-webkit-full-screen .fullscreen-hide {
+  display: none;
+}

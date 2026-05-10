@@ -358,13 +358,17 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects } = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages } = deserializeProject(snapshot);
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
     activeEffects.value = effects;
     engine.effects = activeEffects.value;
     triggerRef(sceneNodes);
+    // Wire live pages into live-mode store (lazy import avoids circular deps)
+    import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
+      useLiveModeStore().loadPages(livePages);
+    });
   }
 
   async function loadProject(projectId: string) {
@@ -468,12 +472,15 @@ export const useEngineStore = defineStore('engine', () => {
         const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
           data: m.usePinnedModifiersStore(),
         }));
+        const { useLiveModeStore } = await import('~/stores/live-mode-store');
+        const liveStore = useLiveModeStore();
         const snapshot = serializeProject(
           sceneNodes.value,
           savedPresets.value,
           pinnedStore.pinnedModifiers,
           globalBases.value,
           activeEffects.value,
+          liveStore.pages,
         );
         await supabase.functions.invoke('save-snapshot', {
           body: {

@@ -111,11 +111,13 @@ const liveBus = useLiveBusStore();
 const { remoteSelections, remoteCameras, followedSessionId } = storeToRefs(liveBus);
 
 // Follow mode: mirror the remote user's full camera state (position + zoom)
+// — but only when they're in the editor (their camera has context='editor').
 watchEffect(() => {
   const sid = followedSessionId.value;
   if (!sid) return;
   const remote = remoteCameras.value.get(sid);
   if (!remote) return;
+  if (remote.context && remote.context !== 'editor') return;
   camera.x = remote.x;
   camera.y = remote.y;
   camera.scale = remote.scale;
@@ -124,7 +126,7 @@ watchEffect(() => {
 // Broadcast camera state so followers can mirror our viewport
 watch(camera, (c) => {
   if (!followedSessionId.value) {
-    liveBus.dispatch('camera.sync', { x: c.x, y: c.y, scale: c.scale });
+    liveBus.dispatch('camera.sync', { x: c.x, y: c.y, scale: c.scale, context: 'editor' });
   }
 }, { deep: true });
 
@@ -219,7 +221,7 @@ function handleMouseMove(e: MouseEvent) {
   // Broadcast cursor position (bus throttles via rAF internally)
   const r = rect();
   const world = viewportToWorld(e.clientX - r.left, e.clientY - r.top);
-  liveBus.dispatch('cursor.move', { wx: world.x, wy: world.y });
+  liveBus.dispatch('cursor.move', { wx: world.x, wy: world.y, context: 'editor' });
 
   // Broadcast live drag positions if dragging
   if (interaction.value.type === 'drag') {

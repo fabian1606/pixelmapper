@@ -3,39 +3,40 @@ import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useLiveBusStore, type CursorState } from '~/stores/live-bus-store';
 
-interface Camera {
-  x: number;
-  y: number;
+const props = defineProps<{
+  pageId: string;
   scale: number;
-}
-
-interface Props {
-  camera: Camera;
-}
-
-const props = defineProps<Props>();
+}>();
 
 const liveBus = useLiveBusStore();
 const { cursors } = storeToRefs(liveBus);
 
+// Only show cursors that are on THIS live page
 const cursorList = computed(() =>
-  Array.from(cursors.value.values()).filter(c => (c.context ?? 'editor') === 'editor'),
+  Array.from(cursors.value.values()).filter(
+    c => c.context === 'live' && c.livePageId === props.pageId,
+  ),
 );
 
 function cursorTransform(c: CursorState): string {
-  const vx = c.wx * props.camera.scale + props.camera.x;
-  const vy = c.wy * props.camera.scale + props.camera.y;
-  return `translate3d(${vx}px, ${vy}px, 0)`;
+  // wx/wy are in canvas-local pixels. The parent canvas has transform: scale(s).
+  // Translate to (wx,wy) in local space (so position is correct after parent scale),
+  // then apply scale(1/s) to cancel the size scaling — cursor stays a constant
+  // visual size regardless of canvas zoom/resolution.
+  const inv = props.scale > 0 ? 1 / props.scale : 1;
+  return `translate3d(${c.wx}px, ${c.wy}px, 0) scale(${inv})`;
 }
 </script>
 
 <template>
-  <div class="absolute inset-0 pointer-events-none overflow-hidden" style="z-index: 50;">
-    <!-- Remote cursors -->
+  <!-- High z-index ensures the cursor overlay always sits above any widget,
+       even pressed buttons that might create their own stacking context. -->
+  <div class="absolute inset-0 pointer-events-none" style="z-index: 9999;">
     <div
       v-for="cursor in cursorList"
       :key="cursor.sessionId"
       class="absolute top-0 left-0 will-change-transform"
+      style="transform-origin: 0 0;"
       :style="{ transform: cursorTransform(cursor) }"
     >
       <svg

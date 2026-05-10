@@ -5,3 +5,5 @@ import './modifier-ops';
 import './preset-ops';
 import './channel-ops';
 import './engine-ops';
+import './live-widget-ops';
+import './page-ops';

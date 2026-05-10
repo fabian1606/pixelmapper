@@ -1,22 +1,30 @@
-import { triggerRef } from 'vue';
+import { triggerRef, watch } from 'vue';
 import { useHistory, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { commandFromPayload } from '~/components/engine/commands/serializable-command';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore, type CollaboratorPresence, TAB_SESSION_ID } from '~/stores/live-bus-store';
+import { useLiveModeStore } from '~/stores/live-mode-store';
 import { userColor } from '~/composables/live-ops/colors';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 
-// Side-effect import: registers all live ops
+// Side-effect imports: register all live ops and live widget commands
 import '~/composables/live-ops';
+import '~/components/engine/commands/live-widget-commands';
 
 export interface CollaborationContext {
   connect: () => Promise<void>;
   cleanup: () => void;
 }
 
+function getViewMode(path: string): 'editor' | 'live' {
+  return path.endsWith('/live') ? 'live' : 'editor';
+}
+
 export function useCollaboration(projectId: string): CollaborationContext {
   const supabase = useSupabaseClient();
   const user = useSupabaseUser();
+  const route = useRoute();
+  const liveModeStore = useLiveModeStore();
 
   const history = useHistory();
   const engineStore = useEngineStore();
@@ -39,7 +47,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
 
   // ── Presence ──────────────────────────────────────────────────────────────
   channel.on('presence', { event: 'sync' }, () => {
-    const state = channel.presenceState<{ displayName: string; userId: string; sessionId: string; clockEpoch?: number }>();
+    const state = channel.presenceState<{ displayName: string; userId: string; sessionId: string; clockEpoch?: number; viewMode?: 'editor' | 'live'; livePageId?: string }>();
     const users: CollaboratorPresence[] = [];
     for (const [sessionId, presences] of Object.entries(state)) {
       const p = presences[0] as any;
@@ -49,6 +57,8 @@ export function useCollaboration(projectId: string): CollaborationContext {
         sessionId,
         displayName: p.displayName ?? '',
         color: userColor(sessionId),
+        viewMode: p.viewMode,
+        livePageId: p.livePageId,
       });
     }
     liveBus.setPresence(users);
@@ -140,9 +150,16 @@ export function useCollaboration(projectId: string): CollaborationContext {
         if (!displayName) displayName = email ? email.split('@')[0] : userId;
         // Guard: only wire up the bus once; on reconnect just re-track presence
         if (!liveBus.isConnected) {
-          liveBus.connect({ channel, userId });
+          liveBus.connect({ channel, userId, projectId });
         }
-        await channel.track({ userId, displayName, sessionId: TAB_SESSION_ID, clockEpoch: engineStore.clockEpoch });
+        await channel.track({
+          userId,
+          displayName,
+          sessionId: TAB_SESSION_ID,
+          clockEpoch: engineStore.clockEpoch,
+          viewMode: getViewMode(route.path),
+          livePageId: liveModeStore.activePageId ?? undefined,
+        });
       }
 
       // On JWT expiry: refresh and re-authenticate so the next reconnect succeeds
@@ -154,11 +171,46 @@ export function useCollaboration(projectId: string): CollaborationContext {
     });
   }
 
+  // Re-track presence when user navigates between editor and live sub-pages
+  // so that other clients can see their viewMode change in real time.
+  let stopRouteWatch: (() => void) | null = null;
+
+  function startRouteWatch() {
+    stopRouteWatch = watch(
+      [() => route.path, () => liveModeStore.activePageId],
+      async ([path, livePageId]) => {
+        if (!liveBus.isConnected) return;
+        const viewMode = getViewMode(path as string);
+        const livePageIdValue = (livePageId as string | null) ?? undefined;
+        const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
+        const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
+        // Update presence for avatars / initial follow target.
+        await channel.track({
+          userId,
+          displayName,
+          sessionId: TAB_SESSION_ID,
+          clockEpoch: engineStore.clockEpoch,
+          viewMode,
+          livePageId: livePageIdValue,
+        });
+        // Emit explicit page-change event so followers navigate exactly once.
+        liveBus.dispatch('user.pageChange', { viewMode, livePageId: livePageIdValue });
+      },
+    );
+  }
+
+  const _originalConnect = connect;
+  async function connectWithRouteWatch() {
+    await _originalConnect();
+    startRouteWatch();
+  }
+
   function cleanup() {
+    stopRouteWatch?.();
     liveBus.disconnect();
     channel.unsubscribe();
     supabase.removeChannel(channel);
   }
 
-  return { connect, cleanup };
+  return { connect: connectWithRouteWatch, cleanup };
 }
