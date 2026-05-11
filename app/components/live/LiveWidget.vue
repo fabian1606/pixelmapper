@@ -8,6 +8,7 @@ import LiveButtonWidget from './LiveButtonWidget.vue';
 import LiveSliderWidget from './LiveSliderWidget.vue';
 import LiveXYPadWidget from './LiveXYPadWidget.vue';
 import LiveLabelWidget from './LiveLabelWidget.vue';
+import LiveControllerTwinWidget from './LiveControllerTwinWidget.vue';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -301,6 +302,7 @@ const handleVisualSize = computed(() => {
     <LiveSliderWidget v-else-if="widget.type === 'slider'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
     <LiveXYPadWidget v-else-if="widget.type === 'xy-pad'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
     <LiveLabelWidget v-else-if="widget.type === 'label'" :widget="widget" :edit-mode="editMode" />
+    <LiveControllerTwinWidget v-else-if="widget.type === 'controller-twin'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
     <div v-else class="w-full h-full flex items-center justify-center text-xs text-muted-foreground border border-dashed border-white/20 rounded">
       {{ widget.type }}
     </div>

@@ -9,13 +9,11 @@ import {
 } from '~/components/engine/commands/live-widget-commands';
 import type { LiveWidget } from '~/utils/live/types';
 
-/** Deep-clone a widget and assign new IDs (recursively for controller children). */
+/** Deep-clone a widget and assign a new ID. Controller-twin children are
+ *  mapping records (not canvas widgets), so they survive the clone as-is. */
 function cloneWidget(w: LiveWidget): LiveWidget {
   const copy: LiveWidget = JSON.parse(JSON.stringify(w));
   copy.id = crypto.randomUUID();
-  if (copy.controllerWidgets) {
-    copy.controllerWidgets = copy.controllerWidgets.map(cloneWidget);
-  }
   return copy;
 }
 

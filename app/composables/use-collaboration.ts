@@ -2,10 +2,12 @@ import { triggerRef, watch } from 'vue';
 import { useHistory, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { commandFromPayload } from '~/components/engine/commands/serializable-command';
 import { useEngineStore } from '~/stores/engine-store';
-import { useLiveBusStore, type CollaboratorPresence, TAB_SESSION_ID } from '~/stores/live-bus-store';
+import { useLiveBusStore, type CollaboratorPresence, type PresenceController, TAB_SESSION_ID } from '~/stores/live-bus-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
+import { useControllerStore } from '~/stores/controller-store';
 import { userColor } from '~/composables/live-ops/colors';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
+import { snapshotTwinStates } from '~/composables/live-ops/twin-state-hub';
 
 // Side-effect imports: register all live ops and live widget commands
 import '~/composables/live-ops';
@@ -29,6 +31,16 @@ export function useCollaboration(projectId: string): CollaborationContext {
   const history = useHistory();
   const engineStore = useEngineStore();
   const liveBus = useLiveBusStore();
+  const controllerStore = useControllerStore();
+
+  function snapshotControllers(): PresenceController[] {
+    return controllerStore.instances.map(d => ({
+      id: d.id,
+      definitionKey: d.definitionKey,
+      deviceLabel: d.deviceLabel.value,
+      status: d.status.value,
+    }));
+  }
 
   // Presence key = per-tab session, so each WebSocket connection of the same user
   // appears as its own presence entry (and gets its own cursor/avatar slot).
@@ -47,7 +59,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
 
   // ── Presence ──────────────────────────────────────────────────────────────
   channel.on('presence', { event: 'sync' }, () => {
-    const state = channel.presenceState<{ displayName: string; userId: string; sessionId: string; clockEpoch?: number; viewMode?: 'editor' | 'live'; livePageId?: string }>();
+    const state = channel.presenceState<{ displayName: string; userId: string; sessionId: string; clockEpoch?: number; viewMode?: 'editor' | 'live'; livePageId?: string; controllers?: PresenceController[] }>();
     const users: CollaboratorPresence[] = [];
     for (const [sessionId, presences] of Object.entries(state)) {
       const p = presences[0] as any;
@@ -59,6 +71,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
         color: userColor(sessionId),
         viewMode: p.viewMode,
         livePageId: p.livePageId,
+        controllers: Array.isArray(p.controllers) ? p.controllers : undefined,
       });
     }
     liveBus.setPresence(users);
@@ -104,6 +117,22 @@ export function useCollaboration(projectId: string): CollaborationContext {
     const effects = engineStore.activeEffects;
     if (effects?.length) {
       liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effects)) });
+    }
+
+    // Push controller-twin visual state (held buttons + fader positions) so
+    // late-joining peers see the twins in their current state, not the default.
+    // Bundled into one op because widget.slide is rAF-throttled with replace-merge —
+    // dispatching individually would coalesce all faders down to the last one.
+    const twins = snapshotTwinStates()
+      .map(t => ({
+        pageId: t.pageId,
+        widgetId: t.widgetId,
+        pressed: t.getPressed(),
+        faders: t.getFaderValues(),
+      }))
+      .filter(t => t.pressed.length > 0 || t.faders.length > 0);
+    if (twins.length) {
+      liveBus.dispatch('twin.snapshot', { twins });
     }
   });
 
@@ -159,6 +188,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
           clockEpoch: engineStore.clockEpoch,
           viewMode: getViewMode(route.path),
           livePageId: liveModeStore.activePageId ?? undefined,
+          controllers: snapshotControllers(),
         });
       }
 
@@ -192,6 +222,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
           clockEpoch: engineStore.clockEpoch,
           viewMode,
           livePageId: livePageIdValue,
+          controllers: snapshotControllers(),
         });
         // Emit explicit page-change event so followers navigate exactly once.
         liveBus.dispatch('user.pageChange', { viewMode, livePageId: livePageIdValue });
@@ -199,14 +230,41 @@ export function useCollaboration(projectId: string): CollaborationContext {
     );
   }
 
+  // Re-track presence when our local controller list or any driver's status
+  // changes, so collaborators see what hardware we have open in real time.
+  let stopControllerWatch: (() => void) | null = null;
+  function startControllerWatch() {
+    stopControllerWatch = watch(
+      // Read each driver's reactive fields so the watcher subscribes to them.
+      () => snapshotControllers(),
+      async () => {
+        if (!liveBus.isConnected) return;
+        const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
+        const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
+        await channel.track({
+          userId,
+          displayName,
+          sessionId: TAB_SESSION_ID,
+          clockEpoch: engineStore.clockEpoch,
+          viewMode: getViewMode(route.path),
+          livePageId: liveModeStore.activePageId ?? undefined,
+          controllers: snapshotControllers(),
+        });
+      },
+      { deep: true },
+    );
+  }
+
   const _originalConnect = connect;
   async function connectWithRouteWatch() {
     await _originalConnect();
     startRouteWatch();
+    startControllerWatch();
   }
 
   function cleanup() {
     stopRouteWatch?.();
+    stopControllerWatch?.();
     liveBus.disconnect();
     channel.unsubscribe();
     supabase.removeChannel(channel);

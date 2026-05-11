@@ -17,6 +17,7 @@ import {
 } from '~/utils/engine/serialize';
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
 import { useLiveModeStore } from '~/stores/live-mode-store';
+import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
@@ -402,6 +403,10 @@ export const useEngineStore = defineStore('engine', () => {
     sceneNodes.value = [];
     savedPresets.value = [];
     selectedPresetId.value = null;
+
+    // Disconnect any hardware-controller instances from the previous project
+    // so MIDI/HID ports don't leak across project loads. Bindings cleared too.
+    await useControllerStore().reset();
 
     // Apply the base snapshot if present
     if (data.snapshot) {

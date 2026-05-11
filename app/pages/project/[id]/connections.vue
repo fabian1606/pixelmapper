@@ -1,19 +1,70 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'project' });
-import { CircleDot, Plus, Trash2, ArrowUpCircle, RefreshCw, Network, ChevronDown, ChevronRight } from 'lucide-vue-next';
-import { ref, computed } from 'vue';
+import { CircleDot, Plus, Trash2, ArrowUpCircle, RefreshCw, Network, ChevronDown, ChevronRight, Gamepad2, PlugZap } from 'lucide-vue-next';
+import { ref, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { useEngineStore } from '~/stores/engine-store';
+import { useControllerStore } from '~/stores/controller-store';
+import { useLiveBusStore, TAB_SESSION_ID } from '~/stores/live-bus-store';
+import { listControllerDefinitions, getControllerDefinition } from '~/utils/controllers/catalog';
 import { OUTPUT_CONNECTOR_REGISTRY, INPUT_CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
 
-const connectionsTab = ref<'outputs' | 'inputs'>('outputs');
+const route = useRoute();
+const initialTab = route.query.tab === 'inputs' ? 'inputs' : 'outputs';
+const connectionsTab = ref<'outputs' | 'inputs'>(initialTab);
+watch(() => route.query.tab, (v) => { if (v === 'inputs' || v === 'outputs') connectionsTab.value = v; });
 
 const store = useConnectionsStore();
 const engineStore = useEngineStore();
+const controllerStore = useControllerStore();
+const liveBus = useLiveBusStore();
 const { usedUniverses, totalUniverses } = storeToRefs(engineStore);
+
+const controllerDefs = computed(() => listControllerDefinitions());
+
+/**
+ * Controllers connected by other tabs/users on this project. Filters out our
+ * own session — local controllers already have full editing UI above.
+ */
+const remoteControllers = computed(() => {
+  const out: Array<{ presence: typeof liveBus.presenceUsers[number]; controller: NonNullable<typeof liveBus.presenceUsers[number]['controllers']>[number] }> = [];
+  for (const p of liveBus.presenceUsers) {
+    if (p.sessionId === TAB_SESSION_ID) continue;
+    if (!p.controllers?.length) continue;
+    for (const c of p.controllers) out.push({ presence: p, controller: c });
+  }
+  return out;
+});
+
+function controllerLabelFor(definitionKey: string): string {
+  return getControllerDefinition(definitionKey)?.label ?? definitionKey;
+}
+
+async function addController(definitionKey: string) {
+  const driver = controllerStore.addInstance(definitionKey);
+  if (!driver) return;
+  // Web MIDI/HID requires a user gesture, and this click is one.
+  try { await driver.connect(); } catch (e) { /* error surfaces via driver.errorMessage */ }
+}
+
+async function reconnectController(id: string) {
+  const driver = controllerStore.getInstance(id);
+  if (!driver) return;
+  try { await driver.connect(); } catch { /* surfaces via errorMessage */ }
+}
+
+async function disconnectController(id: string) {
+  const driver = controllerStore.getInstance(id);
+  if (!driver) return;
+  try { await driver.disconnect(); } catch (e) { console.warn('disconnect failed', e); }
+}
+
+async function removeController(id: string) {
+  await controllerStore.removeInstance(id);
+}
 
 const expandedConnectors = ref<Set<string>>(new Set());
 
@@ -95,10 +146,105 @@ function assignedCount(connector: BaseConnector): number {
       </button>
     </div>
 
-    <!-- Inputs empty state -->
-    <div v-if="connectionsTab === 'inputs'" class="rounded border border-border/50 bg-muted/20 px-4 py-8 text-center text-xs text-muted-foreground">
-      Bald verfügbar: ArtNet In, MIDI, OSC
-    </div>
+    <!-- Inputs: controller drivers (MIDI/HID-based hardware twins) -->
+    <template v-if="connectionsTab === 'inputs'">
+      <!-- Add buttons per available controller definition -->
+      <div v-if="controllerDefs.length" class="flex gap-2 flex-wrap">
+        <button
+          v-for="def in controllerDefs"
+          :key="def.key"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-border bg-background hover:bg-accent transition-colors"
+          @click="addController(def.key)"
+        >
+          <Plus :size="12" />
+          {{ def.label }}
+        </button>
+      </div>
+      <p v-else class="text-xs text-muted-foreground">
+        Keine Controller-Definitionen gefunden. Lege einen Ordner unter <code class="font-mono">controllers/</code> an.
+      </p>
+
+      <p v-if="!controllerStore.instances.length" class="text-sm text-muted-foreground py-4">
+        Noch keine Geräte verbunden. Klicke auf einen Controller oben, um ihn zu verbinden — dein Browser fragt dann nach MIDI-Zugriff.
+      </p>
+
+      <div
+        v-for="driver in controllerStore.instances"
+        :key="driver.id"
+        class="flex flex-col gap-2 px-3 py-2.5 rounded border border-border bg-background text-sm"
+      >
+        <div class="flex items-center gap-3">
+          <CircleDot :size="14" :class="statusColor[driver.status.value]" />
+
+          <div class="flex-1 min-w-0">
+            <div class="font-medium flex items-center gap-1.5">
+              <Gamepad2 :size="12" class="text-muted-foreground" />
+              {{ driver.deviceLabel.value ?? driver.definitionKey }}
+            </div>
+            <div v-if="driver.errorMessage.value" class="text-xs text-red-400 truncate">
+              {{ driver.errorMessage.value }}
+            </div>
+            <div v-else class="text-xs text-muted-foreground capitalize">
+              {{ driver.status.value }}
+            </div>
+          </div>
+
+          <button
+            v-if="driver.status.value === 'connected'"
+            class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+            @click="disconnectController(driver.id)"
+          >
+            Disconnect
+          </button>
+          <button
+            v-else
+            class="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+            :disabled="driver.status.value === 'connecting'"
+            @click="reconnectController(driver.id)"
+          >
+            <PlugZap :size="12" />
+            Connect
+          </button>
+
+          <button
+            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Gerät entfernen"
+            @click="removeController(driver.id)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Remote controllers: read-only view of what other tabs/users have open -->
+      <template v-if="remoteControllers.length">
+        <div class="mt-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Andere Sessions
+        </div>
+        <div
+          v-for="entry in remoteControllers"
+          :key="`${entry.presence.sessionId}:${entry.controller.id}`"
+          class="flex items-center gap-3 px-3 py-2 rounded border border-border/60 bg-muted/20 text-sm"
+        >
+          <CircleDot :size="14" :class="statusColor[entry.controller.status]" />
+          <div class="flex-1 min-w-0">
+            <div class="font-medium flex items-center gap-1.5 truncate">
+              <Gamepad2 :size="12" class="text-muted-foreground" />
+              {{ entry.controller.deviceLabel ?? controllerLabelFor(entry.controller.definitionKey) }}
+            </div>
+            <div class="text-xs text-muted-foreground capitalize flex items-center gap-1.5">
+              <span
+                class="inline-block size-2 rounded-full"
+                :style="{ backgroundColor: entry.presence.color }"
+              />
+              <span>{{ entry.presence.displayName || 'Unbekannt' }}</span>
+              <span>·</span>
+              <span>{{ entry.controller.status }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
 
     <!-- Universe overview -->
     <div v-if="totalUniverses > 0" class="px-3 py-2.5 rounded border border-border bg-background text-sm">

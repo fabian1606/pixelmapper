@@ -40,6 +40,15 @@ export interface CollaboratorPresence {
   color: string;
   viewMode?: 'editor' | 'live';
   livePageId?: string;
+  /** Per-tab list of hardware controllers this collaborator currently has open. */
+  controllers?: PresenceController[];
+}
+
+export interface PresenceController {
+  id: string;
+  definitionKey: string;
+  deviceLabel?: string | null;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
 }
 
 export interface LiveOpConfig<T = any> {

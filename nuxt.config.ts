@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import { fileURLToPath } from 'node:url';
 
 export default defineNuxtConfig({
   typescript: {
@@ -8,6 +9,7 @@ export default defineNuxtConfig({
       compilerOptions: {
         types: ['w3c-web-serial'],
       },
+      include: ['../controllers/**/*.ts'],
     },
   },
   devtools: {
@@ -29,6 +31,11 @@ export default defineNuxtConfig({
       //@ts-ignore
       tailwindcss(),
     ],
+    resolve: {
+      alias: {
+        '~controllers': fileURLToPath(new URL('./controllers', import.meta.url)),
+      },
+    },
     build: {
       target: 'esnext', // required for top-level await support
     },

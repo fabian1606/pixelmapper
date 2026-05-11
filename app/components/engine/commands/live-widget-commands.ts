@@ -1,6 +1,6 @@
 import type { Command } from '../composables/use-history';
 import { type SerializableCommand, registerCommand } from './serializable-command';
-import type { LivePage, LiveWidget, LiveMapping } from '~/utils/live/types';
+import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 
 function getLiveStore() {
@@ -425,3 +425,62 @@ export class BatchSetWidgetGroupIdsCommand implements SerializableCommand {
 }
 
 registerCommand('live.batchSetGroupIds', (p) => new BatchSetWidgetGroupIdsCommand(p.pageId, p.updates));
+
+// ─── UpdateControllerChildMapping ─────────────────────────────────────────────
+// Updates a single per-control binding inside a controller-twin widget.
+// Children are not canvas widgets — they are mapping records keyed by controlId.
+
+export class UpdateControllerChildMappingCommand implements SerializableCommand {
+  readonly commandType = 'live.updateChildMapping';
+  description = 'Update Controller Mapping';
+  private _before: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>> | null = null;
+  private _wasMissing = false;
+
+  constructor(
+    private pageId: string,
+    private twinId: string,
+    private controlId: string,
+    private patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>,
+  ) {}
+
+  execute() {
+    const store = getLiveStore();
+    const page = store.pages.find((p: LivePage) => p.id === this.pageId);
+    const twin = page?.widgets.find((w: LiveWidget) => w.id === this.twinId);
+    if (twin) {
+      const child = twin.controllerChildren?.find(c => c.controlId === this.controlId);
+      if (child) {
+        this._before = {};
+        if ('mapping' in this.patch) this._before.mapping = JSON.parse(JSON.stringify(child.mapping));
+        if ('label' in this.patch) this._before.label = child.label;
+        if ('color' in this.patch) this._before.color = child.color;
+      } else {
+        this._wasMissing = true;
+        this._before = { mapping: { type: 'none' } };
+      }
+    }
+    store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, this.patch);
+  }
+  undo() {
+    if (!this._before) return;
+    const store = getLiveStore();
+    if (this._wasMissing) {
+      // Restore the empty default — the child didn't exist before.
+      store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, { mapping: { type: 'none' } });
+    } else {
+      store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, this._before);
+    }
+  }
+  inverse(): Command | null {
+    if (!this._before) return null;
+    return new UpdateControllerChildMappingCommand(this.pageId, this.twinId, this.controlId, this._before);
+  }
+  toPayload() {
+    return { pageId: this.pageId, twinId: this.twinId, controlId: this.controlId, patch: this.patch };
+  }
+}
+
+registerCommand(
+  'live.updateChildMapping',
+  (p) => new UpdateControllerChildMappingCommand(p.pageId, p.twinId, p.controlId, p.patch),
+);

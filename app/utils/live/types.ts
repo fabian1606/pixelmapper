@@ -16,6 +16,18 @@ export interface LiveMapping {
   targetPageId?: string
 }
 
+/**
+ * Per-control mapping override stored inside a controller-twin widget.
+ * Children are NOT canvas widgets — they are mapping records keyed by a
+ * controlId from the controller definition's `controls[]`.
+ */
+export interface ControllerChildBinding {
+  controlId: string
+  label?: string
+  color?: string
+  mapping: LiveMapping
+}
+
 export interface LiveWidget {
   id: string
   type: LiveWidgetType
@@ -28,7 +40,7 @@ export interface LiveWidget {
   mapping: LiveMapping
   // controller-twin specific
   controllerKey?: string
-  controllerWidgets?: LiveWidget[]
+  controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
 }

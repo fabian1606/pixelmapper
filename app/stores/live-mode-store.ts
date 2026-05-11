@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { LivePage, LiveWidget } from '~/utils/live/types';
+import type { LivePage, LiveWidget, ControllerChildBinding } from '~/utils/live/types';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
   const pages = ref<LivePage[]>([]);
@@ -13,6 +13,9 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   // While isolated, clicks select individual group members instead of the
   // whole group, like Figma/Sketch group editing.
   const isolatedGroupId = ref<string | null>(null);
+  // When a controller-twin is selected, this holds the controlId currently
+  // being edited in the right sidebar (or null = no per-control focus).
+  const selectedControlId = ref<string | null>(null);
 
   const activePage = computed(() => pages.value.find(p => p.id === activePageId.value) ?? null);
 
@@ -27,6 +30,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     editMode.value = true;
     selectedWidgetIds.value = new Set();
     isolatedGroupId.value = null;
+    selectedControlId.value = null;
   }
 
   function exitIsolation() {
@@ -38,6 +42,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
       activePageId.value = id;
       isolatedGroupId.value = null;
       selectedWidgetIds.value = new Set();
+      selectedControlId.value = null;
     }
   }
 
@@ -92,6 +97,26 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     else widget.groupId = groupId;
   }
 
+  function updateControllerChildMapping(
+    pageId: string,
+    twinId: string,
+    controlId: string,
+    patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>,
+  ) {
+    const page = pages.value.find(p => p.id === pageId);
+    const twin = page?.widgets.find(w => w.id === twinId);
+    if (!twin) return;
+    if (!twin.controllerChildren) twin.controllerChildren = [];
+    let child = twin.controllerChildren.find(c => c.controlId === controlId);
+    if (!child) {
+      child = { controlId, mapping: { type: 'none' } };
+      twin.controllerChildren.push(child);
+    }
+    if ('mapping' in patch && patch.mapping) child.mapping = patch.mapping;
+    if ('label' in patch) child.label = patch.label;
+    if ('color' in patch) child.color = patch.color;
+  }
+
   return {
     pages,
     activePageId,
@@ -99,6 +124,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     selectedWidgetIds,
     clipboard,
     isolatedGroupId,
+    selectedControlId,
     activePage,
     loadPages,
     reset,
@@ -112,5 +138,6 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     moveResizeWidget,
     updateWidgetMapping,
     setWidgetGroupId,
+    updateControllerChildMapping,
   };
 });
