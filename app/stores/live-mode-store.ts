@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { LivePage, LiveWidget, ControllerChildBinding } from '~/utils/live/types';
+import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance } from '~/utils/live/types';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
   const pages = ref<LivePage[]>([]);
@@ -16,6 +16,20 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   // When a controller-twin is selected, this holds the controlId currently
   // being edited in the right sidebar (or null = no per-control focus).
   const selectedControlId = ref<string | null>(null);
+  // Section ID the user is currently editing in the sidebar (clicking a member
+  // selects both the widget and surfaces its section here).
+  const selectedSectionId = ref<string | null>(null);
+  // When set, the user has "entered" a section via double-click — clicks on
+  // section members select the individual widget, like group isolation.
+  const isolatedSectionId = ref<string | null>(null);
+  // When set to a sectionId, the canvas is in section-mapping mode: clicking a
+  // widget toggles its membership in that section.
+  const sectionMappingMode = ref<string | null>(null);
+  // Runtime-only: which member(s) inside a section are currently "active".
+  // Map<sectionId, Set<memberKey>>. Cleared on reset / page switch.
+  const activeSectionMembers = ref<Map<string, Set<string>>>(new Map());
+  /** Controller instances persisted with the project. Auto-connect on load. */
+  const liveControllers = ref<LiveControllerInstance[]>([]);
 
   const activePage = computed(() => pages.value.find(p => p.id === activePageId.value) ?? null);
 
@@ -31,10 +45,37 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     selectedWidgetIds.value = new Set();
     isolatedGroupId.value = null;
     selectedControlId.value = null;
+    selectedSectionId.value = null;
+    isolatedSectionId.value = null;
+    sectionMappingMode.value = null;
+    activeSectionMembers.value = new Map();
+    liveControllers.value = [];
+  }
+
+  function addLiveController(instance: LiveControllerInstance) {
+    if (!liveControllers.value.some(c => c.id === instance.id)) {
+      liveControllers.value = [...liveControllers.value, instance];
+    }
+  }
+
+  function removeLiveController(instanceId: string) {
+    liveControllers.value = liveControllers.value.filter(c => c.id !== instanceId);
+  }
+
+  function loadLiveControllers(incoming: LiveControllerInstance[]) {
+    liveControllers.value = incoming.filter(c => c && typeof c === 'object' && typeof c.id === 'string');
   }
 
   function exitIsolation() {
     isolatedGroupId.value = null;
+  }
+
+  function exitSectionIsolation() {
+    isolatedSectionId.value = null;
+  }
+
+  function exitSectionMappingMode() {
+    sectionMappingMode.value = null;
   }
 
   function setActivePage(id: string) {
@@ -43,6 +84,9 @@ export const useLiveModeStore = defineStore('live-mode', () => {
       isolatedGroupId.value = null;
       selectedWidgetIds.value = new Set();
       selectedControlId.value = null;
+      selectedSectionId.value = null;
+      isolatedSectionId.value = null;
+      sectionMappingMode.value = null;
     }
   }
 
@@ -83,7 +127,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     if (widget) Object.assign(widget, { gridX, gridY, gridW, gridH });
   }
 
-  function updateWidgetMapping(pageId: string, widgetId: string, patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>>) {
+  function updateWidgetMapping(pageId: string, widgetId: string, patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'controllerInstanceId'>>) {
     const page = pages.value.find(p => p.id === pageId);
     const widget = page?.widgets.find(w => w.id === widgetId);
     if (widget) Object.assign(widget, patch);
@@ -95,6 +139,32 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     if (!widget) return;
     if (groupId === null) delete widget.groupId;
     else widget.groupId = groupId;
+  }
+
+  function addSection(pageId: string, section: LiveSection) {
+    const page = pages.value.find(p => p.id === pageId);
+    if (!page) return;
+    if (!page.sections) page.sections = [];
+    page.sections.push(section);
+  }
+
+  function removeSection(pageId: string, sectionId: string) {
+    const page = pages.value.find(p => p.id === pageId);
+    if (!page?.sections) return;
+    const idx = page.sections.findIndex(s => s.id === sectionId);
+    if (idx !== -1) page.sections.splice(idx, 1);
+  }
+
+  function updateSection(pageId: string, sectionId: string, changes: Partial<Omit<LiveSection, 'id' | 'members'>>) {
+    const page = pages.value.find(p => p.id === pageId);
+    const section = page?.sections?.find(s => s.id === sectionId);
+    if (section) Object.assign(section, changes);
+  }
+
+  function setSectionMembers(pageId: string, sectionId: string, members: SectionMember[]) {
+    const page = pages.value.find(p => p.id === pageId);
+    const section = page?.sections?.find(s => s.id === sectionId);
+    if (section) section.members = members.map(m => ({ ...m }));
   }
 
   function updateControllerChildMapping(
@@ -125,10 +195,20 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     clipboard,
     isolatedGroupId,
     selectedControlId,
+    selectedSectionId,
+    isolatedSectionId,
+    sectionMappingMode,
+    activeSectionMembers,
+    liveControllers,
     activePage,
     loadPages,
     reset,
+    addLiveController,
+    removeLiveController,
+    loadLiveControllers,
     exitIsolation,
+    exitSectionIsolation,
+    exitSectionMappingMode,
     setActivePage,
     addPage,
     removePage,
@@ -138,6 +218,10 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     moveResizeWidget,
     updateWidgetMapping,
     setWidgetGroupId,
+    addSection,
+    removeSection,
+    updateSection,
+    setSectionMembers,
     updateControllerChildMapping,
   };
 });

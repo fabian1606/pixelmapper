@@ -34,7 +34,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
   const controllerStore = useControllerStore();
 
   function snapshotControllers(): PresenceController[] {
-    return controllerStore.instances.map(d => ({
+    return Array.from(controllerStore.drivers.values()).map(d => ({
       id: d.id,
       definitionKey: d.definitionKey,
       deviceLabel: d.deviceLabel.value,
@@ -131,8 +131,22 @@ export function useCollaboration(projectId: string): CollaborationContext {
         faders: t.getFaderValues(),
       }))
       .filter(t => t.pressed.length > 0 || t.faders.length > 0);
-    if (twins.length) {
-      liveBus.dispatch('twin.snapshot', { twins });
+
+    // Also push latched section state for the active page so late joiners see
+    // single-/multi-select latches, not just momentary presses.
+    const activePageId = liveModeStore.activePageId;
+    const sections = activePageId
+      ? Array.from(liveModeStore.activeSectionMembers.entries())
+          .filter(([, keys]) => keys.size > 0)
+          .map(([sectionId, keys]) => ({
+            pageId: activePageId,
+            sectionId,
+            keys: Array.from(keys),
+          }))
+      : [];
+
+    if (twins.length || sections.length) {
+      liveBus.dispatch('twin.snapshot', { twins, sections });
     }
   });
 

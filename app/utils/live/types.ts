@@ -1,5 +1,11 @@
 export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label'
 
+/** A persisted controller instance: one entry per physical device slot. */
+export interface LiveControllerInstance {
+  id: string
+  definitionKey: string
+}
+
 export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'none'
 
 export interface LiveMapping {
@@ -40,9 +46,28 @@ export interface LiveWidget {
   mapping: LiveMapping
   // controller-twin specific
   controllerKey?: string
+  /** ID of the specific LiveControllerInstance this twin is bound to. */
+  controllerInstanceId?: string
   controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
+}
+
+export type SectionSource = 'all-presets' | 'preset-variants'
+export type SectionMode = 'flash' | 'single-select' | 'multi-select'
+
+export interface SectionMember {
+  widgetId: string
+  // For controller-twin members, identifies which sub-control on the twin.
+  controlId?: string
+}
+
+export interface LiveSection {
+  id: string
+  name?: string
+  source: SectionSource
+  mode: SectionMode
+  members: SectionMember[]
 }
 
 export interface LivePage {
@@ -54,6 +79,7 @@ export interface LivePage {
   gridSize: number
   backgroundColor: string
   widgets: LiveWidget[]
+  sections?: LiveSection[]
 }
 
 /** Pixel dimensions derived from columns × gridSize and aspect ratio. */

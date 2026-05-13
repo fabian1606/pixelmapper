@@ -21,6 +21,7 @@ import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
+import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 
 export const useEngineStore = defineStore('engine', () => {
@@ -139,6 +140,8 @@ export const useEngineStore = defineStore('engine', () => {
 
   function clearAllOverrides() {
     overrideMap.value = new Map();
+    activeEffects.value.splice(0, activeEffects.value.length);
+    resetFixtureChannels(flatFixtures.value);
   }
 
   function clearUniverseOverrides(universe: number) {
@@ -370,7 +373,9 @@ export const useEngineStore = defineStore('engine', () => {
     // Load live pages SYNCHRONOUSLY so the tail replay (which runs immediately
     // after this in loadProject) sees the pages and can mutate them. Earlier
     // dynamic-import version dropped any tail live-widget commands silently.
-    useLiveModeStore().loadPages(livePages);
+    const liveStore = useLiveModeStore();
+    liveStore.loadPages(livePages);
+    liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
   }
 
   async function loadProject(projectId: string) {
@@ -425,6 +430,17 @@ export const useEngineStore = defineStore('engine', () => {
       lastSeenSequenceNumber.value = data.snapshot.sequence_number;
     }
     triggerRef(sceneNodes);
+
+    // Auto-connect controllers that were persisted with the project.
+    // Fire-and-forget: MIDI access is async and non-blocking.
+    {
+      const controllerStore = useControllerStore();
+      const liveStore = useLiveModeStore();
+      for (const inst of liveStore.liveControllers) {
+        const driver = controllerStore.createDriver(inst.id, inst.definitionKey);
+        if (driver) driver.connect().catch((e: unknown) => console.warn('[engine] auto-connect failed:', inst.id, e));
+      }
+    }
 
     // ── Persistence: batched pushChange ──────────────────────────────────────
     // Commands queue locally and flush as one bulk INSERT after a short settle
@@ -486,6 +502,7 @@ export const useEngineStore = defineStore('engine', () => {
           globalBases.value,
           activeEffects.value,
           liveStore.pages,
+          liveStore.liveControllers,
         );
         await supabase.functions.invoke('save-snapshot', {
           body: {

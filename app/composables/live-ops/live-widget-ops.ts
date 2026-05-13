@@ -60,10 +60,43 @@ export function onWidgetSlide(handler: SlideHandler): () => void {
   return () => widgetSlideHandlers.delete(handler);
 }
 
+// ── section.setActive ──────────────────────────────────────────────────────────
+// Broadcast the runtime "active members" set of a section. The latched state of
+// single-select / multi-select sections lives only in liveStore.activeSectionMembers
+// (a Map<sectionId, Set<memberKey>>) and was previously not synced across tabs —
+// so tab B only saw the brief `widget.trigger` flash when tab A latched a section.
+// This op is a snapshot (replaces the local set) and is idempotent.
+
+export interface SectionSetActivePayload {
+  pageId: string;
+  sectionId: string;
+  /** memberKey({widgetId, controlId?}) values currently active. */
+  keys: string[];
+}
+
+registerLiveOp<SectionSetActivePayload>('section.setActive', {
+  scope: 'shared',
+  throttle: 'immediate',
+  apply: ({ pageId, sectionId, keys }) => {
+    // Lazy import so this module can be imported before Pinia is initialized —
+    // same pattern as live-bus-store's handlePageChange.
+    import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
+      const liveStore = useLiveModeStore();
+      // Only mutate when the op belongs to the page we're currently viewing,
+      // otherwise we'd silently latch state on a non-visible page.
+      if (liveStore.activePageId !== pageId) return;
+      const map = new Map(liveStore.activeSectionMembers);
+      map.set(sectionId, new Set(keys));
+      liveStore.activeSectionMembers = map;
+    });
+  },
+});
+
 // ── twin.snapshot ──────────────────────────────────────────────────────────────
-// Bulk push of every controller-twin's visual state. Used on presence:join so a
-// late peer sees current pressed buttons + fader positions in one broadcast,
-// instead of N rAF-coalesced widget.slide ops where only the last would win.
+// Bulk push of every controller-twin's visual state + latched section state.
+// Used on presence:join so a late peer sees current pressed buttons, fader
+// positions, and latched section selections in one broadcast — instead of N
+// rAF-coalesced widget.slide ops where only the last would win.
 
 export interface TwinSnapshotPayload {
   twins: Array<{
@@ -72,12 +105,14 @@ export interface TwinSnapshotPayload {
     pressed: string[];
     faders: Array<[string, number]>;
   }>;
+  /** Latched section state of the active page, keyed by sectionId. */
+  sections?: Array<{ pageId: string; sectionId: string; keys: string[] }>;
 }
 
 registerLiveOp<TwinSnapshotPayload>('twin.snapshot', {
   scope: 'shared',
   throttle: 'immediate',
-  apply: ({ twins }) => {
+  apply: ({ twins, sections }) => {
     for (const t of twins) {
       for (const controlId of t.pressed) {
         widgetTriggerHandlers.forEach(h => h(t.pageId, t.widgetId, true, controlId));
@@ -85,6 +120,17 @@ registerLiveOp<TwinSnapshotPayload>('twin.snapshot', {
       for (const [controlId, value] of t.faders) {
         widgetSlideHandlers.forEach(h => h(t.pageId, t.widgetId, value, undefined, controlId));
       }
+    }
+    if (sections && sections.length) {
+      import('~/stores/live-mode-store').then(({ useLiveModeStore }) => {
+        const liveStore = useLiveModeStore();
+        const map = new Map(liveStore.activeSectionMembers);
+        for (const s of sections) {
+          if (liveStore.activePageId !== s.pageId) continue;
+          map.set(s.sectionId, new Set(s.keys));
+        }
+        liveStore.activeSectionMembers = map;
+      });
     }
   },
 });

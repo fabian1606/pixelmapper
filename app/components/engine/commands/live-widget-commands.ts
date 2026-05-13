@@ -1,6 +1,6 @@
 import type { Command } from '../composables/use-history';
 import { type SerializableCommand, registerCommand } from './serializable-command';
-import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding } from '~/utils/live/types';
+import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding, LiveSection, SectionMember } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 
 function getLiveStore() {
@@ -484,3 +484,186 @@ registerCommand(
   'live.updateChildMapping',
   (p) => new UpdateControllerChildMappingCommand(p.pageId, p.twinId, p.controlId, p.patch),
 );
+
+// ─── AddLiveSection ───────────────────────────────────────────────────────────
+
+export class AddLiveSectionCommand implements SerializableCommand {
+  readonly commandType = 'live.addSection';
+  description = 'Add Section';
+
+  constructor(private pageId: string, private section: LiveSection) {}
+
+  execute() { getLiveStore().addSection(this.pageId, JSON.parse(JSON.stringify(this.section))); }
+  undo() { getLiveStore().removeSection(this.pageId, this.section.id); }
+  inverse(): Command { return new RemoveLiveSectionCommand(this.pageId, this.section.id, this.section); }
+  toPayload() { return { pageId: this.pageId, section: this.section }; }
+}
+
+registerCommand('live.addSection', (p) => new AddLiveSectionCommand(p.pageId, p.section));
+
+// ─── RemoveLiveSection ────────────────────────────────────────────────────────
+
+export class RemoveLiveSectionCommand implements SerializableCommand {
+  readonly commandType = 'live.removeSection';
+  description = 'Remove Section';
+  private _removed: LiveSection | null = null;
+
+  constructor(private pageId: string, private sectionId: string, removedSnapshot?: LiveSection) {
+    if (removedSnapshot) this._removed = JSON.parse(JSON.stringify(removedSnapshot));
+  }
+
+  execute() {
+    const store = getLiveStore();
+    if (!this._removed) {
+      const page = store.pages.find((p: LivePage) => p.id === this.pageId);
+      const s = page?.sections?.find(x => x.id === this.sectionId);
+      if (s) this._removed = JSON.parse(JSON.stringify(s));
+    }
+    store.removeSection(this.pageId, this.sectionId);
+  }
+  undo() {
+    if (this._removed) getLiveStore().addSection(this.pageId, JSON.parse(JSON.stringify(this._removed)));
+  }
+  inverse(): Command | null {
+    if (!this._removed) return null;
+    return new AddLiveSectionCommand(this.pageId, JSON.parse(JSON.stringify(this._removed)));
+  }
+  toPayload() { return { pageId: this.pageId, sectionId: this.sectionId }; }
+}
+
+registerCommand('live.removeSection', (p) => new RemoveLiveSectionCommand(p.pageId, p.sectionId));
+
+// ─── UpdateLiveSection ────────────────────────────────────────────────────────
+// Patches a section's name / source / mode. Members are handled by SetSectionMembers.
+
+export class UpdateLiveSectionCommand implements SerializableCommand {
+  readonly commandType = 'live.updateSection';
+  description = 'Update Section';
+  private _before: Partial<Omit<LiveSection, 'id' | 'members'>> | null = null;
+
+  constructor(
+    private pageId: string,
+    private sectionId: string,
+    private changes: Partial<Omit<LiveSection, 'id' | 'members'>>,
+  ) {}
+
+  execute() {
+    const store = getLiveStore();
+    const page = store.pages.find((p: LivePage) => p.id === this.pageId);
+    const section = page?.sections?.find(s => s.id === this.sectionId);
+    if (section) {
+      this._before = Object.fromEntries(
+        Object.keys(this.changes).map(k => [k, (section as any)[k]]),
+      ) as any;
+    }
+    store.updateSection(this.pageId, this.sectionId, this.changes);
+  }
+  undo() {
+    if (this._before) getLiveStore().updateSection(this.pageId, this.sectionId, this._before);
+  }
+  inverse(): Command | null {
+    if (!this._before) return null;
+    return new UpdateLiveSectionCommand(this.pageId, this.sectionId, this._before);
+  }
+  toPayload() { return { pageId: this.pageId, sectionId: this.sectionId, changes: this.changes }; }
+}
+
+registerCommand('live.updateSection', (p) => new UpdateLiveSectionCommand(p.pageId, p.sectionId, p.changes));
+
+// ─── SetSectionMembers ────────────────────────────────────────────────────────
+// Replaces the full member list. Used for add / remove / reorder so undo always
+// restores a coherent snapshot.
+
+export class SetSectionMembersCommand implements SerializableCommand {
+  readonly commandType = 'live.setSectionMembers';
+  description = 'Update Section Members';
+  private _before: SectionMember[] | null = null;
+
+  constructor(
+    private pageId: string,
+    private sectionId: string,
+    private members: SectionMember[],
+  ) {}
+
+  execute() {
+    const store = getLiveStore();
+    const page = store.pages.find((p: LivePage) => p.id === this.pageId);
+    const section = page?.sections?.find(s => s.id === this.sectionId);
+    if (section) this._before = section.members.map(m => ({ ...m }));
+    store.setSectionMembers(this.pageId, this.sectionId, this.members);
+  }
+  undo() {
+    if (this._before) getLiveStore().setSectionMembers(this.pageId, this.sectionId, this._before);
+  }
+  inverse(): Command | null {
+    if (!this._before) return null;
+    return new SetSectionMembersCommand(this.pageId, this.sectionId, this._before);
+  }
+  toPayload() { return { pageId: this.pageId, sectionId: this.sectionId, members: this.members }; }
+}
+
+registerCommand('live.setSectionMembers', (p) => new SetSectionMembersCommand(p.pageId, p.sectionId, p.members));
+
+// ─── AddLiveController ────────────────────────────────────────────────────────
+
+export class AddLiveControllerCommand implements SerializableCommand {
+  readonly commandType = 'live.addController';
+  description = 'Add Controller';
+
+  constructor(private instanceId: string, private definitionKey: string) {}
+
+  execute() { getLiveStore().addLiveController({ id: this.instanceId, definitionKey: this.definitionKey }); }
+  undo() { getLiveStore().removeLiveController(this.instanceId); }
+  inverse(): Command { return new RemoveLiveControllerCommand(this.instanceId, this.definitionKey); }
+  toPayload() { return { instanceId: this.instanceId, definitionKey: this.definitionKey }; }
+}
+
+registerCommand('live.addController', (p) => new AddLiveControllerCommand(p.instanceId, p.definitionKey));
+
+// ─── RemoveLiveController ─────────────────────────────────────────────────────
+
+export class RemoveLiveControllerCommand implements SerializableCommand {
+  readonly commandType = 'live.removeController';
+  description = 'Remove Controller';
+
+  constructor(private instanceId: string, private definitionKey: string) {}
+
+  execute() { getLiveStore().removeLiveController(this.instanceId); }
+  undo() { getLiveStore().addLiveController({ id: this.instanceId, definitionKey: this.definitionKey }); }
+  inverse(): Command { return new AddLiveControllerCommand(this.instanceId, this.definitionKey); }
+  toPayload() { return { instanceId: this.instanceId, definitionKey: this.definitionKey }; }
+}
+
+registerCommand('live.removeController', (p) => new RemoveLiveControllerCommand(p.instanceId, p.definitionKey));
+
+// ─── SetWidgetControllerInstance ──────────────────────────────────────────────
+
+export class SetWidgetControllerInstanceCommand implements SerializableCommand {
+  readonly commandType = 'live.setControllerInstance';
+  description = 'Bind Controller';
+  private _before: string | null | undefined = undefined;
+
+  constructor(
+    private pageId: string,
+    private widgetId: string,
+    private instanceId: string | null,
+  ) {}
+
+  execute() {
+    const store = getLiveStore();
+    const widget = store.pages.find((p: LivePage) => p.id === this.pageId)?.widgets.find((w: LiveWidget) => w.id === this.widgetId);
+    if (widget) this._before = widget.controllerInstanceId ?? null;
+    store.updateWidgetMapping(this.pageId, this.widgetId, { controllerInstanceId: this.instanceId ?? undefined });
+  }
+  undo() {
+    if (this._before !== undefined)
+      getLiveStore().updateWidgetMapping(this.pageId, this.widgetId, { controllerInstanceId: this._before ?? undefined });
+  }
+  inverse(): Command | null {
+    if (this._before === undefined) return null;
+    return new SetWidgetControllerInstanceCommand(this.pageId, this.widgetId, this._before);
+  }
+  toPayload() { return { pageId: this.pageId, widgetId: this.widgetId, instanceId: this.instanceId }; }
+}
+
+registerCommand('live.setControllerInstance', (p) => new SetWidgetControllerInstanceCommand(p.pageId, p.widgetId, p.instanceId));

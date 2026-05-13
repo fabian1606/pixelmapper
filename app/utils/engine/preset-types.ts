@@ -83,4 +83,6 @@ export interface Preset {
   categories: PresetCategory[];
   /** Optional ID of the base preset this is a variant of */
   basePresetId?: string;
+  /** Optional manual color override (hex). When absent, color is derived from `categories`. */
+  color?: string;
 }

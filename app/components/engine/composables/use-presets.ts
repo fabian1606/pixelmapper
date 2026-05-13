@@ -89,6 +89,13 @@ export function usePresets() {
     if (preset) preset.name = newName;
   }
 
+  function setPresetColor(id: string, color: string | undefined): void {
+    const preset = savedPresets.value.find((p) => p.id === id);
+    if (!preset) return;
+    if (color) preset.color = color;
+    else delete preset.color;
+  }
+
   return {
     savedPresets,
     selectedPresetId,
@@ -101,5 +108,6 @@ export function usePresets() {
     stopPreset,
     deletePreset,
     renamePreset,
+    setPresetColor,
   };
 }

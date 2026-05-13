@@ -12,9 +12,11 @@ import type { ControlFeedback, ControlInputEvent } from '~/utils/controllers/typ
  *   fader-<i>         i=0..8  (0..7 = channel faders, 8 = master)  → CC 48..56
  *
  * LED feedback:
- *   Pads (RGB): sysex F0 47 7F 4F 24 LL HH [pad, r, g, b]... F7
- *               (LL HH = payload byte count, LSB first)
- *   Track / Scene (single-color): note_on with velocity 0 (off) or 1 (on).
+ *   Pads (RGB): sysex F0 47 7F 4F 24 00 08 <padFrom> <padTo>
+ *                     <rMSB> <rLSB> <gMSB> <gLSB> <bMSB> <bLSB> F7
+ *   Track / Scene (single-color): note_on on MIDI channel 6 (0x96) for 100%
+ *   brightness; velocity is a palette index (0 = off, 3 = white, etc.).
+ *   Channels 0..5 = dimmer brightness levels, 7..F = blink/pulse rates.
  */
 
 const VENDOR_REGEX = /APC mini mk2/i;
@@ -181,28 +183,19 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
   private sendPadFeedback(note: number, fb: ControlFeedback) {
     if (!this.output) return;
     let r = 0, g = 0, b = 0;
-    if (fb.state === 'off') {
-      r = 0; g = 0; b = 0;
-    } else if (fb.state === 'on') {
+    if (fb.state === 'on') {
       r = 255; g = 255; b = 255;
     } else if (typeof fb.state === 'object' && fb.state.type === 'rgb') {
-      r = clamp7(fb.state.r); g = clamp7(fb.state.g); b = clamp7(fb.state.b);
+      r = clamp8(fb.state.r); g = clamp8(fb.state.g); b = clamp8(fb.state.b);
     }
-    // Sysex header: F0 47 7F 4F 24 LL HH <payload> F7
-    // Payload per pad: <pad>, <r MSB>, <r LSB>, <g MSB>, <g LSB>, <b MSB>, <b LSB>
-    // The mk2 spec uses 14-bit color (two bytes per channel, MSB first in 7-bit chunks).
-    // Here we simply repeat the 8-bit value in both bytes (close enough for v1).
-    const payload: number[] = [
-      note,
+    // F0 47 7F 4F 24 00 08 padFrom padTo rMSB rLSB gMSB gLSB bMSB bLSB F7
+    // Payload length is fixed (single-pad range), header LL/HH = 00 08.
+    const sysex = [
+      0xf0, 0x47, 0x7f, 0x4f, 0x24, 0x00, 0x08,
+      note, note,
       (r >> 7) & 0x7f, r & 0x7f,
       (g >> 7) & 0x7f, g & 0x7f,
       (b >> 7) & 0x7f, b & 0x7f,
-    ];
-    const len = payload.length;
-    const sysex = [
-      0xf0, 0x47, 0x7f, 0x4f, 0x24,
-      len & 0x7f, (len >> 7) & 0x7f,
-      ...payload,
       0xf7,
     ];
     try { this.output.send(sysex); } catch (e) { /* ignore */ }
@@ -210,7 +203,8 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
 
   private sendSingleColorNote(note: number, on: boolean) {
     if (!this.output) return;
-    try { this.output.send([0x90, note, on ? 1 : 0]); } catch (e) { /* ignore */ }
+    // Channel 6 (0x96) = 100% brightness. Velocity 3 = white from the palette.
+    try { this.output.send([0x96, note, on ? 3 : 0]); } catch (e) { /* ignore */ }
   }
 
   private feedbackKey(fb: ControlFeedback): string {
@@ -228,6 +222,13 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
       this.status.value = 'disconnected';
       this.input = null;
       this.output = null;
+      return;
+    }
+    // Auto-reconnect on replug: if device shows up again while we're disconnected,
+    // re-acquire the input/output ports silently.
+    if (port.state === 'connected' && this.status.value === 'disconnected' && /apc.*mini/i.test(port.name ?? '')) {
+      this.pushLog(`Device re-detected: ${port.name} — auto-reconnecting`);
+      this.connect().catch(err => this.pushLog(`Auto-reconnect failed: ${String(err)}`));
     }
   }
 
@@ -239,7 +240,7 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
   }
 }
 
-function clamp7(v: number): number {
+function clamp8(v: number): number {
   if (v < 0) return 0;
   if (v > 255) return 255;
   return v | 0;

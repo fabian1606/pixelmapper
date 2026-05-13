@@ -167,6 +167,10 @@ function handleMouseDown(e: MouseEvent) {
     const local = clientToCanvasLocal(e.clientX, e.clientY);
     if (!local) return;
     if (store.isolatedGroupId !== null) store.exitIsolation();
+    if (store.isolatedSectionId !== null) store.exitSectionIsolation();
+    if (store.sectionMappingMode !== null) store.exitSectionMappingMode();
+    store.selectedSectionId = null;
+    store.selectedControlId = null;
     marqueeStartShift = e.shiftKey || e.metaKey || e.ctrlKey;
     marqueePrevSelection = marqueeStartShift ? new Set(store.selectedWidgetIds) : new Set();
     if (!marqueeStartShift) store.selectedWidgetIds = new Set();

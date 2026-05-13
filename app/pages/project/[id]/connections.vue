@@ -8,6 +8,9 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { useLiveBusStore, TAB_SESSION_ID } from '~/stores/live-bus-store';
 import { listControllerDefinitions, getControllerDefinition } from '~/utils/controllers/catalog';
+import { AddLiveControllerCommand, RemoveLiveControllerCommand } from '~/components/engine/commands/live-widget-commands';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { useLiveModeStore } from '~/stores/live-mode-store';
 import { OUTPUT_CONNECTOR_REGISTRY, INPUT_CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
@@ -21,9 +24,11 @@ const store = useConnectionsStore();
 const engineStore = useEngineStore();
 const controllerStore = useControllerStore();
 const liveBus = useLiveBusStore();
-const { usedUniverses, totalUniverses } = storeToRefs(engineStore);
+const liveModeStore = useLiveModeStore();
+const history = useHistory();
 
 const controllerDefs = computed(() => listControllerDefinitions());
+const { usedUniverses, totalUniverses } = storeToRefs(engineStore);
 
 /**
  * Controllers connected by other tabs/users on this project. Filters out our
@@ -43,27 +48,26 @@ function controllerLabelFor(definitionKey: string): string {
   return getControllerDefinition(definitionKey)?.label ?? definitionKey;
 }
 
-async function addController(definitionKey: string) {
-  const driver = controllerStore.addInstance(definitionKey);
-  if (!driver) return;
-  // Web MIDI/HID requires a user gesture, and this click is one.
-  try { await driver.connect(); } catch (e) { /* error surfaces via driver.errorMessage */ }
+function allDrivers() {
+  return Array.from(controllerStore.drivers.entries()).map(([key, driver]) => ({ key, driver }));
 }
 
-async function reconnectController(id: string) {
-  const driver = controllerStore.getInstance(id);
+async function addController(definitionKey: string) {
+  const instanceId = crypto.randomUUID();
+  history.execute(new AddLiveControllerCommand(instanceId, definitionKey));
+  const driver = controllerStore.createDriver(instanceId, definitionKey);
+  if (driver) driver.connect().catch(console.warn);
+}
+
+async function reconnectController(instanceId: string) {
+  const driver = controllerStore.getBindingFor(instanceId);
   if (!driver) return;
   try { await driver.connect(); } catch { /* surfaces via errorMessage */ }
 }
 
-async function disconnectController(id: string) {
-  const driver = controllerStore.getInstance(id);
-  if (!driver) return;
-  try { await driver.disconnect(); } catch (e) { console.warn('disconnect failed', e); }
-}
-
-async function removeController(id: string) {
-  await controllerStore.removeInstance(id);
+async function removeController(instanceId: string, definitionKey: string) {
+  history.execute(new RemoveLiveControllerCommand(instanceId, definitionKey));
+  await controllerStore.removeDriver(instanceId);
 }
 
 const expandedConnectors = ref<Set<string>>(new Set());
@@ -146,10 +150,10 @@ function assignedCount(connector: BaseConnector): number {
       </button>
     </div>
 
-    <!-- Inputs: controller drivers (MIDI/HID-based hardware twins) -->
+    <!-- Inputs: controller instances -->
     <template v-if="connectionsTab === 'inputs'">
-      <!-- Add buttons per available controller definition -->
-      <div v-if="controllerDefs.length" class="flex gap-2 flex-wrap">
+      <!-- Add buttons: one per catalog definition -->
+      <div class="flex gap-2 flex-wrap">
         <button
           v-for="def in controllerDefs"
           :key="def.key"
@@ -160,56 +164,59 @@ function assignedCount(connector: BaseConnector): number {
           {{ def.label }}
         </button>
       </div>
-      <p v-else class="text-xs text-muted-foreground">
-        Keine Controller-Definitionen gefunden. Lege einen Ordner unter <code class="font-mono">controllers/</code> an.
+
+      <p v-if="!liveModeStore.liveControllers.length" class="text-sm text-muted-foreground py-2">
+        Noch keine Controller angelegt.
       </p>
 
-      <p v-if="!controllerStore.instances.length" class="text-sm text-muted-foreground py-4">
-        Noch keine Geräte verbunden. Klicke auf einen Controller oben, um ihn zu verbinden — dein Browser fragt dann nach MIDI-Zugriff.
-      </p>
-
+      <!-- One row per instance -->
       <div
-        v-for="driver in controllerStore.instances"
-        :key="driver.id"
+        v-for="inst in liveModeStore.liveControllers"
+        :key="inst.id"
         class="flex flex-col gap-2 px-3 py-2.5 rounded border border-border bg-background text-sm"
       >
         <div class="flex items-center gap-3">
-          <CircleDot :size="14" :class="statusColor[driver.status.value]" />
+          <CircleDot
+            :size="14"
+            :class="controllerStore.drivers.get(inst.id)
+              ? statusColor[(controllerStore.drivers.get(inst.id) as any).status]
+              : 'text-muted-foreground/30'"
+          />
 
           <div class="flex-1 min-w-0">
             <div class="font-medium flex items-center gap-1.5">
               <Gamepad2 :size="12" class="text-muted-foreground" />
-              {{ driver.deviceLabel.value ?? driver.definitionKey }}
+              {{ (controllerStore.drivers.get(inst.id) as any)?.deviceLabel ?? controllerLabelFor(inst.definitionKey) }}
             </div>
-            <div v-if="driver.errorMessage.value" class="text-xs text-red-400 truncate">
-              {{ driver.errorMessage.value }}
+            <div v-if="(controllerStore.drivers.get(inst.id) as any)?.errorMessage" class="text-xs text-red-400 truncate">
+              {{ (controllerStore.drivers.get(inst.id) as any).errorMessage }}
             </div>
             <div v-else class="text-xs text-muted-foreground capitalize">
-              {{ driver.status.value }}
+              {{ (controllerStore.drivers.get(inst.id) as any)?.status ?? 'Nicht verbunden' }}
             </div>
           </div>
 
           <button
-            v-if="driver.status.value === 'connected'"
-            class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-            @click="disconnectController(driver.id)"
+            v-if="(controllerStore.drivers.get(inst.id) as any)?.status !== 'connected'"
+            class="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+            :disabled="(controllerStore.drivers.get(inst.id) as any)?.status === 'connecting'"
+            @click="reconnectController(inst.id)"
           >
-            Disconnect
+            <PlugZap :size="12" />
+            Verbinden
           </button>
           <button
             v-else
-            class="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-            :disabled="driver.status.value === 'connecting'"
-            @click="reconnectController(driver.id)"
+            class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+            @click="reconnectController(inst.id)"
           >
-            <PlugZap :size="12" />
-            Connect
+            Reconnect
           </button>
 
           <button
-            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Gerät entfernen"
-            @click="removeController(driver.id)"
+            class="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-accent transition-colors"
+            title="Entfernen"
+            @click="removeController(inst.id, inst.definitionKey)"
           >
             <Trash2 :size="14" />
           </button>

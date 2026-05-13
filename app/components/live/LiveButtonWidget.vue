@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
+import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
 import { applyPreset } from '~/components/engine/composables/preset-apply';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 
@@ -18,7 +19,15 @@ const engineStore = useEngineStore();
 
 const pressed = ref(false);
 
-// Listen for remote trigger events
+const section = useSectionBinding({ widget: () => props.widget });
+
+// Visual label/color: section binding wins when this widget is part of a section.
+const displayLabel = computed(() => section.effectiveLabel.value ?? props.widget.label ?? props.widget.type);
+const displayColor = computed(() => section.effectiveColor.value ?? props.widget.color ?? '#334155');
+
+// Single/multi-select sections also light up when "active" without being held.
+const visuallyActive = computed(() => pressed.value || section.isActive.value);
+
 const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
   if (pageId === props.pageId && widgetId === props.widget.id) {
     pressed.value = active;
@@ -26,8 +35,7 @@ const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
 });
 onUnmounted(offTrigger);
 
-function applyMapping(active: boolean) {
-  if (props.editMode) return;
+function applyOwnMapping(active: boolean) {
   const { mapping } = props.widget;
   if (mapping.type === 'preset' && mapping.presetId && active) {
     const presets = engineStore.savedPresets;
@@ -51,14 +59,16 @@ function onPointerDown(e: PointerEvent) {
   if (props.editMode) return;
   (e.target as HTMLElement).setPointerCapture(e.pointerId);
   pressed.value = true;
-  applyMapping(true);
+  if (section.membership.value) section.press();
+  else applyOwnMapping(true);
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true });
 }
 
 function onPointerUp() {
   if (props.editMode) return;
   pressed.value = false;
-  applyMapping(false);
+  if (section.membership.value) section.release();
+  else applyOwnMapping(false);
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false });
 }
 </script>
@@ -67,20 +77,20 @@ function onPointerUp() {
   <button
     class="w-full h-full rounded flex items-center justify-center text-sm font-medium transition-all select-none border"
     :class="[
-      pressed
+      visuallyActive
         ? 'brightness-150 scale-95'
         : 'brightness-100 scale-100',
       editMode ? 'pointer-events-none' : 'cursor-pointer',
     ]"
     :style="{
-      backgroundColor: widget.color ?? '#334155',
-      borderColor: widget.color ? `${widget.color}88` : 'rgba(255,255,255,0.1)',
+      backgroundColor: displayColor,
+      borderColor: `${displayColor}88`,
       color: '#fff',
     }"
     @pointerdown="onPointerDown"
     @pointerup="onPointerUp"
     @pointerleave="onPointerUp"
   >
-    <span class="truncate px-2">{{ widget.label || widget.type }}</span>
+    <span class="truncate px-2">{{ displayLabel }}</span>
   </button>
 </template>

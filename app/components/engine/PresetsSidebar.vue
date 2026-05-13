@@ -70,9 +70,16 @@ const {
   getUnsavedChanges,
   applyPreset,
   renamePreset,
+  setPresetColor,
   stopPreset,
   getActivePresetResolved,
 } = usePresets();
+
+import { getPresetMainColor } from '~/utils/engine/preset-color';
+
+function presetDisplayColor(preset: Preset): string {
+  return getPresetMainColor(preset);
+}
 
 const history = useHistory();
 
@@ -462,6 +469,21 @@ defineExpose({
                 :class="[selectedPresetId === preset.id ? 'text-primary' : 'text-foreground']"
               >
                 <div class="flex items-center gap-2 flex-1 min-w-0 w-full" @dblclick.stop="startRename(preset)">
+                  <!-- Color swatch (manual override; defaults to derived color) -->
+                  <label
+                    class="relative shrink-0 size-3 rounded-full ring-1 ring-border/40 cursor-pointer overflow-hidden"
+                    :style="{ backgroundColor: presetDisplayColor(preset) }"
+                    :title="preset.color ? 'Klick: Farbe ändern' : 'Farbe aus Preset abgeleitet — Klick zum Überschreiben'"
+                    @click.stop
+                  >
+                    <input
+                      type="color"
+                      class="absolute inset-0 opacity-0 cursor-pointer"
+                      :value="presetDisplayColor(preset)"
+                      @input="(e) => setPresetColor(preset.id, (e.target as HTMLInputElement).value)"
+                    />
+                  </label>
+
                   <!-- Name or rename input -->
                   <template v-if="renamingId === preset.id">
                     <Input
@@ -574,6 +596,19 @@ defineExpose({
                     <div class="absolute left-3 top-1/2 w-3 border-t border-primary/20 pointer-events-none" />
                     
                     <div class="flex items-center gap-2 flex-1 min-w-0 w-full pl-5" @dblclick.stop="startRename(variant)">
+                        <label
+                          class="relative shrink-0 size-3 rounded-full ring-1 ring-border/40 cursor-pointer overflow-hidden"
+                          :style="{ backgroundColor: presetDisplayColor(variant) }"
+                          :title="variant.color ? 'Klick: Farbe ändern' : 'Farbe aus Preset abgeleitet — Klick zum Überschreiben'"
+                          @click.stop
+                        >
+                          <input
+                            type="color"
+                            class="absolute inset-0 opacity-0 cursor-pointer"
+                            :value="presetDisplayColor(variant)"
+                            @input="(e) => setPresetColor(variant.id, (e.target as HTMLInputElement).value)"
+                          />
+                        </label>
                         <template v-if="renamingId === variant.id">
                           <Input ref="renameInputRef" v-model="renameValue" class="h-5 text-xs px-1 py-0 flex-1 min-w-0" @keydown.prevent.enter="confirmRename" @keydown.prevent.escape="renamingId = null" @blur="handleRenameBlur" @click.stop autofocus />
                         </template>

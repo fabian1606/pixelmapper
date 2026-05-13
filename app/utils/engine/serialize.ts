@@ -63,6 +63,8 @@ export interface ProjectSnapshot {
   globalBases: Record<string, number>
   activeEffects: Effect[]
   livePages?: LivePage[]
+  /** Controller instances persisted with the project. Auto-connect on load. */
+  liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -124,6 +126,7 @@ export function serializeProject(
   globalBases: Record<string, number>,
   activeEffects: Effect[],
   livePages: LivePage[] = [],
+  liveControllers: string[] = [],
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -132,6 +135,7 @@ export function serializeProject(
     globalBases: { ...globalBases },
     activeEffects: JSON.parse(JSON.stringify(activeEffects)),
     livePages: JSON.parse(JSON.stringify(livePages)),
+    liveControllers: JSON.parse(JSON.stringify(liveControllers)),
   }
 }
 

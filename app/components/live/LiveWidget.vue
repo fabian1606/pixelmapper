@@ -3,7 +3,8 @@ import { computed } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useHistory } from '~/components/engine/composables/use-history';
-import { MoveResizeLiveWidgetCommand, BatchMoveResizeLiveWidgetsCommand, type BatchMoveResizeUpdate } from '~/components/engine/commands/live-widget-commands';
+import { MoveResizeLiveWidgetCommand, BatchMoveResizeLiveWidgetsCommand, SetSectionMembersCommand, type BatchMoveResizeUpdate } from '~/components/engine/commands/live-widget-commands';
+import { findSectionFor } from '~/utils/live/sections';
 import LiveButtonWidget from './LiveButtonWidget.vue';
 import LiveSliderWidget from './LiveSliderWidget.vue';
 import LiveXYPadWidget from './LiveXYPadWidget.vue';
@@ -34,6 +35,48 @@ const isDimmedByIsolation = computed(() =>
   store.isolatedGroupId !== null && !isInIsolatedGroup.value
 );
 
+// Section the widget belongs to (canvas-level — no controlId)
+const widgetSection = computed(() => {
+  const page = store.activePage;
+  if (!page) return null;
+  const membership = findSectionFor(page, props.widget.id, undefined);
+  return membership ? membership.section : null;
+});
+// Whether this widget participates in the currently-isolated section. True for
+// direct canvas-level members AND for twins whose sub-controls are members.
+const isInIsolatedSection = computed(() => {
+  if (store.isolatedSectionId === null) return false;
+  if (widgetSection.value?.id === store.isolatedSectionId) return true;
+  const page = store.activePage;
+  const sec = page?.sections?.find(s => s.id === store.isolatedSectionId);
+  return sec?.members.some(m => m.widgetId === props.widget.id) ?? false;
+});
+// In section mapping mode: is this widget a member of the mapped section?
+const isSectionMappingTarget = computed(() => store.sectionMappingMode !== null);
+const isSectionMember = computed(() => {
+  const sid = store.sectionMappingMode;
+  if (!sid) return false;
+  const page = store.activePage;
+  if (!page) return false;
+  const sec = page.sections?.find(s => s.id === sid);
+  return sec?.members.some(m => m.widgetId === props.widget.id && !m.controlId) ?? false;
+});
+// Dim when something else is isolated (group or section) and this widget isn't in it
+const isDimmedBySectionIsolation = computed(() =>
+  store.isolatedSectionId !== null && !isInIsolatedSection.value
+);
+// Show dashed yellow highlight when this widget is a section member AND either:
+//  (a) the section is currently selected as a whole on the canvas, or
+//  (b) we're in mapping mode and this is a member of the mapped section.
+const isSectionHighlighted = computed(() => {
+  const sec = widgetSection.value;
+  if (!sec) return false;
+  if (isSectionMappingTarget.value) return isSectionMember.value;
+  // Section selected as a whole: all canvas members are in selectedWidgetIds
+  const memberIds = sec.members.filter(m => !m.controlId).map(m => m.widgetId);
+  return memberIds.length > 0 && memberIds.every(id => store.selectedWidgetIds.has(id));
+});
+
 // Position/size from grid coordinates
 const style = computed(() => ({
   position: 'absolute' as const,
@@ -43,13 +86,24 @@ const style = computed(() => ({
   height: `${props.widget.gridH * props.gridSize}px`,
 }));
 
-// ── Double-click: enter group (Figma-style isolation) ───────────────────────
+// ── Double-click: enter group or section isolation (Figma-style) ────────────
 function onDoubleClick(e: MouseEvent) {
   if (!props.editMode) return;
-  if (!props.widget.groupId) return;
   e.stopPropagation();
-  store.isolatedGroupId = props.widget.groupId;
-  store.selectedWidgetIds = new Set([props.widget.id]);
+  // Section isolation takes priority over group (a section member that's also
+  // grouped enters its section first; double-clicking again enters the group).
+  const sec = widgetSection.value;
+  if (sec && store.isolatedSectionId !== sec.id) {
+    store.isolatedSectionId = sec.id;
+    store.isolatedGroupId = null;
+    store.selectedWidgetIds = new Set([props.widget.id]);
+    return;
+  }
+  if (props.widget.groupId) {
+    store.isolatedGroupId = props.widget.groupId;
+    store.isolatedSectionId = null;
+    store.selectedWidgetIds = new Set([props.widget.id]);
+  }
 }
 
 // ── Drag (move) — supports multi-selection ──────────────────────────────────
@@ -77,41 +131,80 @@ function onMouseDown(e: MouseEvent) {
   const page = store.activePage;
   if (!page) return;
 
-  // ── Selection logic ──────────────────────────────────────────────────────
-  // Group-isolation rules (Figma-style):
-  //  - When isolated INTO this widget's group, clicks select the individual
-  //    widget (no group expansion).
-  //  - When isolated into a DIFFERENT group, clicking outside that group
-  //    exits isolation and falls back to normal group-aware selection.
-  //  - When not isolated: plain click selects whole group; cmd-click bypasses.
-  const insideIsolatedGroup = !!props.widget.groupId && store.isolatedGroupId === props.widget.groupId;
-
-  if (store.isolatedGroupId !== null && !insideIsolatedGroup) {
-    // Clicked outside the isolated group → exit isolation first.
-    store.isolatedGroupId = null;
+  // ── Section mapping mode: clicks toggle section membership ───────────────
+  if (store.sectionMappingMode) {
+    const sectionId = store.sectionMappingMode;
+    const sec = page.sections?.find(s => s.id === sectionId);
+    if (!sec || !store.activePageId) return;
+    // Only plain canvas widgets (non-twin) can be members at this level.
+    if (props.widget.type === 'controller-twin') return;
+    const isCurrentMember = sec.members.some(m => m.widgetId === props.widget.id && !m.controlId);
+    let next;
+    if (isCurrentMember) {
+      next = sec.members.filter(m => !(m.widgetId === props.widget.id && !m.controlId));
+    } else {
+      next = [...sec.members, { widgetId: props.widget.id }];
+    }
+    history.execute(new SetSectionMembersCommand(store.activePageId, sectionId, next));
+    return; // no drag in mapping mode
   }
 
-  const expandToGroup = !insideIsolatedGroup; // skip group expansion while inside the group
-  const groupMembers = expandToGroup && props.widget.groupId
-    ? page.widgets.filter(w => w.groupId === props.widget.groupId).map(w => w.id)
-    : [props.widget.id];
+  // Clear per-control / surfaced-section state from a previous twin click.
+  // Sub-control clicks stopPropagation before reaching here, so this only fires
+  // for clicks on a twin frame or any non-twin widget.
+  store.selectedSectionId = null;
+  store.selectedControlId = null;
 
-  if (shift) {
-    const next = new Set(store.selectedWidgetIds);
-    const allSelected = groupMembers.every(id => next.has(id));
-    for (const id of groupMembers) {
-      if (allSelected) next.delete(id); else next.add(id);
+  // ── Selection logic ──────────────────────────────────────────────────────
+  // Exit any active isolation when clicking outside it.
+  const insideIsolatedGroup = !!props.widget.groupId && store.isolatedGroupId === props.widget.groupId;
+  const insideIsolatedSection = isInIsolatedSection.value;
+
+  if (store.isolatedGroupId !== null && !insideIsolatedGroup) {
+    store.isolatedGroupId = null;
+  }
+  if (store.isolatedSectionId !== null && !insideIsolatedSection) {
+    store.isolatedSectionId = null;
+  }
+
+  // Section-level selection: plain click on a section member selects the whole
+  // section, unless we're already isolated inside it.
+  const sec = widgetSection.value;
+  if (sec && !insideIsolatedSection && !cmd && !shift) {
+    const sectionWidgetIds = sec.members
+      .filter(m => !m.controlId)
+      .map(m => m.widgetId);
+    const allSelected = sectionWidgetIds.every(id => store.selectedWidgetIds.has(id));
+    if (!allSelected) {
+      store.selectedWidgetIds = new Set(sectionWidgetIds);
     }
-    store.selectedWidgetIds = next;
-  } else if (cmd) {
-    const next = new Set(store.selectedWidgetIds);
-    if (next.has(props.widget.id)) next.delete(props.widget.id);
-    else next.add(props.widget.id);
-    store.selectedWidgetIds = next;
+    // Still fall through to drag setup below (don't return early).
   } else {
-    const alreadySelected = groupMembers.every(id => store.selectedWidgetIds.has(id));
-    if (!alreadySelected) {
-      store.selectedWidgetIds = new Set(groupMembers);
+    // Group-isolation rules (Figma-style):
+    //  - When isolated INTO this widget's group, clicks select the individual widget.
+    //  - When not isolated: plain click selects whole group; cmd-click bypasses.
+    const expandToGroup = !insideIsolatedGroup;
+    const groupMembers = expandToGroup && props.widget.groupId
+      ? page.widgets.filter(w => w.groupId === props.widget.groupId).map(w => w.id)
+      : [props.widget.id];
+
+    if (shift) {
+      const next = new Set(store.selectedWidgetIds);
+      const allSelected = groupMembers.every(id => next.has(id));
+      for (const id of groupMembers) {
+        if (allSelected) next.delete(id); else next.add(id);
+      }
+      store.selectedWidgetIds = next;
+    } else if (cmd) {
+      const next = new Set(store.selectedWidgetIds);
+      if (next.has(props.widget.id)) next.delete(props.widget.id);
+      else next.add(props.widget.id);
+      store.selectedWidgetIds = next;
+    } else {
+      const alreadySelected = groupMembers.every(id => store.selectedWidgetIds.has(id));
+      if (!alreadySelected) {
+        store.selectedWidgetIds = new Set(groupMembers);
+      }
     }
   }
 
@@ -280,8 +373,9 @@ const handleVisualSize = computed(() => {
     :style="style"
     class="absolute select-none transition-opacity"
     :class="[
-      { 'cursor-move': editMode },
-      isDimmedByIsolation ? 'opacity-40' : 'opacity-100',
+      { 'cursor-move': editMode && !isSectionMappingTarget },
+      { 'cursor-pointer': isSectionMappingTarget },
+      (isDimmedByIsolation || isDimmedBySectionIsolation) ? 'opacity-40' : 'opacity-100',
     ]"
     @mousedown="onMouseDown"
     @dblclick="onDoubleClick"
@@ -291,11 +385,25 @@ const handleVisualSize = computed(() => {
       v-if="editMode"
       class="absolute inset-0 rounded pointer-events-none z-10 transition-colors"
       :class="[
-        isSelected
-          ? (isGrouped ? 'ring-2 ring-amber-400' : 'ring-2 ring-primary')
-          : (isInIsolatedGroup ? 'ring-1 ring-amber-400/70'
-            : (isGrouped ? 'ring-1 ring-amber-400/40' : 'ring-1 ring-white/10')),
+        isSectionMappingTarget
+          ? 'ring-1 ring-white/20'
+          : (isSelected
+              ? (isGrouped ? 'ring-2 ring-amber-400' : 'ring-2 ring-primary')
+              : (isInIsolatedGroup ? 'ring-1 ring-amber-400/70'
+                : (isGrouped ? 'ring-1 ring-amber-400/40' : 'ring-1 ring-white/10'))),
       ]"
+    />
+    <!-- Mapping-mode fill: solid yellow for section members -->
+    <div
+      v-if="editMode && isSectionMappingTarget && isSectionMember"
+      class="absolute inset-0 pointer-events-none z-[5] rounded"
+      style="background-color: rgba(250, 204, 21, 0.7);"
+    />
+    <!-- Dashed yellow highlight for section members -->
+    <div
+      v-if="editMode && isSectionHighlighted"
+      class="absolute pointer-events-none z-20 rounded"
+      style="inset: -2px; border: 1.5px dashed rgba(250, 204, 21, 0.85);"
     />
 
     <LiveButtonWidget v-if="widget.type === 'button'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />

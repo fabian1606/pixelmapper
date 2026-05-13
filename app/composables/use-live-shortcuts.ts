@@ -124,7 +124,15 @@ export function useLiveShortcuts() {
   }
 
   function clearSelection() {
-    // First press of Escape exits any group isolation; if not isolated, clear selection.
+    // Escape priority: section mapping mode → section isolation → group isolation → clear selection
+    if (store.sectionMappingMode !== null) {
+      store.sectionMappingMode = null;
+      return;
+    }
+    if (store.isolatedSectionId !== null) {
+      store.isolatedSectionId = null;
+      return;
+    }
     if (store.isolatedGroupId !== null) {
       store.isolatedGroupId = null;
       return;
