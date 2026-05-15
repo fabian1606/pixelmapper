@@ -5,8 +5,7 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
 import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
-import { applyPreset } from '~/components/engine/composables/preset-apply';
-import { resolvePreset } from '~/components/engine/composables/preset-resolve';
+import { setActivePreset } from '~/components/engine/composables/preset-activation';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -38,13 +37,7 @@ onUnmounted(offTrigger);
 function applyOwnMapping(active: boolean) {
   const { mapping } = props.widget;
   if (mapping.type === 'preset' && mapping.presetId && active) {
-    const presets = engineStore.savedPresets;
-    const preset = presets.find((p: any) => p.id === mapping.presetId);
-    if (preset) {
-      const resolved = resolvePreset(preset, presets);
-      applyPreset(resolved, engineStore.flatFixtures, engineStore.activeEffects);
-      engineStore.triggerCanvasSync?.();
-    }
+    setActivePreset(mapping.presetId);
   } else if (mapping.type === 'channel' && mapping.fixtureId != null && mapping.channelOffset != null) {
     const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
     const ch = fixture?.channels[mapping.channelOffset];

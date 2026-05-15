@@ -35,6 +35,24 @@ export function setPersistenceHooks(hooks: {
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
 }
 
+/**
+ * Persist a change directly to the project_changes tail WITHOUT pushing it onto
+ * the undo stack. For state transitions that must survive reload / sync to
+ * collaborators but should not be reachable via Ctrl+Z (e.g. activating a
+ * preset). Replayed on load via the registered command factory.
+ */
+export function persistChange(commandType: string, payload: object) {
+  if (!persistenceHooks.pushChange) return;
+  persistenceHooks.pushChange(commandType, payload).then((seq) => {
+    if (seq != null) lastSeenSequenceNumber.value = seq;
+    commandsSinceSnapshot.value++;
+    if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
+      commandsSinceSnapshot.value = 0;
+      persistenceHooks.saveSnapshot();
+    }
+  }).catch(err => console.warn('[history] persistChange failed:', err));
+}
+
 export function useHistory() {
   const canUndo = computed(() => past.value.length > 0);
   const canRedo = computed(() => future.value.length > 0);

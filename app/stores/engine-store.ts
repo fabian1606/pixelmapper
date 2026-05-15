@@ -140,8 +140,13 @@ export const useEngineStore = defineStore('engine', () => {
 
   function clearAllOverrides() {
     overrideMap.value = new Map();
-    activeEffects.value.splice(0, activeEffects.value.length);
     resetFixtureChannels(flatFixtures.value);
+    // Route effects clear through history so it's pushed to the Supabase tail
+    // and survives page reloads. Without this, the tail still contains the
+    // SetModifiers command that added the effect, which gets replayed on load.
+    const before = cloneEffectsList(activeEffects.value);
+    const history = useHistory();
+    history.execute(new SetModifiersCommand(engine, before, [], 'Clear all'));
   }
 
   function clearUniverseOverrides(universe: number) {
@@ -363,12 +368,13 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages } = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId } = deserializeProject(snapshot);
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
     activeEffects.value = effects;
     engine.effects = activeEffects.value;
+    selectedPresetId.value = restoredPresetId;
     triggerRef(sceneNodes);
     // Load live pages SYNCHRONOUSLY so the tail replay (which runs immediately
     // after this in loadProject) sees the pages and can mutate them. Earlier
@@ -503,6 +509,7 @@ export const useEngineStore = defineStore('engine', () => {
           activeEffects.value,
           liveStore.pages,
           liveStore.liveControllers,
+          selectedPresetId.value,
         );
         await supabase.functions.invoke('save-snapshot', {
           body: {

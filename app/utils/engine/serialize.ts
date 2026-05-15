@@ -65,6 +65,8 @@ export interface ProjectSnapshot {
   livePages?: LivePage[]
   /** Controller instances persisted with the project. Auto-connect on load. */
   liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
+  /** Which preset is active at snapshot time — restored so reload keeps it. */
+  selectedPresetId?: string | null
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -127,6 +129,7 @@ export function serializeProject(
   activeEffects: Effect[],
   livePages: LivePage[] = [],
   liveControllers: string[] = [],
+  selectedPresetId: string | null = null,
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -136,6 +139,7 @@ export function serializeProject(
     activeEffects: JSON.parse(JSON.stringify(activeEffects)),
     livePages: JSON.parse(JSON.stringify(livePages)),
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
+    selectedPresetId,
   }
 }
 
@@ -191,6 +195,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   globalBases: Record<string, number>
   activeEffects: Effect[]
   livePages: LivePage[]
+  selectedPresetId: string | null
 } {
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
@@ -199,5 +204,6 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     globalBases: { ...snapshot.globalBases },
     activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
+    selectedPresetId: snapshot.selectedPresetId ?? null,
   }
 }

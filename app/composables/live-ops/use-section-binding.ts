@@ -5,8 +5,7 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { findSectionFor, resolveSectionSource, memberKey, type SectionMembership } from '~/utils/live/sections';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
-import { resolvePreset } from '~/components/engine/composables/preset-resolve';
-import { applyPreset } from '~/components/engine/composables/preset-apply';
+import { setActivePreset } from '~/components/engine/composables/preset-activation';
 import type { Preset } from '~/utils/engine/preset-types';
 
 /**
@@ -93,9 +92,7 @@ export function sectionPress(args: {
   }
 
   if (shouldApply) {
-    const resolved = resolvePreset(bound.preset, engineStore.savedPresets);
-    applyPreset(resolved, engineStore.flatFixtures, engineStore.activeEffects);
-    engineStore.triggerCanvasSync?.();
+    setActivePreset(bound.preset.id);
   }
   return true;
 }

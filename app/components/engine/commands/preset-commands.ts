@@ -1,7 +1,8 @@
 import type { Command } from '../composables/use-history';
 import type { Preset, PresetCategory } from '~/utils/engine/preset-types';
 import type { Ref } from 'vue';
-import { type SerializableCommand, registerCommand } from './serializable-command';
+import { type SerializableCommand, type ReplayContext, registerCommand } from './serializable-command';
+import { applyActivePreset } from '../composables/preset-activation';
 
 /**
  * Undoable command for creating a preset.
@@ -172,4 +173,47 @@ registerCommand('OverwritePreset', (payload, ctx) => {
     () => ctx.savedPresets,
     ctx.setSavedPresets,
   );
+});
+
+/**
+ * Replay-only command for "active preset changed". Persisted to the change tail
+ * by `setActivePreset` (not via the undo stack — preset activation is
+ * deliberately not undoable). On project load it re-runs the full activation so
+ * the restored fixture state matches the persisted `selectedPresetId`.
+ */
+export class SetActivePresetCommand implements SerializableCommand {
+  readonly commandType = 'SetActivePreset';
+  description: string;
+
+  constructor(
+    private presetId: string | null,
+    private ctx: ReplayContext,
+  ) {
+    this.description = presetId ? 'Activate Preset' : 'Deactivate Preset';
+  }
+
+  toPayload() {
+    return { presetId: this.presetId };
+  }
+
+  execute() {
+    applyActivePreset(
+      {
+        savedPresets: this.ctx.savedPresets,
+        flatFixtures: this.ctx.flatFixtures,
+        activeEffects: this.ctx.activeEffects,
+        getSelectedPresetId: this.ctx.getSelectedPresetId,
+        setSelectedPresetId: this.ctx.setSelectedPresetId,
+        triggerCanvasSync: () => {},
+      },
+      this.presetId,
+    );
+  }
+
+  // Preset activation is not undoable.
+  undo() {}
+}
+
+registerCommand('SetActivePreset', (payload, ctx) => {
+  return new SetActivePresetCommand(payload.presetId ?? null, ctx);
 });

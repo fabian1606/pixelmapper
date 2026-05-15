@@ -181,14 +181,18 @@ export function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[
       const fixture = fixtureMap.get(fixtureId);
       if (!fixture) continue;
 
-      for (const snap of category.channels) {
-        const ch = fixture.channels[snap.channelIndex];
-        if (!ch || ch.type !== snap.channelType) continue; // sanity check
-        ch.chaserConfig.stepValues = [ch.defaultValue];
-        ch.chaserConfig.stepsCount = 1;
-        ch.chaserConfig.activeEditStep = 0;
-        ch.chaserConfig.isPlaying = false;
-        ch.currentBaseValue = ch.defaultValue;
+      // Symmetric with applyPreset: reset every channel of this fixture whose
+      // type belongs to this category, not just the snapshots the preset stored.
+      // Otherwise stale chaserConfig from prior modifiers (noise/sequencer that
+      // baked stepValues into the channels) survives the stop.
+      for (const ch of fixture.channels) {
+        if (getCategoryType(ch.type) === category.type) {
+          ch.chaserConfig.stepValues = [ch.defaultValue];
+          ch.chaserConfig.stepsCount = 1;
+          ch.chaserConfig.activeEditStep = 0;
+          ch.chaserConfig.isPlaying = false;
+          ch.currentBaseValue = ch.defaultValue;
+        }
       }
     }
 

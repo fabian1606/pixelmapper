@@ -103,8 +103,7 @@ Two mechanisms prevent feedback loops:
 | `channel.update` | A | shared | raf | replace | Bulk channel state — `stepValues[]` and `colorValue` per fixture/channel |
 | `modifier.update` | A | shared | raf | replace | Incremental param patch on a single effect by id (`Object.assign(effect, changes)`) |
 | `modifier.sync` | A | shared | raf | replace | **Full effects-list replace**, dispatched when a structural change (split) happens locally so remotes get the new effect tree atomically |
-| `preset.activate` | A | shared | immediate | replace | Calls local `applyPreset` and sets `selectedPresetId` |
-| `preset.deactivate` | A | shared | immediate | replace | Calls local `stopPreset`, clears `selectedPresetId` if matching |
+| `preset.set` | A | shared | immediate | replace | `{ presetId: string \| null }` — applies/stops the preset and updates `selectedPresetId` via `setActivePreset(…, { broadcast: false, persist: false })` |
 | `engine.clock` | A | shared | immediate | replace | Sets shared `clockEpoch` (only adopts if remote epoch is earlier) |
 
 ## Special Concerns
@@ -179,6 +178,15 @@ function instantiateEffect(effect: any): Effect {
 
 `cloneEffectsList(effects)` calls this for every entry and copies the common + per-class properties onto the new instance. It is invoked by `SetModifiersCommand.execute/undo`, by `deserializeProject` in `app/utils/engine/serialize.ts`, and by the `modifier.sync` op apply.
 
+### Preset Activation — both tiers, not undoable
+
+Activating a preset must reach collaborators *within a frame* (Tier 2) **and** survive a reload (Tier 1) — but it must **not** sit on the undo stack. `setActivePreset` (`preset-activation.ts`) therefore does both pushes itself:
+
+- **Tier 2** — dispatches the `preset.set` live op for immediate cross-client sync.
+- **Tier 1** — calls `persistChange('SetActivePreset', { presetId })`. This is the same persistence hook `useHistory().execute` uses, but invoked directly so the change is written to `project_changes` and replayed on load **without** being pushed onto `past[]`. The `SetActivePreset` command is registered with `registerCommand` purely for tail replay; its `undo()` is a no-op.
+
+Both pushes are skipped when `isApplyingRemote()` is true (the activation came from an inbound `preset.set`), and when called from the `SetActivePreset` replay command. `selectedPresetId` is also stored directly in `ProjectSnapshot` so a fresh snapshot doesn't depend on the tail.
+
 ## File Map
 
 | File | Role |
@@ -191,10 +199,11 @@ function instantiateEffect(effect: any): Effect {
 | `app/composables/live-ops/fixture-ops.ts` | `fixture.drag`, `selection.set` |
 | `app/composables/live-ops/modifier-ops.ts` | `modifier.update`, `modifier.sync`, `modifier.editing` |
 | `app/composables/live-ops/channel-ops.ts` | `channel.update` |
-| `app/composables/live-ops/preset-ops.ts` | `preset.activate`, `preset.deactivate` |
+| `app/composables/live-ops/preset-ops.ts` | `preset.set` — delegates to `setActivePreset` |
+| `app/components/engine/composables/preset-activation.ts` | `setActivePreset` / `applyActivePreset` — the single funnel for preset activation (apply + broadcast + persist) |
 | `app/composables/live-ops/engine-ops.ts` | `engine.clock` |
 | `app/composables/dispatch-channel-update.ts` | Helper that serializes `flatFixtures` channels and dispatches `channel.update` |
-| `app/components/engine/composables/use-history.ts` | `execute / executeRemote`, `lastSeenSequenceNumber`, persistence hooks |
+| `app/components/engine/composables/use-history.ts` | `execute / executeRemote`, `lastSeenSequenceNumber`, persistence hooks, `persistChange` (persist a change without an undo entry) |
 | `app/components/engine/commands/serializable-command.ts` | Command registry, `registerCommand`, `commandFromPayload`, `ReplayContext` |
 | `app/components/engine/commands/set-modifiers-command.ts` | `cloneEffectsList`, `instantiateEffect` (fingerprint reconstruction) |
 | `app/components/engine/composables/use-chaser-modifiers.ts` | `getSafeEffectToMutate` (split logic), `dispatchModifierUpdate` (`modifier.update` vs `modifier.sync` branching) |

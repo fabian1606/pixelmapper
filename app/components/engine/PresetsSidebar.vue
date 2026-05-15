@@ -2,9 +2,9 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
-import { useLiveBusStore } from '~/stores/live-bus-store';
 import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
+import { setActivePreset, toggleActivePreset } from '~/components/engine/composables/preset-activation';
 import { useHistory } from '~/components/engine/composables/use-history';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
@@ -23,7 +23,9 @@ import {
   Zap,
   Activity,
   Layers,
+  RotateCcw,
 } from 'lucide-vue-next';
+import { useEngineStore } from '~/stores/engine-store';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
 import {
   DropdownMenu,
@@ -68,10 +70,8 @@ const {
   savedPresets,
   selectedPresetId,
   getUnsavedChanges,
-  applyPreset,
   renamePreset,
   setPresetColor,
-  stopPreset,
   getActivePresetResolved,
 } = usePresets();
 
@@ -82,6 +82,11 @@ function presetDisplayColor(preset: Preset): string {
 }
 
 const history = useHistory();
+const engineStore = useEngineStore();
+
+function resetAll() {
+  engineStore.clearAllOverrides();
+}
 
 // Shortcuts
 useShortcuts([
@@ -286,14 +291,9 @@ watch(activeBaseId, (baseId) => {
 });
 
 function togglePresetApply(preset: Preset) {
-  if (selectedPresetId.value === preset.id) {
-    stopPreset(preset, props.fixtures, props.effects);
-    useLiveBusStore().dispatch('preset.deactivate', { presetId: preset.id });
-  } else {
-    applyPreset(preset, props.fixtures, props.effects);
-    openPreset.value = preset.basePresetId || preset.id;
-    useLiveBusStore().dispatch('preset.activate', { presetId: preset.id });
-  }
+  const willActivate = selectedPresetId.value !== preset.id;
+  toggleActivePreset(preset.id);
+  if (willActivate) openPreset.value = preset.basePresetId || preset.id;
 }
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
@@ -309,7 +309,7 @@ const categoryTypeToTab: Record<PresetCategoryType, string> = {
 
 function handleCategoryClick(category: PresetCategory, preset: Preset) {
   if (selectedPresetId.value !== preset.id) {
-    applyPreset(preset, props.fixtures, props.effects);
+    setActivePreset(preset.id);
   }
   emit('selectFixtures', category.fixtureIds);
   const effectId = category.isModifier && category.modifiers.length > 0 ? category.modifiers[0]?.id : undefined;
@@ -438,12 +438,23 @@ defineExpose({
         <span class="font-semibold text-xs tracking-wider uppercase text-muted-foreground">
           Presets
         </span>
-        <span
-          class="text-[10px] tabular-nums text-muted-foreground"
-          :class="{ 'text-foreground': savedPresets.length > 0 }"
-        >
-          {{ savedPresets.length }}
-        </span>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Reset all channels and clear all modifiers (Blackout)"
+            @click="resetAll"
+          >
+            <RotateCcw class="size-3" />
+            Reset
+          </button>
+          <span
+            class="text-[10px] tabular-nums text-muted-foreground"
+            :class="{ 'text-foreground': savedPresets.length > 0 }"
+          >
+            {{ savedPresets.length }}
+          </span>
+        </div>
       </div>
 
       <!-- ─── Presets accordion list ──────────────────────────────────────── -->

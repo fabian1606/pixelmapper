@@ -66,8 +66,32 @@ const currentChannelValue = computed(() => {
 
 ## Preset System
 
-Presets store a snapshot of channel states for specific fixtures:
+Presets store a snapshot of channel states (and modifier effects) for specific fixtures:
 
 - **Selective application**: Each preset stores `fixtureIds` indicating which fixtures it covers. Loading a preset does not affect fixtures not listed in it.
 - **Diffing**: The engine compares live programmer state against a preset's snapshot (filtered by `fixtureIds`) to detect unsaved changes. Editing a non-preset fixture doesn't mark the preset as modified.
-- **History integration**: Loading or modifying a preset goes through the command system, so it is fully undoable.
+- **Save / delete / overwrite** go through the command system (`preset-commands.ts`), so they are fully undoable.
+
+### Active preset — single source of truth
+
+`engineStore.selectedPresetId` (`ref<string | null>`) is **the** answer to "which preset is currently running". Both the design view (`PresetsSidebar`) and the live view (buttons, controller twins, section members) read it; whoever changes it must change it through one path.
+
+That path is **`setActivePreset(presetId, opts?)`** in `app/components/engine/composables/preset-activation.ts`. Every entry point funnels through it:
+
+- `PresetsSidebar` — `togglePresetApply` / category click
+- `LiveButtonWidget`, `LiveControllerTwinWidget` — preset-mapped buttons
+- `use-section-binding.ts` — section members (`sectionPress`)
+- the `preset.set` live op — remote activations
+
+`setActivePreset` does three things:
+
+1. **`applyActivePreset(ctx, presetId)`** — the pure core transition: stop the previously-active preset (resetting its channels/effects), apply the target preset, set `selectedPresetId`. Works against either the engine store or a project-load `ReplayContext`.
+2. **Broadcast** — dispatches the `preset.set` live op (unless the change *came from* a remote op — see `isApplyingRemote()`).
+3. **Persist** — `persistChange('SetActivePreset', …)` writes a `SetActivePreset` row to the change tail.
+
+### Persistence across reload
+
+Preset activation is **persisted but not undoable** — it must survive a reload and reach collaborators, but `Ctrl+Z` should not toggle presets.
+
+- `selectedPresetId` is part of `ProjectSnapshot` (`serialize.ts`), restored by `applyProjectSnapshot`.
+- Activations *after* the last snapshot are replayed from the tail via the `SetActivePreset` command (`preset-commands.ts`), whose `execute()` re-runs `applyActivePreset` so the restored fixture state matches the restored `selectedPresetId`. It is registered with `registerCommand` for replay but pushed via `persistChange()` — i.e. it bypasses the undo stack. See [Live Collaboration → Preset Activation](live-collaboration.md) for the broadcast + persist flow.

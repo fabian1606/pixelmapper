@@ -4,7 +4,6 @@ import type { Preset } from '~/utils/engine/preset-types';
 import type { Effect } from '~/utils/engine/types';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { extractCategories } from './preset-diff';
-import { applyPreset as _applyPreset, stopPreset as _stopPreset } from './preset-apply';
 import { resolvePreset } from './preset-resolve';
 
 // Re-export for consumers that import extractCategories from this module
@@ -66,18 +65,6 @@ export function usePresets() {
     return preset;
   }
 
-  function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
-    const resolved = resolvePreset(preset, savedPresets.value);
-    _applyPreset(resolved, fixtures, effects);
-    selectedPresetId.value = preset.id;
-  }
-
-  function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
-    const resolved = resolvePreset(preset, savedPresets.value);
-    _stopPreset(resolved, fixtures, effects);
-    if (selectedPresetId.value === preset.id) selectedPresetId.value = null;
-  }
-
   function deletePreset(id: string): void {
     const idx = savedPresets.value.findIndex((p) => p.id === id);
     if (idx !== -1) savedPresets.value.splice(idx, 1);
@@ -104,8 +91,6 @@ export function usePresets() {
     getUnsavedChanges,
     savePreset,
     overwritePreset,
-    applyPreset,
-    stopPreset,
     deletePreset,
     renamePreset,
     setPresetColor,

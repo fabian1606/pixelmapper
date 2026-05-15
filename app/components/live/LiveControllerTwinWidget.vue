@@ -13,8 +13,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { findBoundPreset, sectionPress, sectionRelease } from '~/composables/live-ops/use-section-binding';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { memberKey, findSectionFor } from '~/utils/live/sections';
-import { applyPreset } from '~/components/engine/composables/preset-apply';
-import { resolvePreset } from '~/components/engine/composables/preset-resolve';
+import { setActivePreset } from '~/components/engine/composables/preset-activation';
 import type { ControlInputEvent, ControllerControl } from '~/utils/controllers/types';
 
 const props = defineProps<{
@@ -57,13 +56,7 @@ function getChild(id: string) {
 // ── Mapping dispatch ────────────────────────────────────────────────────────
 function applyMapping(mapping: LiveMapping, active: boolean, value?: number) {
   if (mapping.type === 'preset' && mapping.presetId && active) {
-    const presets = engineStore.savedPresets;
-    const preset = presets.find((p: any) => p.id === mapping.presetId);
-    if (preset) {
-      const resolved = resolvePreset(preset, presets);
-      applyPreset(resolved, engineStore.flatFixtures, engineStore.activeEffects);
-      engineStore.triggerCanvasSync?.();
-    }
+    setActivePreset(mapping.presetId);
   } else if (mapping.type === 'channel' && mapping.fixtureId != null && mapping.channelOffset != null) {
     const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
     const ch = fixture?.channels[mapping.channelOffset];
