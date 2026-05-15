@@ -377,9 +377,10 @@ export const useEngineStore = defineStore('engine', () => {
       }
     }
 
-    connectionsStore.sendFrame(outputBuffer);
+    const cs = useConnectionsStore();
+    cs.sendFrame(outputBuffer);
     try {
-      connectionsStore.notifyEngineState({
+      cs.notifyEngineState({
         bpm: engine.globalBpm.value,
         elapsedMs: elapsed,
         layoutRevision: layoutRevision.value,
@@ -635,7 +636,6 @@ export const useEngineStore = defineStore('engine', () => {
     clearUniverseOverrides,
     getOutputBuffer,
     initEngine,
-    _syncTrigger,
     triggerCanvasSync,
     flushEngineOutput,
     currentProjectId,

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance } from '~/utils/live/types';
-import type { ColorParams } from '~/utils/engine/types';
+import type { RGB } from '~/utils/live/color-utils';
 import { clearFlashStack } from '~/components/engine/composables/preset-activation';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
@@ -30,9 +30,10 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   // Runtime-only: which member(s) inside a section are currently "active".
   // Map<sectionId, Set<memberKey>>. Cleared on reset / page switch.
   const activeSectionMembers = ref<Map<string, Set<string>>>(new Map());
-  // Runtime-only: hue overrides per preset ID (or 'global' for global scope).
+  // Runtime-only: absolute RGB base-color overrides per preset ID.
+  // Written by the color wheel widget and by auto-color section slots.
   // Shared via LiveBus, survives page switches but not project reload.
-  const presetHueOverrides = ref<Map<string, ColorParams>>(new Map());
+  const presetColorOverrides = ref<Map<string, RGB>>(new Map());
   /** Controller instances persisted with the project. Auto-connect on load. */
   const liveControllers = ref<LiveControllerInstance[]>([]);
 
@@ -43,9 +44,9 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     activePageId.value = incoming[0]?.id ?? null;
   }
 
-  function setPresetHue(key: string, params: ColorParams | null) {
-    if (params === null) presetHueOverrides.value.delete(key);
-    else presetHueOverrides.value.set(key, params);
+  function setPresetColor(key: string, rgb: RGB | null) {
+    if (rgb === null) presetColorOverrides.value.delete(key);
+    else presetColorOverrides.value.set(key, { ...rgb });
   }
 
   function reset() {
@@ -60,7 +61,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     isolatedSectionId.value = null;
     sectionMappingMode.value = null;
     activeSectionMembers.value = new Map();
-    presetHueOverrides.value = new Map();
+    presetColorOverrides.value = new Map();
     liveControllers.value = [];
   }
 
@@ -212,12 +213,12 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     isolatedSectionId,
     sectionMappingMode,
     activeSectionMembers,
-    presetHueOverrides,
+    presetColorOverrides,
     liveControllers,
     activePage,
     loadPages,
     reset,
-    setPresetHue,
+    setPresetColor,
     addLiveController,
     removeLiveController,
     loadLiveControllers,

@@ -4,8 +4,8 @@ import type { LiveWidget } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
-import { applyHueOverrideEffect } from '~/composables/live-ops/hue-ops';
-import type { ColorParams } from '~/utils/engine/types';
+import { reapplyColorOverrideForActive } from '~/composables/live-ops/color-override-ops';
+import { getPresetNaturalRGB, hsvToRgb, rgbToHsv, type RGB } from '~/utils/live/color-utils';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -17,100 +17,92 @@ const liveBus = useLiveBusStore();
 const engineStore = useEngineStore();
 const liveStore = useLiveModeStore();
 
-const scope = computed(() => props.widget.colorWheelScope ?? 'preset');
+const activePresetId = computed(() => engineStore.selectedPresetId);
 
-const overrideKey = computed<string | null>(() => {
-  if (scope.value === 'global') return 'global';
-  return engineStore.selectedPresetId ?? null;
+const naturalRGB = computed<RGB | null>(() => {
+  const id = activePresetId.value;
+  if (!id) return null;
+  return getPresetNaturalRGB(id, engineStore.savedPresets);
 });
 
-const currentParams = computed<ColorParams>(() => {
-  const key = overrideKey.value;
-  if (!key) return { hueShift: 0, saturation: 1, hueRange: 0, satRange: 0 };
-  return liveStore.presetHueOverrides.get(key) ?? { hueShift: 0, saturation: 1, hueRange: 0, satRange: 0 };
+/** Effective base color: override if set, else preset's natural RGB. */
+const effectiveRGB = computed<RGB | null>(() => {
+  const id = activePresetId.value;
+  if (!id) return null;
+  return liveStore.presetColorOverrides.get(id) ?? naturalRGB.value;
 });
 
-// ── Circular wheel ────────────────────────────────────────────────────────────
-// Angle on the wheel = hueShift (0-360), mapped to hueShift (-180 to +180).
-// Distance from center = saturation multiplier (0 at center → 1 at 50% → 2 at rim).
+const hasOverride = computed(() => {
+  const id = activePresetId.value;
+  return !!id && liveStore.presetColorOverrides.has(id);
+});
+
+const hasColorChannels = computed(() => naturalRGB.value !== null);
+
+// ── Wheel math ────────────────────────────────────────────────────────────────
+// Pointer position → HSV (angle = hue 0–360, distance/radius = saturation 0–1),
+// value fixed at 1. Then HSV → RGB.
 
 const wheelRef = ref<HTMLElement | null>(null);
 
-function paramsFromPos(x: number, y: number, radius: number): ColorParams {
-  // angle in degrees (0 = right, 90 = down, like CSS conic)
+function rgbFromPos(x: number, y: number, radius: number): RGB {
   let angle = Math.atan2(y, x) * 180 / Math.PI + 90;
   if (angle < 0) angle += 360;
-  // Convert 0-360 → hueShift -180..+180
-  const hueShift = angle > 180 ? angle - 360 : angle;
-
   const dist = Math.min(Math.sqrt(x * x + y * y), radius);
-  // center = saturation 1 (unchanged), rim = 2 (vivid), but allow going toward 0 via negative dist
-  // Map: 0..radius → 0..2  (simple linear; center = 0)
-  const saturation = Math.round(((dist / radius) * 2) * 100) / 100;
-
-  return { hueShift: Math.round(hueShift), saturation, hueRange: 0, satRange: 0 };
+  const sat = dist / radius;
+  return hsvToRgb(angle, sat, 1);
 }
 
-function handleFromParams(params: ColorParams, containerSize: number): { left: string; top: string; color: string } {
-  const radius = containerSize / 2;
-  // hueShift -180..+180 → angle 0..360
-  let angle = params.hueShift < 0 ? params.hueShift + 360 : params.hueShift;
-  // account for conic-gradient start offset
-  const angleDeg = angle - 90;
+function handlePosFromRGB(rgb: RGB): { left: string; top: string; color: string } {
+  const { h, s } = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  const angleDeg = h - 90;
   const angleRad = angleDeg * Math.PI / 180;
-  // saturation 0..2 → distance 0..radius
-  const dist = Math.min((params.saturation / 2) * radius, radius);
-
-  const left = 50 + (Math.cos(angleRad) * dist / radius) * 50;
-  const top = 50 + (Math.sin(angleRad) * dist / radius) * 50;
-
-  // Show target hue as handle color (full saturation/brightness)
-  const hue = ((params.hueShift % 360) + 360) % 360;
-  const color = `hsl(${hue}deg,100%,50%)`;
-  return { left: `${left}%`, top: `${top}%`, color };
+  const dist = s; // 0–1
+  const left = 50 + Math.cos(angleRad) * dist * 50;
+  const top = 50 + Math.sin(angleRad) * dist * 50;
+  return { left: `${left}%`, top: `${top}%`, color: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})` };
 }
 
-const containerSize = computed(() => {
-  // Use widget h in grid cells * gridSize as proxy; fallback to 120
-  return 120;
+const handleStyle = computed(() => {
+  const rgb = effectiveRGB.value;
+  if (!rgb) return { left: '50%', top: '50%', color: 'rgba(255,255,255,0.5)' };
+  return handlePosFromRGB(rgb);
 });
-
-const handleStyle = computed(() => handleFromParams(currentParams.value, containerSize.value));
-const hasOverride = computed(() => overrideKey.value != null && liveStore.presetHueOverrides.has(overrideKey.value));
 
 const isDragging = ref(false);
 
-function getRelPos(e: MouseEvent | PointerEvent, el: HTMLElement) {
+function getRelPos(e: PointerEvent, el: HTMLElement) {
   const rect = el.getBoundingClientRect();
   const cx = rect.width / 2;
   const cy = rect.height / 2;
   return { x: e.clientX - rect.left - cx, y: e.clientY - rect.top - cy, radius: Math.min(cx, cy) };
 }
 
-function dispatchLocal(params: ColorParams) {
-  const key = overrideKey.value;
-  if (!key) return;
-  liveStore.setPresetHue(key, params);
-  applyHueOverrideEffect();
+/** Local-only update: instant feedback, no broadcast. */
+function setOverrideLocal(rgb: RGB) {
+  const id = activePresetId.value;
+  if (!id) return;
+  liveStore.setPresetColor(id, rgb);
+  reapplyColorOverrideForActive();
 }
 
-function dispatchBroadcast(params: ColorParams) {
-  const key = overrideKey.value;
-  if (!key) return;
-  liveBus.dispatch('hue.update', { key, params });
+/** Broadcast (LiveBus) — used on pointer-up and reset. */
+function broadcastOverride(rgb: RGB | null) {
+  const id = activePresetId.value;
+  if (!id) return;
+  liveBus.dispatch('color.override', { key: id, rgb });
 }
 
 function onPointerDown(e: PointerEvent) {
-  if (props.editMode) return;
+  if (props.editMode || !activePresetId.value) return;
   if (e.button !== 0) return;
   const el = wheelRef.value;
   if (!el) return;
   e.preventDefault();
   isDragging.value = true;
   el.setPointerCapture(e.pointerId);
-
   const pos = getRelPos(e, el);
-  dispatchLocal(paramsFromPos(pos.x, pos.y, pos.radius));
+  setOverrideLocal(rgbFromPos(pos.x, pos.y, pos.radius));
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -118,7 +110,7 @@ function onPointerMove(e: PointerEvent) {
   const el = wheelRef.value;
   if (!el) return;
   const pos = getRelPos(e, el);
-  dispatchLocal(paramsFromPos(pos.x, pos.y, pos.radius));
+  setOverrideLocal(rgbFromPos(pos.x, pos.y, pos.radius));
 }
 
 function onPointerUp(e: PointerEvent) {
@@ -127,105 +119,108 @@ function onPointerUp(e: PointerEvent) {
   const el = wheelRef.value;
   if (!el) return;
   const pos = getRelPos(e, el);
-  dispatchBroadcast(paramsFromPos(pos.x, pos.y, pos.radius));
+  const rgb = rgbFromPos(pos.x, pos.y, pos.radius);
+  setOverrideLocal(rgb);
+  broadcastOverride(rgb);
 }
 
-function resetHue() {
+function resetOverride() {
   if (props.editMode) return;
-  const key = overrideKey.value;
-  if (!key) return;
-  liveBus.dispatch('hue.update', { key, params: null });
+  broadcastOverride(null);
 }
-
-const scopeLabel = computed(() => {
-  if (scope.value === 'global') return 'Global';
-  if (scope.value === 'variant') return 'Variant';
-  return 'Preset';
-});
 
 const activePresetName = computed(() =>
-  engineStore.savedPresets?.find((p: any) => p.id === engineStore.selectedPresetId)?.name ?? null
+  engineStore.savedPresets?.find((p: any) => p.id === activePresetId.value)?.name ?? null
 );
+
+const readout = computed(() => {
+  const rgb = effectiveRGB.value;
+  if (!rgb) return '';
+  return `${rgb.r}, ${rgb.g}, ${rgb.b}`;
+});
 </script>
 
 <template>
   <div
-    class="w-full h-full rounded border border-white/10 flex flex-col items-center justify-between p-2 gap-1 select-none overflow-hidden"
+    class="w-full h-full rounded border border-white/10 flex flex-col p-2 gap-1 select-none overflow-hidden"
     style="background-color: #1a1a1a;"
     :class="editMode ? 'pointer-events-none' : ''"
   >
-    <!-- Header -->
-    <div class="w-full flex items-center justify-between shrink-0">
-      <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {{ widget.label || 'Color' }}
-      </span>
-      <div class="flex items-center gap-2">
-        <span class="text-[9px] text-muted-foreground/50">{{ scopeLabel }}{{ activePresetName ? ` · ${activePresetName}` : '' }}</span>
-        <button
-          v-if="!editMode && hasOverride"
-          class="text-[9px] text-muted-foreground/50 hover:text-muted-foreground transition-colors px-1 rounded"
-          @click.stop="resetHue"
-        >
-          ✕
-        </button>
+    <!-- Header: label + preset name + reset -->
+    <div class="w-full flex items-center justify-between shrink-0 gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+          {{ widget.label || 'Color' }}
+        </span>
+        <span v-if="activePresetName" class="text-[9px] text-muted-foreground/60 truncate">
+          {{ activePresetName }}
+        </span>
       </div>
-    </div>
-
-    <!-- Color Wheel (circular, like FixtureColorPicker) -->
-    <div
-      ref="wheelRef"
-      class="relative rounded-full cursor-crosshair touch-none"
-      style="
-        flex: 1 1 auto;
-        max-width: 100%;
-        aspect-ratio: 1;
-        background: conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red);
-      "
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-    >
-      <!-- White center overlay (desaturated center) -->
-      <div
-        class="absolute inset-0 rounded-full pointer-events-none"
-        style="background: radial-gradient(circle at center, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 60%); mix-blend-mode: screen;"
-      />
-      <!-- Dark rim for depth -->
-      <div
-        class="absolute inset-0 rounded-full pointer-events-none"
-        style="background: radial-gradient(circle at center, rgba(0,0,0,0) 60%, rgba(0,0,0,0.25) 100%);"
-      />
-
-      <!-- "No shift" center indicator -->
-      <div
-        class="absolute rounded-full border border-white/40 pointer-events-none"
-        style="width: 6px; height: 6px; top: calc(50% - 3px); left: calc(50% - 3px); background: rgba(255,255,255,0.3);"
-      />
-
-      <!-- Handle -->
-      <div
-        class="absolute w-5 h-5 rounded-full border-2 border-white shadow-md pointer-events-none transition-none"
-        :class="hasOverride ? 'opacity-100' : 'opacity-40'"
-        :style="{
-          left: handleStyle.left,
-          top: handleStyle.top,
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: handleStyle.color,
-        }"
-      />
-
-      <!-- No-override hint -->
-      <div
-        v-if="!hasOverride && !editMode"
-        class="absolute inset-0 rounded-full flex items-center justify-center pointer-events-none"
+      <button
+        v-if="!editMode && hasOverride"
+        class="text-[9px] text-muted-foreground/60 hover:text-muted-foreground transition-colors px-1 rounded shrink-0"
+        title="Override zurücksetzen"
+        @click.stop="resetOverride"
       >
-        <span class="text-[9px] text-white/30">Drag to shift</span>
-      </div>
+        ✕
+      </button>
     </div>
 
-    <!-- Hue shift readout -->
-    <div v-if="hasOverride" class="text-[9px] text-muted-foreground/60 shrink-0">
-      {{ currentParams.hueShift > 0 ? '+' : '' }}{{ currentParams.hueShift }}°
+    <!-- Wheel -->
+    <div class="relative flex-1 min-h-0 flex items-center justify-center">
+      <div
+        ref="wheelRef"
+        class="relative rounded-full touch-none"
+        :class="(editMode || !activePresetId) ? 'cursor-not-allowed' : 'cursor-crosshair'"
+        style="
+          aspect-ratio: 1;
+          height: 100%;
+          max-width: 100%;
+          background: conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red);
+        "
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+      >
+        <!-- White center overlay (low saturation) -->
+        <div
+          class="absolute inset-0 rounded-full pointer-events-none"
+          style="background: radial-gradient(circle at center, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 70%);"
+        />
+        <!-- Dark rim -->
+        <div
+          class="absolute inset-0 rounded-full pointer-events-none"
+          style="background: radial-gradient(circle at center, rgba(0,0,0,0) 70%, rgba(0,0,0,0.2) 100%);"
+        />
+
+        <!-- Handle: always shows the effective base color -->
+        <div
+          v-if="hasColorChannels"
+          class="absolute w-5 h-5 rounded-full border-2 border-white shadow-md pointer-events-none transition-none"
+          :style="{
+            left: handleStyle.left,
+            top: handleStyle.top,
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: handleStyle.color,
+          }"
+        />
+
+        <!-- No-preset hint -->
+        <div
+          v-if="!activePresetId && !editMode"
+          class="absolute inset-0 rounded-full flex items-center justify-center pointer-events-none"
+        >
+          <span class="text-[9px] text-white/50 px-2 text-center">Preset wählen</span>
+        </div>
+
+        <!-- Bottom-corner readout (overlaid, doesn't change wheel size) -->
+        <div
+          v-if="hasColorChannels"
+          class="absolute bottom-1 right-2 text-[9px] font-mono text-white/70 pointer-events-none drop-shadow"
+        >
+          {{ readout }}
+        </div>
+      </div>
     </div>
   </div>
 </template>

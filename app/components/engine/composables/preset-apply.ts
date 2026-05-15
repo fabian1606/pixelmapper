@@ -5,6 +5,8 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
+import { useLiveModeStore } from '~/stores/live-mode-store';
+import type { RGB } from '~/utils/live/color-utils';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -92,11 +94,22 @@ function clearPresetEffects(preset: Preset, effects: Effect[]): void {
   }
 }
 
+function rgbOverrideValue(channelType: string, override: RGB | undefined): number | null {
+  if (!override) return null;
+  if (channelType === 'RED')   return override.r;
+  if (channelType === 'GREEN') return override.g;
+  if (channelType === 'BLUE')  return override.b;
+  return null;
+}
+
 /** Applies channel snapshots and reconstructs modifier effects from a preset. */
 function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
 
   clearPresetEffects(preset, effects);
+
+  // Pull any runtime color override for this preset — wins over stored RGB step values.
+  const override = useLiveModeStore().presetColorOverrides.get(preset.id);
 
   for (const category of preset.categories) {
     for (const fixtureId of category.fixtureIds) {
@@ -106,13 +119,15 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
       for (const snap of category.channels) {
         const ch = fixture.channels[snap.channelIndex];
         if (!ch || ch.type !== snap.channelType) continue; // sanity check
-        ch.chaserConfig.stepValues = [...snap.stepValues];
-        ch.chaserConfig.stepsCount = snap.chaserConfig?.stepsCount ?? snap.stepValues.length;
+        const overrideV = rgbOverrideValue(snap.channelType, override);
+        const baseValue = overrideV ?? snap.stepValues[0] ?? ch.defaultValue;
+        ch.chaserConfig.stepValues = overrideV !== null ? [overrideV] : [...snap.stepValues];
+        ch.chaserConfig.stepsCount = overrideV !== null ? 1 : (snap.chaserConfig?.stepsCount ?? snap.stepValues.length);
         ch.chaserConfig.activeEditStep = snap.chaserConfig?.activeEditStep ?? 0;
         ch.chaserConfig.isPlaying = snap.chaserConfig?.isPlaying ?? false;
         if (snap.chaserConfig?.stepDuration) ch.chaserConfig.stepDuration = { ...snap.chaserConfig.stepDuration };
         if (snap.chaserConfig?.fadeDuration) ch.chaserConfig.fadeDuration = { ...snap.chaserConfig.fadeDuration };
-        ch.currentBaseValue = snap.stepValues[0] ?? ch.defaultValue;
+        ch.currentBaseValue = baseValue;
       }
     }
 
@@ -122,6 +137,33 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
       if (eff) {
         eff.targetFixtureIds = [...category.fixtureIds];
         effects.push(eff);
+      }
+    }
+  }
+}
+
+/**
+ * Fast path used by the color wheel during drag: rewrites just the RED/GREEN/BLUE
+ * step values on the preset's target fixtures, without touching effects or
+ * non-color channels. Avoids the heavier `applyPreset` work on every pointermove.
+ */
+export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB | null): void {
+  const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
+  for (const category of preset.categories) {
+    for (const fixtureId of category.fixtureIds) {
+      const fixture = fixtureMap.get(fixtureId);
+      if (!fixture) continue;
+      for (const snap of category.channels) {
+        if (snap.channelType !== 'RED' && snap.channelType !== 'GREEN' && snap.channelType !== 'BLUE') continue;
+        const ch = fixture.channels[snap.channelIndex];
+        if (!ch || ch.type !== snap.channelType) continue;
+        const overrideV = rgbOverrideValue(snap.channelType, rgb ?? undefined);
+        const baseValue = overrideV ?? snap.stepValues[0] ?? ch.defaultValue;
+        ch.chaserConfig.stepValues = [baseValue];
+        ch.chaserConfig.stepsCount = 1;
+        ch.chaserConfig.activeEditStep = 0;
+        ch.chaserConfig.isPlaying = false;
+        ch.currentBaseValue = baseValue;
       }
     }
   }

@@ -3,8 +3,6 @@ import { computed } from 'vue';
 import { Play } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useEngineStore } from '~/stores/engine-store';
-import { generateSectionAutoColors } from '~/composables/live-ops/hue-ops';
-import type { ColorWheelScope } from '~/utils/live/types';
 import { useControllerStore } from '~/stores/controller-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import {
@@ -193,8 +191,9 @@ const eligibleAddTargets = computed<LiveSection[]>(() => {
 
 function defaultModeForSource(source: SectionSource): SectionMode {
   switch (source) {
-    case 'all-presets':       return 'single-select';
-    case 'preset-variants':   return 'single-select';
+    case 'all-presets':         return 'single-select';
+    case 'preset-variants':     return 'single-select';
+    case 'auto-color-variants': return 'single-select';
   }
 }
 
@@ -315,6 +314,7 @@ const isInMappingMode = computed(() => {
 const SOURCE_LABELS: Record<SectionSource, string> = {
   'all-presets': 'Alle Presets',
   'preset-variants': 'Varianten des aktiven Presets',
+  'auto-color-variants': 'Auto-Color Varianten',
 };
 const MODE_LABELS: Record<SectionMode, string> = {
   'flash': 'Flash (gedrückt = aktiv)',
@@ -322,35 +322,6 @@ const MODE_LABELS: Record<SectionMode, string> = {
   'multi-select': 'Mehrfachauswahl (Toggle)',
 };
 
-// ── Color Wheel Widget settings ───────────────────────────────────────────────
-
-const selectedColorWheel = computed(() => {
-  if (store.selectedWidgetIds.size !== 1) return null;
-  const id = Array.from(store.selectedWidgetIds)[0];
-  const widget = store.activePage?.widgets.find(w => w.id === id);
-  return widget?.type === 'color-wheel' ? widget : null;
-});
-
-const SCOPE_LABELS: Record<ColorWheelScope, string> = {
-  'preset': 'Preset (bis Preset wechselt)',
-  'variant': 'Variant (bis Variant überschreibt)',
-  'global': 'Global (inkl. Flash & Blind)',
-};
-
-function setColorWheelScope(scope: ColorWheelScope) {
-  const widget = selectedColorWheel.value;
-  if (!widget) return;
-  widget.colorWheelScope = scope;
-}
-
-// ── Section auto-color ────────────────────────────────────────────────────────
-
-function applyAutoColors() {
-  const sec = selectionSection.value;
-  if (!sec) return;
-  const scope = sec.source === 'all-presets' ? 'preset' : 'preset';
-  generateSectionAutoColors(sec.id, scope);
-}
 </script>
 
 <template>
@@ -436,18 +407,6 @@ function applyAutoColors() {
             </select>
           </div>
 
-          <!-- Auto-Color -->
-          <div class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Farben</span>
-            <button
-              class="w-full px-2 py-1.5 rounded text-[11px] font-medium bg-accent hover:bg-accent/80 transition-colors text-left"
-              title="Hue gleichmäßig über Section-Slots verteilen"
-              @click="applyAutoColors"
-            >
-              Auto-Color generieren
-            </button>
-          </div>
-
           <div class="flex gap-1.5 mt-1">
             <button
               class="flex-1 px-2 py-1.5 rounded text-[11px] font-medium bg-accent hover:bg-accent/80 transition-colors"
@@ -492,26 +451,6 @@ function applyAutoColors() {
             </select>
           </div>
         </template>
-      </div>
-
-      <!-- ── Color Wheel scope selector ──────────────────────────────────── -->
-      <div v-if="selectedColorWheel && !selectionSection" class="flex flex-col gap-2 pb-4 border-b border-border">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Color Widget</span>
-        <div class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Scope</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedColorWheel.colorWheelScope ?? 'preset'"
-            @change="(e) => setColorWheelScope((e.target as HTMLSelectElement).value as ColorWheelScope)"
-          >
-            <option v-for="(label, key) in SCOPE_LABELS" :key="key" :value="key">{{ label }}</option>
-          </select>
-        </div>
-        <p class="text-[10px] text-muted-foreground/60 leading-snug">
-          <template v-if="(selectedColorWheel.colorWheelScope ?? 'preset') === 'preset'">Hue gilt nur für das aktuell aktive Preset. Bei Preset-Wechsel wird der neue Preset-Wert angezeigt.</template>
-          <template v-else-if="selectedColorWheel.colorWheelScope === 'variant'">Hue gilt pro Variant. Flash/Blind-Presets werden nicht beeinflusst.</template>
-          <template v-else>Hue gilt global für alle Presets, inkl. Flash und Blind.</template>
-        </p>
       </div>
 
       <!-- ── Twin-level: controller + device binding (no control focus) ── -->

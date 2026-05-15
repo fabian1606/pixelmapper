@@ -7,9 +7,16 @@ import { findSectionFor, resolveSectionSource, memberKey, type SectionMembership
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
 import type { Preset } from '~/utils/engine/preset-types';
+import type { RGB } from '~/utils/live/color-utils';
+
+export interface BoundSlot {
+  membership: SectionMembership;
+  preset: Preset;
+  colorOverride?: RGB;
+}
 
 /**
- * Resolve a section-bound preset for a given widget / twin-control. Pure —
+ * Resolve a section-bound slot for a given widget / twin-control. Pure —
  * no reactive subscription. Use inside computed() to make reactive.
  */
 export function findBoundPreset(
@@ -18,13 +25,17 @@ export function findBoundPreset(
   controlId: string | undefined,
   savedPresets: Preset[],
   selectedPresetId: string | null,
-): { membership: SectionMembership; preset: Preset } | null {
+): BoundSlot | null {
   const membership = findSectionFor(page, widgetId, controlId);
   if (!membership) return null;
-  const source = resolveSectionSource(membership.section.source, { savedPresets, selectedPresetId });
-  const preset = source[membership.index];
-  if (!preset) return null;
-  return { membership, preset };
+  const slots = resolveSectionSource(membership.section.source, {
+    savedPresets,
+    selectedPresetId,
+    slotCount: membership.total,
+  });
+  const slot = slots[membership.index];
+  if (!slot) return null;
+  return { membership, preset: slot.preset, colorOverride: slot.colorOverride };
 }
 
 function setActiveSet(
@@ -73,9 +84,14 @@ export function sectionPress(args: {
 
   const key = memberKey({ widgetId: args.widgetId, controlId: args.controlId });
   const cur = liveStore.activeSectionMembers.get(bound.membership.section.id) ?? new Set<string>();
+  const isAutoColor = bound.membership.section.source === 'auto-color-variants';
   const isFlash = bound.membership.section.mode === 'flash' || bound.preset.type === 'flash';
 
-  if (isFlash) {
+  if (isAutoColor) {
+    // Color-variant slots don't switch presets — they override the active preset's base color.
+    setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
+    useLiveBusStore().dispatch('color.override', { key: bound.preset.id, rgb: bound.colorOverride ?? null });
+  } else if (isFlash) {
     const next = new Set(cur);
     next.add(key);
     setActiveSet(liveStore, bound.membership.section.id, next);
@@ -143,9 +159,11 @@ export function useSectionBinding(args: {
   const membership = computed(() => bound.value?.membership ?? null);
   const boundPreset = computed(() => bound.value?.preset ?? null);
   const effectiveLabel = computed(() => boundPreset.value?.name ?? null);
-  const effectiveColor = computed(() =>
-    boundPreset.value ? getPresetMainColor(boundPreset.value) : null,
-  );
+  const effectiveColor = computed(() => {
+    const c = bound.value?.colorOverride;
+    if (c) return `rgb(${c.r}, ${c.g}, ${c.b})`;
+    return boundPreset.value ? getPresetMainColor(boundPreset.value) : null;
+  });
 
   const myKey = computed(() => {
     const w = args.widget();

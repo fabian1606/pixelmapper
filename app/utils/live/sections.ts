@@ -1,21 +1,30 @@
 import type { LivePage, LiveSection, LiveWidget, SectionMember, SectionSource } from './types';
 import type { Preset } from '~/utils/engine/preset-types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
+import { autoColorPalette, type RGB } from '~/utils/live/color-utils';
 
 export interface SectionResolveContext {
   savedPresets: Preset[];
   selectedPresetId: string | null;
+  /** Number of section slots. Only used by 'auto-color-variants'. */
+  slotCount?: number;
+}
+
+/** One resolved slot: which preset it binds to, plus an optional color override. */
+export interface ResolvedSlot {
+  preset: Preset;
+  colorOverride?: RGB;
 }
 
 /**
- * Resolve the dynamic list of presets a section is currently pointing at.
+ * Resolve the dynamic list of slots a section is currently pointing at.
  * Returned order is the order section members will be assigned to.
  */
-export function resolveSectionSource(source: SectionSource, ctx: SectionResolveContext): Preset[] {
+export function resolveSectionSource(source: SectionSource, ctx: SectionResolveContext): ResolvedSlot[] {
   switch (source) {
     case 'all-presets':
       // Top-level presets only — variants are surfaced via 'preset-variants'.
-      return ctx.savedPresets.filter(p => !p.basePresetId);
+      return ctx.savedPresets.filter(p => !p.basePresetId).map(preset => ({ preset }));
     case 'preset-variants': {
       if (!ctx.selectedPresetId) return [];
       // Walk up to the root preset of the currently selected one so a variant
@@ -30,7 +39,19 @@ export function resolveSectionSource(source: SectionSource, ctx: SectionResolveC
       }
       const variants = ctx.savedPresets.filter(p => p.basePresetId === rootId);
       const root = byId.get(rootId);
-      return root ? [root, ...variants] : variants;
+      const list = root ? [root, ...variants] : variants;
+      return list.map(preset => ({ preset }));
+    }
+    case 'auto-color-variants': {
+      // N hue-rotated copies of the currently active preset (N = slot count).
+      // The slot doesn't "switch" the preset on click — it just overrides the
+      // active preset's RGB base color.
+      const activeId = ctx.selectedPresetId;
+      if (!activeId) return [];
+      const active = ctx.savedPresets.find(p => p.id === activeId);
+      if (!active) return [];
+      const n = Math.max(0, ctx.slotCount ?? 0);
+      return autoColorPalette(n).map(colorOverride => ({ preset: active, colorOverride }));
     }
   }
 }

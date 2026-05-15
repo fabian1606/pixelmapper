@@ -1,7 +1,5 @@
 export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label' | 'fixture-preview' | 'color-wheel'
 
-export type ColorWheelScope = 'preset' | 'variant' | 'global'
-
 /** A persisted controller instance: one entry per physical device slot. */
 export interface LiveControllerInstance {
   id: string
@@ -53,11 +51,9 @@ export interface LiveWidget {
   controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
-  // color-wheel specific
-  colorWheelScope?: ColorWheelScope
 }
 
-export type SectionSource = 'all-presets' | 'preset-variants'
+export type SectionSource = 'all-presets' | 'preset-variants' | 'auto-color-variants'
 export type SectionMode = 'flash' | 'single-select' | 'multi-select'
 
 export interface SectionMember {
@@ -72,8 +68,6 @@ export interface LiveSection {
   source: SectionSource
   mode: SectionMode
   members: SectionMember[]
-  /** When enabled, hue values are auto-distributed evenly across section slots. */
-  autoColors?: boolean
 }
 
 export interface LivePage {

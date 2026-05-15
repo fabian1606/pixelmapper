@@ -6,7 +6,6 @@ import { resolvePreset } from './preset-resolve';
 import { persistChange } from './use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
-import { applyHueOverrideEffect } from '~/composables/live-ops/hue-ops';
 
 /**
  * The minimal slice of state preset activation operates on. Both the live
@@ -76,7 +75,6 @@ export interface SetActivePresetOptions {
  */
 export function setActivePreset(presetId: string | null, opts: SetActivePresetOptions = {}): void {
   applyActivePreset(engineActivationContext(), presetId);
-  applyHueOverrideEffect();
 
   const liveBus = useLiveBusStore();
   const fromRemote = liveBus.isApplyingRemote();
@@ -109,7 +107,6 @@ function _transitionFlash(prevId: string | null, nextId: string | null): void {
     const target = presets.find(p => p.id === nextId);
     if (target) _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.activeEffects);
   }
-  applyHueOverrideEffect();
   ctx.triggerCanvasSync();
 }
 
