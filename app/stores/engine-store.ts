@@ -20,7 +20,6 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
-import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 
@@ -175,6 +174,12 @@ export const useEngineStore = defineStore('engine', () => {
   let lastDispatchedLayout   = -1;
   let lastDispatchedChannels = -1;
   let lastDispatchedEffects  = -1;
+  /** Set true around flushEngineOutput() to skip the redundant Vue-watcher rebuild
+   *  of channels/effects packets that would otherwise fire in the next microtask. */
+  let suppressFixturesWatcher = false;
+  /** Cheap fingerprint of layout-relevant fixture data — used to skip buildLayoutBin
+   *  when only channel values changed (the common case during preset/flash transitions). */
+  let lastLayoutFingerprint = '';
 
   const initEngine = async () => {
     if (initialized || typeof window === 'undefined') return;
@@ -243,13 +248,30 @@ export const useEngineStore = defineStore('engine', () => {
       }
     });
 
-    // Watch fixture structure/positions/chaser values → rebuild layout + channels
+    // Watch fixture structure/positions/chaser values → rebuild layout + channels.
+    // - Skip entirely if flushEngineOutput() just ran the rebuild (suppress flag).
+    // - Only rebuild layoutPacket when layout-relevant fields actually changed
+    //   (fingerprint check) — channel value mutations don't affect layout.
+    // - dispatchChannelUpdate() removed: channel state is reproducible on remote tabs
+    //   via preset.set / flash.press / flash.release / widget.slide ops. Late-join
+    //   sync still calls dispatchChannelUpdate explicitly from use-collaboration.ts.
     watch(flatFixtures, () => {
-      layoutPacket   = buildLayoutBin(flatFixtures.value);
+      if (suppressFixturesWatcher) return;
+      let fp = '';
+      for (const f of flatFixtures.value) {
+        fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
+        for (const ch of f.channels) {
+          fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
+        }
+        fp += '|';
+      }
+      if (fp !== lastLayoutFingerprint) {
+        lastLayoutFingerprint = fp;
+        layoutPacket = buildLayoutBin(flatFixtures.value);
+        layoutRevision.value++;
+      }
       channelsPacket = buildChannelsBin(flatFixtures.value);
-      layoutRevision.value++;
       channelsRevision.value++;
-      if (!useLiveBusStore().isApplyingRemote()) dispatchChannelUpdate(flatFixtures.value);
     }, { deep: true, immediate: true });
 
     // globalBases bakes into stepValues via watchEffect above; an explicit watch
@@ -259,8 +281,10 @@ export const useEngineStore = defineStore('engine', () => {
       channelsRevision.value++;
     }, { deep: true });
 
-    // Watch effects, fixtures, or blend mode changes → rebuild effects packet
+    // Watch effects, fixtures, or blend mode changes → rebuild effects packet.
+    // Skipped if flushEngineOutput() just did the rebuild (suppress flag).
     watch([activeEffects, flatFixtures, engine.stackBlendMode], () => {
+      if (suppressFixturesWatcher) return;
       effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
       effectsRevision.value++;
     }, { deep: true, immediate: true });
@@ -353,6 +377,10 @@ export const useEngineStore = defineStore('engine', () => {
   function flushEngineOutput(): void {
     if (!initialized) return;
 
+    // Suppress the Vue watcher that would otherwise rebuild the same packets
+    // in the next microtask and trigger the rAF render-loop to re-dispatch.
+    suppressFixturesWatcher = true;
+
     channelsPacket = buildChannelsBin(flatFixtures.value);
     channelsRevision.value++;
     effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
@@ -360,6 +388,9 @@ export const useEngineStore = defineStore('engine', () => {
 
     engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5));
     engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5));
+    // Tell the rAF render-loop we've already shipped these revisions to WASM.
+    lastDispatchedChannels = channelsRevision.value;
+    lastDispatchedEffects  = effectsRevision.value;
 
     const elapsed = Date.now() - clockEpoch.value;
     engine.render(elapsed, 0);
@@ -393,6 +424,11 @@ export const useEngineStore = defineStore('engine', () => {
     } catch (e) {
       console.warn('[engine] flushEngineOutput notifyEngineState threw:', e);
     }
+
+    // Clear suppress flag in a microtask — runs AFTER Vue's watcher queue
+    // (which is also microtask-scheduled), so the watcher sees suppress=true
+    // and skips, then the flag is cleared for any future independent mutations.
+    Promise.resolve().then(() => { suppressFixturesWatcher = false; });
   }
 
   const triggerCanvasSync = () => {
@@ -629,6 +665,7 @@ export const useEngineStore = defineStore('engine', () => {
     usedUniverses,
     totalUniverses: reactiveTotalUniverses,
     bufferRevision,
+    channelsRevision,
     overrideMap,
     setOverride,
     clearOverride,

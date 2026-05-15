@@ -6,6 +6,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { findSectionFor, resolveSectionSource, memberKey, type SectionMembership } from '~/utils/live/sections';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
+import { setColorOverride } from '~/composables/live-ops/color-override-ops';
 import type { Preset } from '~/utils/engine/preset-types';
 import type { RGB } from '~/utils/live/color-utils';
 
@@ -13,6 +14,8 @@ export interface BoundSlot {
   membership: SectionMembership;
   preset: Preset;
   colorOverride?: RGB;
+  /** Slot-specific label that overrides the preset name (e.g. color name for auto-color slots). */
+  label?: string;
 }
 
 /**
@@ -35,7 +38,7 @@ export function findBoundPreset(
   });
   const slot = slots[membership.index];
   if (!slot) return null;
-  return { membership, preset: slot.preset, colorOverride: slot.colorOverride };
+  return { membership, preset: slot.preset, colorOverride: slot.colorOverride, label: slot.label };
 }
 
 function setActiveSet(
@@ -90,7 +93,7 @@ export function sectionPress(args: {
   if (isAutoColor) {
     // Color-variant slots don't switch presets — they override the active preset's base color.
     setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
-    useLiveBusStore().dispatch('color.override', { key: bound.preset.id, rgb: bound.colorOverride ?? null });
+    setColorOverride(bound.preset.id, bound.colorOverride ?? null);
   } else if (isFlash) {
     const next = new Set(cur);
     next.add(key);
@@ -158,7 +161,7 @@ export function useSectionBinding(args: {
 
   const membership = computed(() => bound.value?.membership ?? null);
   const boundPreset = computed(() => bound.value?.preset ?? null);
-  const effectiveLabel = computed(() => boundPreset.value?.name ?? null);
+  const effectiveLabel = computed(() => bound.value?.label ?? boundPreset.value?.name ?? null);
   const effectiveColor = computed(() => {
     const c = bound.value?.colorOverride;
     if (c) return `rgb(${c.r}, ${c.g}, ${c.b})`;

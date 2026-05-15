@@ -47,7 +47,7 @@ const idleInteraction: Interaction = { type: 'idle' };
 const emptySelection = new Set<string | number>();
 
 // Re-sync fixture geometry when something in the design changes (add/move/remove).
-watch(() => engineStore._syncTrigger, () => {
+watch(() => engineStore.channelsRevision, () => {
   fixtureCanvas.value?.sync();
 });
 

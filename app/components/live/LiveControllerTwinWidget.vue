@@ -123,12 +123,16 @@ function isSectionActive(controlId: string): boolean {
 }
 
 /**
- * Pick the "bound color" for a control: section preset wins, then child
- * override, then null (no override → keep the SVG's default look).
+ * Pick the "bound color" for a control: section slot's color override wins
+ * (auto-color-variants), then the preset's natural colour, then child override.
  */
 function boundColorFor(id: string): string | null {
   const bound = boundPresetFor(id);
-  if (bound) return getPresetMainColor(bound.preset);
+  if (bound) {
+    const c = bound.colorOverride;
+    if (c) return `rgb(${c.r}, ${c.g}, ${c.b})`;
+    return getPresetMainColor(bound.preset);
+  }
   return getChild(id)?.color ?? null;
 }
 
@@ -322,7 +326,7 @@ function pickLabelPosition(ctrl: ControllerControl): 'inside' | 'below' {
  */
 function resolveLabelText(controlId: string, _ctrl: ControllerControl): string {
   const bound = boundPresetFor(controlId);
-  if (bound) return bound.preset.name ?? '';
+  if (bound) return bound.label ?? bound.preset.name ?? '';
   return getChild(controlId)?.label ?? '';
 }
 
@@ -803,7 +807,13 @@ function sendLedFeedback(controlId: string, _active?: boolean) {
   const sectionActive = isSectionActive(controlId);
   const active = physicallyPressed || sectionActive;
   const bound = boundPresetFor(controlId);
-  const sectionColor = bound ? getPresetMainColor(bound.preset) : null;
+  // LED feedback needs hex so it can be parsed downstream — emit hex for override RGB too.
+  const sectionColor = bound
+    ? (bound.colorOverride
+        ? '#' + [bound.colorOverride.r, bound.colorOverride.g, bound.colorOverride.b]
+            .map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')
+        : getPresetMainColor(bound.preset))
+    : null;
   const childColor = getChild(controlId)?.color;
   const color = sectionColor ?? childColor;
   if (color) {

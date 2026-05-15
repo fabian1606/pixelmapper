@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
-import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
-import { reapplyColorOverrideForActive } from '~/composables/live-ops/color-override-ops';
+import { reapplyColorOverrideForActive, setColorOverride } from '~/composables/live-ops/color-override-ops';
 import { getPresetNaturalRGB, hsvToRgb, rgbToHsv, type RGB } from '~/utils/live/color-utils';
 
 const props = defineProps<{
@@ -13,7 +12,6 @@ const props = defineProps<{
   editMode: boolean;
 }>();
 
-const liveBus = useLiveBusStore();
 const engineStore = useEngineStore();
 const liveStore = useLiveModeStore();
 
@@ -86,11 +84,11 @@ function setOverrideLocal(rgb: RGB) {
   reapplyColorOverrideForActive();
 }
 
-/** Broadcast (LiveBus) — used on pointer-up and reset. */
-function broadcastOverride(rgb: RGB | null) {
+/** Commit locally + broadcast (LiveBus) — used on pointer-up and reset. */
+function commitOverride(rgb: RGB | null) {
   const id = activePresetId.value;
   if (!id) return;
-  liveBus.dispatch('color.override', { key: id, rgb });
+  setColorOverride(id, rgb);
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -121,12 +119,12 @@ function onPointerUp(e: PointerEvent) {
   const pos = getRelPos(e, el);
   const rgb = rgbFromPos(pos.x, pos.y, pos.radius);
   setOverrideLocal(rgb);
-  broadcastOverride(rgb);
+  commitOverride(rgb);
 }
 
 function resetOverride() {
   if (props.editMode) return;
-  broadcastOverride(null);
+  commitOverride(null);
 }
 
 const activePresetName = computed(() =>

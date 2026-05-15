@@ -1,7 +1,7 @@
 import type { LivePage, LiveSection, LiveWidget, SectionMember, SectionSource } from './types';
 import type { Preset } from '~/utils/engine/preset-types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
-import { autoColorPalette, type RGB } from '~/utils/live/color-utils';
+import { autoColorPalette, colorNameFor, getPresetNaturalRGB, type RGB } from '~/utils/live/color-utils';
 
 export interface SectionResolveContext {
   savedPresets: Preset[];
@@ -10,10 +10,12 @@ export interface SectionResolveContext {
   slotCount?: number;
 }
 
-/** One resolved slot: which preset it binds to, plus an optional color override. */
+/** One resolved slot: which preset it binds to, plus an optional color override + label. */
 export interface ResolvedSlot {
   preset: Preset;
   colorOverride?: RGB;
+  /** When set, overrides the preset name as the button's displayed label. */
+  label?: string;
 }
 
 /**
@@ -44,14 +46,19 @@ export function resolveSectionSource(source: SectionSource, ctx: SectionResolveC
     }
     case 'auto-color-variants': {
       // N hue-rotated copies of the currently active preset (N = slot count).
-      // The slot doesn't "switch" the preset on click — it just overrides the
-      // active preset's RGB base color.
+      // Slot 0 = the preset's natural base colour; subsequent slots are evenly
+      // hue-rotated from that base, preserving its saturation/value.
       const activeId = ctx.selectedPresetId;
       if (!activeId) return [];
       const active = ctx.savedPresets.find(p => p.id === activeId);
       if (!active) return [];
       const n = Math.max(0, ctx.slotCount ?? 0);
-      return autoColorPalette(n).map(colorOverride => ({ preset: active, colorOverride }));
+      const base = getPresetNaturalRGB(activeId, ctx.savedPresets);
+      return autoColorPalette(n, base ?? undefined).map((colorOverride, i) => ({
+        preset: active,
+        colorOverride,
+        label: i === 0 ? 'Default' : colorNameFor(colorOverride),
+      }));
     }
   }
 }

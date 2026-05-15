@@ -1,4 +1,4 @@
-import { registerLiveOp } from '~/stores/live-bus-store';
+import { registerLiveOp, useLiveBusStore } from '~/stores/live-bus-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
@@ -21,6 +21,22 @@ export function reapplyColorOverrideForActive(): void {
   const rgb = liveStore.presetColorOverrides.get(presetId) ?? null;
   applyRGBOverride(resolved, engineStore.flatFixtures, rgb);
   engineStore.triggerCanvasSync?.();
+}
+
+/**
+ * Single entry point for changing a preset's color override: writes locally,
+ * re-applies fixtures, and broadcasts to remote tabs (when connected).
+ * Use this for one-shot changes (section auto-color slot press, reset button).
+ * The color wheel's drag handler uses the lower-level functions directly to
+ * avoid going through LiveBus on every pointermove.
+ */
+export function setColorOverride(key: string, rgb: RGB | null): void {
+  const liveStore = useLiveModeStore();
+  const engineStore = useEngineStore();
+  liveStore.setPresetColor(key, rgb);
+  if (engineStore.selectedPresetId === key) reapplyColorOverrideForActive();
+  const liveBus = useLiveBusStore();
+  if (!liveBus.isApplyingRemote()) liveBus.dispatch('color.override', { key, rgb });
 }
 
 // ── Live op ──────────────────────────────────────────────────────────────────

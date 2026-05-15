@@ -142,7 +142,7 @@ watch(selectedIdsModel, (newVal) => {
   liveBus.dispatch('selection.set', { ids: Array.from(newVal) });
 });
 
-watch([() => engineStore._syncTrigger, () => history.version.value], () => {
+watch([() => engineStore.channelsRevision, () => history.version.value], () => {
   fixtureCanvas.value?.sync();
 });
 
