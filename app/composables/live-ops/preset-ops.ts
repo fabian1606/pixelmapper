@@ -1,5 +1,5 @@
 import { registerLiveOp } from '~/stores/live-bus-store';
-import { setActivePreset } from '~/components/engine/composables/preset-activation';
+import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
 
 interface PresetSetPayload { presetId: string | null; }
 
@@ -14,4 +14,19 @@ registerLiveOp<PresetSetPayload>('preset.set', {
   apply: ({ presetId }) => {
     setActivePreset(presetId, { broadcast: false, persist: false });
   },
+});
+
+interface FlashPressPayload { key: string; presetId: string; }
+interface FlashReleasePayload { key: string; }
+
+registerLiveOp<FlashPressPayload>('flash.press', {
+  scope: 'shared',
+  throttle: 'immediate',
+  apply: ({ key, presetId }) => { pressFlashPreset(key, presetId); },
+});
+
+registerLiveOp<FlashReleasePayload>('flash.release', {
+  scope: 'shared',
+  throttle: 'immediate',
+  apply: ({ key }) => { releaseFlashPreset(key); },
 });

@@ -5,7 +5,7 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { findSectionFor, resolveSectionSource, memberKey, type SectionMembership } from '~/utils/live/sections';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
-import { setActivePreset } from '~/components/engine/composables/preset-activation';
+import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
 import type { Preset } from '~/utils/engine/preset-types';
 
 /**
@@ -73,26 +73,22 @@ export function sectionPress(args: {
 
   const key = memberKey({ widgetId: args.widgetId, controlId: args.controlId });
   const cur = liveStore.activeSectionMembers.get(bound.membership.section.id) ?? new Set<string>();
+  const isFlash = bound.membership.section.mode === 'flash' || bound.preset.type === 'flash';
 
-  let shouldApply = false;
-  if (bound.membership.section.mode === 'flash') {
+  if (isFlash) {
     const next = new Set(cur);
     next.add(key);
     setActiveSet(liveStore, bound.membership.section.id, next);
-    shouldApply = true;
+    pressFlashPreset(key, bound.preset.id);
   } else if (bound.membership.section.mode === 'single-select') {
     setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
-    shouldApply = true;
+    setActivePreset(bound.preset.id);
   } else {
     const next = new Set(cur);
     if (next.has(key)) next.delete(key);
     else next.add(key);
     setActiveSet(liveStore, bound.membership.section.id, next);
-    shouldApply = next.has(key);
-  }
-
-  if (shouldApply) {
-    setActivePreset(bound.preset.id);
+    if (next.has(key)) setActivePreset(bound.preset.id);
   }
   return true;
 }
@@ -102,17 +98,21 @@ export function sectionRelease(args: {
   controlId?: string;
 }): boolean {
   const liveStore = useLiveModeStore();
+  const engineStore = useEngineStore();
   const page = liveStore.activePage;
   if (!page) return false;
-  const membership = findSectionFor(page, args.widgetId, args.controlId);
-  if (!membership) return false;
-  // Only flash mode clears on release; single/multi-select stay latched.
-  if (membership.section.mode !== 'flash') return true;
+  const bound = findBoundPreset(page, args.widgetId, args.controlId, engineStore.savedPresets, engineStore.selectedPresetId);
+  if (!bound) return true;
+  const { section } = bound.membership;
+  const isFlash = section.mode === 'flash' || bound.preset.type === 'flash';
+  // Single/multi-select sections without a flash preset stay latched on release.
+  if (!isFlash) return true;
   const key = memberKey({ widgetId: args.widgetId, controlId: args.controlId });
-  const cur = useLiveModeStore().activeSectionMembers.get(membership.section.id) ?? new Set<string>();
+  const cur = liveStore.activeSectionMembers.get(section.id) ?? new Set<string>();
   const next = new Set(cur);
   next.delete(key);
-  setActiveSet(useLiveModeStore(), membership.section.id, next);
+  setActiveSet(liveStore, section.id, next);
+  releaseFlashPreset(key);
   return true;
 }
 

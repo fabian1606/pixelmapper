@@ -27,6 +27,10 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
   const selectedPresetId = ref<string | null>(null);
+  /** Press-and-hold flash stack. Each entry = one held flash trigger. Top wins. */
+  const flashStack = ref<Array<{ key: string; presetId: string }>>([]);
+  /** The preset actually rendering: top of flash stack, or the latched base preset. */
+  const effectivePresetId = computed<string | null>(() => flashStack.value.at(-1)?.presetId ?? selectedPresetId.value);
 
   const engine = markRaw(new EffectEngine());
 
@@ -337,9 +341,61 @@ export const useEngineStore = defineStore('engine', () => {
     animFrameId = requestAnimationFrame(renderLoop);
   };
 
-  let _syncTrigger = ref(0);
+  /**
+   * Synchronously rebuild channel/effects packets, dispatch to WASM, render,
+   * and push to all connectors — without waiting for the next rAF tick.
+   *
+   * Called by triggerCanvasSync() so every preset transition (flash, normal,
+   * hue override) reaches hardware immediately, even for sub-16ms button presses
+   * where the Vue watcher batch would otherwise coalesce press+release into one
+   * rAF cycle and skip the intermediate flash state entirely.
+   */
+  function flushEngineOutput(): void {
+    if (!initialized) return;
+
+    channelsPacket = buildChannelsBin(flatFixtures.value);
+    channelsRevision.value++;
+    effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
+    effectsRevision.value++;
+
+    engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5));
+    engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5));
+
+    const elapsed = Date.now() - clockEpoch.value;
+    engine.render(elapsed, 0);
+
+    const overrides = getOverrideMap();
+    if (overrides.size === 0) {
+      outputBuffer = engine.dmxBuffer;
+    } else {
+      if (outputBuffer === engine.dmxBuffer || outputBuffer.length !== engine.dmxBuffer.length) {
+        outputBuffer = new Uint8Array(engine.dmxBuffer.length);
+      }
+      outputBuffer.set(engine.dmxBuffer);
+      for (const [idx, val] of overrides) {
+        if (idx < outputBuffer.length) outputBuffer[idx] = val;
+      }
+    }
+
+    connectionsStore.sendFrame(outputBuffer);
+    try {
+      connectionsStore.notifyEngineState({
+        bpm: engine.globalBpm.value,
+        elapsedMs: elapsed,
+        layoutRevision: layoutRevision.value,
+        channelsRevision: channelsRevision.value,
+        effectsRevision: effectsRevision.value,
+        layoutPacket,
+        channelsPacket,
+        effectsPacket,
+      });
+    } catch (e) {
+      console.warn('[engine] flushEngineOutput notifyEngineState threw:', e);
+    }
+  }
+
   const triggerCanvasSync = () => {
-    _syncTrigger.value++;
+    flushEngineOutput();
   };
 
   // ── Project persistence ───────────────────────────────────────────────────
@@ -558,6 +614,8 @@ export const useEngineStore = defineStore('engine', () => {
   return {
     savedPresets,
     selectedPresetId,
+    flashStack,
+    effectivePresetId,
     clockEpoch,
     setClockEpoch,
     engine,
@@ -579,6 +637,7 @@ export const useEngineStore = defineStore('engine', () => {
     initEngine,
     _syncTrigger,
     triggerCanvasSync,
+    flushEngineOutput,
     currentProjectId,
     projectLoading,
     projectError,

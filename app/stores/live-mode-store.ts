@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance } from '~/utils/live/types';
+import type { ColorParams } from '~/utils/engine/types';
+import { clearFlashStack } from '~/components/engine/composables/preset-activation';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
   const pages = ref<LivePage[]>([]);
@@ -28,6 +30,9 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   // Runtime-only: which member(s) inside a section are currently "active".
   // Map<sectionId, Set<memberKey>>. Cleared on reset / page switch.
   const activeSectionMembers = ref<Map<string, Set<string>>>(new Map());
+  // Runtime-only: hue overrides per preset ID (or 'global' for global scope).
+  // Shared via LiveBus, survives page switches but not project reload.
+  const presetHueOverrides = ref<Map<string, ColorParams>>(new Map());
   /** Controller instances persisted with the project. Auto-connect on load. */
   const liveControllers = ref<LiveControllerInstance[]>([]);
 
@@ -38,7 +43,13 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     activePageId.value = incoming[0]?.id ?? null;
   }
 
+  function setPresetHue(key: string, params: ColorParams | null) {
+    if (params === null) presetHueOverrides.value.delete(key);
+    else presetHueOverrides.value.set(key, params);
+  }
+
   function reset() {
+    clearFlashStack();
     pages.value = [];
     activePageId.value = null;
     editMode.value = true;
@@ -49,6 +60,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     isolatedSectionId.value = null;
     sectionMappingMode.value = null;
     activeSectionMembers.value = new Map();
+    presetHueOverrides.value = new Map();
     liveControllers.value = [];
   }
 
@@ -80,6 +92,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
 
   function setActivePage(id: string) {
     if (pages.value.some(p => p.id === id)) {
+      clearFlashStack();
       activePageId.value = id;
       isolatedGroupId.value = null;
       selectedWidgetIds.value = new Set();
@@ -199,10 +212,12 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     isolatedSectionId,
     sectionMappingMode,
     activeSectionMembers,
+    presetHueOverrides,
     liveControllers,
     activePage,
     loadPages,
     reset,
+    setPresetHue,
     addLiveController,
     removeLiveController,
     loadLiveControllers,

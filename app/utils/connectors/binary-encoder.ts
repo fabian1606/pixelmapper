@@ -182,7 +182,11 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
   for (const f of fixtures) {
     for (const ch of f.channels) {
       const dmxIndex = f.startAddress - 1 + ch.addressOffset;
-      const key = JSON.stringify(ch.chaserConfig);
+      const cfg = ch.chaserConfig;
+      const key = `${cfg.stepsCount}|${cfg.isPlaying ? 1 : 0}|${cfg.activeEditStep}|` +
+        `${cfg.stepDuration.mode}:${cfg.stepDuration.timeMs}:${cfg.stepDuration.beatValue}:${cfg.stepDuration.beatOffset}|` +
+        `${cfg.fadeDuration.mode}:${cfg.fadeDuration.timeMs}:${cfg.fadeDuration.beatValue}:${cfg.fadeDuration.beatOffset}|` +
+        cfg.stepValues.slice(0, cfg.stepsCount).join(',');
       if (!groups.has(key)) {
         groups.set(key, { chaser: ch.chaserConfig, dmxIndices: [] });
       }

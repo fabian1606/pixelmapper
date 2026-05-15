@@ -7,3 +7,4 @@ import './channel-ops';
 import './engine-ops';
 import './live-widget-ops';
 import './page-ops';
+import './hue-ops';

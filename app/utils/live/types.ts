@@ -1,4 +1,6 @@
-export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label'
+export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label' | 'fixture-preview' | 'color-wheel'
+
+export type ColorWheelScope = 'preset' | 'variant' | 'global'
 
 /** A persisted controller instance: one entry per physical device slot. */
 export interface LiveControllerInstance {
@@ -51,6 +53,8 @@ export interface LiveWidget {
   controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
+  // color-wheel specific
+  colorWheelScope?: ColorWheelScope
 }
 
 export type SectionSource = 'all-presets' | 'preset-variants'
@@ -68,6 +72,8 @@ export interface LiveSection {
   source: SectionSource
   mode: SectionMode
   members: SectionMember[]
+  /** When enabled, hue values are auto-distributed evenly across section slots. */
+  autoColors?: boolean
 }
 
 export interface LivePage {
@@ -110,6 +116,8 @@ export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0): L
     'xy-pad': [6, 6],
     'controller-twin': [12, 8],
     label: [4, 1],
+    'fixture-preview': [12, 8],
+    'color-wheel': [12, 5],
   };
   const [w, h] = sizes[type];
   return {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { MousePointerClick, SlidersHorizontal, Crosshair, Type, Gamepad2 } from 'lucide-vue-next';
+import { MousePointerClick, SlidersHorizontal, Crosshair, Type, Gamepad2, Projector, Palette } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { AddLiveWidgetCommand } from '~/components/engine/commands/live-widget-commands';
@@ -16,6 +16,8 @@ const WIDGET_TYPES: { type: LiveWidgetType; label: string; icon: typeof MousePoi
   { type: 'slider', label: 'Slider', icon: SlidersHorizontal },
   { type: 'xy-pad', label: 'XY Pad', icon: Crosshair },
   { type: 'label', label: 'Label', icon: Type },
+  { type: 'fixture-preview', label: 'Preview', icon: Projector },
+  { type: 'color-wheel', label: 'Color', icon: Palette },
 ];
 
 const controllers = computed<ControllerDefinition[]>(() => listControllerDefinitions());
