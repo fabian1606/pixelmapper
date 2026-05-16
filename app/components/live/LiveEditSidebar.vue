@@ -20,11 +20,13 @@ import {
   type LiveMapping,
   type ControllerChildBinding,
   type LiveSection,
+  type SectionColorEntry,
   type SectionMember,
   type SectionMode,
   type SectionSource,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
+import { getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
 
 const store = useLiveModeStore();
 const engineStore = useEngineStore();
@@ -193,7 +195,7 @@ function defaultModeForSource(source: SectionSource): SectionMode {
   switch (source) {
     case 'all-presets':         return 'single-select';
     case 'preset-variants':     return 'single-select';
-    case 'auto-color-variants': return 'single-select';
+    case 'color-variants':      return 'single-select';
   }
 }
 
@@ -248,11 +250,75 @@ function updateSectionSource(source: SectionSource) {
   if (!sec || !store.activePageId) return;
   // When swapping source, snap mode to the source's preferred default — keeps
   // surprise low: e.g. switching to preset-variants resets to single-select.
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, {
+  const patch: Partial<Omit<LiveSection, 'id' | 'members'>> = {
     source,
     mode: defaultModeForSource(source),
-  }));
+  };
+  // Seed a stable color palette so it doesn't shift on every recount.
+  if (source === 'color-variants') {
+    const baseRGB = engineStore.selectedPresetId
+      ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+      : null;
+    patch.colorVariants = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
+  }
+  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, patch));
 }
+
+/** Update a single slot's stored color (slot 0 is always preset-natural and not user-editable). */
+function setColorVariantSlot(index: number, rgb: RGB) {
+  const sec = selectionSection.value;
+  if (!sec || !store.activePageId) return;
+  if (index <= 0) return;
+  const baseRGB = engineStore.selectedPresetId
+    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+    : null;
+  const current = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
+  const next: SectionColorEntry[] = current.map((e, i) => i === index ? { ...rgb } : e);
+  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { colorVariants: next }));
+}
+
+function regenerateColorVariants() {
+  const sec = selectionSection.value;
+  if (!sec || !store.activePageId) return;
+  const baseRGB = engineStore.selectedPresetId
+    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+    : null;
+  const fresh = growColorVariants(undefined, sec.members.length, baseRGB);
+  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { colorVariants: fresh }));
+}
+
+/** Hex string ("#rrggbb") for a slot's effective color, used in the editor swatches. */
+function slotHex(index: number): string {
+  const sec = selectionSection.value;
+  if (!sec) return '#000000';
+  const baseRGB = engineStore.selectedPresetId
+    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+    : null;
+  const entries = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
+  const entry = entries[index];
+  const rgb = entry ?? baseRGB;
+  if (!rgb) return '#000000';
+  const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
+}
+
+function hexToRGB(hex: string): RGB | null {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return null;
+  return { r: parseInt(m[1]!, 16), g: parseInt(m[2]!, 16), b: parseInt(m[3]!, 16) };
+}
+
+function onSlotColorInput(index: number, value: string) {
+  const rgb = hexToRGB(value);
+  if (rgb) setColorVariantSlot(index, rgb);
+}
+
+/** Visible slot indices for the color editor (matches the section's member count). */
+const colorVariantSlots = computed<number[]>(() => {
+  const sec = selectionSection.value;
+  if (!sec || sec.source !== 'color-variants') return [];
+  return Array.from({ length: sec.members.length }, (_, i) => i);
+});
 
 function updateSectionName(name: string) {
   const sec = selectionSection.value;
@@ -312,14 +378,14 @@ const isInMappingMode = computed(() => {
 });
 
 const SOURCE_LABELS: Record<SectionSource, string> = {
-  'all-presets': 'Alle Presets',
-  'preset-variants': 'Varianten des aktiven Presets',
-  'auto-color-variants': 'Auto-Color Varianten',
+  'all-presets': 'All Presets',
+  'preset-variants': 'Variants of Active Preset',
+  'color-variants': 'Color Variants',
 };
 const MODE_LABELS: Record<SectionMode, string> = {
-  'flash': 'Flash (gedrückt = aktiv)',
-  'single-select': 'Einzelauswahl (nur einer aktiv)',
-  'multi-select': 'Mehrfachauswahl (Toggle)',
+  'flash': 'Flash (hold = active)',
+  'single-select': 'Single-select (one active)',
+  'multi-select': 'Multi-select (toggle)',
 };
 
 </script>
@@ -333,7 +399,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
         @click="store.editMode = false"
       >
         <Play class="size-3.5" />
-        Play-Modus
+        Play Mode
       </button>
     </div>
 
@@ -341,9 +407,9 @@ const MODE_LABELS: Record<SectionMode, string> = {
       <!-- ── Section editor ─────────────────────────────────────────────── -->
       <div v-if="(selectionMembers.length > 0 || selectionSection) && !focusedControlSection" class="flex flex-col gap-2 pb-4 border-b border-border">
         <div class="flex items-center justify-between">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Sektion</span>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Section</span>
           <span v-if="selectionSection" class="text-[10px] text-muted-foreground">
-            {{ selectionMembers.length }} ausgewählt · {{ selectionSection.members.length }} insgesamt
+            {{ selectionMembers.length }} selected · {{ selectionSection.members.length }} total
           </span>
         </div>
 
@@ -354,13 +420,13 @@ const MODE_LABELS: Record<SectionMode, string> = {
             v-if="isInMappingMode"
             class="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-violet-500/20 ring-1 ring-violet-400/50"
           >
-            <span class="text-[10px] text-violet-300 leading-snug">Klick = Mitgliedschaft umschalten</span>
+            <span class="text-[10px] text-violet-300 leading-snug">Click = toggle membership</span>
             <button
               type="button"
               class="shrink-0 px-2 py-1 rounded text-[11px] font-medium bg-violet-500 hover:bg-violet-400 text-white transition-colors"
               @click="store.exitSectionMappingMode()"
             >
-              Fertig
+              Done
             </button>
           </div>
 
@@ -368,7 +434,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <input
               type="text"
               class="flex-1 min-w-0 text-xs bg-background border border-border rounded px-2 py-1.5"
-              placeholder="Sektionsname"
+              placeholder="Section name"
               :value="selectionSection.name ?? ''"
               @change="(e) => updateSectionName((e.target as HTMLInputElement).value)"
             />
@@ -378,15 +444,15 @@ const MODE_LABELS: Record<SectionMode, string> = {
               :class="isInMappingMode
                 ? 'bg-violet-500 hover:bg-violet-400 text-white'
                 : 'bg-accent hover:bg-accent/80'"
-              title="Buttons der Sektion zuordnen"
+              title="Assign buttons to this section"
               @click="enterSectionMappingMode"
             >
-              Zuordnen
+              Assign
             </button>
           </div>
 
           <div class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Inhalt</span>
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Content</span>
             <select
               class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
               :value="selectionSection.source"
@@ -397,7 +463,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
           </div>
 
           <div class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Verhalten</span>
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Behavior</span>
             <select
               class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
               :value="selectionSection.mode"
@@ -407,18 +473,58 @@ const MODE_LABELS: Record<SectionMode, string> = {
             </select>
           </div>
 
+          <!-- Color Variants editor: stable, editable palette -->
+          <div v-if="selectionSection.source === 'color-variants'" class="flex flex-col gap-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Colors</span>
+              <button
+                type="button"
+                class="text-[9px] text-muted-foreground/70 hover:text-muted-foreground underline-offset-2 hover:underline"
+                title="Regenerate evenly distributed colors"
+                @click="regenerateColorVariants"
+              >
+                Regenerate
+              </button>
+            </div>
+            <div class="flex flex-col gap-1">
+              <div
+                v-for="i in colorVariantSlots"
+                :key="i"
+                class="flex items-center gap-2 text-[10px]"
+              >
+                <span class="text-muted-foreground/60 w-5 tabular-nums">{{ i + 1 }}</span>
+                <template v-if="i === 0">
+                  <div
+                    class="w-5 h-5 rounded border border-border shrink-0"
+                    :style="{ backgroundColor: slotHex(i) }"
+                  />
+                  <span class="text-muted-foreground/70">Preset (auto)</span>
+                </template>
+                <template v-else>
+                  <input
+                    type="color"
+                    class="w-5 h-5 rounded border border-border shrink-0 cursor-pointer bg-transparent p-0"
+                    :value="slotHex(i)"
+                    @input="(e) => onSlotColorInput(i, (e.target as HTMLInputElement).value)"
+                  />
+                  <span class="text-muted-foreground/70 font-mono">{{ slotHex(i) }}</span>
+                </template>
+              </div>
+            </div>
+          </div>
+
           <div class="flex gap-1.5 mt-1">
             <button
               class="flex-1 px-2 py-1.5 rounded text-[11px] font-medium bg-accent hover:bg-accent/80 transition-colors"
               @click="removeSelectionFromSection"
             >
-              Aus Sektion entfernen
+              Remove from section
             </button>
             <button
               class="px-2 py-1.5 rounded text-[11px] font-medium bg-destructive/15 hover:bg-destructive/25 text-destructive transition-colors"
               @click="deleteSelectedSection"
             >
-              Löschen
+              Delete
             </button>
           </div>
         </template>
@@ -426,16 +532,16 @@ const MODE_LABELS: Record<SectionMode, string> = {
         <!-- Not in any section: add / create -->
         <template v-else>
           <p class="text-[10px] text-muted-foreground leading-snug">
-            Sektion gruppiert Buttons zu einem dynamischen Set (z.B. alle Presets). Reihenfolge ergibt sich aus der Canvas-Position.
+            A section groups buttons into a dynamic set (e.g. all presets). Order follows canvas position.
           </p>
           <button
             class="w-full px-2 py-1.5 rounded text-[11px] font-medium bg-accent hover:bg-accent/80 transition-colors"
             @click="createSectionFromSelection"
           >
-            Neue Sektion erstellen
+            Create new section
           </button>
           <div v-if="eligibleAddTargets.length > 0" class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Zu bestehender Sektion hinzufügen</span>
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Add to existing section</span>
             <select
               class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
               @change="(e) => {
@@ -444,7 +550,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
                 (e.target as HTMLSelectElement).value = '';
               }"
             >
-              <option value="">— wählen —</option>
+              <option value="">— choose —</option>
               <option v-for="s in eligibleAddTargets" :key="s.id" :value="s.id">
                 {{ s.name || SOURCE_LABELS[s.source] }} ({{ s.members.length }})
               </option>
@@ -464,31 +570,31 @@ const MODE_LABELS: Record<SectionMode, string> = {
         </div>
 
         <div class="flex flex-col gap-2">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Gerät</span>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Device</span>
 
           <!-- Instance picker -->
           <div v-if="matchingInstances.length" class="flex flex-col gap-1">
-            <label class="text-[10px] text-muted-foreground">Instanz</label>
+            <label class="text-[10px] text-muted-foreground">Instance</label>
             <select
               class="w-full rounded border border-border bg-background text-xs px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
               :value="selectedTwin?.controllerInstanceId ?? ''"
               @change="bindInstance(($event.target as HTMLSelectElement).value)"
             >
-              <option value="">— keine —</option>
+              <option value="">— none —</option>
               <option
                 v-for="inst in matchingInstances"
                 :key="inst.id"
                 :value="inst.id"
               >
                 {{ (controllerStore.drivers.get(inst.id) as any)?.deviceLabel ?? twinDefinition?.label }}
-                ({{ (controllerStore.drivers.get(inst.id) as any)?.status ?? 'getrennt' }})
+                ({{ (controllerStore.drivers.get(inst.id) as any)?.status ?? 'disconnected' }})
               </option>
             </select>
           </div>
           <p v-else class="text-[10px] text-muted-foreground/70 leading-snug">
-            Noch keine Instanz angelegt. Gehe zu
+            No instance yet. Go to
             <NuxtLink :to="`/project/${engineStore.currentProjectId}/connections?tab=inputs`" class="underline">Connections</NuxtLink>
-            um ein Gerät hinzuzufügen.
+            to add a device.
           </p>
 
           <!-- Status row (only when bound) -->
@@ -497,9 +603,9 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <span v-if="(boundDriver as any)?.status === 'connected'" class="text-green-400 font-medium">
               {{ (boundDriver as any)?.deviceLabel ?? twinDefinition?.label }}
             </span>
-            <span v-else-if="(boundDriver as any)?.status === 'connecting'" class="text-yellow-400">Verbinde…</span>
-            <span v-else-if="(boundDriver as any)?.status === 'error'" class="text-destructive">Fehler</span>
-            <span v-else class="text-muted-foreground/50">Nicht verbunden</span>
+            <span v-else-if="(boundDriver as any)?.status === 'connecting'" class="text-yellow-400">Connecting…</span>
+            <span v-else-if="(boundDriver as any)?.status === 'error'" class="text-destructive">Error</span>
+            <span v-else class="text-muted-foreground/50">Not connected</span>
           </div>
 
           <!-- Error detail -->
@@ -509,7 +615,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
         </div>
 
         <p class="text-[10px] text-muted-foreground leading-snug">
-          Klick auf ein Pad / Fader im Twin, um es zu konfigurieren.
+          Click a pad / fader in the twin to configure it.
         </p>
       </div>
 
@@ -523,7 +629,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
           class="self-start text-[10px] text-muted-foreground hover:text-foreground"
           @click="() => { store.selectedControlId = null; store.isolatedSectionId = null; }"
         >
-          ← Zurück zum Controller
+          ← Back to controller
         </button>
 
         <!-- Section-isolated control: section indicator + remove button -->
@@ -532,14 +638,14 @@ const MODE_LABELS: Record<SectionMode, string> = {
           class="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-yellow-400/10 ring-1 ring-yellow-400/40"
         >
           <span class="text-[10px] text-yellow-300 leading-snug truncate">
-            Teil von „{{ focusedControlSection.name || SOURCE_LABELS[focusedControlSection.source] }}"
+            Part of "{{ focusedControlSection.name || SOURCE_LABELS[focusedControlSection.source] }}"
           </span>
           <button
             type="button"
             class="shrink-0 px-2 py-1 rounded text-[10px] font-medium bg-accent hover:bg-accent/80 transition-colors whitespace-nowrap"
             @click="removeControlFromSection"
           >
-            Entfernen
+            Remove
           </button>
         </div>
 
@@ -548,21 +654,21 @@ const MODE_LABELS: Record<SectionMode, string> = {
         </span>
 
         <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Typ</span>
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Type</span>
           <select
             v-if="!focusedControlSection"
             class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
             :value="selectedChild?.mapping?.type ?? 'none'"
             @change="(e) => setMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
           >
-            <option value="none">— keins —</option>
+            <option value="none">— none —</option>
             <option value="preset">Preset</option>
-            <option value="channel">Kanal</option>
-            <option value="effect-param">Effekt-Parameter</option>
-            <option value="page-switch">Seite wechseln</option>
+            <option value="channel">Channel</option>
+            <option value="effect-param">Effect parameter</option>
+            <option value="page-switch">Page switch</option>
           </select>
           <div v-else class="w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-muted-foreground">
-            Sektion
+            Section
           </div>
         </div>
 
@@ -573,7 +679,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
             :value="selectedChild.mapping.presetId ?? ''"
             @change="(e) => setMappingPreset((e.target as HTMLSelectElement).value)"
           >
-            <option value="">— wählen —</option>
+            <option value="">— choose —</option>
             <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
           </select>
         </div>
@@ -590,7 +696,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
         </div>
 
         <div v-if="!focusedControlSection" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Farbe</span>
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Color</span>
           <input
             type="color"
             class="w-full h-8 bg-background border border-border rounded"
@@ -604,7 +710,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
       <div v-else-if="store.activePage && !selectionSection" class="flex flex-col gap-4">
         <!-- Aspect Ratio -->
         <div class="flex flex-col gap-1.5">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seitenverhältnis</span>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Aspect Ratio</span>
           <div class="grid grid-cols-1 gap-1">
             <button
               v-for="ar in ASPECT_RATIOS"
@@ -622,7 +728,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
 
         <!-- Columns -->
         <div class="flex flex-col gap-1.5">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Breite (Spalten)</span>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Width (columns)</span>
           <input
             type="number"
             :value="store.activePage.columns"
@@ -636,7 +742,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
 
         <!-- Derived resolution display -->
         <div v-if="resolution" class="flex flex-col gap-1 pt-1 border-t border-border">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Berechnete Auflösung</span>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Computed Resolution</span>
           <span class="text-xs text-foreground font-mono">{{ resolution.w }} × {{ resolution.h }} px</span>
         </div>
       </div>

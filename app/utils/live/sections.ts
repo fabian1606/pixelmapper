@@ -1,13 +1,15 @@
-import type { LivePage, LiveSection, LiveWidget, SectionMember, SectionSource } from './types';
+import type { LivePage, LiveSection, LiveWidget, SectionColorEntry, SectionMember, SectionSource } from './types';
 import type { Preset } from '~/utils/engine/preset-types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
-import { autoColorPalette, colorNameFor, getPresetNaturalRGB, type RGB } from '~/utils/live/color-utils';
+import { colorNameFor, getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
 
 export interface SectionResolveContext {
   savedPresets: Preset[];
   selectedPresetId: string | null;
-  /** Number of section slots. Only used by 'auto-color-variants'. */
+  /** Number of section slots. Only used by 'color-variants'. */
   slotCount?: number;
+  /** For 'color-variants' sections, the section's stored static color list. */
+  storedColorVariants?: SectionColorEntry[];
 }
 
 /** One resolved slot: which preset it binds to, plus an optional color override + label. */
@@ -22,8 +24,10 @@ export interface ResolvedSlot {
  * Resolve the dynamic list of slots a section is currently pointing at.
  * Returned order is the order section members will be assigned to.
  */
-export function resolveSectionSource(source: SectionSource, ctx: SectionResolveContext): ResolvedSlot[] {
-  switch (source) {
+export function resolveSectionSource(source: SectionSource | string, ctx: SectionResolveContext): ResolvedSlot[] {
+  // Backwards-compat: old projects may still carry the previous source name.
+  const normalized: SectionSource = source === 'auto-color-variants' ? 'color-variants' : (source as SectionSource);
+  switch (normalized) {
     case 'all-presets':
       // Top-level presets only — variants are surfaced via 'preset-variants'.
       return ctx.savedPresets.filter(p => !p.basePresetId).map(preset => ({ preset }));
@@ -44,23 +48,32 @@ export function resolveSectionSource(source: SectionSource, ctx: SectionResolveC
       const list = root ? [root, ...variants] : variants;
       return list.map(preset => ({ preset }));
     }
-    case 'auto-color-variants': {
-      // N hue-rotated copies of the currently active preset (N = slot count).
-      // Slot 0 = the preset's natural base colour; subsequent slots are evenly
-      // hue-rotated from that base, preserving its saturation/value.
+    case 'color-variants': {
+      // Static palette stored on the section. Slot 0 always mirrors the active
+      // preset's natural RGB; other slots use their stored fixed RGB.
       const activeId = ctx.selectedPresetId;
       if (!activeId) return [];
       const active = ctx.savedPresets.find(p => p.id === activeId);
       if (!active) return [];
       const n = Math.max(0, ctx.slotCount ?? 0);
+      if (n === 0) return [];
       const base = getPresetNaturalRGB(activeId, ctx.savedPresets);
-      return autoColorPalette(n, base ?? undefined).map((colorOverride, i) => ({
-        preset: active,
-        colorOverride,
-        label: i === 0 ? 'Default' : colorNameFor(colorOverride),
-      }));
+      // If no stored list yet, fall back to a freshly-generated palette so the
+      // section is usable until the user (or a follow-up command) persists it.
+      const entries = ctx.storedColorVariants && ctx.storedColorVariants.length > 0
+        ? growColorVariants(ctx.storedColorVariants, n, base)
+        : growColorVariants(undefined, n, base);
+      return entries.map((entry, i) => {
+        const rgb = entry ?? base;
+        return {
+          preset: active,
+          colorOverride: rgb ?? undefined,
+          label: i === 0 ? 'Preset' : (rgb ? colorNameFor(rgb) : `Slot ${i + 1}`),
+        };
+      });
     }
   }
+  return [];
 }
 
 interface PositionedMember {

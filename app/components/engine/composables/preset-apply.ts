@@ -5,8 +5,8 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
-import { useLiveModeStore } from '~/stores/live-mode-store';
 import type { RGB } from '~/utils/live/color-utils';
+import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -94,12 +94,124 @@ function clearPresetEffects(preset: Preset, effects: Effect[]): void {
   }
 }
 
-function rgbOverrideValue(channelType: string, override: RGB | undefined): number | null {
-  if (!override) return null;
-  if (channelType === 'RED')   return override.r;
-  if (channelType === 'GREEN') return override.g;
-  if (channelType === 'BLUE')  return override.b;
-  return null;
+/** Index of the first category in this preset that has any RGB channels, or -1. */
+function primaryRGBCategoryIndex(preset: Preset): number {
+  for (let i = 0; i < preset.categories.length; i++) {
+    const cat = preset.categories[i];
+    if (!cat) continue;
+    for (const snap of cat.channels) {
+      if (snap.channelType === 'RED' || snap.channelType === 'GREEN' || snap.channelType === 'BLUE') {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Read the FIRST pixel's natural RGB triple at step 0. A multi-pixel fixture
+ * has multiple RED/GREEN/BLUE channels in the same category snapshot; we take
+ * the first occurrence of each type so this is "pixel 0's color".
+ */
+function categoryNaturalRGBAtStep0(category: Preset['categories'][number]): RGB | null {
+  let r: number | null = null, g: number | null = null, b: number | null = null;
+  for (const snap of category.channels) {
+    if (snap.channelType === 'RED'   && r === null) r = snap.stepValues[0] ?? 0;
+    if (snap.channelType === 'GREEN' && g === null) g = snap.stepValues[0] ?? 0;
+    if (snap.channelType === 'BLUE'  && b === null) b = snap.stepValues[0] ?? 0;
+    if (r !== null && g !== null && b !== null) break;
+  }
+  if (r === null && g === null && b === null) return null;
+  return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
+}
+
+/**
+ * For one category, build rotated stepValues arrays for ALL its R/G/B channels.
+ *
+ * Multi-pixel fixtures have multiple (RED, GREEN, BLUE) channel snapshots in
+ * the same category snapshot — one triple per pixel, in channel-order. Each
+ * pixel is rotated independently using its own natural hue.
+ *
+ * Hue delta = wheel.h − primary.pixel0.step0.h. Every step of every pixel of
+ * every category gets rotated by this same delta, keeping each step's natural
+ * saturation/value, so multi-step / multi-color / multi-pixel presets keep
+ * their composition.
+ *
+ * Special case (isPrimary && pixel === 0 && step === 0): use the override RGB
+ * verbatim, so the wheel's exact picked color appears at the focal point.
+ *
+ * Achromatic samples (s ≈ 0 — black/white) are NOT rotated.
+ *
+ * Returns Map<channelIndex, number[]> or null if the category has no RGB channels.
+ */
+function rotateCategorySteps(
+  category: Preset['categories'][number],
+  override: RGB,
+  primaryNatural: RGB,
+  isPrimary: boolean,
+): Map<number, number[]> | null {
+  type Snap = typeof category.channels[number];
+  const redSnaps: Snap[] = [];
+  const greenSnaps: Snap[] = [];
+  const blueSnaps: Snap[] = [];
+  for (const snap of category.channels) {
+    if (snap.channelType === 'RED')   redSnaps.push(snap);
+    else if (snap.channelType === 'GREEN') greenSnaps.push(snap);
+    else if (snap.channelType === 'BLUE')  blueSnaps.push(snap);
+  }
+  if (redSnaps.length === 0 && greenSnaps.length === 0 && blueSnaps.length === 0) return null;
+
+  const pixelCount = Math.max(redSnaps.length, greenSnaps.length, blueSnaps.length);
+
+  const primH = rgbToHsv(primaryNatural.r, primaryNatural.g, primaryNatural.b).h;
+  const ovH = rgbToHsv(override.r, override.g, override.b).h;
+  const delta = ovH - primH;
+
+  const result = new Map<number, number[]>();
+
+  for (let p = 0; p < pixelCount; p++) {
+    const redSnap = redSnaps[p];
+    const greenSnap = greenSnaps[p];
+    const blueSnap = blueSnaps[p];
+
+    const stepCount = Math.max(
+      redSnap?.stepValues.length ?? 0,
+      greenSnap?.stepValues.length ?? 0,
+      blueSnap?.stepValues.length ?? 0,
+    );
+    if (stepCount === 0) continue;
+
+    const redOut: number[] = [];
+    const greenOut: number[] = [];
+    const blueOut: number[] = [];
+
+    for (let i = 0; i < stepCount; i++) {
+      const r = redSnap?.stepValues[i] ?? 0;
+      const g = greenSnap?.stepValues[i] ?? 0;
+      const b = blueSnap?.stepValues[i] ?? 0;
+
+      let rotated: RGB;
+      if (isPrimary && p === 0 && i === 0) {
+        rotated = override;
+      } else {
+        const { h, s, v } = rgbToHsv(r, g, b);
+        if (s < 0.001) {
+          rotated = { r, g, b };
+        } else {
+          rotated = hsvToRgb(((h + delta) % 360 + 360) % 360, s, v);
+        }
+      }
+      redOut.push(rotated.r);
+      greenOut.push(rotated.g);
+      blueOut.push(rotated.b);
+    }
+
+    if (redSnap)   result.set(redSnap.channelIndex, redOut);
+    if (greenSnap) result.set(greenSnap.channelIndex, greenOut);
+    if (blueSnap)  result.set(blueSnap.channelIndex, blueOut);
+  }
+
+  return result;
 }
 
 /** Applies channel snapshots and reconstructs modifier effects from a preset. */
@@ -108,9 +220,6 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
 
   clearPresetEffects(preset, effects);
 
-  // Pull any runtime color override for this preset — wins over stored RGB step values.
-  const override = useLiveModeStore().presetColorOverrides.get(preset.id);
-
   for (const category of preset.categories) {
     for (const fixtureId of category.fixtureIds) {
       const fixture = fixtureMap.get(fixtureId);
@@ -118,11 +227,10 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
 
       for (const snap of category.channels) {
         const ch = fixture.channels[snap.channelIndex];
-        if (!ch || ch.type !== snap.channelType) continue; // sanity check
-        const overrideV = rgbOverrideValue(snap.channelType, override);
-        const baseValue = overrideV ?? snap.stepValues[0] ?? ch.defaultValue;
-        ch.chaserConfig.stepValues = overrideV !== null ? [overrideV] : [...snap.stepValues];
-        ch.chaserConfig.stepsCount = overrideV !== null ? 1 : (snap.chaserConfig?.stepsCount ?? snap.stepValues.length);
+        if (!ch || ch.type !== snap.channelType) continue;
+        const baseValue = snap.stepValues[0] ?? ch.defaultValue;
+        ch.chaserConfig.stepValues = [...snap.stepValues];
+        ch.chaserConfig.stepsCount = snap.chaserConfig?.stepsCount ?? snap.stepValues.length;
         ch.chaserConfig.activeEditStep = snap.chaserConfig?.activeEditStep ?? 0;
         ch.chaserConfig.isPlaying = snap.chaserConfig?.isPlaying ?? false;
         if (snap.chaserConfig?.stepDuration) ch.chaserConfig.stepDuration = { ...snap.chaserConfig.stepDuration };
@@ -131,7 +239,6 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
       }
     }
 
-    // Restore modifier effects; assign target fixture IDs from the category
     for (const modSnap of category.modifiers) {
       const eff = reconstructEffect(modSnap);
       if (eff) {
@@ -143,13 +250,32 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Eff
 }
 
 /**
- * Fast path used by the color wheel during drag: rewrites just the RED/GREEN/BLUE
- * step values on the preset's target fixtures, without touching effects or
- * non-color channels. Avoids the heavier `applyPreset` work on every pointermove.
+ * Mutates fixture R/G/B channel step values to apply (or revert) a color
+ * override. The wheel's exact color is applied to the preset's primary RGB
+ * category at step 0; every other step (in primary and in any other RGB
+ * category) is hue-rotated by the same delta so multi-step / multi-color
+ * presets keep their composition. Passing `rgb=null` writes the natural
+ * snapshot stepValues back — the fast-path "revert".
+ *
+ * No state is stored — the override is purely a fixture-state mutation. Any
+ * subsequent preset (re-)activation reloads the snapshot via
+ * `applyPresetToFixtures` and naturally clears the override.
  */
 export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB | null): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
-  for (const category of preset.categories) {
+  const primaryIdx = rgb ? primaryRGBCategoryIndex(preset) : -1;
+  const primaryNatural = (rgb && primaryIdx >= 0)
+    ? categoryNaturalRGBAtStep0(preset.categories[primaryIdx]!)
+    : null;
+
+  for (let catIdx = 0; catIdx < preset.categories.length; catIdx++) {
+    const category = preset.categories[catIdx];
+    if (!category) continue;
+    const isPrimary = catIdx === primaryIdx;
+    const rotated = (rgb && primaryNatural)
+      ? rotateCategorySteps(category, rgb, primaryNatural, isPrimary)
+      : null;
+
     for (const fixtureId of category.fixtureIds) {
       const fixture = fixtureMap.get(fixtureId);
       if (!fixture) continue;
@@ -157,13 +283,10 @@ export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB |
         if (snap.channelType !== 'RED' && snap.channelType !== 'GREEN' && snap.channelType !== 'BLUE') continue;
         const ch = fixture.channels[snap.channelIndex];
         if (!ch || ch.type !== snap.channelType) continue;
-        const overrideV = rgbOverrideValue(snap.channelType, rgb ?? undefined);
-        const baseValue = overrideV ?? snap.stepValues[0] ?? ch.defaultValue;
-        ch.chaserConfig.stepValues = [baseValue];
-        ch.chaserConfig.stepsCount = 1;
-        ch.chaserConfig.activeEditStep = 0;
-        ch.chaserConfig.isPlaying = false;
-        ch.currentBaseValue = baseValue;
+        const stepValuesOut = rotated?.get(snap.channelIndex) ?? [...snap.stepValues];
+        ch.chaserConfig.stepValues = stepValuesOut;
+        ch.chaserConfig.stepsCount = stepValuesOut.length;
+        ch.currentBaseValue = stepValuesOut[0] ?? ch.defaultValue;
       }
     }
   }

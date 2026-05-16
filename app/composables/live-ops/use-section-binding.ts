@@ -6,9 +6,16 @@ import { useEngineStore } from '~/stores/engine-store';
 import { findSectionFor, resolveSectionSource, memberKey, type SectionMembership } from '~/utils/live/sections';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
-import { setColorOverride } from '~/composables/live-ops/color-override-ops';
+import { setColorOverride, getEffectiveRGB } from '~/composables/live-ops/color-override-ops';
 import type { Preset } from '~/utils/engine/preset-types';
 import type { RGB } from '~/utils/live/color-utils';
+import { getPresetNaturalRGB } from '~/utils/live/color-utils';
+
+/** RGB within ±1 per channel (rounding tolerance from HSV→RGB conversions). */
+function rgbEquals(a: RGB | null, b: RGB | null): boolean {
+  if (!a || !b) return false;
+  return Math.abs(a.r - b.r) <= 1 && Math.abs(a.g - b.g) <= 1 && Math.abs(a.b - b.b) <= 1;
+}
 
 export interface BoundSlot {
   membership: SectionMembership;
@@ -35,6 +42,7 @@ export function findBoundPreset(
     savedPresets,
     selectedPresetId,
     slotCount: membership.total,
+    storedColorVariants: membership.section.colorVariants,
   });
   const slot = slots[membership.index];
   if (!slot) return null;
@@ -87,7 +95,8 @@ export function sectionPress(args: {
 
   const key = memberKey({ widgetId: args.widgetId, controlId: args.controlId });
   const cur = liveStore.activeSectionMembers.get(bound.membership.section.id) ?? new Set<string>();
-  const isAutoColor = bound.membership.section.source === 'auto-color-variants';
+  const isAutoColor = bound.membership.section.source === 'color-variants'
+    || (bound.membership.section.source as string) === 'auto-color-variants';
   const isFlash = bound.membership.section.mode === 'flash' || bound.preset.type === 'flash';
 
   if (isAutoColor) {
@@ -176,6 +185,25 @@ export function useSectionBinding(args: {
   const isActive = computed(() => {
     const m = membership.value;
     if (!m) return false;
+
+    // Color-variants slots: derive active-state from current fixture color, not
+    // from the latched activeSectionMembers — that way preset re-activation
+    // (which resets fixture state to natural) automatically un-highlights the
+    // slot and re-highlights "Preset (auto)".
+    const source = m.section.source as string;
+    if (source === 'color-variants' || source === 'auto-color-variants') {
+      const preset = boundPreset.value;
+      if (!preset) return false;
+      const effective = getEffectiveRGB(preset, engineStore.flatFixtures);
+      const slotRGB = bound.value?.colorOverride;
+      if (!slotRGB) {
+        // The "Preset (auto)" slot — active when the live color is natural.
+        const natural = getPresetNaturalRGB(preset.id, engineStore.savedPresets);
+        return rgbEquals(effective, natural);
+      }
+      return rgbEquals(effective, slotRGB);
+    }
+
     return liveStore.activeSectionMembers.get(m.section.id)?.has(myKey.value) ?? false;
   });
 

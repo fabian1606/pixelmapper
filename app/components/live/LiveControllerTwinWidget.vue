@@ -124,7 +124,7 @@ function isSectionActive(controlId: string): boolean {
 
 /**
  * Pick the "bound color" for a control: section slot's color override wins
- * (auto-color-variants), then the preset's natural colour, then child override.
+ * (color-variants), then the preset's natural colour, then child override.
  */
 function boundColorFor(id: string): string | null {
   const bound = boundPresetFor(id);

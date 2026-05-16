@@ -5,6 +5,8 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { MoveResizeLiveWidgetCommand, BatchMoveResizeLiveWidgetsCommand, SetSectionMembersCommand, type BatchMoveResizeUpdate } from '~/components/engine/commands/live-widget-commands';
 import { findSectionFor } from '~/utils/live/sections';
+import { getPresetNaturalRGB, growColorVariants } from '~/utils/live/color-utils';
+import { useEngineStore } from '~/stores/engine-store';
 import LiveButtonWidget from './LiveButtonWidget.vue';
 import LiveSliderWidget from './LiveSliderWidget.vue';
 import LiveXYPadWidget from './LiveXYPadWidget.vue';
@@ -22,6 +24,7 @@ const props = defineProps<{
 }>();
 
 const store = useLiveModeStore();
+const engineStore = useEngineStore();
 const history = useHistory();
 
 const isSelected = computed(() => store.selectedWidgetIds.has(props.widget.id));
@@ -147,7 +150,15 @@ function onMouseDown(e: MouseEvent) {
     } else {
       next = [...sec.members, { widgetId: props.widget.id }];
     }
-    history.execute(new SetSectionMembersCommand(store.activePageId, sectionId, next));
+    // For color-variants sections, grow/trim the static palette in lockstep.
+    let nextColors: ReturnType<typeof growColorVariants> | undefined;
+    if (sec.source === 'color-variants' || (sec.source as string) === 'auto-color-variants') {
+      const baseRGB = engineStore.selectedPresetId
+        ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+        : null;
+      nextColors = growColorVariants(sec.colorVariants, next.length, baseRGB);
+    }
+    history.execute(new SetSectionMembersCommand(store.activePageId, sectionId, next, nextColors));
     return; // no drag in mapping mode
   }
 

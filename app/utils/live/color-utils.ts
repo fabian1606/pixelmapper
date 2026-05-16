@@ -10,20 +10,27 @@ export function getPresetDominantHue(presetId: string, savedPresets: Preset[]): 
   return rgbToHsv(rgb.r, rgb.g, rgb.b).h;
 }
 
-/** First RGB triple found in the preset's color category, scaled 0–255. */
+/**
+ * The FIRST pixel's natural RGB triple in the preset's primary RGB category.
+ * Used as the "reference" color for hue-rotation, wheel handle position, and
+ * "is this preset natural?" comparisons. Multi-pixel fixtures have multiple
+ * (R, G, B) triples per category — we take the first of each type so this is
+ * pixel 0's color, not "the last pixel's".
+ */
 export function getPresetNaturalRGB(presetId: string, savedPresets: Preset[]): RGB | null {
   const preset = savedPresets.find(p => p.id === presetId);
   if (!preset) return null;
   const resolved = resolvePreset(preset, savedPresets);
   for (const cat of resolved.categories) {
-    let r = 0, g = 0, b = 0, found = false;
+    let r: number | null = null, g: number | null = null, b: number | null = null;
     for (const ch of cat.channels) {
       const v = ch.stepValues[0] ?? 0;
-      if (ch.channelType === 'RED')   { r = v; found = true; }
-      if (ch.channelType === 'GREEN') { g = v; found = true; }
-      if (ch.channelType === 'BLUE')  { b = v; found = true; }
+      if (ch.channelType === 'RED'   && r === null) r = v;
+      if (ch.channelType === 'GREEN' && g === null) g = v;
+      if (ch.channelType === 'BLUE'  && b === null) b = v;
+      if (r !== null && g !== null && b !== null) break;
     }
-    if (found) return { r, g, b };
+    if (r !== null || g !== null || b !== null) return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
   }
   return null;
 }
@@ -69,32 +76,32 @@ export function rgbToHsv(r: number, g: number, b: number): { h: number; s: numbe
 }
 
 /**
- * Map an RGB to the nearest German color name. Achromatic colors (low saturation
- * or value) collapse to "Weiß" / "Grau" / "Schwarz". Otherwise picks the closest
- * of 12 hue buckets at 30° steps.
+ * Map an RGB to the nearest English color name. Achromatic colors (low
+ * saturation or value) collapse to "White" / "Gray" / "Black". Otherwise picks
+ * the closest of 12 hue buckets at 30° steps.
  */
-const HUE_NAMES_DE: { hue: number; name: string }[] = [
-  { hue: 0,   name: 'Rot' },
+const HUE_NAMES: { hue: number; name: string }[] = [
+  { hue: 0,   name: 'Red' },
   { hue: 30,  name: 'Orange' },
-  { hue: 60,  name: 'Gelb' },
-  { hue: 90,  name: 'Limette' },
-  { hue: 120, name: 'Grün' },
-  { hue: 150, name: 'Türkis' },
+  { hue: 60,  name: 'Yellow' },
+  { hue: 90,  name: 'Lime' },
+  { hue: 120, name: 'Green' },
+  { hue: 150, name: 'Teal' },
   { hue: 180, name: 'Cyan' },
-  { hue: 210, name: 'Azur' },
-  { hue: 240, name: 'Blau' },
-  { hue: 270, name: 'Violett' },
+  { hue: 210, name: 'Azure' },
+  { hue: 240, name: 'Blue' },
+  { hue: 270, name: 'Violet' },
   { hue: 300, name: 'Magenta' },
   { hue: 330, name: 'Pink' },
 ];
 
 export function colorNameFor(rgb: RGB): string {
   const { h, s, v } = rgbToHsv(rgb.r, rgb.g, rgb.b);
-  if (v < 0.08) return 'Schwarz';
-  if (s < 0.12) return v > 0.85 ? 'Weiß' : 'Grau';
-  let best = HUE_NAMES_DE[0]!;
+  if (v < 0.08) return 'Black';
+  if (s < 0.12) return v > 0.85 ? 'White' : 'Gray';
+  let best = HUE_NAMES[0]!;
   let bestDist = 360;
-  for (const entry of HUE_NAMES_DE) {
+  for (const entry of HUE_NAMES) {
     const raw = Math.abs(h - entry.hue) % 360;
     const dist = Math.min(raw, 360 - raw);
     if (dist < bestDist) { bestDist = dist; best = entry; }
@@ -120,4 +127,71 @@ export function autoColorPalette(n: number, base?: RGB): RGB[] {
   return Array.from({ length: n }, (_, i) =>
     i === 0 ? { ...base } : hsvToRgb(h + (i / n) * 360, useS, useV),
   );
+}
+
+/** A stored color-variants entry: `null` = "use the active preset's natural RGB". */
+export type ColorEntry = RGB | null;
+
+/**
+ * Pick the next color to append to a stored palette.
+ * Strategy: collect all hues currently in use (including the preset's natural hue
+ * for `null` slots), and place the new color at the midpoint of the largest gap
+ * on the hue circle. Saturation/value follow the existing palette (or 1/1).
+ */
+export function nextAutoColor(existing: ColorEntry[], baseRGB: RGB | null): RGB {
+  // Gather hues + a reference saturation/value from real entries.
+  const hues: number[] = [];
+  let refS = 1, refV = 1;
+  let haveRef = false;
+  for (const e of existing) {
+    const rgb = e ?? baseRGB;
+    if (!rgb) continue;
+    const { h, s, v } = rgbToHsv(rgb.r, rgb.g, rgb.b);
+    hues.push(((h % 360) + 360) % 360);
+    if (!haveRef && (s > 0.05 || v > 0.05)) {
+      refS = s < 0.05 ? 1 : s;
+      refV = v < 0.05 ? 1 : v;
+      haveRef = true;
+    }
+  }
+  if (hues.length === 0) return hsvToRgb(0, 1, 1);
+  hues.sort((a, b) => a - b);
+  // Largest gap on the circle.
+  let bestGap = 0, bestMid = 0;
+  for (let i = 0; i < hues.length; i++) {
+    const cur = hues[i]!;
+    const next = i + 1 < hues.length ? hues[i + 1]! : hues[0]! + 360;
+    const gap = next - cur;
+    if (gap > bestGap) {
+      bestGap = gap;
+      bestMid = ((cur + gap / 2) % 360 + 360) % 360;
+    }
+  }
+  return hsvToRgb(bestMid, refS, refV);
+}
+
+/**
+ * Grow or trim a stored color-variants array to match a target slot count.
+ * - Slot 0 is always `null` (preset-natural).
+ * - Existing entries at indices 1..len-1 are preserved verbatim.
+ * - Missing trailing slots are filled by repeatedly calling `nextAutoColor`.
+ * - Extra trailing slots are dropped when shrinking.
+ */
+export function growColorVariants(
+  current: ColorEntry[] | undefined,
+  targetLen: number,
+  baseRGB: RGB | null,
+): ColorEntry[] {
+  if (targetLen <= 0) return [];
+  const out: ColorEntry[] = [null]; // slot 0 always preset-natural
+  // Copy through user-set / previously generated entries up to targetLen.
+  if (current) {
+    for (let i = 1; i < Math.min(current.length, targetLen); i++) {
+      out.push(current[i] ?? null);
+    }
+  }
+  while (out.length < targetLen) {
+    out.push(nextAutoColor(out, baseRGB));
+  }
+  return out;
 }

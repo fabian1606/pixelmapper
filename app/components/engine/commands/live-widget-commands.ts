@@ -1,6 +1,6 @@
 import type { Command } from '../composables/use-history';
 import { type SerializableCommand, registerCommand } from './serializable-command';
-import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding, LiveSection, SectionMember } from '~/utils/live/types';
+import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding, LiveSection, SectionMember, SectionColorEntry } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 
 function getLiveStore() {
@@ -577,32 +577,53 @@ registerCommand('live.updateSection', (p) => new UpdateLiveSectionCommand(p.page
 export class SetSectionMembersCommand implements SerializableCommand {
   readonly commandType = 'live.setSectionMembers';
   description = 'Update Section Members';
-  private _before: SectionMember[] | null = null;
+  private _beforeMembers: SectionMember[] | null = null;
+  private _beforeColors: SectionColorEntry[] | undefined = undefined;
 
   constructor(
     private pageId: string,
     private sectionId: string,
     private members: SectionMember[],
+    /** Optional new colorVariants array. Pass for 'color-variants' sections so the
+     *  static palette grows/trims in lockstep with the member list. */
+    private nextColorVariants?: SectionColorEntry[],
   ) {}
 
   execute() {
     const store = getLiveStore();
     const page = store.pages.find((p: LivePage) => p.id === this.pageId);
     const section = page?.sections?.find(s => s.id === this.sectionId);
-    if (section) this._before = section.members.map(m => ({ ...m }));
+    if (section) {
+      this._beforeMembers = section.members.map(m => ({ ...m }));
+      this._beforeColors = section.colorVariants ? section.colorVariants.map(c => c ? { ...c } : null) : undefined;
+    }
     store.setSectionMembers(this.pageId, this.sectionId, this.members);
+    if (this.nextColorVariants !== undefined) {
+      store.updateSection(this.pageId, this.sectionId, { colorVariants: this.nextColorVariants });
+    }
   }
   undo() {
-    if (this._before) getLiveStore().setSectionMembers(this.pageId, this.sectionId, this._before);
+    const store = getLiveStore();
+    if (this._beforeMembers) store.setSectionMembers(this.pageId, this.sectionId, this._beforeMembers);
+    if (this.nextColorVariants !== undefined) {
+      store.updateSection(this.pageId, this.sectionId, { colorVariants: this._beforeColors });
+    }
   }
   inverse(): Command | null {
-    if (!this._before) return null;
-    return new SetSectionMembersCommand(this.pageId, this.sectionId, this._before);
+    if (!this._beforeMembers) return null;
+    return new SetSectionMembersCommand(this.pageId, this.sectionId, this._beforeMembers, this._beforeColors);
   }
-  toPayload() { return { pageId: this.pageId, sectionId: this.sectionId, members: this.members }; }
+  toPayload() {
+    return {
+      pageId: this.pageId,
+      sectionId: this.sectionId,
+      members: this.members,
+      colorVariants: this.nextColorVariants,
+    };
+  }
 }
 
-registerCommand('live.setSectionMembers', (p) => new SetSectionMembersCommand(p.pageId, p.sectionId, p.members));
+registerCommand('live.setSectionMembers', (p) => new SetSectionMembersCommand(p.pageId, p.sectionId, p.members, p.colorVariants));
 
 // ─── AddLiveController ────────────────────────────────────────────────────────
 

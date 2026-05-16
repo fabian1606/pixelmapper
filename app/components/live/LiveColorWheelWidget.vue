@@ -2,8 +2,7 @@
 import { computed, ref } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
-import { useLiveModeStore } from '~/stores/live-mode-store';
-import { reapplyColorOverrideForActive, setColorOverride } from '~/composables/live-ops/color-override-ops';
+import { applyRGBToActivePreset, setColorOverride, getEffectiveRGB } from '~/composables/live-ops/color-override-ops';
 import { getPresetNaturalRGB, hsvToRgb, rgbToHsv, type RGB } from '~/utils/live/color-utils';
 
 const props = defineProps<{
@@ -13,7 +12,6 @@ const props = defineProps<{
 }>();
 
 const engineStore = useEngineStore();
-const liveStore = useLiveModeStore();
 
 const activePresetId = computed(() => engineStore.selectedPresetId);
 
@@ -23,16 +21,21 @@ const naturalRGB = computed<RGB | null>(() => {
   return getPresetNaturalRGB(id, engineStore.savedPresets);
 });
 
-/** Effective base color: override if set, else preset's natural RGB. */
+/** Effective base color, derived live from fixture state. */
 const effectiveRGB = computed<RGB | null>(() => {
   const id = activePresetId.value;
   if (!id) return null;
-  return liveStore.presetColorOverrides.get(id) ?? naturalRGB.value;
+  const preset = engineStore.savedPresets.find((p: any) => p.id === id);
+  if (!preset) return null;
+  return getEffectiveRGB(preset, engineStore.flatFixtures);
 });
 
+/** True when the live fixture color differs from the preset's natural RGB. */
 const hasOverride = computed(() => {
-  const id = activePresetId.value;
-  return !!id && liveStore.presetColorOverrides.has(id);
+  const eff = effectiveRGB.value;
+  const nat = naturalRGB.value;
+  if (!eff || !nat) return false;
+  return Math.abs(eff.r - nat.r) > 1 || Math.abs(eff.g - nat.g) > 1 || Math.abs(eff.b - nat.b) > 1;
 });
 
 const hasColorChannels = computed(() => naturalRGB.value !== null);
@@ -61,13 +64,18 @@ function handlePosFromRGB(rgb: RGB): { left: string; top: string; color: string 
   return { left: `${left}%`, top: `${top}%`, color: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})` };
 }
 
+// Live preview during drag: handle follows the cursor immediately, while
+// fixture writes themselves are RAF-throttled to avoid 60+fps spam.
+const dragPreviewRGB = ref<RGB | null>(null);
+
 const handleStyle = computed(() => {
-  const rgb = effectiveRGB.value;
+  const rgb = dragPreviewRGB.value ?? effectiveRGB.value;
   if (!rgb) return { left: '50%', top: '50%', color: 'rgba(255,255,255,0.5)' };
   return handlePosFromRGB(rgb);
 });
 
 const isDragging = ref(false);
+let _rafId: number | null = null;
 
 function getRelPos(e: PointerEvent, el: HTMLElement) {
   const rect = el.getBoundingClientRect();
@@ -76,12 +84,19 @@ function getRelPos(e: PointerEvent, el: HTMLElement) {
   return { x: e.clientX - rect.left - cx, y: e.clientY - rect.top - cy, radius: Math.min(cx, cy) };
 }
 
-/** Local-only update: instant feedback, no broadcast. */
+/** Local-only update: handle moves instantly; fixture writes RAF-throttled. */
+let _pendingRGB: RGB | null = null;
 function setOverrideLocal(rgb: RGB) {
   const id = activePresetId.value;
   if (!id) return;
-  liveStore.setPresetColor(id, rgb);
-  reapplyColorOverrideForActive();
+  dragPreviewRGB.value = rgb;
+  _pendingRGB = rgb;
+  if (_rafId !== null) return;
+  _rafId = requestAnimationFrame(() => {
+    _rafId = null;
+    if (_pendingRGB) applyRGBToActivePreset(_pendingRGB);
+    _pendingRGB = null;
+  });
 }
 
 /** Commit locally + broadcast (LiveBus) — used on pointer-up and reset. */
@@ -120,10 +135,13 @@ function onPointerUp(e: PointerEvent) {
   const rgb = rgbFromPos(pos.x, pos.y, pos.radius);
   setOverrideLocal(rgb);
   commitOverride(rgb);
+  // Clear the preview so the handle settles to fixture-derived effectiveRGB.
+  dragPreviewRGB.value = null;
 }
 
 function resetOverride() {
   if (props.editMode) return;
+  dragPreviewRGB.value = null;
   commitOverride(null);
 }
 
@@ -157,7 +175,7 @@ const readout = computed(() => {
       <button
         v-if="!editMode && hasOverride"
         class="text-[9px] text-muted-foreground/60 hover:text-muted-foreground transition-colors px-1 rounded shrink-0"
-        title="Override zurücksetzen"
+        title="Reset override"
         @click.stop="resetOverride"
       >
         ✕
@@ -208,7 +226,7 @@ const readout = computed(() => {
           v-if="!activePresetId && !editMode"
           class="absolute inset-0 rounded-full flex items-center justify-center pointer-events-none"
         >
-          <span class="text-[9px] text-white/50 px-2 text-center">Preset wählen</span>
+          <span class="text-[9px] text-white/50 px-2 text-center">Select a preset</span>
         </div>
 
         <!-- Bottom-corner readout (overlaid, doesn't change wheel size) -->

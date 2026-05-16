@@ -53,7 +53,7 @@ export interface LiveWidget {
   groupId?: string
 }
 
-export type SectionSource = 'all-presets' | 'preset-variants' | 'auto-color-variants'
+export type SectionSource = 'all-presets' | 'preset-variants' | 'color-variants'
 export type SectionMode = 'flash' | 'single-select' | 'multi-select'
 
 export interface SectionMember {
@@ -62,12 +62,21 @@ export interface SectionMember {
   controlId?: string
 }
 
+/** A persisted color for a 'color-variants' section slot. `null` = use the active preset's natural color. */
+export type SectionColorEntry = { r: number; g: number; b: number } | null
+
 export interface LiveSection {
   id: string
   name?: string
   source: SectionSource
   mode: SectionMode
   members: SectionMember[]
+  /**
+   * For source === 'color-variants': one entry per ordered member slot.
+   * Slot 0 is always `null` (mirrors the active preset's natural RGB).
+   * Other slots hold a fixed RGB chosen by auto-generation or user edit.
+   */
+  colorVariants?: SectionColorEntry[]
 }
 
 export interface LivePage {

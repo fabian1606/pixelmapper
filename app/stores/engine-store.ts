@@ -435,6 +435,19 @@ export const useEngineStore = defineStore('engine', () => {
     flushEngineOutput();
   };
 
+  /**
+   * Lightweight alternative to triggerCanvasSync for use during continuous
+   * drags (e.g. color wheel). Rebuilds the channels binary packet and bumps
+   * the revision so the rAF render loop picks it up on the next frame — without
+   * doing an immediate WASM dispatch, render, or notifyEngineState call.
+   * This avoids doubling hardware/network messages at 60fps during drag.
+   */
+  function markChannelsDirty(): void {
+    if (!initialized) return;
+    channelsPacket = buildChannelsBin(flatFixtures.value);
+    channelsRevision.value++;
+  }
+
   // ── Project persistence ───────────────────────────────────────────────────
 
   const currentProjectId = ref<string | null>(null);
@@ -674,6 +687,7 @@ export const useEngineStore = defineStore('engine', () => {
     getOutputBuffer,
     initEngine,
     triggerCanvasSync,
+    markChannelsDirty,
     flushEngineOutput,
     currentProjectId,
     projectLoading,
