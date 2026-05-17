@@ -59,12 +59,17 @@ function setActiveSet(
   liveStore.activeSectionMembers = map;
   // Broadcast latched state so other tabs mirror single-/multi-select sections.
   // Flash-mode press+release will fire this twice (active + empty); harmless.
+  // Deferred to next microtask so the LiveBus dispatch doesn't sit in the
+  // synchronous click handler that just kicked off the engine flush.
   const pageId = liveStore.activePageId;
   if (pageId) {
-    useLiveBusStore().dispatch('section.setActive', {
-      pageId,
-      sectionId,
-      keys: Array.from(next),
+    const keys = Array.from(next);
+    queueMicrotask(() => {
+      useLiveBusStore().dispatch('section.setActive', {
+        pageId,
+        sectionId,
+        keys,
+      });
     });
   }
 }

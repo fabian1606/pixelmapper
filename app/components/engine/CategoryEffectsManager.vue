@@ -30,6 +30,7 @@ import ChaserModifiersList from './ChaserModifiersList.vue';
 import { useChaserHistory } from './composables/use-chaser-history';
 import { useChaserSteps } from './composables/use-chaser-steps';
 import { useChaserModifiers } from './composables/use-chaser-modifiers';
+import { useEngineStore } from '~/stores/engine-store';
 
 // Layer mode: 'steps' is the default visual editing mode, 'modifiers' hides faders and shows advanced timing (effects)
 const layerMode = ref<'steps'|'modifiers'>('steps');
@@ -44,6 +45,12 @@ const emit = defineEmits<{
 }>();
 
 const effectEngine = inject<EffectEngine>('effectEngine');
+const engineStore = useEngineStore();
+
+function handleChange() {
+  emit('change');
+  engineStore.flushEngineOutput?.();
+}
 
 // Sidebar close lock to prevent the sidebar from auto-closing when clicking outside dropdowns
 const { lock, unlock } = useSidebarLock();
@@ -81,7 +88,7 @@ const {
   deleteActiveStep, 
   updateTiming, 
   removeChaser 
-} = useChaserSteps(props, effectEngine, historyTools, () => emit('change'));
+} = useChaserSteps(props, effectEngine, historyTools, handleChange);
 
 const {
   activeModifiers,
@@ -100,7 +107,7 @@ const {
   selectModifier,
   reverseDirection,
   reorderModifiers,
-} = useChaserModifiers(props, effectEngine, historyTools, tabChannelFilter, () => emit('change'));
+} = useChaserModifiers(props, effectEngine, historyTools, tabChannelFilter, handleChange);
 
 const pinnedStore = usePinnedModifiersStore();
 const pinnedEffectIds = computed(() => new Set(pinnedStore.pinnedModifiers.map(p => p.effectId)));

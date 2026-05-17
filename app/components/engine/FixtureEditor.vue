@@ -164,6 +164,7 @@ function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
   if (!effectEngine) return;
   if (!modifierDragBeforeEffects) modifierDragBeforeEffects = cloneEffectsList(effectEngine.effects);
   Object.assign(modifier, changes);
+  engineStore.flushEngineOutput?.();
 }
 
 function handleSpatialDragStart() {
@@ -308,7 +309,7 @@ function handleMouseUp(e?: MouseEvent) {
       @dragStart="handleSpatialDragStart"
       @modifierChange="handleModifierChange"
       @modifierDragEnd="handleModifierDragEnd"
-      @redraw="() => fixtureCanvas?.draw()"
+      @redraw="() => { engineStore.flushEngineOutput?.(); fixtureCanvas?.draw(); }"
     />
   </div>
 </template>

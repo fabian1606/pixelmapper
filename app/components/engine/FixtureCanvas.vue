@@ -23,37 +23,49 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// Pull dmxBuffer directly from the engine — never via prop (prop is captured at render time,
-// effectEngine.dmxBuffer is reassigned after async WASM init and after each render call).
+// Engine holds the worker that owns the OffscreenCanvas (drawing happens there).
 const effectEngine = inject<EffectEngine | undefined>('effectEngine');
 const engineStore = useEngineStore();
 
-// Plain JS variable — intentionally bypasses Vue's reactivity proxy.
-let wasmCanvas: WasmCanvas | null = null;
+// Local WasmCanvas — NO init_gl. Used only for hit-test / marquee-select on
+// the main thread so input handlers stay synchronous. State (camera, viewport,
+// world, fixtures, marquee, selected) is mirrored from the worker side.
+let localCanvas: WasmCanvas | null = null;
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let rafId: number | null = null;
+let canvasTransferred = false;
 
-// ─── Sync: Camera / Viewport / Marquee (CHEAP — called every RAF frame, no JSON) ──────────────
+// ─── Sync: Camera / Viewport / Marquee (every RAF — cheap postMessages + local mirror) ──────
 function syncState() {
-  const wc = wasmCanvas;
-  if (!wc) return;
-
-  wc.set_camera(props.camera.x, props.camera.y, props.camera.scale);
-  wc.set_viewport(props.viewportWidth, props.viewportHeight);
-  wc.set_world(props.worldWidth, props.worldHeight);
+  if (!effectEngine) return;
+  effectEngine.setCanvasCamera(props.camera.x, props.camera.y, props.camera.scale);
+  effectEngine.setCanvasViewport(props.viewportWidth, props.viewportHeight);
+  effectEngine.setCanvasWorld(props.worldWidth, props.worldHeight);
 
   if (props.interaction.type === 'marquee') {
     const { start, end } = props.interaction;
-    wc.set_marquee(true, start.x, start.y, end.x, end.y);
+    effectEngine.setCanvasMarquee(true, start.x, start.y, end.x, end.y);
   } else {
-    wc.set_marquee(false, 0, 0, 0, 0);
+    effectEngine.setCanvasMarquee(false, 0, 0, 0, 0);
+  }
+
+  // Mirror to local canvas for hit-testing
+  if (localCanvas) {
+    localCanvas.set_camera(props.camera.x, props.camera.y, props.camera.scale);
+    localCanvas.set_viewport(props.viewportWidth, props.viewportHeight);
+    localCanvas.set_world(props.worldWidth, props.worldHeight);
+    if (props.interaction.type === 'marquee') {
+      const { start, end } = props.interaction;
+      localCanvas.set_marquee(true, start.x, start.y, end.x, end.y);
+    } else {
+      localCanvas.set_marquee(false, 0, 0, 0, 0);
+    }
   }
 }
 
 // ─── Sync: Fixture geometry + DMX channel indices (EXPENSIVE — JSON + R-Tree rebuild) ─────────
 function syncFixtures() {
-  const wc = wasmCanvas;
-  if (!wc) return;
+  if (!effectEngine) return;
 
   const isSelected = (f: Fixture): boolean => {
     let c: any = f;
@@ -96,38 +108,29 @@ function syncFixtures() {
     };
   });
 
-  try {
-    wc.sync_fixtures(JSON.stringify(canvasFixtures));
-  } catch (err) {
-    console.error('rs-engine-canvas sync_fixtures failed:', err);
+  const json = JSON.stringify(canvasFixtures);
+  effectEngine.syncCanvasFixtures(json);
+  if (localCanvas) {
+    try { localCanvas.sync_fixtures(json); } catch (err) {
+      console.error('rs-engine-canvas (local) sync_fixtures failed:', err);
+    }
   }
 }
 
 // ─── Sync: Selection state only (CHEAP — no JSON, no R-Tree rebuild) ──────────────────────────
 function syncSelected() {
-  const wc = wasmCanvas;
-  if (!wc) return;
-  // Expand: include fixture IDs whose ancestor is in selectedIds
+  if (!effectEngine) return;
   const arr = props.fixtures
     .filter(f => { let c: any = f; while (c) { if (props.selectedIds.has(c.id)) return true; c = c.parent; } return false; })
     .map(f => String(f.id));
-  wc.set_selected(arr);
+  effectEngine.setCanvasSelected(arr);
+  if (localCanvas) localCanvas.set_selected(arr);
 }
 
-// ─── Draw: use the mixed output buffer (overrides applied on top of engine output) ───────────
-function drawFrame() {
-  if (wasmCanvas) {
-    const buf = engineStore.getOutputBuffer();
-    const finalBuf = buf.length > 0 ? buf : (effectEngine?.dmxBuffer ?? new Uint8Array());
-    wasmCanvas.draw(finalBuf);
-  }
-}
-
-// ─── RAF loop: syncState (cheap) + draw every frame ───────────────────────────────────────────
+// ─── RAF loop: state sync only (drawing happens in the worker, off the main thread) ──────────
 function startRafLoop() {
   const loop = () => {
     syncState();
-    drawFrame();
     rafId = requestAnimationFrame(loop);
   };
   rafId = requestAnimationFrame(loop);
@@ -135,19 +138,32 @@ function startRafLoop() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────────────────────
 async function initAndDraw() {
+  // Local WasmCanvas for hit-test only — no GL needed.
   await initWasm(wasmUrl);
-  if (!canvasEl.value) return;
+  if (!canvasEl.value || !effectEngine) return;
 
-  const wc = new WasmCanvas();
-  try {
-    wc.init_gl(canvasEl.value!);
-    wasmCanvas = wc;
-    syncState();    // ensure world dimensions are set before R-Tree build
-    syncFixtures(); // initial fixture geometry + selection sync
-    startRafLoop();
-  } catch (error) {
-    console.error('Failed to initialize WebGL femtovg canvas:', error);
+  localCanvas = new WasmCanvas();
+
+  // Hand the canvas drawing surface to the worker so rendering runs off-main.
+  // After transfer the HTMLCanvas's width/height attributes become read-only,
+  // so set them once here (initial size) and route subsequent resizes through
+  // a worker message that mutates OffscreenCanvas.width/height directly.
+  if (!canvasTransferred && 'transferControlToOffscreen' in canvasEl.value) {
+    try {
+      await effectEngine.ready;
+      canvasEl.value.width = props.viewportWidth;
+      canvasEl.value.height = props.viewportHeight;
+      const offscreen = canvasEl.value.transferControlToOffscreen();
+      effectEngine.initCanvas(offscreen);
+      canvasTransferred = true;
+    } catch (e) {
+      console.error('[FixtureCanvas] transferControlToOffscreen failed:', e);
+    }
   }
+
+  syncState();    // initial dimensions before R-Tree builds
+  syncFixtures(); // initial fixture geometry + selection sync
+  startRafLoop();
 }
 
 onMounted(() => {
@@ -159,44 +175,47 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(rafId);
     rafId = null;
   }
-  if (wasmCanvas) {
-    wasmCanvas.free();
-    wasmCanvas = null;
+  if (localCanvas) {
+    localCanvas.free();
+    localCanvas = null;
   }
 });
 
 // ─── Watches ──────────────────────────────────────────────────────────────────────────────────
-// Camera/viewport/marquee are synced every RAF frame via syncState() — no watches needed.
-// Re-sync fixtures when added/removed (expensive JSON + R-Tree rebuild).
 watch(() => props.fixtures.length, syncFixtures);
-// Re-sync selection cheaply (set_selected only, no R-Tree rebuild).
 watch(() => props.selectedIds, syncSelected);
+// Resize: HTMLCanvas's width/height is frozen after transferControlToOffscreen,
+// so push viewport changes to the worker which mutates OffscreenCanvas directly.
+watch(() => [props.viewportWidth, props.viewportHeight], ([w, h]) => {
+  effectEngine?.resizeCanvas(w as number, h as number);
+});
 
 // ─── Public API ───────────────────────────────────────────────────────────────────────────────
 function syncRemoteSelections(entries: Array<{ id: string; r: number; g: number; b: number }>) {
-  const wc = wasmCanvas;
-  if (!wc) return;
-  wc.set_remote_selections(JSON.stringify(entries));
+  if (!effectEngine) return;
+  const json = JSON.stringify(entries);
+  effectEngine.setCanvasRemoteSelections(json);
+  if (localCanvas) localCanvas.set_remote_selections(json);
 }
 
 defineExpose({
-  // sync() is called from handleMouseMove during drag to push updated fixture positions
+  // Hit-tests run synchronously against the local WasmCanvas mirror.
   sync: syncFixtures,
-  draw: drawFrame,
+  draw: () => {}, // no-op: worker draws on its own tick
   syncRemoteSelections,
-  hitTest: (x: number, y: number) => wasmCanvas?.hit_test(x, y),
-  hitTestRotationZone: (x: number, y: number) => wasmCanvas?.hit_test_rotation_zone(x, y),
-  marqueeSelect: (sx: number, sy: number, ex: number, ey: number) => wasmCanvas?.marquee_select(sx, sy, ex, ey),
+  hitTest: (x: number, y: number) => localCanvas?.hit_test(x, y),
+  hitTestRotationZone: (x: number, y: number) => localCanvas?.hit_test_rotation_zone(x, y),
+  marqueeSelect: (sx: number, sy: number, ex: number, ey: number) => localCanvas?.marquee_select(sx, sy, ex, ey),
 });
 </script>
 
 <template>
   <div class="relative w-full h-full pointer-events-none">
+    <!-- width/height set imperatively before transferControlToOffscreen() —
+         a reactive :width/:height binding would throw after transfer. -->
     <canvas
       ref="canvasEl"
       class="absolute inset-0 rounded-none mix-blend-screen"
-      :width="viewportWidth"
-      :height="viewportHeight"
     />
   </div>
 </template>

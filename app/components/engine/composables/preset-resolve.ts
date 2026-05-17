@@ -20,11 +20,24 @@ function flattenPreset(preset: Preset, maps: SnapshotMaps) {
 }
 
 /**
+ * Cache keyed on the savedPresets array reference. Cache is auto-invalidated
+ * because every preset edit replaces savedPresets.value with a new array (the
+ * old WeakMap entry becomes unreachable and is GC'd).
+ */
+const _resolveCache = new WeakMap<Preset[], Map<string, Preset>>();
+
+/**
  * Recursively resolves a preset by merging it on top of its base preset.
  * The resulting preset contains the combined state of all its parents.
  */
 export function resolvePreset(preset: Preset, allPresets: Preset[]): Preset {
   if (!preset.basePresetId) return preset;
+
+  let perArrayCache = _resolveCache.get(allPresets);
+  if (perArrayCache) {
+    const cached = perArrayCache.get(preset.id);
+    if (cached) return cached;
+  }
 
   const base = allPresets.find((p) => p.id === preset.basePresetId);
   if (!base) return preset;
@@ -101,10 +114,18 @@ export function resolvePreset(preset: Preset, allPresets: Preset[]): Preset {
     label: `Merged (${c.type})`
   }));
 
-  return {
+  const result: Preset = {
     ...preset,
     categories,
     // The resolved preset acts as a standalone preset, so wipe basePresetId to avoid recursive confusion if used incorrectly
-    basePresetId: undefined, 
+    basePresetId: undefined,
   };
+
+  if (!perArrayCache) {
+    perArrayCache = new Map();
+    _resolveCache.set(allPresets, perArrayCache);
+  }
+  perArrayCache.set(preset.id, result);
+
+  return result;
 }

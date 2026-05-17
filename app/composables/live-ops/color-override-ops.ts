@@ -4,6 +4,7 @@ import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { applyRGBOverride } from '~/components/engine/composables/preset-apply';
 import type { RGB } from '~/utils/live/color-utils';
 import type { Preset } from '~/utils/engine/preset-types';
+import { mark, measure, trace } from '~/utils/perf';
 
 /**
  * Reads the actual step-0 RGB currently driving the FIRST pixel of the FIRST
@@ -70,15 +71,21 @@ export function applyRGBToActivePreset(rgb: RGB | null): void {
  * own copy of that preset by ID before applying.
  */
 export function setColorOverride(key: string, rgb: RGB | null): void {
+  mark('color.start');
   const engineStore = useEngineStore();
   const preset = engineStore.savedPresets.find((p: any) => p.id === key);
   if (preset) {
     const resolved = resolvePreset(preset, engineStore.savedPresets);
-    applyRGBOverride(resolved, engineStore.flatFixtures, rgb);
-    engineStore.markChannelsDirty?.();
+    trace('color.apply', () => applyRGBOverride(resolved, engineStore.flatFixtures, rgb));
+    engineStore.flushEngineOutput?.();
   }
+  mark('color.flush.done');
+  measure('color.total-sync', 'color.start', 'color.flush.done');
   const liveBus = useLiveBusStore();
-  if (!liveBus.isApplyingRemote()) liveBus.dispatch('color.override', { key, rgb });
+  const fromRemote = liveBus.isApplyingRemote();
+  queueMicrotask(() => {
+    if (!fromRemote) liveBus.dispatch('color.override', { key, rgb });
+  });
 }
 
 // ── Live op ──────────────────────────────────────────────────────────────────

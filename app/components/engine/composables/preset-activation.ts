@@ -6,6 +6,7 @@ import { resolvePreset } from './preset-resolve';
 import { persistChange } from './use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import { mark, measure, trace } from '~/utils/perf';
 
 /**
  * The minimal slice of state preset activation operates on. Both the live
@@ -28,24 +29,40 @@ export interface PresetActivationContext {
  * Pure with respect to side channels: no broadcast, no persistence.
  */
 export function applyActivePreset(ctx: PresetActivationContext, presetId: string | null): void {
+  mark('preset.start');
   const presets = ctx.savedPresets;
   const current = ctx.getSelectedPresetId();
 
   if (current && current !== presetId) {
     const cur = presets.find((p) => p.id === current);
-    if (cur) _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.activeEffects);
+    if (cur) trace('preset.stop', () =>
+      _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.activeEffects),
+    );
   }
 
   if (presetId) {
     const target = presets.find((p) => p.id === presetId);
     if (!target) return;
-    _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.activeEffects);
-    ctx.setSelectedPresetId(presetId);
-  } else {
-    ctx.setSelectedPresetId(null);
+    trace('preset.apply', () =>
+      _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.activeEffects),
+    );
   }
+  mark('preset.apply.done');
 
+  // Engine-flush ZUERST → DMX raus, bevor der Vue-Render-Cascade beginnt.
   ctx.triggerCanvasSync();
+  mark('preset.flush.done');
+  measure('preset.total-sync', 'preset.start', 'preset.flush.done');
+
+  // Vue-State (selectedPresetId) erst nach dem Engine-Tick aktualisieren.
+  // Damit blockiert die ~20-Buttons-Re-Render-Kaskade nicht den Klick-Tick
+  // und friert die laufende rAF-Animation nicht ein.
+  queueMicrotask(() => {
+    mark('preset.vue.start');
+    ctx.setSelectedPresetId(presetId);
+    mark('preset.vue.done');
+    measure('preset.vue-cascade', 'preset.vue.start', 'preset.vue.done');
+  });
 }
 
 function engineActivationContext(): PresetActivationContext {
@@ -79,12 +96,16 @@ export function setActivePreset(presetId: string | null, opts: SetActivePresetOp
   const liveBus = useLiveBusStore();
   const fromRemote = liveBus.isApplyingRemote();
 
-  if (opts.broadcast !== false && !fromRemote) {
-    liveBus.dispatch('preset.set', { presetId });
-  }
-  if (opts.persist !== false && !fromRemote) {
-    persistChange('SetActivePreset', { presetId });
-  }
+  // Broadcast und Persistierung in den nächsten Microtask schieben, damit der
+  // synchrone Klick-Pfad nichts mehr außer dem Engine-Flush macht.
+  queueMicrotask(() => {
+    if (opts.broadcast !== false && !fromRemote) {
+      liveBus.dispatch('preset.set', { presetId });
+    }
+    if (opts.persist !== false && !fromRemote) {
+      persistChange('SetActivePreset', { presetId });
+    }
+  });
 }
 
 /** Activate the preset, or deactivate it if it is already the active one. */
@@ -119,7 +140,10 @@ export function pressFlashPreset(key: string, presetId: string): void {
   engineStore.flashStack = [...stack, { key, presetId }];
   if (prevEffective !== presetId) _transitionFlash(prevEffective, presetId);
   const liveBus = useLiveBusStore();
-  if (!liveBus.isApplyingRemote()) liveBus.dispatch('flash.press', { key, presetId });
+  const fromRemote = liveBus.isApplyingRemote();
+  queueMicrotask(() => {
+    if (!fromRemote) liveBus.dispatch('flash.press', { key, presetId });
+  });
 }
 
 /** Remove a flash entry from the hold-stack (button released). */
@@ -137,7 +161,10 @@ export function releaseFlashPreset(key: string): void {
     _transitionFlash(prevPresetId, newEffective);
   }
   const liveBus = useLiveBusStore();
-  if (!liveBus.isApplyingRemote()) liveBus.dispatch('flash.release', { key });
+  const fromRemote = liveBus.isApplyingRemote();
+  queueMicrotask(() => {
+    if (!fromRemote) liveBus.dispatch('flash.release', { key });
+  });
 }
 
 /** Clear entire flash stack and restore the base preset (e.g. on page switch). */

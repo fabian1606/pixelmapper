@@ -22,6 +22,7 @@ import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/comma
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import { trace } from '~/utils/perf';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -165,21 +166,49 @@ export const useEngineStore = defineStore('engine', () => {
   // ── Render loop state ─────────────────────────────────────────────────────
 
   const clockEpoch = ref(Date.now());
-  function setClockEpoch(ms: number) { clockEpoch.value = ms; }
+  function setClockEpoch(ms: number) { clockEpoch.value = ms; engine.postEpoch(ms); }
 
   let initialized = false;
   let animFrameId: number;
-  let startTime: number;
-  let lastTime: number;
   let lastDispatchedLayout   = -1;
   let lastDispatchedChannels = -1;
   let lastDispatchedEffects  = -1;
-  /** Set true around flushEngineOutput() to skip the redundant Vue-watcher rebuild
-   *  of channels/effects packets that would otherwise fire in the next microtask. */
-  let suppressFixturesWatcher = false;
   /** Cheap fingerprint of layout-relevant fixture data — used to skip buildLayoutBin
    *  when only channel values changed (the common case during preset/flash transitions). */
   let lastLayoutFingerprint = '';
+
+  /**
+   * Rebuild all three binary packets (layout / channels / effects) from current
+   * state and bump revisions so the next dispatch picks them up. Layout build
+   * is skipped via fingerprint compare unless layout-relevant fields changed.
+   *
+   * Replaces the two deep `watch(flatFixtures, …, { deep: true })` watchers
+   * that used to fire on any nested mutation — those traversed the entire
+   * fixture graph to track Vue dependencies, which became measurable per
+   * preset switch. Now any caller that mutates fixtures must invoke this
+   * explicitly (or use `flushEngineOutput` / `markChannelsDirty`).
+   */
+  function rebuildLayoutAndChannels(): void {
+    let fp = '';
+    for (const f of flatFixtures.value) {
+      fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
+      for (const ch of f.channels) {
+        fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
+      }
+      fp += '|';
+    }
+    if (fp !== lastLayoutFingerprint) {
+      lastLayoutFingerprint = fp;
+      layoutPacket = trace('packet.layout', () => buildLayoutBin(flatFixtures.value));
+      layoutRevision.value++;
+    }
+    channelsPacket = trace('packet.channels', () => buildChannelsBin(flatFixtures.value));
+    channelsRevision.value++;
+    effectsPacket = trace('packet.effects', () =>
+      buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value),
+    );
+    effectsRevision.value++;
+  }
 
   const initEngine = async () => {
     if (initialized || typeof window === 'undefined') return;
@@ -191,7 +220,9 @@ export const useEngineStore = defineStore('engine', () => {
     const history = useHistory();
     const connectionsStore = useConnectionsStore();
 
-    // Sync UI trigger on history undo/redo
+    // Sync UI trigger on history undo/redo. Also re-flush the engine pipeline
+    // since the deep-watcher rebuilds are gone — without an explicit flush
+    // here, undoing a fixture/effect change wouldn't propagate to WASM.
     watch(() => history.version.value, () => {
       triggerRef(sceneNodes);
 
@@ -200,6 +231,8 @@ export const useEngineStore = defineStore('engine', () => {
         activeEffects.value.splice(0, activeEffects.value.length, ...engine.effects);
         engine.effects = activeEffects.value;
       }
+
+      flushEngineOutput();
     });
 
     // Create default fixtures
@@ -248,31 +281,14 @@ export const useEngineStore = defineStore('engine', () => {
       }
     });
 
-    // Watch fixture structure/positions/chaser values → rebuild layout + channels.
-    // - Skip entirely if flushEngineOutput() just ran the rebuild (suppress flag).
-    // - Only rebuild layoutPacket when layout-relevant fields actually changed
-    //   (fingerprint check) — channel value mutations don't affect layout.
-    // - dispatchChannelUpdate() removed: channel state is reproducible on remote tabs
-    //   via preset.set / flash.press / flash.release / widget.slide ops. Late-join
-    //   sync still calls dispatchChannelUpdate explicitly from use-collaboration.ts.
-    watch(flatFixtures, () => {
-      if (suppressFixturesWatcher) return;
-      let fp = '';
-      for (const f of flatFixtures.value) {
-        fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
-        for (const ch of f.channels) {
-          fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
-        }
-        fp += '|';
-      }
-      if (fp !== lastLayoutFingerprint) {
-        lastLayoutFingerprint = fp;
-        layoutPacket = buildLayoutBin(flatFixtures.value);
-        layoutRevision.value++;
-      }
-      channelsPacket = buildChannelsBin(flatFixtures.value);
-      channelsRevision.value++;
-    }, { deep: true, immediate: true });
+    // Initial packet build after default fixtures have been created. Subsequent
+    // rebuilds happen explicitly from `_doFlush()` (preset/flash/color paths),
+    // `markChannelsDirty()` (drag paths), or direct callers of
+    // `flushEngineOutput()` (fixture add/remove/move/address-edit, undo/redo,
+    // project load). The two old deep watchers on `flatFixtures` have been
+    // replaced with these explicit calls to avoid the Vue dependency-traversal
+    // cost on every channel mutation.
+    rebuildLayoutAndChannels();
 
     // globalBases bakes into stepValues via watchEffect above; an explicit watch
     // here ensures channelsPacket rebuilds after the globalBases watchEffect runs.
@@ -281,84 +297,55 @@ export const useEngineStore = defineStore('engine', () => {
       channelsRevision.value++;
     }, { deep: true });
 
-    // Watch effects, fixtures, or blend mode changes → rebuild effects packet.
-    // Skipped if flushEngineOutput() just did the rebuild (suppress flag).
-    watch([activeEffects, flatFixtures, engine.stackBlendMode], () => {
-      if (suppressFixturesWatcher) return;
-      effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
-      effectsRevision.value++;
-    }, { deep: true, immediate: true });
+    // Sync BPM changes to the worker engine
+    watch(engine.globalBpm, (bpm) => engine.postBpm(bpm));
 
-    // Start background render loop
-    startTime = performance.now();
-    lastTime  = startTime;
+    // Frame-receive handler: called by the worker engine on every rendered frame.
+    // Runs off the main-thread render loop — Vue cascade can't block it.
+    engine.onFrame = (dmx: Uint8Array, elapsedMs: number) => {
+      bufferLength.value = dmx.length;
+      bufferRevision.value++;
+      currentElapsed.value = elapsedMs;
 
-    const renderLoop = (time: number) => {
-      try {
-        const elapsed = Date.now() - clockEpoch.value;
-        const delta   = time - lastTime;
-        lastTime = time;
-
-        // Dispatch changed binary packets to WASM engine
-        const lr = layoutRevision.value;
-        const cr = channelsRevision.value;
-        const er = effectsRevision.value;
-
-        // Only mark as dispatched if WASM is ready (dispatch returns >= 0).
-        // Packets are framed with a 5-byte header [AA 55 type len_lo len_hi];
-        // the WASM dispatch_bin expects only the raw payload (offset 5).
-        if (lr !== lastDispatchedLayout && engine.dispatch(TYPE_LAYOUT_BIN, layoutPacket.subarray(5)) >= 0) {
-          lastDispatchedLayout = lr;
+      const overrides = getOverrideMap();
+      if (overrides.size === 0) {
+        // dmx comes from a transferred ArrayBuffer — safe to use directly
+        outputBuffer = new Uint8Array(dmx.buffer as ArrayBuffer, dmx.byteOffset, dmx.byteLength);
+      } else {
+        if (outputBuffer.length !== dmx.length) outputBuffer = new Uint8Array(dmx.length);
+        outputBuffer.set(dmx);
+        for (const [idx, val] of overrides) {
+          if (idx < outputBuffer.length) outputBuffer[idx] = val;
         }
-        if (cr !== lastDispatchedChannels && engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5)) >= 0) {
-          lastDispatchedChannels = cr;
-        }
-        if (er !== lastDispatchedEffects && engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5)) >= 0) {
-          lastDispatchedEffects = er;
-        }
-
-        engine.render(elapsed, delta);
-        bufferLength.value = engine.dmxBuffer.length;
-        bufferRevision.value++;
-        currentElapsed.value = elapsed;
-
-        // Mix output layers: SCENE (base) → OVERRIDE (top)
-        // Fast path: no overrides → alias engine.dmxBuffer directly (no copy).
-        // Consumers of getOutputBuffer() are read-only; verified.
-        const overrides = getOverrideMap();
-        if (overrides.size === 0) {
-          outputBuffer = engine.dmxBuffer;
-        } else {
-          // We may currently be aliasing the engine buffer — allocate a
-          // separate buffer so .set() doesn't write into WASM memory.
-          if (outputBuffer === engine.dmxBuffer || outputBuffer.length !== engine.dmxBuffer.length) {
-            outputBuffer = new Uint8Array(engine.dmxBuffer.length);
-          }
-          outputBuffer.set(engine.dmxBuffer);
-          for (const [idx, val] of overrides) {
-            if (idx < outputBuffer.length) outputBuffer[idx] = val;
-          }
-        }
-
-        connectionsStore.sendFrame(outputBuffer);
-        try {
-          connectionsStore.notifyEngineState({
-            bpm: engine.globalBpm.value,
-            elapsedMs: elapsed,
-            layoutRevision: lr,
-            channelsRevision: cr,
-            effectsRevision: er,
-            layoutPacket,
-            channelsPacket,
-            effectsPacket,
-          });
-        } catch (e) {
-          console.warn('[engine] notifyEngineState threw:', e);
-        }
-      } catch (e) {
-        console.error('[engine] render loop error:', e);
       }
 
+      connectionsStore.sendFrame(outputBuffer);
+      try {
+        connectionsStore.notifyEngineState({
+          bpm: engine.globalBpm.value,
+          elapsedMs,
+          layoutRevision: layoutRevision.value,
+          channelsRevision: channelsRevision.value,
+          effectsRevision: effectsRevision.value,
+          layoutPacket,
+          channelsPacket,
+          effectsPacket,
+        });
+      } catch (e) {
+        console.warn('[engine] notifyEngineState threw:', e);
+      }
+    };
+
+    // Lightweight rAF loop: only dispatches changed packets to the worker.
+    // The worker renders independently — this loop exists solely so that
+    // markChannelsDirty() drag updates reach the worker within one frame.
+    const renderLoop = () => {
+      const lr = layoutRevision.value;
+      const cr = channelsRevision.value;
+      const er = effectsRevision.value;
+      if (lr !== lastDispatchedLayout)   { engine.dispatch(TYPE_LAYOUT_BIN,  layoutPacket.subarray(5));  lastDispatchedLayout   = lr; }
+      if (cr !== lastDispatchedChannels) { engine.dispatch(TYPE_CHAN_BIN,     channelsPacket.subarray(5)); lastDispatchedChannels = cr; }
+      if (er !== lastDispatchedEffects)  { engine.dispatch(TYPE_FX_BIN,      effectsPacket.subarray(5));  lastDispatchedEffects  = er; }
       animFrameId = requestAnimationFrame(renderLoop);
     };
 
@@ -366,69 +353,45 @@ export const useEngineStore = defineStore('engine', () => {
   };
 
   /**
-   * Synchronously rebuild channel/effects packets, dispatch to WASM, render,
-   * and push to all connectors — without waiting for the next rAF tick.
-   *
-   * Called by triggerCanvasSync() so every preset transition (flash, normal,
-   * hue override) reaches hardware immediately, even for sub-16ms button presses
-   * where the Vue watcher batch would otherwise coalesce press+release into one
-   * rAF cycle and skip the intermediate flash state entirely.
+   * Inner flush: rebuild packets and dispatch to the worker engine.
+   * The worker renders and posts frames back via onFrame — no render/sendFrame here.
    */
+  function _doFlush(): void {
+    trace('flush.rebuild', rebuildLayoutAndChannels);
+    trace('flush.dispatch', () => {
+      if (layoutRevision.value !== lastDispatchedLayout) {
+        engine.dispatch(TYPE_LAYOUT_BIN, layoutPacket.subarray(5));
+        lastDispatchedLayout = layoutRevision.value;
+      }
+      engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5));
+      lastDispatchedChannels = channelsRevision.value;
+      engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5));
+      lastDispatchedEffects  = effectsRevision.value;
+    });
+  }
+
+  // Leading + trailing throttle: first call in a frame runs immediately (low
+  // latency), subsequent calls within the same rAF window are coalesced into
+  // one trailing flush so the last state is always sent without spam-flooding
+  // the main thread.
+  let _flushScheduled = false;
+  let _flushPending   = false;
+
   function flushEngineOutput(): void {
     if (!initialized) return;
-
-    // Suppress the Vue watcher that would otherwise rebuild the same packets
-    // in the next microtask and trigger the rAF render-loop to re-dispatch.
-    suppressFixturesWatcher = true;
-
-    channelsPacket = buildChannelsBin(flatFixtures.value);
-    channelsRevision.value++;
-    effectsPacket = buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value);
-    effectsRevision.value++;
-
-    engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5));
-    engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5));
-    // Tell the rAF render-loop we've already shipped these revisions to WASM.
-    lastDispatchedChannels = channelsRevision.value;
-    lastDispatchedEffects  = effectsRevision.value;
-
-    const elapsed = Date.now() - clockEpoch.value;
-    engine.render(elapsed, 0);
-
-    const overrides = getOverrideMap();
-    if (overrides.size === 0) {
-      outputBuffer = engine.dmxBuffer;
-    } else {
-      if (outputBuffer === engine.dmxBuffer || outputBuffer.length !== engine.dmxBuffer.length) {
-        outputBuffer = new Uint8Array(engine.dmxBuffer.length);
-      }
-      outputBuffer.set(engine.dmxBuffer);
-      for (const [idx, val] of overrides) {
-        if (idx < outputBuffer.length) outputBuffer[idx] = val;
-      }
+    if (_flushScheduled) {
+      _flushPending = true;
+      return;
     }
-
-    const cs = useConnectionsStore();
-    cs.sendFrame(outputBuffer);
-    try {
-      cs.notifyEngineState({
-        bpm: engine.globalBpm.value,
-        elapsedMs: elapsed,
-        layoutRevision: layoutRevision.value,
-        channelsRevision: channelsRevision.value,
-        effectsRevision: effectsRevision.value,
-        layoutPacket,
-        channelsPacket,
-        effectsPacket,
-      });
-    } catch (e) {
-      console.warn('[engine] flushEngineOutput notifyEngineState threw:', e);
-    }
-
-    // Clear suppress flag in a microtask — runs AFTER Vue's watcher queue
-    // (which is also microtask-scheduled), so the watcher sees suppress=true
-    // and skips, then the flag is cleared for any future independent mutations.
-    Promise.resolve().then(() => { suppressFixturesWatcher = false; });
+    _flushScheduled = true;
+    _doFlush();
+    requestAnimationFrame(() => {
+      _flushScheduled = false;
+      if (_flushPending) {
+        _flushPending = false;
+        flushEngineOutput();
+      }
+    });
   }
 
   const triggerCanvasSync = () => {
@@ -488,6 +451,10 @@ export const useEngineStore = defineStore('engine', () => {
     const liveStore = useLiveModeStore();
     liveStore.loadPages(livePages);
     liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
+    // Reset the worker engine so no stale state from a previous project leaks
+    // into the first frames, then dispatch fresh packets.
+    engine.reset();
+    flushEngineOutput();
   }
 
   async function loadProject(projectId: string) {
