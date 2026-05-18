@@ -18,9 +18,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust nightly + rust-src
+        # Pin nightly explicitly via env so the workspace's
+        # `rust-toolchain.toml` (channel = "nightly", which resolves to "latest")
+        # doesn't pull a newer nightly whose std references libc symbols (e.g.
+        # SIGKILL) that newer libc versions have dropped for newlib/espidf.
         run: |
           rustup install nightly-2026-03-12
           rustup component add rust-src --toolchain nightly-2026-03-12
+          echo "RUSTUP_TOOLCHAIN=nightly-2026-03-12" >> "$GITHUB_ENV"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2

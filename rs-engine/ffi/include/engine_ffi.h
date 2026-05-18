@@ -19,10 +19,6 @@ const uint8_t* engine_get_dmx_buffer(const EffectEngine* engine);
 /// Returns count of parsed items, or -1 on error.
 int32_t engine_dispatch(EffectEngine* engine, uint8_t packet_type, const uint8_t* data, uint32_t len);
 
-/// Legacy JSON functions (kept for reference)
-int32_t engine_sync_targets_json(EffectEngine* engine, const char* json);
-int32_t engine_sync_effects_json(EffectEngine* engine, const char* json);
-
 #ifdef __cplusplus
 }
 #endif

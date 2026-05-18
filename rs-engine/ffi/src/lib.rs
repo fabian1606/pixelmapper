@@ -1,7 +1,4 @@
 use rs_engine_core::engine::EffectEngine;
-use rs_engine_core::types::{RenderTarget, EffectConfig};
-use std::ffi::CStr;
-use std::os::raw::c_char;
 
 // ── Core lifecycle ────────────────────────────────────────────────────────────
 
@@ -27,7 +24,7 @@ pub unsafe extern "C" fn engine_render(ptr: *mut EffectEngine, time_ms: f32, del
     (*ptr).render(time_ms, delta_ms);
 }
 
-/// Returns a pointer to the 512-byte DMX buffer. Valid until the next engine call.
+/// Returns a pointer to the DMX buffer. Valid until the next engine call.
 #[no_mangle]
 pub unsafe extern "C" fn engine_get_dmx_buffer(ptr: *const EffectEngine) -> *const u8 {
     (*ptr).dmx_buffer.as_ptr()
@@ -48,32 +45,4 @@ pub unsafe extern "C" fn engine_dispatch(
     if ptr.is_null() || data.is_null() { return -1; }
     let slice = core::slice::from_raw_parts(data, len as usize);
     (*ptr).dispatch_bin(packet_type, slice)
-}
-
-// ── Legacy JSON FFI (kept for reference, not used by main.cpp) ────────────────
-
-/// Sync targets from a null-terminated JSON string: Vec<RenderTarget>
-#[no_mangle]
-pub unsafe extern "C" fn engine_sync_targets_json(ptr: *mut EffectEngine, json: *const c_char) -> i32 {
-    if ptr.is_null() || json.is_null() { return -1; }
-    match CStr::from_ptr(json).to_str() {
-        Ok(s) => match serde_json::from_str::<Vec<RenderTarget>>(s) {
-            Ok(targets) => { let n = targets.len() as i32; (*ptr).sync_targets(targets); n }
-            Err(_) => -2,
-        },
-        Err(_) => -3,
-    }
-}
-
-/// Sync effects from a null-terminated JSON string: Vec<EffectConfig>
-#[no_mangle]
-pub unsafe extern "C" fn engine_sync_effects_json(ptr: *mut EffectEngine, json: *const c_char) -> i32 {
-    if ptr.is_null() || json.is_null() { return -1; }
-    match CStr::from_ptr(json).to_str() {
-        Ok(s) => match serde_json::from_str::<Vec<EffectConfig>>(s) {
-            Ok(configs) => { let n = configs.len() as i32; (*ptr).sync_effects(configs); n }
-            Err(_) => -2,
-        },
-        Err(_) => -3,
-    }
 }
