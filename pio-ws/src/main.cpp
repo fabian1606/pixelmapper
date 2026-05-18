@@ -6,7 +6,7 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
-#include <NeoPixelBus.h>
+#include <FastLED.h>
 #include "engine_ffi.h"
 #include "version.h"
 
@@ -14,7 +14,7 @@
 #define MDNS_HOSTNAME_PREFIX "pixelmapper-strip"
 #endif
 #ifndef MAX_LEDS_HARD_CAP
-#define MAX_LEDS_HARD_CAP 2048
+#define MAX_LEDS_HARD_CAP 1024
 #endif
 
 // ── Protocol ─────────────────────────────────────────────────────────────────
@@ -31,11 +31,13 @@ static String      wifiPass;
 static uint8_t     dataPin     = 48;
 static String      hostname;
 
-// ── Runtime strip state (set via TYPE_STRIP_CONFIG) ──────────────────────────
-static uint16_t    ledCount     = 0;
-static uint8_t     groupSize    = 1;
-using StripT = NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>;
-static StripT*     strip        = nullptr;
+// ── LED buffer + runtime state (set via TYPE_STRIP_CONFIG) ───────────────────
+// FastLED needs a compile-time pin. We pre-allocate a fixed buffer at the hard
+// cap and only display the first `ledCount` pixels per frame.
+static CRGB        leds[MAX_LEDS_HARD_CAP];
+static uint16_t    ledCount  = 0;
+static uint8_t     groupSize = 1;
+static bool        stripReady = false;
 
 // ── WebSocket + engine ───────────────────────────────────────────────────────
 static AsyncWebServer       server(80);
@@ -62,6 +64,32 @@ static void sendLogf(const char* fmt, ...) {
     sendLog(String(buf));
 }
 
+// ── FastLED pin selector ─────────────────────────────────────────────────────
+// FastLED encodes the pin as a template parameter — to support runtime pin
+// selection we expand a switch over every reasonable ESP32-S3 GPIO and let
+// the optimizer drop the unused branches.
+//
+// Skipped pins:
+//   0     boot strap (sometimes used as input for boot mode)
+//   22-34 PSRAM/flash on N16R8/N32R8 modules (board-dependent)
+//   43,44 USB-Serial-JTAG (UART0)
+//   45,46 boot strapping (must be low at boot)
+#define LED_BRANCH(PIN) case PIN: FastLED.addLeds<WS2812B, PIN, GRB>(leds, MAX_LEDS_HARD_CAP); return true
+static bool registerStripPin(uint8_t pin) {
+    switch (pin) {
+        LED_BRANCH( 1); LED_BRANCH( 2); LED_BRANCH( 3); LED_BRANCH( 4);
+        LED_BRANCH( 5); LED_BRANCH( 6); LED_BRANCH( 7); LED_BRANCH( 8);
+        LED_BRANCH( 9); LED_BRANCH(10); LED_BRANCH(11); LED_BRANCH(12);
+        LED_BRANCH(13); LED_BRANCH(14); LED_BRANCH(15); LED_BRANCH(16);
+        LED_BRANCH(17); LED_BRANCH(18); LED_BRANCH(19); LED_BRANCH(20);
+        LED_BRANCH(21); LED_BRANCH(35); LED_BRANCH(36); LED_BRANCH(37);
+        LED_BRANCH(38); LED_BRANCH(39); LED_BRANCH(40); LED_BRANCH(41);
+        LED_BRANCH(42); LED_BRANCH(47); LED_BRANCH(48);
+        default: return false;
+    }
+}
+#undef LED_BRANCH
+
 // ── Boot info broadcast (parsed by the browser wizard) ───────────────────────
 static void printBootInfo(const char* mode) {
     Serial.printf("[info] firmware=%s\n", FIRMWARE_VERSION);
@@ -71,7 +99,7 @@ static void printBootInfo(const char* mode) {
     Serial.printf("[info] mode=%s\n",     mode);
 }
 
-// ── Packet receiver state machine (identical to pio/src/main.cpp) ────────────
+// ── Packet receiver state machine ────────────────────────────────────────────
 enum RxState { WAIT_MAGIC1, WAIT_MAGIC2, WAIT_TYPE, WAIT_LEN_LO, WAIT_LEN_HI, COLLECT };
 
 static RxState  rxState    = WAIT_MAGIC1;
@@ -82,19 +110,6 @@ static uint8_t  rxBuf[8192];
 
 static inline float    readF32LE(const uint8_t* buf) { float v; memcpy(&v, buf, 4); return v; }
 static inline uint16_t readU16LE(const uint8_t* buf) { return (uint16_t)buf[0] | ((uint16_t)buf[1] << 8); }
-
-static void recreateStrip(uint16_t newCount) {
-    if (strip && newCount == ledCount) return;
-    if (strip) { delete strip; strip = nullptr; }
-    if (newCount == 0) return;
-    if (newCount > MAX_LEDS_HARD_CAP) newCount = MAX_LEDS_HARD_CAP;
-    strip = new StripT(newCount, dataPin);
-    strip->Begin();
-    strip->ClearTo(RgbColor(0, 0, 0));
-    strip->Show();
-    ledCount = newCount;
-    sendLogf("[strip] count=%u pin=%u", (unsigned)ledCount, (unsigned)dataPin);
-}
 
 static void handleStripConfig() {
     if (rxPos < 7) {
@@ -108,8 +123,15 @@ static void handleStripConfig() {
     (void)chipType;
     (void)ledsPerMeter;
     if (newGroupSize == 0) newGroupSize = 1;
+    if (newLedCount > MAX_LEDS_HARD_CAP) newLedCount = MAX_LEDS_HARD_CAP;
     groupSize = (uint8_t)min<uint16_t>(newGroupSize, 255);
-    recreateStrip(newLedCount);
+    if (newLedCount != ledCount) {
+        // Clear LEDs beyond the new active count so old data isn't held.
+        for (uint16_t i = newLedCount; i < ledCount; i++) leds[i] = CRGB::Black;
+        ledCount = newLedCount;
+    }
+    sendLogf("[strip] count=%u group=%u pin=%u",
+             (unsigned)ledCount, (unsigned)groupSize, (unsigned)dataPin);
 }
 
 static void dispatch() {
@@ -150,15 +172,6 @@ static void processByte(uint8_t b) {
 }
 
 // ── CONFIG_MODE: read [config] lines from Serial, persist to NVS ─────────────
-// Stays here forever until a [config] commit arrives.
-//
-//   [config] ssid=Heim-WLAN
-//   [config] pass=secret
-//   [config] pin=48
-//   [config] commit
-//
-// Replies one line per assignment ("[config] ok ssid"), and on commit either
-// reboots into RUN_MODE (if ssid is now set) or stays here.
 static void runConfigMode() {
     String line;
     while (true) {
@@ -218,6 +231,19 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 }
 
 static void runRunMode() {
+    // Register the FastLED controller for the NVS-configured pin. This must
+    // happen exactly once per boot — to change the pin, the device reboots
+    // through CONFIG_MODE.
+    stripReady = registerStripPin(dataPin);
+    if (!stripReady) {
+        Serial.printf("[strip] WARNING: pin %u not in supported set — LEDs disabled\n",
+                      (unsigned)dataPin);
+    } else {
+        FastLED.clear();
+        FastLED.show();
+        Serial.printf("[strip] FastLED ready on pin %u\n", (unsigned)dataPin);
+    }
+
     Serial.printf("[boot] connecting to %s\n", wifiSsid.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
@@ -255,17 +281,17 @@ static void runRunMode() {
 
         engine_render(engine, engineTime, delta);
 
-        if (strip && ledCount > 0) {
+        if (stripReady && ledCount > 0) {
             const uint8_t* dmx = engine_get_dmx_buffer(engine);
             const uint16_t logicalPixels = (ledCount + groupSize - 1) / groupSize;
             for (uint16_t i = 0; i < logicalPixels; i++) {
-                RgbColor c(dmx[i * 3 + 0], dmx[i * 3 + 1], dmx[i * 3 + 2]);
+                CRGB c(dmx[i * 3 + 0], dmx[i * 3 + 1], dmx[i * 3 + 2]);
                 for (uint16_t k = 0; k < groupSize; k++) {
                     uint16_t physIdx = (uint16_t)i * groupSize + k;
-                    if (physIdx < ledCount) strip->SetPixelColor(physIdx, c);
+                    if (physIdx < ledCount) leds[physIdx] = c;
                 }
             }
-            if (strip->CanShow()) strip->Show();
+            FastLED.show();
         }
 
         if (now - lastDmxReport >= 500) {

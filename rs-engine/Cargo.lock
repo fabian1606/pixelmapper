@@ -365,7 +365,6 @@ name = "rs-engine-ffi"
 version = "0.1.0"
 dependencies = [
  "rs-engine-core",
- "serde_json",
 ]
 
 [[package]]
