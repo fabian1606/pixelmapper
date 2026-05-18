@@ -54,6 +54,7 @@ export class AddFixturesCommand implements SerializableCommand {
           chaserConfig: JSON.parse(JSON.stringify(ch.chaserConfig)),
         })),
         beams: f.beams.map(b => ({ id: b.id, localX: b.localX, localY: b.localY })),
+        stripConfig: f.stripConfig ? { ...f.stripConfig } : undefined,
       };
     }
     return { nodes: this.newNodes.map(serializeNode) };

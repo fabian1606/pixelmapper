@@ -24,6 +24,7 @@ export type OflCategory =
   | 'Laser'
   | 'Matrix'
   | 'Moving Head'
+  | 'NeoPixel Strip'
   | 'Pixel Bar'
   | 'Scanner'
   | 'Smoke'
@@ -32,7 +33,7 @@ export type OflCategory =
   | 'Other';
 
 /** Which canvas rendering mode a category uses. */
-export type CanvasRenderMode = 'single' | 'bar' | 'matrix';
+export type CanvasRenderMode = 'single' | 'bar' | 'matrix' | 'strip';
 
 /** Metadata about a fixture category shown in the sidebar. */
 export interface FixtureCategoryMeta {
@@ -57,6 +58,7 @@ export const FIXTURE_CATEGORIES: Record<OflCategory, FixtureCategoryMeta> = {
   'Flower':         { label: 'Flower',         icon: 'flower',       renderMode: 'single',     hasPixelDensity: false },
   'Pixel Bar':      { label: 'Pixel Bar',      icon: 'align-justify',renderMode: 'bar',        hasPixelDensity: true  },
   'Matrix':         { label: 'Matrix',         icon: 'grid',         renderMode: 'matrix',     hasPixelDensity: true  },
+  'NeoPixel Strip': { label: 'NeoPixel Strip', icon: 'minus',        renderMode: 'strip',      hasPixelDensity: true  },
   'Smoke':          { label: 'Smoke / Fog',    icon: 'cloud',        renderMode: 'single',     hasPixelDensity: false },
   'Hazer':          { label: 'Hazer',          icon: 'wind',         renderMode: 'single',     hasPixelDensity: false },
   'Fan':            { label: 'Fan',            icon: 'wind',         renderMode: 'single',     hasPixelDensity: false },
@@ -132,7 +134,7 @@ export const DMX_CONNECTORS = [
 export const OFL_FIXTURE_CATEGORIES = [
   'Moving Head', 'Color Changer', 'Dimmer', 'Blinder', 'Strobe',
   'Scanner', 'Barrel Scanner', 'Laser', 'Effect', 'Flower',
-  'Pixel Bar', 'Matrix', 'Smoke', 'Hazer', 'Fan', 'Stand', 'Other',
+  'Pixel Bar', 'Matrix', 'NeoPixel Strip', 'Smoke', 'Hazer', 'Fan', 'Stand', 'Other',
 ] as const;
 
 export type OflFixtureCategory = typeof OFL_FIXTURE_CATEGORIES[number];
@@ -270,6 +272,7 @@ export const CATEGORY_OPTIONS: OflCategory[] = [
   'Flower',
   'Pixel Bar',
   'Matrix',
+  'NeoPixel Strip',
   'Smoke',
   'Hazer',
   'Fan',

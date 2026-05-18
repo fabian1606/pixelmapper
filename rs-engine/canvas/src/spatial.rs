@@ -54,6 +54,12 @@ impl SpatialIndex {
         self.tree.locate_all_at_point(&[wx, wy]).next().map(|n| n.id.clone())
     }
 
+    /// Returns every fixture id whose AABB contains the point.
+    /// Order is unspecified; callers should apply their own priority logic.
+    pub fn hit_test_all(&self, wx: f32, wy: f32) -> Vec<String> {
+        self.tree.locate_all_at_point(&[wx, wy]).map(|n| n.id.clone()).collect()
+    }
+
     pub fn marquee_select(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32) -> Vec<String> {
         let min_x = start_x.min(end_x);
         let max_x = start_x.max(end_x);

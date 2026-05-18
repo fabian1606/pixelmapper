@@ -6,10 +6,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Library, Pencil, FileText, Clock, ChevronLeft, Trash2 } from 'lucide-vue-next';
+import { Loader2, Library, Pencil, FileText, Clock, ChevronLeft, Trash2, Minus } from 'lucide-vue-next';
 import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
 import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
 import CustomFixtureEditorDialog from './custom-fixture-editor/CustomFixtureEditorDialog.vue';
+import NeoPixelStripForm from './NeoPixelStripForm.vue';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -26,7 +27,7 @@ const emit = defineEmits<{
 
 // ─── View State ───────────────────────────────────────────────────────────────
 
-type View = 'landing' | 'library';
+type View = 'landing' | 'library' | 'neopixel';
 const view = ref<View>('landing');
 
 // ─── LocalStorage ─────────────────────────────────────────────────────────────
@@ -117,6 +118,15 @@ function openCustomEditor() {
   customFixtureToEdit.value = null;
   customFixtureStartWithAi.value = false;
   isCustomFixtureEditorOpen.value = true;
+}
+
+function openNeoPixelView() {
+  view.value = 'neopixel';
+}
+
+function handleAddNeoPixelStrip(fixtures: Fixture[]) {
+  emit('add', fixtures);
+  emit('update:open', false);
 }
 
 function editStoredCustomFixture(stored: StoredCustomFixture) {
@@ -268,8 +278,8 @@ watch(() => props.open, (isOpen) => {
           </div>
 
           <div class="flex-1 overflow-y-auto px-6 pb-6 flex flex-col gap-8">
-            <!-- 3 Action Cards -->
-            <div class="grid grid-cols-3 gap-3">
+            <!-- 4 Action Cards -->
+            <div class="grid grid-cols-4 gap-3">
               <button
                 class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
                 @click="view = 'library'"
@@ -306,6 +316,19 @@ watch(() => props.open, (isOpen) => {
                 <div>
                   <p class="text-sm font-semibold text-foreground">Create from PDF</p>
                   <p class="text-xs text-muted-foreground mt-0.5">AI reads the manual for you</p>
+                </div>
+              </button>
+
+              <button
+                class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
+                @click="openNeoPixelView"
+              >
+                <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                  <Minus class="size-5 text-primary" />
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-foreground">NeoPixel Strip</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">Parametric LED strip</p>
                 </div>
               </button>
             </div>
@@ -402,6 +425,25 @@ watch(() => props.open, (isOpen) => {
                 @add="handleAdd"
               />
             </div>
+          </div>
+        </template>
+
+        <!-- ── NeoPixel View ─────────────────────────────────────────────── -->
+        <template v-else-if="view === 'neopixel'">
+          <div class="px-6 py-5 flex items-center gap-3 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-7 text-muted-foreground hover:text-foreground shrink-0"
+              @click="view = 'landing'"
+            >
+              <ChevronLeft class="size-4" />
+            </Button>
+            <DialogTitle class="text-lg font-bold tracking-tight">NeoPixel LED Strip</DialogTitle>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-6 pb-6">
+            <NeoPixelStripForm @add="handleAddNeoPixelStrip" />
           </div>
         </template>
 

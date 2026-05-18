@@ -192,6 +192,13 @@ export const useEngineStore = defineStore('engine', () => {
     let fp = '';
     for (const f of flatFixtures.value) {
       fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
+      // Strip vertices feed per-pixel layout (binary-encoder.ts arc-length sampling),
+      // so any polyline mutation must bust the layout cache even when the AABB
+      // happens not to move.
+      if (f.stripConfig) {
+        fp += `s${f.stripConfig.lengthMeters}:`;
+        for (const p of f.stripConfig.points) fp += `${p.x},${p.y};`;
+      }
       for (const ch of f.channels) {
         fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
       }

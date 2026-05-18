@@ -5,6 +5,7 @@ import type { Interaction } from './composables/use-selection';
 import type { Camera } from './composables/use-camera';
 import type { EffectEngine } from '~/utils/engine/engine';
 import { useEngineStore } from '~/stores/engine-store';
+import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
 
 import initWasm, { WasmCanvas } from 'rs-engine-canvas';
 import wasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
@@ -12,6 +13,10 @@ import wasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
 interface Props {
   fixtures: Fixture[];
   selectedIds: Set<string | number>;
+  /** Id of the strip currently in edit-mode (shows vertex / mid-handles). */
+  editingId: string | number | null;
+  /** Focused vertex inside the editing strip — drawn with a highlight ring. */
+  editingVertex: { fixtureId: string | number; idx: number } | null;
   interaction: Interaction;
   camera: Camera;
 
@@ -89,6 +94,7 @@ function syncFixtures() {
       height: f.fixtureSize?.y ?? 1,
       rotation: f.rotation || 0,
       selected: isSelected(f),
+      editing: props.editingId != null && f.id === props.editingId,
       svg: f.definition?.pixelmapper?.customSvg?.enabled ? (f.definition?.pixelmapper?.customSvg?.data ?? null) : null,
       channelStart: f.startAddress,
       rIndex:      chIdx('RED'),
@@ -105,6 +111,22 @@ function syncFixtures() {
         bIndex:      chIdx('BLUE',   String(b.id)),
         dimmerIndex: chIdx('DIMMER', String(b.id)),
       })),
+      strip: f.stripConfig
+        ? {
+            ledCount: f.stripConfig.ledCount,
+            groupSize: f.stripConfig.groupSize,
+            // Target arc-length in world-pixels. The renderer walks from the
+            // star anchor (points[0]) along the curve for exactly this length,
+            // trimming a too-long polyline or extending a too-short one along
+            // its tangent. Length stays constant regardless of vertex moves.
+            targetLength: f.stripConfig.lengthMeters * PIXELS_PER_METER,
+            points: f.stripConfig.points.map(p => [p.x, p.y] as [number, number]),
+            // -1 means no vertex focused; the renderer skips the highlight ring.
+            selectedVertexIdx: (props.editingVertex && props.editingVertex.fixtureId === f.id)
+              ? props.editingVertex.idx
+              : -1,
+          }
+        : null,
     };
   });
 
@@ -184,6 +206,10 @@ onBeforeUnmount(() => {
 // ─── Watches ──────────────────────────────────────────────────────────────────────────────────
 watch(() => props.fixtures.length, syncFixtures);
 watch(() => props.selectedIds, syncSelected);
+// Editing changes the rendered handles & gates strip endpoint hit-test.
+watch(() => props.editingId, syncFixtures);
+// Vertex focus drives the per-vertex highlight ring.
+watch(() => props.editingVertex, syncFixtures, { deep: true });
 // Resize: HTMLCanvas's width/height is frozen after transferControlToOffscreen,
 // so push viewport changes to the worker which mutates OffscreenCanvas directly.
 watch(() => [props.viewportWidth, props.viewportHeight], ([w, h]) => {
@@ -205,6 +231,7 @@ defineExpose({
   syncRemoteSelections,
   hitTest: (x: number, y: number) => localCanvas?.hit_test(x, y),
   hitTestRotationZone: (x: number, y: number) => localCanvas?.hit_test_rotation_zone(x, y),
+  hitTestStripEndpoint: (x: number, y: number) => localCanvas?.hit_test_strip_endpoint(x, y),
   marqueeSelect: (sx: number, sy: number, ex: number, ey: number) => localCanvas?.marquee_select(sx, sy, ex, ey),
 });
 </script>

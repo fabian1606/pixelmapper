@@ -14,6 +14,55 @@ export interface FixtureSize {
   y: number;
 }
 
+/**
+ * Identifies a NeoPixel-style addressable LED strip chip.
+ * Determines DMX channels per LED (RGB = 3, RGBW = 4) and is also surfaced as metadata.
+ */
+export type NeoPixelChipType =
+  | 'WS2812B'
+  | 'WS2811'
+  | 'APA102'
+  | 'SK6812-RGB'
+  | 'SK6812-RGBW';
+
+/**
+ * A vertex along the polyline of a NeoPixel strip, in WORLD-PIXEL coordinates
+ * (matching `fixturePosition.x * WORLD_WIDTH` etc., NOT normalized 0-1).
+ */
+export interface StripPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Parametric definition of a NeoPixel LED strip fixture.
+ * Stored on Fixture.stripConfig when the fixture is a programmatically generated strip.
+ *
+ * The strip's physical shape is a polyline of `points` (≥ 2 vertices) in
+ * world-pixel coordinates. LEDs are distributed evenly along the polyline's
+ * total arc length.
+ *
+ * Beams = logical pixels (groups of `groupSize` physical LEDs sharing a color).
+ *   logicalPixelCount = ceil(ledCount / groupSize)
+ * DMX channels = logicalPixelCount * channelsPerPixel(chipType)
+ *
+ * `lengthMeters` is the LOGICAL length implied by `ledCount / ledsPerMeter`.
+ * The polyline's geometric length is independent — the user may shape it freely.
+ */
+export interface StripConfig {
+  chipType: NeoPixelChipType;
+  /** Number of physical LEDs on the strip. */
+  ledCount: number;
+  /** Physical LED density used to derive `lengthMeters`. */
+  ledsPerMeter: number;
+  /** N physical LEDs share one logical pixel (1 = every LED individually addressable). */
+  groupSize: number;
+  /** Logical strip length = ledCount / ledsPerMeter. */
+  lengthMeters: number;
+  /** Polyline vertices in world-pixel coordinates. Must contain ≥ 2 points. */
+  points: StripPoint[];
+}
+
 export class Fixture {
   id: string | number;
   name: string;
@@ -48,6 +97,13 @@ export class Fixture {
    * Original OFL fixture definition, stored for editing a fixture type.
    */
   definition?: OflFixture;
+
+  /**
+   * Set when this fixture is a parametrically generated NeoPixel LED strip
+   * (created by `createNeoPixelStripFixture`). Drives the strip render mode
+   * and Figma-style fixed-length endpoint interaction.
+   */
+  stripConfig?: StripConfig;
 
   constructor(id: string | number, channels: Channel[] = [], startAddress: number = 1) {
     this.id = id;

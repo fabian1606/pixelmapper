@@ -20,9 +20,18 @@ export function useWorkspaceOperations(
 
   function handleAddOflFixtures(fixtures: Fixture[]) {
     let maxAddress = 0;
+    // Sync nextFixtureId past any existing `ofl-N` id. Without this, fixtures
+    // restored from a persisted snapshot can collide with newly assigned ids
+    // (counter resets to 1000 each page load), causing two fixtures to share
+    // the same id — selection and drag then affect both as if they were one.
     for (const f of flatFixtures.value) {
       const fMax = f.startAddress + f.channels.length - 1;
       if (fMax > maxAddress) maxAddress = fMax;
+      const m = /^ofl-(\d+)$/.exec(String(f.id));
+      if (m) {
+        const n = parseInt(m[1]!, 10);
+        if (Number.isFinite(n) && n >= nextFixtureId) nextFixtureId = n + 1;
+      }
     }
 
     // currentAddress is the next free 1-based global address.
