@@ -17,11 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Espressif fork of Rust + LLVM (the only stack that can produce a usable
+      # xtensa-esp32s3 binary today — upstream LLVM lacks the matching data layout).
       - name: Install Espressif Rust toolchain (espup)
         run: |
           cargo install espup --locked
           espup install --targets esp32s3 --export-file $HOME/export-esp.sh
-          echo "source $HOME/export-esp.sh" >> $HOME/.bashrc
+          # Promote the espup env to all subsequent steps via GITHUB_ENV.
+          # `set -a` makes every sourced var an env var, then we forward them.
+          set -a
+          source $HOME/export-esp.sh
+          set +a
+          {
+            echo "PATH=$PATH"
+            [ -n "$LIBCLANG_PATH" ]   && echo "LIBCLANG_PATH=$LIBCLANG_PATH"
+            [ -n "$CLANG_PATH" ]      && echo "CLANG_PATH=$CLANG_PATH"
+            [ -n "$LIBCLANG_BIN_PATH" ] && echo "LIBCLANG_BIN_PATH=$LIBCLANG_BIN_PATH"
+            echo "RUSTUP_TOOLCHAIN=esp"
+          } >> "$GITHUB_ENV"
+          rustup show
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -33,7 +47,7 @@ jobs:
 
       - name: Inject version from tag into version.h
         run: |
-          VER="${GITHUB_REF#refs/tags/vws}"
+          VER="${GITHUB_REF#refs/tags/v}"
           mkdir -p pio-ws/include
           printf '#pragma once\n#define FIRMWARE_VERSION "%s"\n' "$VER" \
             > pio-ws/include/version.h
@@ -41,27 +55,28 @@ jobs:
           echo "VERSION=$VER" >> "$GITHUB_ENV"
 
       - name: Build firmware
-        run: |
-          source $HOME/export-esp.sh
-          pio run
+        run: pio run
         working-directory: pio-ws
 
+      # Rename assets so they don't collide with the P4 firmware in the same
+      # GitHub Release (both pipelines trigger on `v*.*.*` and publish to the
+      # same tag).
       - name: Assemble release assets
         run: |
           OUT=pio-ws/.pio/build/esp32s3_neopixel
           mkdir -p release
-          cp "$OUT/firmware.bin"   release/firmware.bin
-          cp "$OUT/bootloader.bin" release/bootloader.bin
-          cp "$OUT/partitions.bin" release/partitions.bin
-          cat > release/manifest.json <<EOF
+          cp "$OUT/firmware.bin"   release/strip-firmware.bin
+          cp "$OUT/bootloader.bin" release/strip-bootloader.bin
+          cp "$OUT/partitions.bin" release/strip-partitions.bin
+          cat > release/strip-manifest.json <<EOF
           {
             "name": "Pixelmapper Strip (ESP32-S3)",
             "version": "${VERSION}",
             "chipFamily": "ESP32-S3",
             "parts": [
-              { "path": "bootloader.bin", "offset": 0 },
-              { "path": "partitions.bin", "offset": 32768 },
-              { "path": "firmware.bin",   "offset": 65536 }
+              { "path": "strip-bootloader.bin", "offset": 0 },
+              { "path": "strip-partitions.bin", "offset": 32768 },
+              { "path": "strip-firmware.bin",   "offset": 65536 }
             ]
           }
           EOF
@@ -69,12 +84,12 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: WS Firmware ${{ github.ref_name }}
+          name: Firmware ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           files: |
-            release/firmware.bin
-            release/bootloader.bin
-            release/partitions.bin
-            release/manifest.json
+            release/strip-firmware.bin
+            release/strip-bootloader.bin
+            release/strip-partitions.bin
+            release/strip-manifest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

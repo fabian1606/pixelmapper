@@ -61,22 +61,25 @@ function pushLog(line: string) {
 }
 
 async function fetchManifest(): Promise<Manifest> {
-  // GitHub Releases API → filter for vws*.*.* tags → take latest.
+  // Pick the most recent release that has a strip-manifest.json (= a build of
+  // the ESP32-S3 strip firmware). The P4 firmware ships in the same release
+  // but uses different asset filenames (firmware.bin vs strip-firmware.bin),
+  // so they coexist on a single GitHub release.
   const releasesResp = await fetch('https://api.github.com/repos/fabian1606/pixelmapper/releases');
   if (!releasesResp.ok) throw new Error(`GitHub releases fetch failed: HTTP ${releasesResp.status}`);
   const releases = await releasesResp.json() as Array<{ tag_name: string; assets: Array<{ name: string; browser_download_url: string }> }>;
-  const wsRelease = releases.find(r => /^vws\d/.test(r.tag_name));
-  if (!wsRelease) throw new Error('No vws*.*.* firmware release found');
-  const manifestAsset = wsRelease.assets.find(a => a.name === 'manifest.json');
-  if (!manifestAsset) throw new Error(`Release ${wsRelease.tag_name} has no manifest.json`);
+  const release = releases.find(r => r.assets.some(a => a.name === 'strip-manifest.json'));
+  if (!release) throw new Error('No release with strip-manifest.json found');
+  const manifestAsset = release.assets.find(a => a.name === 'strip-manifest.json');
+  if (!manifestAsset) throw new Error(`Release ${release.tag_name} has no strip-manifest.json`);
 
   const mfResp = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(manifestAsset.browser_download_url)}`);
-  if (!mfResp.ok) throw new Error(`manifest.json fetch failed: HTTP ${mfResp.status}`);
+  if (!mfResp.ok) throw new Error(`strip-manifest.json fetch failed: HTTP ${mfResp.status}`);
   const mf = await mfResp.json() as Manifest;
-  mf.releaseTag = wsRelease.tag_name;
+  mf.releaseTag = release.tag_name;
 
   // Resolve part paths against the same release's asset URLs
-  const assetByName = new Map(wsRelease.assets.map(a => [a.name, a.browser_download_url]));
+  const assetByName = new Map(release.assets.map(a => [a.name, a.browser_download_url]));
   mf.parts = mf.parts.map(p => ({
     ...p,
     path: assetByName.get(p.path) ?? p.path,
