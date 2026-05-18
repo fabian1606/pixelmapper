@@ -1,4 +1,5 @@
 import { SerialConnector } from './serial-connector';
+import { WebSocketConnector } from './websocket-connector';
 import type { BaseConnector } from './base-connector';
 
 export interface ConnectorRegistryEntry {
@@ -14,6 +15,12 @@ export const OUTPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
     label: 'USB Serial (ESP32)',
     icon: 'Usb',
     create: (id) => new SerialConnector(id),
+  },
+  {
+    type: 'websocket',
+    label: 'WebSocket LED-Strip (ESP32-S3)',
+    icon: 'Wifi',
+    create: (id) => new WebSocketConnector(id),
   },
   // Future entries — add class + one line here:
   // { type: 'artnet',  label: 'ArtNet',   icon: 'Network', create: (id) => new ArtNetConnector(id) },

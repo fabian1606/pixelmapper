@@ -13,7 +13,12 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { OUTPUT_CONNECTOR_REGISTRY, INPUT_CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
+import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
+import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
+import EspWebFlasher from '~/components/connectors/EspWebFlasher.vue';
+
+const wizardOpen = ref(false);
 
 const route = useRoute();
 const initialTab = route.query.tab === 'inputs' ? 'inputs' : 'outputs';
@@ -89,6 +94,46 @@ function asSerial(c: BaseConnector): SerialConnector | null {
   return c instanceof SerialConnector ? c : null;
 }
 
+function asWebSocket(c: BaseConnector): WebSocketConnector | null {
+  return c instanceof WebSocketConnector ? c : null;
+}
+
+/** All LED-strip fixtures in the project, available for binding to a WebSocketConnector. */
+const stripFixtures = computed(() =>
+  engineStore.flatFixtures.filter(f => f.stripConfig)
+);
+
+function fixtureFor(connector: WebSocketConnector) {
+  const id = connector.fixtureId.value;
+  if (id == null) return null;
+  return engineStore.flatFixtures.find(f => String(f.id) === String(id)) ?? null;
+}
+
+function snapshotStrip(f: ReturnType<typeof fixtureFor>): StripConfigSnapshot | null {
+  if (!f || !f.stripConfig) return null;
+  return {
+    ledCount:     f.stripConfig.ledCount,
+    groupSize:    f.stripConfig.groupSize,
+    ledsPerMeter: f.stripConfig.ledsPerMeter,
+    chipType:     f.stripConfig.chipType,
+  };
+}
+
+function commitStripPatch(connector: WebSocketConnector, patch: Partial<StripConfigSnapshot>) {
+  const f = fixtureFor(connector);
+  const before = snapshotStrip(f);
+  if (!f || !before) return;
+  const after: StripConfigSnapshot = { ...before, ...patch };
+  if (
+    after.ledCount     === before.ledCount &&
+    after.groupSize    === before.groupSize &&
+    after.ledsPerMeter === before.ledsPerMeter &&
+    after.chipType     === before.chipType
+  ) return;
+  history.execute(new UpdateStripConfigCommand(engineStore.flatFixtures, f.id, before, after));
+  engineStore.flushEngineOutput();
+}
+
 function toggleExpanded(connectorId: string) {
   if (expandedConnectors.value.has(connectorId)) {
     expandedConnectors.value.delete(connectorId);
@@ -148,7 +193,17 @@ function assignedCount(connector: BaseConnector): number {
         <Plus :size="12" />
         {{ entry.label }}
       </button>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-colors"
+        @click="wizardOpen = true"
+      >
+        <Plus :size="12" />
+        Neues Gerät einrichten…
+      </button>
     </div>
+
+    <EspWebFlasher v-if="wizardOpen" @close="wizardOpen = false" />
+
 
     <!-- Inputs: controller instances -->
     <template v-if="connectionsTab === 'inputs'">
@@ -341,6 +396,87 @@ function assignedCount(connector: BaseConnector): number {
         >
           <Trash2 :size="14" />
         </button>
+      </div>
+
+      <!-- WebSocketConnector settings: URL + Fixture binding -->
+      <div
+        v-if="asWebSocket(connector)"
+        class="flex flex-col gap-1.5 px-1"
+      >
+        <label class="text-xs text-muted-foreground">
+          WebSocket-URL
+          <input
+            type="text"
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+            placeholder="ws://pixelmapper-strip-XXXX.local/ws"
+            :value="asWebSocket(connector)!.url.value"
+            :disabled="connector.status.value === 'connected' || connector.status.value === 'connecting'"
+            @change="asWebSocket(connector)!.setUrl(($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <label class="text-xs text-muted-foreground">
+          Strip-Fixture
+          <select
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+            :value="String(asWebSocket(connector)!.fixtureId.value ?? '')"
+            @change="asWebSocket(connector)!.setFixtureId(($event.target as HTMLSelectElement).value || null)"
+          >
+            <option value="">— keine —</option>
+            <option
+              v-for="f in stripFixtures"
+              :key="String(f.id)"
+              :value="String(f.id)"
+            >
+              {{ f.name || `Fixture ${f.id}` }}
+              ({{ f.stripConfig?.ledCount }} LEDs)
+            </option>
+          </select>
+        </label>
+        <div
+          v-if="asWebSocket(connector)!.firmwareVersion.value"
+          class="text-xs text-muted-foreground"
+        >
+          Firmware: v{{ asWebSocket(connector)!.firmwareVersion.value }}
+        </div>
+        <p v-if="!stripFixtures.length" class="text-xs text-yellow-400/80">
+          Es gibt noch keine LED-Strip-Fixture in dieser Szene.
+        </p>
+
+        <!-- Strip parameter editor (two-way binding to fixture.stripConfig) -->
+        <template v-if="fixtureFor(asWebSocket(connector)!)">
+          <div class="grid grid-cols-3 gap-2 pt-1 border-t border-border/40 mt-1">
+            <label class="text-xs text-muted-foreground">
+              LED-Anzahl
+              <input
+                type="number"
+                min="1" max="2048" step="1"
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.ledCount ?? 0"
+                @change="commitStripPatch(asWebSocket(connector)!, { ledCount: Number(($event.target as HTMLInputElement).value) })"
+              />
+            </label>
+            <label class="text-xs text-muted-foreground">
+              Gruppe
+              <input
+                type="number"
+                min="1" max="64" step="1"
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.groupSize ?? 1"
+                @change="commitStripPatch(asWebSocket(connector)!, { groupSize: Number(($event.target as HTMLInputElement).value) })"
+              />
+            </label>
+            <label class="text-xs text-muted-foreground">
+              LEDs/m
+              <input
+                type="number"
+                min="1" max="500" step="1"
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.ledsPerMeter ?? 60"
+                @change="commitStripPatch(asWebSocket(connector)!, { ledsPerMeter: Number(($event.target as HTMLInputElement).value) })"
+              />
+            </label>
+          </div>
+        </template>
       </div>
 
       <!-- Expandable outputs section -->

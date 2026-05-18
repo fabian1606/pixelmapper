@@ -1,4 +1,6 @@
 import { reactive, ref, shallowRef } from 'vue';
+import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Effect, BlendMode } from '~/utils/engine/types';
 
 export type ConnectorStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -22,6 +24,11 @@ export interface EngineConnectorState {
   layoutPacket: Uint8Array;
   channelsPacket: Uint8Array;
   effectsPacket: Uint8Array;
+  /** Live references used by connectors that build their own scoped packets
+   *  (e.g. WebSocketConnector with a per-fixture scope). */
+  fixtures: Fixture[];
+  effects: Effect[];
+  blendMode: BlendMode;
 }
 
 export abstract class BaseConnector {

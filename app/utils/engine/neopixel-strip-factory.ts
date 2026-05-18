@@ -66,6 +66,48 @@ export interface CreateNeoPixelStripOptions {
   startAddress?: number;
 }
 
+/**
+ * Builds the channel + beam arrays for a given strip config. Pure / no side
+ * effects. Used both by the initial factory and by the regenerator that
+ * rebuilds these when ledCount/groupSize/chipType changes on an existing
+ * fixture.
+ */
+export function buildStripChannelsAndBeams(config: StripConfig): { channels: Channel[]; beams: Beam[] } {
+  const layout = channelLayoutFor(config.chipType);
+  const cpp = layout.length;
+  const pixelCount = logicalPixelCount(config.ledCount, config.groupSize);
+
+  const channels: Channel[] = [];
+  for (let p = 0; p < pixelCount; p++) {
+    const beamId = `pixel-${p}`;
+    for (const spec of layout) {
+      channels.push({
+        type: spec.type,
+        addressOffset: p * cpp + spec.offset,
+        resolution: 1,
+        role: 'COLOR',
+        colorValue: spec.colorValue,
+        defaultValue: 0,
+        beamId,
+        chaserConfig: makeChaser(0),
+      });
+    }
+  }
+
+  const beams: Beam[] = [];
+  if (pixelCount === 1) {
+    beams.push(new Beam('pixel-0', 0, 0));
+  } else {
+    const spreadX = (pixelCount - 1) / pixelCount;
+    for (let p = 0; p < pixelCount; p++) {
+      const localX = (p / (pixelCount - 1) - 0.5) * spreadX;
+      beams.push(new Beam(`pixel-${p}`, localX, 0));
+    }
+  }
+
+  return { channels, beams };
+}
+
 // ─── Bounds + length sync helpers ────────────────────────────────────────────
 
 /**
@@ -132,26 +174,7 @@ export function createNeoPixelStripFixture(
   config: StripConfig,
   opts: CreateNeoPixelStripOptions,
 ): Fixture {
-  const layout = channelLayoutFor(config.chipType);
-  const cpp = layout.length;
-  const pixelCount = logicalPixelCount(config.ledCount, config.groupSize);
-
-  const channels: Channel[] = [];
-  for (let p = 0; p < pixelCount; p++) {
-    const beamId = `pixel-${p}`;
-    for (const spec of layout) {
-      channels.push({
-        type: spec.type,
-        addressOffset: p * cpp + spec.offset,
-        resolution: 1,
-        role: 'COLOR',
-        colorValue: spec.colorValue,
-        defaultValue: 0,
-        beamId,
-        chaserConfig: makeChaser(0),
-      });
-    }
-  }
+  const { channels, beams } = buildStripChannelsAndBeams(config);
 
   const fixture = new Fixture(opts.id, channels, opts.startAddress ?? 1);
   fixture.name = opts.name ?? `NeoPixel Strip (${config.ledCount} LEDs)`;
@@ -172,22 +195,6 @@ export function createNeoPixelStripFixture(
       ];
 
   fixture.stripConfig = { ...config, points };
-
-  // Beams distributed along localX in [-0.475, +0.475] (same spread formula
-  // used by the OFL pixel-bar path in fixture-factory.ts:430-433).
-  // These are kept around so non-strip code paths (presets, color overrides)
-  // see one beam per logical pixel — the Rust renderer derives ACTUAL display
-  // positions from the polyline instead.
-  const beams: Beam[] = [];
-  if (pixelCount === 1) {
-    beams.push(new Beam('pixel-0', 0, 0));
-  } else {
-    const spreadX = (pixelCount - 1) / pixelCount;
-    for (let p = 0; p < pixelCount; p++) {
-      const localX = (p / (pixelCount - 1) - 0.5) * spreadX;
-      beams.push(new Beam(`pixel-${p}`, localX, 0));
-    }
-  }
   fixture.beams = beams;
 
   // Set fixturePosition / fixtureSize from the polyline AABB so the spatial

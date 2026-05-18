@@ -16,6 +16,17 @@ export const TYPE_OTA_BEGIN     = 0x15;
 export const TYPE_OTA_CHUNK     = 0x16;
 export const TYPE_OTA_END       = 0x17;
 export const TYPE_UNIVERSE_MAP  = 0x18;
+export const TYPE_STRIP_CONFIG  = 0x19;
+
+// Chip-type IDs sent in TYPE_STRIP_CONFIG. ESP32-S3 firmware v1 only honours
+// WS2812B (id 0); the field exists for forward-compat with multi-chip support.
+export const STRIP_CHIP_TYPE_ID: Record<string, number> = {
+  'WS2812B':     0,
+  'WS2811':      1,
+  'SK6812-RGB':  2,
+  'SK6812-RGBW': 3,
+  'APA102':      4,
+};
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -109,6 +120,27 @@ export function buildOtaChunkPacket(chunk: Uint8Array): Uint8Array {
 export function buildOtaEndPacket(): Uint8Array {
   const w = new BufWriter();
   return w.toPacket(TYPE_OTA_END);
+}
+
+// ── Strip config packet (TYPE_STRIP_CONFIG 0x19) ─────────────────────────────
+// Tells the ESP32-S3 node which LED strip layout to drive. Sent on connect and
+// whenever the bound fixture's stripConfig changes. Firmware v1 only consumes
+// ledCount + groupSize; chipType is forward-compat (always 0/WS2812B today).
+
+export interface StripConfigPayload {
+  chipType:     string;   // "WS2812B" | "SK6812-RGB" | …
+  ledCount:     number;
+  groupSize:    number;
+  ledsPerMeter: number;
+}
+
+export function buildStripConfigPacket(cfg: StripConfigPayload): Uint8Array {
+  const w = new BufWriter();
+  w.u8(STRIP_CHIP_TYPE_ID[cfg.chipType] ?? 0);
+  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledCount))));
+  w.u16(Math.max(1, Math.min(65535, Math.round(cfg.groupSize))));
+  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledsPerMeter))));
+  return w.toPacket(TYPE_STRIP_CONFIG);
 }
 
 // ── Universe map packet (TYPE_UNIVERSE_MAP 0x18) ──────────────────────────────

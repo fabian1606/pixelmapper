@@ -7,5 +7,11 @@ rustflags = [
     "--cfg", "espidf_time64",
 ]
 
+[target.xtensa-esp32s3-espidf]
+linker = "xtensa-esp32s3-elf-gcc"
+rustflags = [
+    "--cfg", "espidf_time64",
+]
+
 [unstable]
 build-std = ["std", "panic_abort"]

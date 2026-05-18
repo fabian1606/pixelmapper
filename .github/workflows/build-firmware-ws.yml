@@ -1,0 +1,80 @@
+name: Build & Release ESP32-S3 WS Firmware
+
+on:
+  push:
+    tags:
+      - 'vws*.*.*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Espressif Rust toolchain (espup)
+        run: |
+          cargo install espup --locked
+          espup install --targets esp32s3 --export-file $HOME/export-esp.sh
+          echo "source $HOME/export-esp.sh" >> $HOME/.bashrc
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rs-engine
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Inject version from tag into version.h
+        run: |
+          VER="${GITHUB_REF#refs/tags/vws}"
+          mkdir -p pio-ws/include
+          printf '#pragma once\n#define FIRMWARE_VERSION "%s"\n' "$VER" \
+            > pio-ws/include/version.h
+          echo "Firmware version: $VER"
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
+
+      - name: Build firmware
+        run: |
+          source $HOME/export-esp.sh
+          pio run
+        working-directory: pio-ws
+
+      - name: Assemble release assets
+        run: |
+          OUT=pio-ws/.pio/build/esp32s3_neopixel
+          mkdir -p release
+          cp "$OUT/firmware.bin"   release/firmware.bin
+          cp "$OUT/bootloader.bin" release/bootloader.bin
+          cp "$OUT/partitions.bin" release/partitions.bin
+          cat > release/manifest.json <<EOF
+          {
+            "name": "Pixelmapper Strip (ESP32-S3)",
+            "version": "${VERSION}",
+            "chipFamily": "ESP32-S3",
+            "parts": [
+              { "path": "bootloader.bin", "offset": 0 },
+              { "path": "partitions.bin", "offset": 32768 },
+              { "path": "firmware.bin",   "offset": 65536 }
+            ]
+          }
+          EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WS Firmware ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            release/firmware.bin
+            release/bootloader.bin
+            release/partitions.bin
+            release/manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

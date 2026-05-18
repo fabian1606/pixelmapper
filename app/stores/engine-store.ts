@@ -337,6 +337,9 @@ export const useEngineStore = defineStore('engine', () => {
           layoutPacket,
           channelsPacket,
           effectsPacket,
+          fixtures: flatFixtures.value,
+          effects: activeEffects.value,
+          blendMode: engine.stackBlendMode.value,
         });
       } catch (e) {
         console.warn('[engine] notifyEngineState threw:', e);
