@@ -172,9 +172,19 @@ static void processByte(uint8_t b) {
 }
 
 // ── CONFIG_MODE: read [config] lines from Serial, persist to NVS ─────────────
+// Re-broadcasts the [info] boot block every 2 seconds so the browser-side
+// wizard reliably catches it — by the time the host's SerialPort is open
+// after the post-flash USB re-enumeration, the initial Serial bytes may have
+// already been lost into the void.
 static void runConfigMode() {
-    String line;
+    String   line;
+    uint32_t lastBroadcast = 0;
     while (true) {
+        uint32_t now = millis();
+        if (now - lastBroadcast > 2000) {
+            lastBroadcast = now;
+            printBootInfo("config");
+        }
         while (Serial.available()) {
             char c = (char)Serial.read();
             if (c == '\r') continue;
@@ -188,6 +198,7 @@ static void runConfigMode() {
                         prefs.putString("wifi_pass", wifiPass);
                         prefs.putUChar("data_pin",  dataPin);
                         Serial.println("[config] ok — restarting");
+                        Serial.flush();
                         delay(150);
                         ESP.restart();
                     } else if (eq > 0) {
@@ -308,7 +319,9 @@ static void runRunMode() {
 // ── Arduino entry points ──────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    delay(200);
+    // Native USB-CDC needs time to enumerate after reset. Give the host long
+    // enough to (re)open the port and start listening before we print [info].
+    delay(800);
 
     prefs.begin("pixmap", false);
     wifiSsid = prefs.getString("wifi_ssid", "");
@@ -317,6 +330,10 @@ void setup() {
     hostname = String(MDNS_HOSTNAME_PREFIX) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
 
     const char* mode = wifiSsid.isEmpty() ? "config" : "run";
+    // Print boot info twice with a small gap so we cover both possibilities:
+    // host already listening, or host opens the port between the two prints.
+    printBootInfo(mode);
+    delay(300);
     printBootInfo(mode);
 
     if (wifiSsid.isEmpty()) {

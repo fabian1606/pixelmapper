@@ -149,12 +149,16 @@ async function flashFirmware() {
   });
 
   pushLog('[esp] flash complete — resetting…');
-  await loader.hardReset();
+  // esptool-js 0.6.x: `after('hard_reset')` toggles DTR/RTS to reset the chip
+  // into user code. Older versions had `hardReset()`; newer use this signature.
+  await loader.after('hard_reset');
   await transport.disconnect();
 
-  // Re-open the port at the firmware's serial baud (115200) for the config phase.
-  await waitForPort();
-  await reopenPortAt(115200);
+  // The ESP32-S3 uses USB-Serial-JTAG (VID 0x303A, PID 0x1001) — after reset
+  // the USB endpoint re-enumerates, so the original SerialPort handle is
+  // stale. We try to reopen, and on failure look up the new port via
+  // navigator.serial.getPorts() filtered by VID/PID.
+  await reopenForBoot(115200);
 }
 
 function binaryToString(bytes: Uint8Array): string {
@@ -165,19 +169,51 @@ function binaryToString(bytes: Uint8Array): string {
   return s;
 }
 
-async function waitForPort() {
-  // After ESP-resets, the port may need to be re-opened. esptool-js already
-  // released it on disconnect(); re-open below.
-  return new Promise(r => setTimeout(r, 300));
-}
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-async function reopenPortAt(baud: number) {
+/**
+ * Reopen the port at the firmware's serial baud after a hard-reset.
+ * ESP32-S3's native USB-Serial-JTAG re-enumerates after reset, so the existing
+ * SerialPort handle is often stale; in that case we look up the freshly
+ * permitted port via navigator.serial.getPorts() filtered by VID/PID.
+ */
+async function reopenForBoot(baud: number) {
   if (!port) return;
+  const origInfo = port.getInfo();
+
+  // First close the existing handle so its writable/readable streams free up.
   try { await port.close(); } catch {}
-  await port.open({ baudRate: baud });
+
+  // ESP32-S3 USB-Serial-JTAG needs ~1s to re-enumerate after reset.
+  await sleep(1200);
+
+  // Try the original handle first.
+  try {
+    await port.open({ baudRate: baud });
+  } catch (firstErr) {
+    pushLog(`[wizard] port stale (${(firstErr as Error).message}) — searching re-enumerated device…`);
+    // Poll getPorts() for up to 4 seconds for a port matching the original VID/PID.
+    let fresh: SerialPort | null = null;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const ports: SerialPort[] = await (navigator as any).serial.getPorts();
+      fresh = ports.find(p => {
+        const i = p.getInfo();
+        return i.usbVendorId === origInfo.usbVendorId
+            && i.usbProductId === origInfo.usbProductId;
+      }) ?? null;
+      if (fresh) break;
+      await sleep(250);
+    }
+    if (!fresh) throw new Error('Re-enumerated serial port not found after reset');
+    port = fresh;
+    await port.open({ baudRate: baud });
+  }
+
   writer = port.writable!.getWriter();
   readerLoopActive = true;
   readSerial();
+  pushLog(`[wizard] serial reopened @${baud} — waiting for boot info…`);
 }
 
 async function readSerial() {
