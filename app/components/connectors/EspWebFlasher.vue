@@ -23,6 +23,7 @@ type Step =
   | 'connecting'
   | 'fetching-manifest'
   | 'flashing'
+  | 'pick-port'
   | 'waiting-boot'
   | 'configuring'
   | 'restarting'
@@ -154,11 +155,13 @@ async function flashFirmware() {
   await loader.after('hard_reset');
   await transport.disconnect();
 
-  // The ESP32-S3 uses USB-Serial-JTAG (VID 0x303A, PID 0x1001) — after reset
-  // the USB endpoint re-enumerates, so the original SerialPort handle is
-  // stale. We try to reopen, and on failure look up the new port via
-  // navigator.serial.getPorts() filtered by VID/PID.
-  await reopenForBoot(115200);
+  // Free the original port handle. The ESP32-S3 with native USB-Serial-JTAG
+  // re-enumerates with a different PID after the reset (bootloader 0x1001 →
+  // user-code CDC 0x4001), so the handle is unusable. We mimic the
+  // SerialConnector.connect() pattern: ask the user to pick the port again
+  // via a fresh requestPort() prompt.
+  try { await port?.close(); } catch {}
+  port = null;
 }
 
 function binaryToString(bytes: Uint8Array): string {
@@ -169,57 +172,33 @@ function binaryToString(bytes: Uint8Array): string {
   return s;
 }
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
- * Reopen the port at the firmware's serial baud after a hard-reset.
- * ESP32-S3's native USB-Serial-JTAG re-enumerates after reset, so the existing
- * SerialPort handle is often stale; in that case we look up the freshly
- * permitted port via navigator.serial.getPorts() filtered by VID/PID.
+ * Step `pick-port`: user picks the (now USB-CDC-mode) ESP32 port via a fresh
+ * requestPort() prompt. Mirrors SerialConnector.connect(): never reuse a
+ * stale handle; always go through the picker.
  */
-async function reopenForBoot(baud: number) {
-  if (!port) return;
-  const origInfo = port.getInfo();
-
-  // First close the existing handle so its writable/readable streams free up.
-  try { await port.close(); } catch {}
-
-  // ESP32-S3 USB-Serial-JTAG needs ~1s to re-enumerate after reset.
-  await sleep(1200);
-
-  // Try the original handle first.
+async function pickAndReadPort() {
   try {
-    await port.open({ baudRate: baud });
-  } catch (firstErr) {
-    pushLog(`[wizard] port stale (${(firstErr as Error).message}) — searching re-enumerated device…`);
-    // Poll getPorts() for up to 4 seconds for a port matching the original VID/PID.
-    let fresh: SerialPort | null = null;
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline) {
-      const ports: SerialPort[] = await (navigator as any).serial.getPorts();
-      fresh = ports.find(p => {
-        const i = p.getInfo();
-        return i.usbVendorId === origInfo.usbVendorId
-            && i.usbProductId === origInfo.usbProductId;
-      }) ?? null;
-      if (fresh) break;
-      await sleep(250);
-    }
-    if (!fresh) throw new Error('Re-enumerated serial port not found after reset');
-    port = fresh;
-    await port.open({ baudRate: baud });
+    pushLog('[wizard] opening port picker…');
+    const newPort: SerialPort = await (navigator as any).serial.requestPort();
+    port = newPort;
+    await port.open({ baudRate: 115200 });
+    writer = port.writable!.getWriter();
+    readerLoopActive = true;
+    readSerial();
+    step.value = 'waiting-boot';
+    pushLog('[wizard] port opened — waiting for [info] boot lines…');
+  } catch (e) {
+    pushLog(`[wizard] port pick error: ${(e as Error).message ?? e}`);
   }
-
-  writer = port.writable!.getWriter();
-  readerLoopActive = true;
-  readSerial();
-  pushLog(`[wizard] serial reopened @${baud} — waiting for boot info…`);
 }
 
 async function readSerial() {
   if (!port || !port.readable) return;
   reader = port.readable.getReader();
   const decoder = new TextDecoder();
+  let lostDevice = false;
   try {
     while (readerLoopActive) {
       const { value, done } = await reader.read();
@@ -236,10 +215,24 @@ async function readSerial() {
       }
     }
   } catch (e) {
-    pushLog(`[serial] read err: ${(e as Error).message ?? e}`);
+    const msg = (e as Error).message ?? String(e);
+    pushLog(`[serial] read err: ${msg}`);
+    // "The device has been lost" or "NetworkError" → USB was re-enumerated.
+    // Surface the manual-reconnect button so the user can pick the new port.
+    if (/device.*lost|networkerror|disconnected/i.test(msg)) {
+      lostDevice = true;
+    }
   } finally {
     try { reader?.releaseLock(); } catch {}
     reader = null;
+    if (lostDevice) {
+      try { writer?.releaseLock(); } catch {}
+      writer = null;
+      try { await port?.close(); } catch {}
+      port = null;
+      step.value = 'pick-port';
+      pushLog('[wizard] USB device re-enumerated — pick the new port manually');
+    }
   }
 }
 
@@ -304,7 +297,7 @@ async function start() {
   try {
     await openPort();
     await flashFirmware();
-    step.value = 'waiting-boot';
+    step.value = 'pick-port';
   } catch (e) {
     errorMessage.value = (e as Error).message ?? String(e);
     step.value = 'error';
@@ -331,6 +324,7 @@ const stepLabel = computed(() => ({
   connecting:        'Verbinde mit dem Gerät…',
   'fetching-manifest':'Firmware-Manifest laden…',
   flashing:          `Flash: ${progressFile.value} (${progressPct.value}%)`,
+  'pick-port':       'Port nach Reset auswählen',
   'waiting-boot':    'Warte auf Boot-Log…',
   configuring:       'Gerät konfigurieren',
   restarting:        'Neu starten…',
@@ -362,6 +356,34 @@ const stepLabel = computed(() => ({
         <!-- Step indicator -->
         <div class="text-xs text-muted-foreground uppercase tracking-wider">
           {{ stepLabel }}
+        </div>
+
+        <!-- Step "pick-port" — after flash the ESP32-S3 re-enumerates as a
+             different USB device (PID 0x1001 → 0x4001) and Chrome requires
+             a new permission grant. The user has to pick the port again. -->
+        <div
+          v-if="step === 'pick-port'"
+          class="flex flex-col gap-2 rounded border border-blue-500/40 bg-blue-500/10 px-3 py-2.5"
+        >
+          <div class="flex items-start gap-2 text-xs text-blue-200">
+            <CheckCircle2 :size="14" class="mt-0.5 flex-shrink-0 text-green-400" />
+            <div>
+              <p class="font-medium">Flash erfolgreich!</p>
+              <p class="mt-1 text-blue-300/80">
+                Der ESP32 ist neu gestartet und meldet sich jetzt mit einer
+                anderen USB-Identität. Bitte den Port erneut auswählen — er
+                erscheint als <span class="font-mono">USB JTAG/serial debug unit</span>
+                oder ähnlich.
+              </p>
+            </div>
+          </div>
+          <button
+            class="flex items-center justify-center gap-2 px-3 py-2 rounded bg-blue-500/20 text-blue-200 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
+            @click="pickAndReadPort"
+          >
+            <Usb :size="14" />
+            Port wählen &amp; Konfiguration starten
+          </button>
         </div>
 
         <!-- Step 1: Start -->

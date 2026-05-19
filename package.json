@@ -11,7 +11,14 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare && ./scripts/setup-ofl.sh",
-    "release": "bun run scripts/release.ts"
+    "release": "bun run scripts/release.ts",
+    "flash": "bun run scripts/flash.ts",
+    "flash:ws": "bun run scripts/flash.ts ws",
+    "flash:p4": "bun run scripts/flash.ts p4",
+    "build:ws": "bun run scripts/flash.ts ws --build",
+    "build:p4": "bun run scripts/flash.ts p4 --build",
+    "monitor:ws": "bun run scripts/flash.ts ws --monitor",
+    "monitor:p4": "bun run scripts/flash.ts p4 --monitor"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",
