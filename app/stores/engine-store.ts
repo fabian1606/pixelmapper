@@ -20,6 +20,10 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
+// Side-effect import — registers 'connector.add' / 'connector.remove' /
+// 'connector.update' factories so the tail replay can recreate connector
+// mutations on project load even before any UI page has been visited.
+import '~/components/engine/commands/connector-commands';
 import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { trace } from '~/utils/perf';
@@ -447,6 +451,8 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
+    const connectionsStore = useConnectionsStore();
+    connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
     const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId } = deserializeProject(snapshot);
     sceneNodes.value = nodes;
     savedPresets.value = presets;
@@ -593,6 +599,7 @@ export const useEngineStore = defineStore('engine', () => {
           liveStore.pages,
           liveStore.liveControllers,
           selectedPresetId.value,
+          connectionsStore.getSnapshots(),
         );
         await supabase.functions.invoke('save-snapshot', {
           body: {

@@ -1,43 +1,41 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue';
-import { X, Usb, Zap, Settings as SettingsIcon, CheckCircle2, AlertTriangle } from 'lucide-vue-next';
-import { ESPLoader, Transport } from 'esptool-js';
+import { X, Usb, Settings as SettingsIcon, CheckCircle2, AlertTriangle, Terminal } from 'lucide-vue-next';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
+import { useHistory } from '~/components/engine/composables/use-history';
+import { UpdateConnectorConfigCommand } from '~/components/engine/commands/connector-commands';
+
+const props = defineProps<{
+  connectorId: string;
+}>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-interface ManifestPart { path: string; offset: number; }
-interface Manifest {
-  name?:        string;
-  version?:     string;
-  chipFamily?:  string;
-  releaseTag?:  string;
-  parts:        ManifestPart[];
-}
+// Wizard for configuring an already-flashed ESP32-S3 over USB serial.
+// The firmware itself is uploaded ahead of time via `bun run flash:ws` (or
+// `pio run -t upload` in pio-ws/). All this wizard does is:
+//   1. open the serial port (user picks via requestPort()),
+//   2. read the firmware's `[info]` boot broadcast to pre-fill the form,
+//   3. send `[config] ssid=…\npass=…\npin=…\ncommit\n`,
+//   4. wait for the ESP32 to reboot into run mode,
+//   5. create a WebSocketConnector with the device's mDNS URL.
 
 type Step =
   | 'idle'
   | 'connecting'
-  | 'fetching-manifest'
-  | 'flashing'
-  | 'pick-port'
   | 'waiting-boot'
   | 'configuring'
   | 'restarting'
   | 'done'
   | 'error';
 
-const step           = ref<Step>('idle');
-const errorMessage   = ref<string>('');
-const progressFile   = ref<string>('');
-const progressPct    = ref<number>(0);
-const logLines       = ref<string[]>([]);
-const manifest       = ref<Manifest | null>(null);
+const step         = ref<Step>('idle');
+const errorMessage = ref<string>('');
+const logLines     = ref<string[]>([]);
 
-// Detected from the firmware's "[info] …" boot broadcast.
 const detected = ref({
   hostname: '' as string,
   ssid:     '' as string,
@@ -45,7 +43,6 @@ const detected = ref({
   mode:     '' as string,
 });
 
-// User-entered values (pre-filled from `detected` on Schritt 2)
 const formSsid = ref('');
 const formPass = ref('');
 const formPin  = ref(48);
@@ -56,141 +53,56 @@ let writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
 let textBuf = '';
 let readerLoopActive = false;
 
+// Double-click guard for factory reset
+let resetClickTimer: ReturnType<typeof setTimeout> | null = null;
+const resetArmed = ref(false);
+
+function handleResetClick() {
+  if (resetArmed.value) {
+    // Second click — execute
+    if (resetClickTimer) clearTimeout(resetClickTimer);
+    resetArmed.value = false;
+    resetClickTimer = null;
+    writeLine('[config] factory-reset');
+    step.value = 'waiting-boot';
+    pushLog('[wizard] factory reset sent — waiting for reboot…');
+  } else {
+    // First click — arm
+    resetArmed.value = true;
+    resetClickTimer = setTimeout(() => {
+      resetArmed.value = false;
+      resetClickTimer = null;
+    }, 2000);
+  }
+}
+
 function pushLog(line: string) {
   logLines.value.push(line);
   if (logLines.value.length > 200) logLines.value.shift();
 }
 
-async function fetchManifest(): Promise<Manifest> {
-  // Pick the most recent release that has a strip-manifest.json (= a build of
-  // the ESP32-S3 strip firmware). The P4 firmware ships in the same release
-  // but uses different asset filenames (firmware.bin vs strip-firmware.bin),
-  // so they coexist on a single GitHub release.
-  const releasesResp = await fetch('https://api.github.com/repos/fabian1606/pixelmapper/releases');
-  if (!releasesResp.ok) throw new Error(`GitHub releases fetch failed: HTTP ${releasesResp.status}`);
-  const releases = await releasesResp.json() as Array<{ tag_name: string; assets: Array<{ name: string; browser_download_url: string }> }>;
-  const release = releases.find(r => r.assets.some(a => a.name === 'strip-manifest.json'));
-  if (!release) throw new Error('No release with strip-manifest.json found');
-  const manifestAsset = release.assets.find(a => a.name === 'strip-manifest.json');
-  if (!manifestAsset) throw new Error(`Release ${release.tag_name} has no strip-manifest.json`);
-
-  const mfResp = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(manifestAsset.browser_download_url)}`);
-  if (!mfResp.ok) throw new Error(`strip-manifest.json fetch failed: HTTP ${mfResp.status}`);
-  const mf = await mfResp.json() as Manifest;
-  mf.releaseTag = release.tag_name;
-
-  // Resolve part paths against the same release's asset URLs
-  const assetByName = new Map(release.assets.map(a => [a.name, a.browser_download_url]));
-  mf.parts = mf.parts.map(p => ({
-    ...p,
-    path: assetByName.get(p.path) ?? p.path,
-  }));
-  return mf;
-}
-
-async function downloadPart(url: string): Promise<Uint8Array> {
-  const resp = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(url)}`);
-  if (!resp.ok) throw new Error(`download failed: HTTP ${resp.status} (${url})`);
-  return new Uint8Array(await resp.arrayBuffer());
-}
-
-async function openPort() {
-  port = await (navigator as any).serial.requestPort();
-  step.value = 'connecting';
+async function start() {
   errorMessage.value = '';
-}
-
-async function flashFirmware() {
-  if (!port) throw new Error('No serial port');
-  step.value = 'fetching-manifest';
-  pushLog('[wizard] fetching manifest.json…');
-  manifest.value = await fetchManifest();
-  pushLog(`[wizard] release=${manifest.value.releaseTag} parts=${manifest.value.parts.length}`);
-
-  // Download all parts up-front
-  const parts: { data: Uint8Array; address: number }[] = [];
-  for (const p of manifest.value.parts) {
-    pushLog(`[wizard] downloading ${p.path.split('/').pop()}…`);
-    const data = await downloadPart(p.path);
-    parts.push({ data: binaryToString(data), address: p.offset } as any);
-    // esptool-js wants strings ("latin-1") for fileArray.data; we'll pass Uint8Array.
-    // The library accepts both Uint8Array and string in practice.
-    parts[parts.length - 1].data = data;
-  }
-
-  step.value = 'flashing';
-  progressFile.value = '';
-  progressPct.value = 0;
-
-  const transport = new Transport(port, true);
-  const loader = new ESPLoader({
-    transport,
-    baudrate: 921600,
-    terminal: {
-      clean: () => {},
-      writeLine: (s: string) => pushLog(s),
-      write:     (s: string) => pushLog(s),
-    },
-  });
-  pushLog('[esp] entering bootloader…');
-  await loader.main();   // detect chip + sync
-  pushLog('[esp] connected — flashing…');
-
-  await loader.writeFlash({
-    fileArray: parts as any,
-    flashSize: 'keep',
-    flashMode: 'keep',
-    flashFreq: 'keep',
-    eraseAll:  false,
-    compress:  true,
-    reportProgress: (idx, written, total) => {
-      progressFile.value = manifest.value!.parts[idx]!.path.split('/').pop() ?? '';
-      progressPct.value  = total > 0 ? Math.round((written / total) * 100) : 0;
-    },
-  });
-
-  pushLog('[esp] flash complete — resetting…');
-  // esptool-js 0.6.x: `after('hard_reset')` toggles DTR/RTS to reset the chip
-  // into user code. Older versions had `hardReset()`; newer use this signature.
-  await loader.after('hard_reset');
-  await transport.disconnect();
-
-  // Free the original port handle. The ESP32-S3 with native USB-Serial-JTAG
-  // re-enumerates with a different PID after the reset (bootloader 0x1001 →
-  // user-code CDC 0x4001), so the handle is unusable. We mimic the
-  // SerialConnector.connect() pattern: ask the user to pick the port again
-  // via a fresh requestPort() prompt.
-  try { await port?.close(); } catch {}
-  port = null;
-}
-
-function binaryToString(bytes: Uint8Array): string {
-  // esptool-js historically expected latin-1 string; new versions accept Uint8Array.
-  // We pass Uint8Array; this helper is here as a fallback.
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
-  return s;
-}
-
-
-/**
- * Step `pick-port`: user picks the (now USB-CDC-mode) ESP32 port via a fresh
- * requestPort() prompt. Mirrors SerialConnector.connect(): never reuse a
- * stale handle; always go through the picker.
- */
-async function pickAndReadPort() {
+  logLines.value = [];
+  detected.value = { hostname: '', ssid: '', pin: 48, mode: '' };
+  formSsid.value = '';
+  formPass.value = '';
+  formPin.value  = 48;
+  step.value = 'connecting';
   try {
-    pushLog('[wizard] opening port picker…');
-    const newPort: SerialPort = await (navigator as any).serial.requestPort();
-    port = newPort;
-    await port.open({ baudRate: 115200 });
-    writer = port.writable!.getWriter();
+    port = await (navigator as any).serial.requestPort();
+    await port!.open({ baudRate: 115200 });
+    writer = port!.writable!.getWriter();
     readerLoopActive = true;
     readSerial();
     step.value = 'waiting-boot';
     pushLog('[wizard] port opened — waiting for [info] boot lines…');
+    // The firmware reprints its [info] block every 2s in CONFIG_MODE, so it
+    // arrives within ~2s even if we missed the first one.
   } catch (e) {
-    pushLog(`[wizard] port pick error: ${(e as Error).message ?? e}`);
+    errorMessage.value = (e as Error).message ?? String(e);
+    step.value = 'error';
+    pushLog(`[wizard] error: ${errorMessage.value}`);
   }
 }
 
@@ -198,7 +110,6 @@ async function readSerial() {
   if (!port || !port.readable) return;
   reader = port.readable.getReader();
   const decoder = new TextDecoder();
-  let lostDevice = false;
   try {
     while (readerLoopActive) {
       const { value, done } = await reader.read();
@@ -215,42 +126,26 @@ async function readSerial() {
       }
     }
   } catch (e) {
-    const msg = (e as Error).message ?? String(e);
-    pushLog(`[serial] read err: ${msg}`);
-    // "The device has been lost" or "NetworkError" → USB was re-enumerated.
-    // Surface the manual-reconnect button so the user can pick the new port.
-    if (/device.*lost|networkerror|disconnected/i.test(msg)) {
-      lostDevice = true;
-    }
+    pushLog(`[serial] read err: ${(e as Error).message ?? e}`);
   } finally {
     try { reader?.releaseLock(); } catch {}
     reader = null;
-    if (lostDevice) {
-      try { writer?.releaseLock(); } catch {}
-      writer = null;
-      try { await port?.close(); } catch {}
-      port = null;
-      step.value = 'pick-port';
-      pushLog('[wizard] USB device re-enumerated — pick the new port manually');
-    }
   }
 }
 
 function handleSerialLine(line: string) {
-  // Boot info broadcast — pre-fills form fields on first arrival.
   const infoMatch = line.match(/^\[info\] (\w+)=(.*)$/);
   if (infoMatch) {
     const [, key, value] = infoMatch;
     if      (key === 'hostname') detected.value.hostname = value!;
     else if (key === 'ssid')     { detected.value.ssid = value!; if (!formSsid.value) formSsid.value = value!; }
-    else if (key === 'pin')      { detected.value.pin  = Number(value); if (!formPin.value) formPin.value = Number(value); }
-    else if (key === 'mode')     detected.value.mode = value!;
-    return;
-  }
-  if (line.includes('CONFIG_MODE') || line.includes('mode=config') || line.includes('mode=run')) {
-    if (step.value === 'flashing' || step.value === 'waiting-boot') {
-      step.value = 'configuring';
+    else if (key === 'pin')      { detected.value.pin  = Number(value); if (!formPin.value || formPin.value === 48) formPin.value = Number(value); }
+    else if (key === 'mode')     {
+      detected.value.mode = value!;
+      // First [info mode=…] line confirms we've caught the boot broadcast.
+      if (step.value === 'waiting-boot') step.value = 'configuring';
     }
+    return;
   }
   if (line.includes('[config] ok — restarting')) {
     step.value = 'restarting';
@@ -281,28 +176,31 @@ async function submitConfig() {
 }
 
 const connectionsStore = useConnectionsStore();
+const history = useHistory();
 
-function createConnector() {
+// Update the existing target connector with the detected URL / label / pin
+// instead of creating a new one. The user pressed "Einrichten" *on* a card —
+// duplicating would leave a stale card behind every time they reconfigure.
+// All three field updates land in a single UpdateConnectorConfigCommand so
+// the tail sees one atomic edit (and undo reverts everything together).
+function applyToConnector() {
   if (!detected.value.hostname) return;
-  const url = `ws://${detected.value.hostname}/ws`;
-  const wc = new WebSocketConnector(crypto.randomUUID(), url, null);
-  connectionsStore.add(wc);
-  emit('close');
-}
-
-async function start() {
-  errorMessage.value = '';
-  logLines.value = [];
-  step.value = 'idle';
-  try {
-    await openPort();
-    await flashFirmware();
-    step.value = 'pick-port';
-  } catch (e) {
-    errorMessage.value = (e as Error).message ?? String(e);
-    step.value = 'error';
-    pushLog(`[wizard] error: ${errorMessage.value}`);
+  const target = connectionsStore.connectors.find(c => c.id === props.connectorId);
+  if (!(target instanceof WebSocketConnector)) {
+    emit('close');
+    return;
   }
+  // Disconnect first if currently connected — URL change while open is invalid.
+  target.disconnect().catch(() => {});
+  const url = `ws://${detected.value.hostname}/ws`;
+  const next = {
+    ...target.getConfig(),
+    url,
+    label: detected.value.hostname,
+    ...(detected.value.pin ? { devicePin: detected.value.pin } : {}),
+  };
+  history.execute(new UpdateConnectorConfigCommand(target.id, next));
+  emit('close');
 }
 
 async function cleanup() {
@@ -322,9 +220,6 @@ const isWebSerialSupported = typeof navigator !== 'undefined' && 'serial' in nav
 const stepLabel = computed(() => ({
   idle:              'Bereit',
   connecting:        'Verbinde mit dem Gerät…',
-  'fetching-manifest':'Firmware-Manifest laden…',
-  flashing:          `Flash: ${progressFile.value} (${progressPct.value}%)`,
-  'pick-port':       'Port nach Reset auswählen',
   'waiting-boot':    'Warte auf Boot-Log…',
   configuring:       'Gerät konfigurieren',
   restarting:        'Neu starten…',
@@ -339,8 +234,8 @@ const stepLabel = computed(() => ({
       <!-- Header -->
       <div class="flex items-center justify-between px-4 py-3 border-b border-border">
         <div class="flex items-center gap-2">
-          <Zap :size="16" class="text-yellow-400" />
-          <h2 class="text-sm font-semibold">Neues LED-Strip-Gerät einrichten</h2>
+          <SettingsIcon :size="16" class="text-blue-400" />
+          <h2 class="text-sm font-semibold">LED-Strip-Gerät konfigurieren</h2>
         </div>
         <button class="p-1 rounded hover:bg-accent" @click="cleanup().then(() => emit('close'))">
           <X :size="16" />
@@ -358,60 +253,44 @@ const stepLabel = computed(() => ({
           {{ stepLabel }}
         </div>
 
-        <!-- Step "pick-port" — after flash the ESP32-S3 re-enumerates as a
-             different USB device (PID 0x1001 → 0x4001) and Chrome requires
-             a new permission grant. The user has to pick the port again. -->
-        <div
-          v-if="step === 'pick-port'"
-          class="flex flex-col gap-2 rounded border border-blue-500/40 bg-blue-500/10 px-3 py-2.5"
-        >
-          <div class="flex items-start gap-2 text-xs text-blue-200">
-            <CheckCircle2 :size="14" class="mt-0.5 flex-shrink-0 text-green-400" />
-            <div>
-              <p class="font-medium">Flash erfolgreich!</p>
-              <p class="mt-1 text-blue-300/80">
-                Der ESP32 ist neu gestartet und meldet sich jetzt mit einer
-                anderen USB-Identität. Bitte den Port erneut auswählen — er
-                erscheint als <span class="font-mono">USB JTAG/serial debug unit</span>
-                oder ähnlich.
+        <!-- Step 1: Start — also explains the firmware-flash prerequisite -->
+        <div v-if="step === 'idle' || step === 'error'" class="flex flex-col gap-3">
+          <div class="flex items-start gap-2 rounded border border-border/60 bg-muted/30 px-3 py-2.5 text-xs">
+            <Terminal :size="14" class="mt-0.5 flex-shrink-0 text-muted-foreground" />
+            <div class="flex flex-col gap-1">
+              <p class="text-muted-foreground">
+                Stelle sicher, dass auf dem ESP32-S3 die aktuelle Firmware läuft:
+              </p>
+              <code class="px-2 py-1 rounded bg-background/60 text-foreground font-mono text-[11px]">
+                bun run flash:ws
+              </code>
+              <p class="text-muted-foreground">
+                Wenn das Gerät frisch ist, bleibt es im CONFIG_MODE und wartet auf die
+                Konfiguration unten.
               </p>
             </div>
           </div>
+
           <button
-            class="flex items-center justify-center gap-2 px-3 py-2 rounded bg-blue-500/20 text-blue-200 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
-            @click="pickAndReadPort"
+            class="flex items-center justify-center gap-2 px-4 py-2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
+            :disabled="!isWebSerialSupported"
+            @click="start"
           >
             <Usb :size="14" />
-            Port wählen &amp; Konfiguration starten
+            Mit Gerät verbinden
           </button>
         </div>
 
-        <!-- Step 1: Start -->
-        <button
-          v-if="step === 'idle' || step === 'error'"
-          class="flex items-center justify-center gap-2 px-4 py-2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
-          :disabled="!isWebSerialSupported"
-          @click="start"
+        <!-- Step 2: waiting for boot info -->
+        <div
+          v-if="step === 'waiting-boot'"
+          class="rounded border border-border/40 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground"
         >
-          <Usb :size="14" />
-          Gerät verbinden &amp; flashen
-        </button>
-
-        <!-- Progress bar -->
-        <div v-if="step === 'flashing'" class="px-1">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-muted-foreground">{{ progressFile }}</span>
-            <span class="text-xs text-muted-foreground">{{ progressPct }}%</span>
-          </div>
-          <div class="h-1 rounded bg-border overflow-hidden">
-            <div
-              class="h-full bg-blue-400 transition-all duration-200"
-              :style="{ width: progressPct + '%' }"
-            />
-          </div>
+          Warte auf <span class="font-mono">[info] …</span>-Zeilen vom Gerät — die Firmware
+          sendet sie alle 2 Sekunden (sowohl im CONFIG_MODE als auch im RUN_MODE).
         </div>
 
-        <!-- Step 2: Configure -->
+        <!-- Step 3: Configure -->
         <div v-if="step === 'configuring'" class="flex flex-col gap-2 border-t border-border/40 pt-3">
           <div class="flex items-center gap-2 text-xs text-muted-foreground mb-1">
             <SettingsIcon :size="12" />
@@ -432,7 +311,7 @@ const stepLabel = computed(() => ({
               v-model="formPass"
               type="password"
               class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-              :placeholder="detected.ssid ? '(unverändert)' : ''"
+              :placeholder="detected.ssid ? '(unverändert lassen)' : ''"
             />
           </label>
           <label class="text-xs text-muted-foreground">
@@ -444,15 +323,35 @@ const stepLabel = computed(() => ({
               class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </label>
-          <button
-            class="mt-2 flex items-center justify-center gap-2 px-4 py-2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
-            @click="submitConfig"
-          >
-            Übernehmen &amp; neu starten
-          </button>
+          <div class="flex gap-2 mt-2">
+            <button
+              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 transition-colors"
+              @click="submitConfig"
+            >
+              Übernehmen &amp; neu starten
+            </button>
+            <button
+              class="px-3 py-2 rounded border text-xs transition-colors"
+              :class="resetArmed
+                ? 'border-red-500/60 bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                : 'border-border text-muted-foreground hover:bg-accent'"
+              :title="resetArmed ? 'Nochmal klicken zum Bestätigen' : 'NVS löschen & auf Werkseinstellungen zurücksetzen'"
+              @click="handleResetClick"
+            >
+              {{ resetArmed ? '⚠ Bestätigen' : 'Reset' }}
+            </button>
+          </div>
         </div>
 
-        <!-- Step 3: Done -->
+        <!-- Step 4: restarting -->
+        <div
+          v-if="step === 'restarting'"
+          class="rounded border border-border/40 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground"
+        >
+          Gerät startet neu und verbindet sich mit WiFi…
+        </div>
+
+        <!-- Step 5: Done -->
         <div v-if="step === 'done'" class="flex flex-col gap-2 border-t border-border/40 pt-3">
           <div class="flex items-center gap-2 text-sm text-green-400">
             <CheckCircle2 :size="16" />
@@ -460,9 +359,9 @@ const stepLabel = computed(() => ({
           </div>
           <button
             class="flex items-center justify-center gap-2 px-4 py-2 rounded bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 transition-colors"
-            @click="createConnector"
+            @click="applyToConnector"
           >
-            Connector anlegen &amp; fertig
+            Übernehmen &amp; fertig
           </button>
         </div>
 

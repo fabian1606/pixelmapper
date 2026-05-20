@@ -1,5 +1,16 @@
 import { registerLiveOp } from '~/stores/live-bus-store';
 
+registerLiveOp<{ bpm: number }>('engine.bpm', {
+  scope: 'shared',
+  throttle: 'immediate',
+  merge: 'replace',
+  apply: ({ bpm }, _userId, ctx) => {
+    if (!ctx.engineStore.engine) return;
+    ctx.engineStore.engine.globalBpm.value = bpm;
+    ctx.engineStore.engine.postBpm(bpm);
+  },
+});
+
 registerLiveOp<{ epochMs: number }>('engine.clock', {
   scope: 'shared',
   throttle: 'immediate',

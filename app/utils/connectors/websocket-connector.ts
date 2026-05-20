@@ -19,7 +19,9 @@ export class WebSocketConnector extends BaseConnector {
 
   url        = ref<string>('');
   fixtureId  = ref<string | number | null>(null);
+  label      = ref<string>('');
   firmwareVersion = ref<string | null>(null);
+  devicePin  = ref<number | null>(null);
 
   private ws: WebSocket | null = null;
 
@@ -29,7 +31,7 @@ export class WebSocketConnector extends BaseConnector {
   private cachedEffectsFp:  string = '';
   private cachedStripFp:    string = '';
   private frameCount = 0;
-  private readonly TIMESYNC_INTERVAL = 120;
+  private readonly TIMESYNC_INTERVAL = 30;
 
   constructor(id: string, url = '', fixtureId: string | number | null = null) {
     super(id);
@@ -173,7 +175,24 @@ export class WebSocketConnector extends BaseConnector {
   }
 
   override getConfig() {
-    return { url: this.url.value, fixtureId: this.fixtureId.value };
+    return {
+      url:           this.url.value,
+      fixtureId:     this.fixtureId.value,
+      label:         this.label.value,
+      devicePin:     this.devicePin.value,
+      outputMapping: this.outputMapping.value.slice(),
+    };
+  }
+
+  static fromConfig(id: string, config: Record<string, unknown>): WebSocketConnector {
+    const wc = new WebSocketConnector(
+      id,
+      String(config.url ?? ''),
+      (config.fixtureId as string | number | null) ?? null,
+    );
+    wc.label.value     = String(config.label ?? '');
+    wc.devicePin.value = config.devicePin != null ? Number(config.devicePin) : null;
+    return wc;
   }
 
   private send(packet: Uint8Array) {
@@ -193,6 +212,8 @@ export class WebSocketConnector extends BaseConnector {
       if (!line) continue;
       const v = line.match(/^\[version\]\s+([\w.\-]+)$/);
       if (v) this.firmwareVersion.value = v[1]!.trim();
+      const p = line.match(/\bpin=(\d+)/);
+      if (p) this.devicePin.value = Number(p[1]);
       this.pushLog(line);
     }
   }

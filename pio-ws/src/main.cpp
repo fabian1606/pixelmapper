@@ -28,7 +28,7 @@
 static Preferences prefs;
 static String      wifiSsid;
 static String      wifiPass;
-static uint8_t     dataPin     = 48;
+static uint8_t     dataPin     = 21;
 static String      hostname;
 
 // ── LED buffer + runtime state (set via TYPE_STRIP_CONFIG) ───────────────────
@@ -46,14 +46,13 @@ static AsyncWebSocketClient* activeClient = nullptr;
 static EffectEngine*        engine        = nullptr;
 static float                timeOffset    = 0.0f;
 static uint32_t             lastMs        = 0;
-static uint32_t             lastDmxReport = 0;
 
-// ── Logging helpers (Serial + optional WS broadcast) ─────────────────────────
+// ── Logging helpers (Serial-only) ────────────────────────────────────────────
+// Originally also mirrored to the WS client, but AsyncWebSocket isn't safe for
+// concurrent text() from the main task while the AsyncTCP task is processing
+// frames on the same client. Logs now go to Serial exclusively.
 static void sendLog(const String& msg) {
     Serial.println(msg);
-    if (activeClient && activeClient->status() == WS_CONNECTED) {
-        activeClient->text(msg);
-    }
 }
 static void sendLogf(const char* fmt, ...) {
     char buf[256];
@@ -107,6 +106,27 @@ static uint8_t  rxType     = 0;
 static uint16_t rxExpected = 0;
 static uint16_t rxPos      = 0;
 static uint8_t  rxBuf[8192];
+
+// ── WS → main-loop byte ring buffer ──────────────────────────────────────────
+// WebSocket events fire on the AsyncTCP task, but the engine FFI is not
+// thread-safe. We copy raw bytes into this ring from the event callback and
+// drain it from the main loop so engine_dispatch / engine_render only ever
+// run on one task.
+static constexpr size_t  RX_RING_SIZE = 32768;
+static uint8_t           rxRing[RX_RING_SIZE];
+static volatile uint32_t rxRingHead = 0;
+static volatile uint32_t rxRingTail = 0;
+static volatile uint32_t rxRingDropped = 0;
+static volatile bool     rxResetRequested = false;
+
+static void rxRingPush(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        uint32_t next = (rxRingHead + 1) % RX_RING_SIZE;
+        if (next == rxRingTail) { rxRingDropped++; return; }
+        rxRing[rxRingHead] = data[i];
+        rxRingHead = next;
+    }
+}
 
 static inline float    readF32LE(const uint8_t* buf) { float v; memcpy(&v, buf, 4); return v; }
 static inline uint16_t readU16LE(const uint8_t* buf) { return (uint16_t)buf[0] | ((uint16_t)buf[1] << 8); }
@@ -176,6 +196,43 @@ static void processByte(uint8_t b) {
 // wizard reliably catches it — by the time the host's SerialPort is open
 // after the post-flash USB re-enumeration, the initial Serial bytes may have
 // already been lost into the void.
+// ── Shared serial [config] line handler ──────────────────────────────────────
+// Returns true if the caller should restart immediately (factory-reset or commit).
+static bool handleConfigLine(const String& line) {
+    if (!line.startsWith("[config] ")) return false;
+    String kv = line.substring(9);
+    int eq = kv.indexOf('=');
+    if (kv == "factory-reset") {
+        prefs.clear();
+        Serial.println("[config] ok — factory reset, restarting");
+        Serial.flush();
+        delay(150);
+        ESP.restart();
+        return true; // unreachable
+    } else if (kv == "commit") {
+        prefs.putString("wifi_ssid", wifiSsid);
+        prefs.putString("wifi_pass", wifiPass);
+        prefs.putUChar("data_pin",  dataPin);
+        Serial.println("[config] ok — restarting");
+        Serial.flush();
+        delay(150);
+        ESP.restart();
+        return true; // unreachable
+    } else if (eq > 0) {
+        String k = kv.substring(0, eq);
+        String v = kv.substring(eq + 1);
+        if      (k == "ssid") wifiSsid = v;
+        else if (k == "pass") wifiPass = v;
+        else if (k == "pin")  dataPin  = (uint8_t)v.toInt();
+        else {
+            Serial.printf("[config] err unknown key %s\n", k.c_str());
+            return false;
+        }
+        Serial.printf("[config] ok %s\n", k.c_str());
+    }
+    return false;
+}
+
 static void runConfigMode() {
     String   line;
     uint32_t lastBroadcast = 0;
@@ -190,30 +247,7 @@ static void runConfigMode() {
             if (c == '\r') continue;
             if (c == '\n') {
                 line.trim();
-                if (line.startsWith("[config] ")) {
-                    String kv = line.substring(9);
-                    int eq = kv.indexOf('=');
-                    if (kv == "commit") {
-                        prefs.putString("wifi_ssid", wifiSsid);
-                        prefs.putString("wifi_pass", wifiPass);
-                        prefs.putUChar("data_pin",  dataPin);
-                        Serial.println("[config] ok — restarting");
-                        Serial.flush();
-                        delay(150);
-                        ESP.restart();
-                    } else if (eq > 0) {
-                        String k = kv.substring(0, eq);
-                        String v = kv.substring(eq + 1);
-                        if      (k == "ssid") wifiSsid = v;
-                        else if (k == "pass") wifiPass = v;
-                        else if (k == "pin")  dataPin  = (uint8_t)v.toInt();
-                        else {
-                            Serial.printf("[config] err unknown key %s\n", k.c_str());
-                            line = ""; continue;
-                        }
-                        Serial.printf("[config] ok %s\n", k.c_str());
-                    }
-                }
+                handleConfigLine(line);
                 line = "";
             } else {
                 line += c;
@@ -232,11 +266,15 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
         sendLogf("[ws] connected — version %s", FIRMWARE_VERSION);
     } else if (type == WS_EVT_DISCONNECT) {
         if (activeClient == client) activeClient = nullptr;
-        rxState = WAIT_MAGIC1;
+        // Signal the main loop to flush the ring + reset the parser. Doing it
+        // here would race with concurrent drain/processByte on the main task.
+        rxResetRequested = true;
     } else if (type == WS_EVT_DATA) {
         AwsFrameInfo* info = (AwsFrameInfo*) arg;
         if (info->opcode == WS_BINARY) {
-            for (size_t i = 0; i < len; i++) processByte(data[i]);
+            // Push into the ring buffer — actual processing happens in the
+            // main loop to avoid concurrent access to the engine.
+            rxRingPush(data, len);
         }
     }
 }
@@ -284,35 +322,87 @@ static void runRunMode() {
     Serial.printf("[boot] ready — ws://%s.local/ws\n", hostname.c_str());
 
     lastMs = millis();
+    uint32_t lastInfoBroadcast = 0;
+    uint32_t lastDropReport    = 0;
+    uint32_t lastFrame         = 0;
+    constexpr uint32_t FRAME_PERIOD_MS = 16;  // ~60 FPS for engine_render + show
+    String   serialLine;
     while (true) {
         uint32_t now   = millis();
-        float    delta = (float)(now - lastMs);
-        lastMs         = now;
-        float    engineTime = (float)now + timeOffset;
 
-        engine_render(engine, engineTime, delta);
-
-        if (stripReady && ledCount > 0) {
-            const uint8_t* dmx = engine_get_dmx_buffer(engine);
-            const uint16_t logicalPixels = (ledCount + groupSize - 1) / groupSize;
-            for (uint16_t i = 0; i < logicalPixels; i++) {
-                CRGB c(dmx[i * 3 + 0], dmx[i * 3 + 1], dmx[i * 3 + 2]);
-                for (uint16_t k = 0; k < groupSize; k++) {
-                    uint16_t physIdx = (uint16_t)i * groupSize + k;
-                    if (physIdx < ledCount) leds[physIdx] = c;
-                }
-            }
-            FastLED.show();
+        // Drain WS bytes queued by the AsyncTCP task before we touch the engine.
+        // All engine state mutations happen here on the main task — never
+        // concurrently with engine_render / engine_get_dmx_buffer.
+        if (rxResetRequested) {
+            rxResetRequested = false;
+            rxRingTail = rxRingHead;
+            rxState = WAIT_MAGIC1;
+            rxPos = 0;
+        }
+        while (rxRingTail != rxRingHead) {
+            uint8_t b = rxRing[rxRingTail];
+            rxRingTail = (rxRingTail + 1) % RX_RING_SIZE;
+            processByte(b);
+        }
+        if (rxRingDropped && now - lastDropReport > 1000) {
+            lastDropReport = now;
+            sendLogf("[rx] ring overflow — dropped %u bytes", (unsigned)rxRingDropped);
+            rxRingDropped = 0;
         }
 
-        if (now - lastDmxReport >= 500) {
-            lastDmxReport = now;
-            const uint8_t* dmx = engine_get_dmx_buffer(engine);
-            sendLogf("[dmx] %u %u %u %u", dmx[0], dmx[1], dmx[2], dmx[3]);
+        // One render + show per frame at ~60 FPS. Rendering at full loop
+        // speed (1000+ FPS) churns the engine's internal buffers, fragments
+        // the heap, and starves AsyncTCP/WiFi → WS link dies after seconds.
+        if (now - lastFrame >= FRAME_PERIOD_MS) {
+            float delta     = (float)(now - lastMs);
+            lastMs          = now;
+            lastFrame       = now;
+            float engineTime = (float)now + timeOffset;
+
+            engine_render(engine, engineTime, delta);
+
+            if (stripReady && ledCount > 0) {
+                const uint8_t* dmx = engine_get_dmx_buffer(engine);
+                const uint16_t logicalPixels = (ledCount + groupSize - 1) / groupSize;
+                for (uint16_t i = 0; i < logicalPixels; i++) {
+                    CRGB c(dmx[i * 3 + 0], dmx[i * 3 + 1], dmx[i * 3 + 2]);
+                    for (uint16_t k = 0; k < groupSize; k++) {
+                        uint16_t physIdx = (uint16_t)i * groupSize + k;
+                        if (physIdx < ledCount) leds[physIdx] = c;
+                    }
+                }
+                FastLED.show();
+            }
+        }
+
+        // Re-broadcast [info] every 2 s so the browser wizard can detect this
+        // device even after it's already configured. Suppress while a WS
+        // client is connected: (a) browser doesn't need it then, and (b)
+        // sending unrelated Serial output during a live session can fight
+        // with the host serial monitor for the USB-CDC bus.
+        if (!activeClient && now - lastInfoBroadcast > 2000) {
+            lastInfoBroadcast = now;
+            printBootInfo("run");
+        }
+
+        // Handle [config] factory-reset from Serial even in RUN_MODE.
+        while (Serial.available()) {
+            char c = (char)Serial.read();
+            if (c == '\r') continue;
+            if (c == '\n') {
+                serialLine.trim();
+                handleConfigLine(serialLine);
+                serialLine = "";
+            } else {
+                serialLine += c;
+                if (serialLine.length() > 256) serialLine = "";
+            }
         }
 
         ws.cleanupClients();
-        delay(0);
+        // Actually yield to AsyncTCP/WiFi — delay(0) on ESP32 does not
+        // descheule the current task at the FreeRTOS level.
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 

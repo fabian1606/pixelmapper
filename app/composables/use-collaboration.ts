@@ -37,8 +37,8 @@ export function useCollaboration(projectId: string): CollaborationContext {
     return Array.from(controllerStore.drivers.values()).map(d => ({
       id: d.id,
       definitionKey: d.definitionKey,
-      deviceLabel: d.deviceLabel.value,
-      status: d.status.value,
+      deviceLabel: d.deviceLabel as unknown as string | null,
+      status: d.status as unknown as PresenceController['status'],
     }));
   }
 

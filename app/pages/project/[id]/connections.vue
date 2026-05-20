@@ -16,9 +16,16 @@ import { SerialConnector } from '~/utils/connectors/serial-connector';
 import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
 import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
+import {
+  AddConnectorCommand,
+  RemoveConnectorCommand,
+  UpdateConnectorConfigCommand,
+} from '~/components/engine/commands/connector-commands';
 import EspWebFlasher from '~/components/connectors/EspWebFlasher.vue';
 
-const wizardOpen = ref(false);
+// ID of the connector currently being configured via the USB wizard.
+// null = wizard closed. Single wizard instance, target picked per click.
+const wizardConnectorId = ref<string | null>(null);
 
 const route = useRoute();
 const initialTab = route.query.tab === 'inputs' ? 'inputs' : 'outputs';
@@ -84,10 +91,37 @@ const statusColor: Record<string, string> = {
   error: 'text-red-400',
 };
 
-function addConnector(type: string) {
+function addConnector(type: 'websocket' | 'serial') {
   const entry = OUTPUT_CONNECTOR_REGISTRY.find(e => e.type === type);
   if (!entry) return;
-  store.add(entry.create(crypto.randomUUID()));
+  history.execute(new AddConnectorCommand(crypto.randomUUID(), type));
+}
+
+function removeConnector(connector: BaseConnector) {
+  history.execute(new RemoveConnectorCommand(
+    connector.id,
+    connector.meta.type as 'websocket' | 'serial',
+    connector.getConfig(),
+  ));
+}
+
+/**
+ * Dispatch a partial config update on a connector. Merges the patch onto
+ * the current getConfig() result and goes through the command system so the
+ * change lands in the project_changes tail (and the undo stack).
+ */
+function patchConnector(connector: BaseConnector, patch: Record<string, unknown>) {
+  history.execute(new UpdateConnectorConfigCommand(
+    connector.id,
+    { ...connector.getConfig(), ...patch },
+  ));
+}
+
+/** Build a new outputMapping array with one slot replaced. */
+function nextOutputMapping(connector: BaseConnector, index: number, universe: number): number[] {
+  const next = connector.outputMapping.value.slice();
+  next[index] = universe;
+  return next;
 }
 
 function asSerial(c: BaseConnector): SerialConnector | null {
@@ -185,24 +219,26 @@ function assignedCount(connector: BaseConnector): number {
     <!-- Add connector buttons (only for active tab) -->
     <div v-if="connectionsTab === 'outputs'" class="flex gap-2 flex-wrap">
       <button
-        v-for="entry in OUTPUT_CONNECTOR_REGISTRY"
-        :key="entry.type"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-border bg-background hover:bg-accent transition-colors"
-        @click="addConnector(entry.type)"
+        @click="addConnector('serial')"
       >
         <Plus :size="12" />
-        {{ entry.label }}
+        USB Serial (ESP32)
       </button>
       <button
         class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-colors"
-        @click="wizardOpen = true"
+        @click="addConnector('websocket')"
       >
         <Plus :size="12" />
-        Neues Gerät einrichten…
+        WebSocket LED-Strip ESP32-S3
       </button>
     </div>
 
-    <EspWebFlasher v-if="wizardOpen" @close="wizardOpen = false" />
+    <EspWebFlasher
+      v-if="wizardConnectorId"
+      :connector-id="wizardConnectorId"
+      @close="wizardConnectorId = null"
+    />
 
 
     <!-- Inputs: controller instances -->
@@ -344,7 +380,9 @@ function assignedCount(connector: BaseConnector): number {
         <CircleDot :size="14" :class="statusColor[connector.status.value]" />
 
         <div class="flex-1 min-w-0">
-          <div class="font-medium">{{ connector.meta.label }}</div>
+          <div class="font-medium font-mono text-sm">
+            {{ asWebSocket(connector)?.label.value || connector.meta.label }}
+          </div>
           <div v-if="connector.errorMessage.value" class="text-xs text-red-400 truncate">
             {{ connector.errorMessage.value }}
           </div>
@@ -353,7 +391,7 @@ function assignedCount(connector: BaseConnector): number {
           </div>
         </div>
 
-        <!-- Version badge -->
+        <!-- Version badge (serial only) -->
         <template v-if="asSerial(connector) && connector.status.value === 'connected'">
           <span
             v-if="asSerial(connector)!.firmwareVersion.value && !asSerial(connector)!.updateAvailable.value"
@@ -365,20 +403,34 @@ function assignedCount(connector: BaseConnector): number {
           <span v-else-if="!asSerial(connector)!.firmwareVersion.value" class="text-xs text-muted-foreground">v—</span>
         </template>
 
+        <!-- WebSocket: Einrichten button -->
+        <button
+          v-if="asWebSocket(connector)"
+          class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
+          title="Via USB konfigurieren"
+          @click="wizardConnectorId = connector.id"
+        >
+          Einrichten
+        </button>
+
         <button
           v-if="connector.status.value === 'connected' && !asSerial(connector)?.isFlashing.value"
           class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
           @click="connector.disconnect()"
         >
-          Disconnect
+          Trennen
         </button>
         <button
           v-else-if="connector.status.value !== 'connected'"
-          class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
-          :disabled="connector.status.value === 'connecting'"
+          class="px-2 py-1 rounded text-xs border transition-colors"
+          :class="asWebSocket(connector) && !asWebSocket(connector)!.url.value
+            ? 'border-border/40 text-muted-foreground/40 cursor-not-allowed'
+            : 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'"
+          :disabled="connector.status.value === 'connecting' || (!!asWebSocket(connector) && !asWebSocket(connector)!.url.value)"
+          :title="asWebSocket(connector) && !asWebSocket(connector)!.url.value ? 'Bitte zuerst eine URL eingeben oder Gerät einrichten' : undefined"
           @click="connector.connect()"
         >
-          Connect
+          Verbinden
         </button>
 
         <button
@@ -392,7 +444,7 @@ function assignedCount(connector: BaseConnector): number {
 
         <button
           class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          @click="store.remove(connector.id)"
+          @click="removeConnector(connector)"
         >
           <Trash2 :size="14" />
         </button>
@@ -411,7 +463,7 @@ function assignedCount(connector: BaseConnector): number {
             placeholder="ws://pixelmapper-strip-XXXX.local/ws"
             :value="asWebSocket(connector)!.url.value"
             :disabled="connector.status.value === 'connected' || connector.status.value === 'connecting'"
-            @change="asWebSocket(connector)!.setUrl(($event.target as HTMLInputElement).value)"
+            @change="patchConnector(connector, { url: ($event.target as HTMLInputElement).value })"
           />
         </label>
         <label class="text-xs text-muted-foreground">
@@ -419,7 +471,7 @@ function assignedCount(connector: BaseConnector): number {
           <select
             class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
             :value="String(asWebSocket(connector)!.fixtureId.value ?? '')"
-            @change="asWebSocket(connector)!.setFixtureId(($event.target as HTMLSelectElement).value || null)"
+            @change="patchConnector(connector, { fixtureId: ($event.target as HTMLSelectElement).value || null })"
           >
             <option value="">— keine —</option>
             <option
@@ -432,11 +484,24 @@ function assignedCount(connector: BaseConnector): number {
             </option>
           </select>
         </label>
-        <div
-          v-if="asWebSocket(connector)!.firmwareVersion.value"
-          class="text-xs text-muted-foreground"
-        >
-          Firmware: v{{ asWebSocket(connector)!.firmwareVersion.value }}
+        <div class="flex items-center gap-3 flex-wrap">
+          <div
+            v-if="asWebSocket(connector)!.firmwareVersion.value"
+            class="text-xs text-muted-foreground"
+          >
+            Firmware: v{{ asWebSocket(connector)!.firmwareVersion.value }}
+          </div>
+          <div class="text-xs text-muted-foreground flex items-center gap-1">
+            Data-Pin:
+            <span class="font-mono">
+              {{ asWebSocket(connector)!.devicePin.value != null ? asWebSocket(connector)!.devicePin.value : '—' }}
+            </span>
+            <button
+              class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-muted/40 hover:bg-muted/70 border border-border/50 transition-colors"
+              title="Pin via USB-Serial ändern"
+              @click="wizardConnectorId = connector.id"
+            >ändern</button>
+          </div>
         </div>
         <p v-if="!stripFixtures.length" class="text-xs text-yellow-400/80">
           Es gibt noch keine LED-Strip-Fixture in dieser Szene.
@@ -502,7 +567,7 @@ function assignedCount(connector: BaseConnector): number {
           <select
             class="flex-1 rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
             :value="connector.outputMapping.value[i] ?? 0"
-            @change="connector.setOutputUniverse(i, Number(($event.target as HTMLSelectElement).value))"
+            @change="patchConnector(connector, { outputMapping: nextOutputMapping(connector, i, Number(($event.target as HTMLSelectElement).value)) })"
           >
             <option :value="0">— none —</option>
             <option

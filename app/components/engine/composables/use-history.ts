@@ -35,6 +35,10 @@ export function setPersistenceHooks(hooks: {
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
 }
 
+export function triggerSaveSnapshot() {
+  persistenceHooks.saveSnapshot?.();
+}
+
 /**
  * Persist a change directly to the project_changes tail WITHOUT pushing it onto
  * the undo stack. For state transitions that must survive reload / sync to

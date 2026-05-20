@@ -30,5 +30,35 @@ export const OUTPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
 /** Input connector registry (ArtNet In, MIDI, OSC — coming soon). */
 export const INPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [];
 
+/** Reconstruct a connector from a persisted snapshot. Returns null for unknown types. */
+export function fromConfig(type: string, id: string, config: Record<string, unknown>): BaseConnector | null {
+  if (type === 'websocket') return WebSocketConnector.fromConfig(id, config);
+  if (type === 'serial')    return SerialConnector.fromConfig(id, config);
+  return null;
+}
+
+/**
+ * Apply a config blob to an EXISTING connector instance.
+ *
+ * Used by `UpdateConnectorConfigCommand` so an edit reuses the same object
+ * (preserving the WebSocket socket / SerialPort handle and `status` ref the
+ * card binds to). Only keys actually present in `config` are written — that
+ * way partial payloads from older clients don't clobber unrelated fields.
+ */
+export function applyConfig(c: BaseConnector, config: Record<string, unknown>): void {
+  if (c instanceof WebSocketConnector) {
+    if ('url'   in config) c.url.value   = String(config.url ?? '');
+    if ('label' in config) c.label.value = String(config.label ?? '');
+    if ('devicePin' in config) c.devicePin.value = config.devicePin != null ? Number(config.devicePin) : null;
+    // setFixtureId clears the resync caches — must use the method, not the ref.
+    if ('fixtureId' in config) c.setFixtureId((config.fixtureId as string | number | null) ?? null);
+  } else if (c instanceof SerialConnector) {
+    if ('baudRate' in config) c.baudRate = Number(config.baudRate ?? 921600);
+  }
+  if ('outputMapping' in config && Array.isArray(config.outputMapping)) {
+    c.outputMapping.value = (config.outputMapping as number[]).slice();
+  }
+}
+
 /** @deprecated Use OUTPUT_CONNECTOR_REGISTRY */
 export const CONNECTOR_REGISTRY = OUTPUT_CONNECTOR_REGISTRY;

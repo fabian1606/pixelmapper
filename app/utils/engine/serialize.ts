@@ -57,6 +57,13 @@ export interface SerializedGroup {
 
 export type SerializedNode = SerializedFixture | SerializedGroup
 
+export interface ConnectorSnapshot {
+  id: string
+  type: string
+  label: string
+  config: Record<string, unknown>
+}
+
 export interface ProjectSnapshot {
   sceneNodes: SerializedNode[]
   savedPresets: Preset[]
@@ -68,6 +75,8 @@ export interface ProjectSnapshot {
   liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
   /** Which preset is active at snapshot time — restored so reload keeps it. */
   selectedPresetId?: string | null
+  /** WebSocket connectors to restore on reload. */
+  connectors?: ConnectorSnapshot[]
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -132,6 +141,7 @@ export function serializeProject(
   livePages: LivePage[] = [],
   liveControllers: string[] = [],
   selectedPresetId: string | null = null,
+  connectors: ConnectorSnapshot[] = [],
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -142,6 +152,7 @@ export function serializeProject(
     livePages: JSON.parse(JSON.stringify(livePages)),
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
     selectedPresetId,
+    connectors: JSON.parse(JSON.stringify(connectors)),
   }
 }
 

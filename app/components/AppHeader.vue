@@ -4,11 +4,13 @@ import { House, Sparkles, Cable, Zap } from 'lucide-vue-next';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
+import BeatOverlay from '~/components/BeatOverlay.vue';
 
 const engineStore = useEngineStore();
 const { projectLoading } = storeToRefs(engineStore);
 const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
 
+const beatOverlayOpen = ref(false);
 const beatActive = ref(false);
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -66,12 +68,18 @@ const tabs = computed(() => projectId.value ? [
     </nav>
 
     <div class="ml-auto flex items-center gap-4">
-      <div class="flex items-center gap-2 text-xs text-sidebar-foreground/40 font-mono">
-        <span
-          class="inline-block w-2 h-2 rounded-full transition-colors duration-75"
-          :class="beatActive ? 'bg-primary' : 'bg-sidebar-foreground/20'"
-        />
-        BPM: {{ bpm }}
+      <div class="relative">
+        <button
+          @click="beatOverlayOpen = !beatOverlayOpen"
+          class="flex items-center gap-2 text-xs text-sidebar-foreground/40 font-mono hover:text-sidebar-foreground/70 transition-colors px-1 py-0.5 rounded"
+        >
+          <span
+            class="inline-block w-2 h-2 rounded-full transition-colors duration-75"
+            :class="beatActive ? 'bg-primary' : 'bg-sidebar-foreground/20'"
+          />
+          BPM: {{ bpm }}
+        </button>
+        <BeatOverlay v-if="beatOverlayOpen" @close="beatOverlayOpen = false" />
       </div>
 
       <!-- Collaborators -->

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { shallowReactive } from 'vue';
 import type { BaseConnector, EngineConnectorState } from '~/utils/connectors/base-connector';
+import { fromConfig } from '~/utils/connectors/registry';
+import type { ConnectorSnapshot } from '~/utils/engine/serialize';
 import { useEngineStore } from '~/stores/engine-store';
 
 export const useConnectionsStore = defineStore('connections', () => {
@@ -65,6 +67,32 @@ export const useConnectionsStore = defineStore('connections', () => {
     return engineStore.usedUniverses;
   }
 
+  /**
+   * Serialize all connectors for inclusion in the project snapshot.
+   *
+   * Connectors persist primarily via the command tail (AddConnectorCommand,
+   * RemoveConnectorCommand, UpdateConnectorConfigCommand). The snapshot
+   * captures the post-replay state as a redundant fallback so loads stay fast
+   * even when the tail grows long.
+   */
+  function getSnapshots(): ConnectorSnapshot[] {
+    return connectors.map(c => ({
+      id:     c.id,
+      type:   c.meta.type,
+      label:  (c as any).label?.value ?? '',
+      config: c.getConfig(),
+    }));
+  }
+
+  /** Reconstruct connectors from a saved project snapshot (skips duplicates). */
+  function restoreFromSnapshots(snapshots: ConnectorSnapshot[]) {
+    for (const snap of snapshots) {
+      if (connectors.find(c => c.id === snap.id)) continue;
+      const c = fromConfig(snap.type, snap.id, snap.config);
+      if (c) connectors.push(c);
+    }
+  }
+
   return {
     connectors,
     add,
@@ -72,5 +100,7 @@ export const useConnectionsStore = defineStore('connections', () => {
     sendFrame,
     notifyEngineState,
     getUsedUniverses,
+    getSnapshots,
+    restoreFromSnapshots,
   };
 });

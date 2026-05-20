@@ -46,7 +46,7 @@ export class SerialConnector extends BaseConnector {
   private cachedEffects  = -1;
   private cachedUniverseMap = '';
   private frameCount     = 0;
-  private readonly TIMESYNC_INTERVAL = 120;
+  private readonly TIMESYNC_INTERVAL = 30;
 
   constructor(id: string, baudRate = 921600) {
     super(id);
@@ -324,6 +324,17 @@ export class SerialConnector extends BaseConnector {
   }
 
   override getConfig() {
-    return { baudRate: this.baudRate };
+    return {
+      baudRate: this.baudRate,
+      outputMapping: this.outputMapping.value.slice(),
+    };
+  }
+
+  static fromConfig(id: string, config: Record<string, unknown>): SerialConnector {
+    const c = new SerialConnector(id, Number(config.baudRate ?? 921600));
+    if (Array.isArray(config.outputMapping)) {
+      c.outputMapping.value = (config.outputMapping as number[]).slice();
+    }
+    return c;
   }
 }
