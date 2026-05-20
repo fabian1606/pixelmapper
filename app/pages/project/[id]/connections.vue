@@ -94,7 +94,12 @@ const statusColor: Record<string, string> = {
 function addConnector(type: 'websocket' | 'serial') {
   const entry = OUTPUT_CONNECTOR_REGISTRY.find(e => e.type === type);
   if (!entry) return;
-  history.execute(new AddConnectorCommand(crypto.randomUUID(), type));
+  const id = crypto.randomUUID();
+  history.execute(new AddConnectorCommand(id, type));
+  // WebSocket connector starts useless without a hostname — open the wizard
+  // immediately so the user has one continuous flow ("click + → set up →
+  // ready") instead of two clicks and a confused-empty-card-in-between.
+  if (type === 'websocket') wizardConnectorId.value = id;
 }
 
 function removeConnector(connector: BaseConnector) {

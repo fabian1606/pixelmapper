@@ -1,4 +1,4 @@
-export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label' | 'fixture-preview' | 'color-wheel'
+export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label' | 'fixture-preview' | 'color-wheel' | 'beat'
 
 /** A persisted controller instance: one entry per physical device slot. */
 export interface LiveControllerInstance {
@@ -121,6 +121,7 @@ export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0): L
     label: [4, 1],
     'fixture-preview': [12, 8],
     'color-wheel': [12, 5],
+    beat: [4, 3],
   };
   const [w, h] = sizes[type];
   return {

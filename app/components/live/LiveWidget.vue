@@ -14,6 +14,7 @@ import LiveLabelWidget from './LiveLabelWidget.vue';
 import LiveControllerTwinWidget from './LiveControllerTwinWidget.vue';
 import LiveFixturePreviewWidget from './LiveFixturePreviewWidget.vue';
 import LiveColorWheelWidget from './LiveColorWheelWidget.vue';
+import LiveBeatWidget from './LiveBeatWidget.vue';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -426,6 +427,7 @@ const handleVisualSize = computed(() => {
     <LiveControllerTwinWidget v-else-if="widget.type === 'controller-twin'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
     <LiveFixturePreviewWidget v-else-if="widget.type === 'fixture-preview'" :widget="widget" :page-id="pageId" :edit-mode="editMode" :canvas-scale="canvasScale" />
     <LiveColorWheelWidget v-else-if="widget.type === 'color-wheel'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
+    <LiveBeatWidget v-else-if="widget.type === 'beat'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
     <div v-else class="w-full h-full flex items-center justify-center text-xs text-muted-foreground border border-dashed border-white/20 rounded">
       {{ widget.type }}
     </div>
