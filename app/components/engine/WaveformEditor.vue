@@ -41,14 +41,7 @@ const svgRef = ref<SVGSVGElement | null>(null);
 const start = computed(() => props.params.start);
 const end = computed(() => props.params.end);
 const scale = computed(() => props.strength / 100);
-
-// Resolved hold levels (use explicit value or fall back to shape's natural boundary)
-const resolvedStartLevel = computed(() =>
-  props.params.startLevel ?? evaluateShape(props.shape, 0, props.params.param)
-);
-const resolvedEndLevel = computed(() =>
-  props.params.endLevel ?? evaluateShape(props.shape, 1, props.params.param)
-);
+const offset = computed(() => props.params.offset ?? 0);
 
 // ─── Snap positions based on speed config ────────────────────────────────────
 const snapPositions = computed((): number[] => {
@@ -78,16 +71,16 @@ function snapValue(value: number): number {
   return bestDist < threshold ? best : value;
 }
 
-// ─── Waveform polyline (strength-scaled, uses startLevel/endLevel) ────────────
+// ─── Waveform polyline (shape × strength, shifted by offset × strength) ──────
+// Mirrors the engine: final = base + (shape + offset) × strength.
 const waveformPoints = computed(() => {
   const s = scale.value;
-  const sl = resolvedStartLevel.value;
-  const el = resolvedEndLevel.value;
+  const off = offset.value;
   const pts: string[] = [];
   const samples = 120;
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
-    const raw = evaluatePhase(t * TAU, props.shape, props.params.param, start.value, end.value, sl, el);
+    const raw = evaluatePhase(t * TAU, props.shape, props.params.param, start.value, end.value, off);
     const cx = (t * SVG_W).toFixed(1);
     const cy = (SVG_H / 2 - raw * WAVE_AMP * s).toFixed(1);
     pts.push(`${cx},${cy}`);
@@ -95,7 +88,7 @@ const waveformPoints = computed(() => {
   return pts.join(' ');
 });
 
-// ─── Strength handle: at waveform peak ───────────────────────────────────────
+// ─── Strength handle: at waveform peak (above the offset baseline) ───────────
 const strengthHandlePos = computed(() => {
   const s = start.value;
   const e = end.value;
@@ -116,7 +109,7 @@ const strengthHandlePos = computed(() => {
       break;
     }
     case 'sawtooth':  localX = p >= 0.5 ? 0.85 : 0.15; break;
-    case 'bounce':    localX = 0.5 / Math.round(1 + p * 4); break; // first peak of the bounce
+    case 'bounce':    localX = 0.5 / Math.round(1 + p * 4); break;
     case 'ramp':      localX = 0.5; break;
     case 'smooth': {
       const peak = 0.05 + p * 0.9;
@@ -126,7 +119,8 @@ const strengthHandlePos = computed(() => {
     default:          localX = 0.25;
   }
   const cx = (s + localX * w) * SVG_W;
-  const cy = SVG_H / 2 - WAVE_AMP * scale.value; // positive peak
+  // Peak is shape-peak(=1) + offset, scaled by strength
+  const cy = SVG_H / 2 - (1 + offset.value) * WAVE_AMP * scale.value;
   return { cx, cy };
 });
 
@@ -170,19 +164,22 @@ const paramHandlePos = computed(() => {
 
   const rawY = evaluateShape(props.shape, localX, p);
   const cx = (s + localX * w) * SVG_W;
-  const cy = SVG_H / 2 - rawY * WAVE_AMP * scale.value;
+  const cy = SVG_H / 2 - (rawY + offset.value) * WAVE_AMP * scale.value;
   return { cx, cy };
 });
 
-// ─── Start/End handle positions (x = boundary, y = hold level) ───────────────
+// ─── Start/End handle positions (x = boundary, y = offset baseline) ──────────
+// Both handles are linked to the same offset — dragging either one shifts the
+// entire wave up/down. The y-position reflects the offset baseline (scaled by
+// strength so the visual matches the engine output).
 const startHandlePos = computed(() => ({
   cx: start.value * SVG_W,
-  cy: SVG_H / 2 - resolvedStartLevel.value * WAVE_AMP * scale.value,
+  cy: SVG_H / 2 - offset.value * WAVE_AMP * scale.value,
 }));
 
 const endHandlePos = computed(() => ({
   cx: end.value * SVG_W,
-  cy: SVG_H / 2 - resolvedEndLevel.value * WAVE_AMP * scale.value,
+  cy: SVG_H / 2 - offset.value * WAVE_AMP * scale.value,
 }));
 
 // ─── Generic drag utility ─────────────────────────────────────────────────────
@@ -210,49 +207,52 @@ function startDrag(
   window.addEventListener('mouseup', up);
 }
 
-// ─── Shared level-from-ry helper ─────────────────────────────────────────────
-// Inverse of: cy = SVG_H/2 - level * WAVE_AMP * scale
-// → level = (0.5 - ry) / (WAVE_AMP/SVG_H) / scale
-function levelFromRy(ry: number): number {
+// ─── Shared offset-from-ry helper ────────────────────────────────────────────
+// Inverse of: cy = SVG_H/2 - offset * WAVE_AMP * scale
+// → offset = (0.5 - ry) / (WAVE_AMP/SVG_H) / scale
+// When strength is 0, fall back to a scale of 1 to keep dragging responsive.
+function offsetFromRy(ry: number): number {
   const ampFrac = WAVE_AMP / SVG_H;
-  const s = scale.value === 0 ? 1 : scale.value; // avoid div by zero
+  const s = scale.value === 0 ? 1 : scale.value;
   const raw = clamp((0.5 - ry) / ampFrac / s, -1, 1);
-  // Snap to zero if within ~10% of the full amplitude range
-  const zeroThreshold = 0.1;
-  return Math.abs(raw) < zeroThreshold ? 0 : raw;
+  return Math.abs(raw) < 0.05 ? 0 : Math.round(raw * 100) / 100;
 }
 
-// ─── Start handle drag (x = position with snap, y = hold level) ──────────────
+// ─── Start handle drag (x = position with snap, y = shared offset) ───────────
 function onStartDrag(e: MouseEvent) {
   startDrag(e, (rx, ry) => {
     const snapped = snapValue(clamp(rx, 0, end.value - 0.02));
-    const newLevel = levelFromRy(ry);
     emit('update:params', {
       ...props.params,
       start: Math.round(snapped * 1000) / 1000,
-      startLevel: Math.round(newLevel * 100) / 100,
+      offset: offsetFromRy(ry),
     });
   });
 }
 
-// ─── End handle drag (x = position with snap, y = hold level) ────────────────
+// ─── End handle drag (x = position with snap, y = shared offset) ─────────────
 function onEndDrag(e: MouseEvent) {
   startDrag(e, (rx, ry) => {
     const snapped = snapValue(clamp(rx, start.value + 0.02, 1));
-    const newLevel = levelFromRy(ry);
     emit('update:params', {
       ...props.params,
       end: Math.round(snapped * 1000) / 1000,
-      endLevel: Math.round(newLevel * 100) / 100,
+      offset: offsetFromRy(ry),
     });
   });
 }
 
 // ─── Strength handle drag (y-axis only, supports negative) ───────────────────
+// The handle sits at peak + offset. Dragging changes strength while offset stays
+// fixed, so the bottom of the wave moves as amplitude changes.
 function onStrengthDrag(e: MouseEvent) {
   const ampFrac = WAVE_AMP / SVG_H;
   startDrag(e, (_rx, ry) => {
-    const newStrength = clamp(Math.round(((0.5 - ry) / ampFrac) * 100), -100, 100);
+    // cy = SVG_H/2 - (1 + offset) * WAVE_AMP * scale
+    // → scale = (0.5 - ry) / ampFrac / (1 + offset)
+    const denom = 1 + offset.value;
+    const effectiveFrac = denom === 0 ? ampFrac : ampFrac * denom;
+    const newStrength = clamp(Math.round(((0.5 - ry) / effectiveFrac) * 100), -100, 100);
     emit('update:strength', newStrength);
   });
 }
@@ -347,9 +347,22 @@ function miniPoints(shape: WaveformShape): string {
         :style="{ height: '80px' }"
         @mousedown.prevent
       >
-        <!-- Midline -->
+        <!-- Midline (base channel value) -->
         <line :x1="0" :y1="SVG_H / 2" :x2="SVG_W" :y2="SVG_H / 2"
           stroke="white" stroke-opacity="0.1" stroke-width="1" />
+
+        <!-- Offset baseline (where the wave center sits) — only when offset != 0 -->
+        <line
+          v-if="offset !== 0"
+          :x1="0"
+          :y1="SVG_H / 2 - offset * WAVE_AMP * scale"
+          :x2="SVG_W"
+          :y2="SVG_H / 2 - offset * WAVE_AMP * scale"
+          stroke="#eab308"
+          stroke-opacity="0.2"
+          stroke-width="1"
+          stroke-dasharray="4 3"
+        />
 
         <!-- Snap tick marks at the bottom -->
         <line

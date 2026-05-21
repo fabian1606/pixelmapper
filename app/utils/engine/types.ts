@@ -62,10 +62,12 @@ export interface WaveformShapeParams {
   start: number;
   /** Where in the cycle the waveform ends (0–1, default 1). */
   end: number;
-  /** Hold value before the active zone [-1, 1]. If undefined, uses the shape's natural value at t=0. */
-  startLevel?: number;
-  /** Hold value after the active zone [-1, 1]. If undefined, uses the shape's natural value at t=1. */
-  endLevel?: number;
+  /**
+   * Vertical baseline of the wave in [-1, 1]. 0 = centered on the base channel value.
+   * Shifts the entire wave by `offset * strength` in channel units; also acts as the
+   * hold value in the inactive (start/end) zones.
+   */
+  offset?: number;
 }
 
 export type ChannelType =

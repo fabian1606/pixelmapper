@@ -123,7 +123,20 @@ impl EffectEngine {
     }
 
     pub fn sync_effects(&mut self, configs: Vec<crate::types::EffectConfig>) {
-        self.effects = configs.into_iter().map(create_effect).collect();
+        // Preserve time_phase across re-syncs so that effect cycles (e.g. ColorEffect
+        // hue/sat oscillation) keep advancing instead of resetting to 0 on every
+        // FX_BIN dispatch. Match by position — the binary protocol carries effects
+        // in the same order from JS, so index i in old and new corresponds to the
+        // same effect for normal edit flows (mutating params, not reordering).
+        let old_phases: Vec<f32> = self.effects.iter().map(|e| e.get_time_phase()).collect();
+        let mut new_effects: Vec<Box<dyn Effect>> =
+            configs.into_iter().map(create_effect).collect();
+        for (i, effect) in new_effects.iter_mut().enumerate() {
+            if let Some(&phase) = old_phases.get(i) {
+                effect.set_time_phase(phase);
+            }
+        }
+        self.effects = new_effects;
     }
 
     // ── Unified binary dispatch ───────────────────────────────────────────────

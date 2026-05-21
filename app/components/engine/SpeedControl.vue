@@ -18,9 +18,9 @@ const emit = defineEmits<{
   (e: 'dropdown-open-change', open: boolean): void;
 }>();
 
-const AVAILABLE_MODES: SpeedMode[] = props.disableInfinite 
-  ? ['time', 'beat']
-  : ['time', 'beat', 'infinite'];
+const AVAILABLE_MODES: SpeedMode[] = props.disableInfinite
+  ? ['beat', 'time']
+  : ['beat', 'time', 'infinite'];
 
 const BEAT_OPTIONS = [
   { label: '1/16', value: 0.0625 },

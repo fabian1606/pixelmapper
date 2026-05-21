@@ -18,8 +18,8 @@ export function useChaserSteps(
     let maxSteps = 1;
     let maxActiveStep = 0;
     let isPlaying = true;
-    let stepDuration: SpeedConfig = { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 };
-    let fadeDuration: SpeedConfig = { mode: 'time', timeMs: 0, beatValue: 1, beatOffset: 0 };
+    let stepDuration: SpeedConfig = { mode: 'beat', timeMs: 1000, beatValue: 1, beatOffset: 0 };
+    let fadeDuration: SpeedConfig = { mode: 'beat', timeMs: 0, beatValue: 1, beatOffset: 0 };
     let found = false;
 
     for (const f of props.fixtures) {

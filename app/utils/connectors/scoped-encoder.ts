@@ -87,7 +87,7 @@ export function scopedFingerprint(
     effects += `${fx.speed?.mode}|${fx.speed?.timeMs}|${fx.speed?.beatValue}|${fx.speed?.beatOffset};`;
     const wf = (fx as any).waveformShape;
     const wp = (fx as any).waveformParams ?? {};
-    effects += `${wf}:${wp.param}:${wp.start}:${wp.end}:${wp.startLevel}:${wp.endLevel};`;
+    effects += `${wf}:${wp.param}:${wp.start}:${wp.end}:${wp.offset};`;
     const np = (fx as any).noiseParams;
     if (np) effects += `n:${np.noiseType}:${np.scale}:${np.channelMode}:${np.colorVariation}:${np.fade}:${np.threshold};`;
     const sp = (fx as any).sequencerParams;

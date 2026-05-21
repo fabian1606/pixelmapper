@@ -205,8 +205,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         let shape_param       = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let shape_start       = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let shape_end         = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_start_level = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_end_level   = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_offset      = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let waveform_shape = match shape_byte {
             0 => WaveformShape::Sine,
             1 => WaveformShape::Square,
@@ -310,7 +309,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             fanning,
             speed,
             waveform_shape,
-            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, start_level: shape_start_level, end_level: shape_end_level },
+            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, offset: shape_offset },
             noise_params,
             sequencer_params,
             color_params,

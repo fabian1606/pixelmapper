@@ -53,7 +53,7 @@ export function persistChange(commandType: string, payload: object) {
   if (!persistenceHooks.pushChange) return;
   persistenceHooks.markDirty?.();
   persistenceHooks.pushChange(commandType, payload).then((seq) => {
-    if (seq != null) lastSeenSequenceNumber.value = seq;
+    if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
     commandsSinceSnapshot.value++;
     if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
       commandsSinceSnapshot.value = 0;
@@ -78,7 +78,7 @@ export function useHistory() {
     if (isSerializable(command) && persistenceHooks.pushChange) {
       const payload = command.toPayload();
       persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
-        if (seq != null) lastSeenSequenceNumber.value = seq;
+        if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
         commandsSinceSnapshot.value++;
         if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
           commandsSinceSnapshot.value = 0;
@@ -115,7 +115,7 @@ export function useHistory() {
       if (inv && isSerializable(inv)) {
         const sCmd = inv as SerializableCommand;
         persistenceHooks.pushChange(sCmd.commandType, sCmd.toPayload()).then((seq) => {
-          if (seq != null) lastSeenSequenceNumber.value = seq;
+          if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
           commandsSinceSnapshot.value++;
           if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
             commandsSinceSnapshot.value = 0;
@@ -138,7 +138,7 @@ export function useHistory() {
     if (isSerializable(command) && persistenceHooks.pushChange) {
       const payload = command.toPayload();
       persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
-        if (seq != null) lastSeenSequenceNumber.value = seq;
+        if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
         commandsSinceSnapshot.value++;
         if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
           commandsSinceSnapshot.value = 0;

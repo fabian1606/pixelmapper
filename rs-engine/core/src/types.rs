@@ -113,14 +113,13 @@ pub struct WaveformShapeParams {
     pub start: f32,
     /// Where in the cycle the waveform ends (0–1).
     pub end: f32,
-    /// Hold value before the active zone [-1, 1]. >2.0 = use natural shape value at t=0.
-    pub start_level: f32,
-    /// Hold value after the active zone [-1, 1]. >2.0 = use natural shape value at t=1.
-    pub end_level: f32,
+    /// Vertical baseline of the wave in [-1, 1]. 0 = centered on base channel value.
+    /// Also acts as the hold value in the inactive (pre-start / post-end) zones.
+    pub offset: f32,
 }
 
 impl Default for WaveformShapeParams {
-    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, start_level: 999.0, end_level: 999.0 } }
+    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, offset: 0.0 } }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]

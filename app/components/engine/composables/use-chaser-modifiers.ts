@@ -66,7 +66,7 @@ export function useChaserModifiers(
     effect.targetChannels = [...availableChannelTypes.value]; // default to all relevant channels
     effect.targetFixtureIds = props.fixtures.map(f => f.id);
     effect.strength = 100;
-    effect.speed = { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 };
+    effect.speed = { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 };
     effect.fanning = 0.1;
     effect.direction = 'LINEAR';
     const avgX = props.fixtures.length > 0
@@ -95,7 +95,7 @@ export function useChaserModifiers(
     effect.targetChannels = [...availableChannelTypes.value];
     effect.targetFixtureIds = props.fixtures.map(f => f.id);
     effect.strength = 50;
-    effect.speed = { mode: 'time', timeMs: 500, beatValue: 1, beatOffset: 0 };
+    effect.speed = { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
     effectEngine.addEffect(effect);
     effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
     emit('change');
@@ -373,7 +373,7 @@ export function useChaserModifiers(
     const targetChannels = [...(effect.targetChannels || [])];
     const targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
     const strength = effect.strength ?? 100;
-    const speed = (effect as any).speed ? { ...(effect as any).speed } : { mode: 'time' as const, timeMs: 500, beatValue: 1, beatOffset: 0 };
+    const speed = (effect as any).speed ? { ...(effect as any).speed } : { mode: 'beat' as const, timeMs: 500, beatValue: 1, beatOffset: 0 };
 
     const avgX = props.fixtures.length > 0
       ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length

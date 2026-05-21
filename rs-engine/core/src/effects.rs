@@ -6,6 +6,8 @@ pub trait Effect {
     fn get_config(&self) -> &EffectConfig;
     fn eval_cycle(&self) -> f32 { 0.0 }
     fn eval_cycle_at(&self, world_x: f32, world_y: f32) -> f32 { let _ = (world_x, world_y); self.eval_cycle() }
+    fn get_time_phase(&self) -> f32 { 0.0 }
+    fn set_time_phase(&mut self, _phase: f32) {}
 }
 
 pub struct BaseOscillator {
@@ -92,6 +94,9 @@ impl Effect for BaseOscillator {
     fn get_config(&self) -> &EffectConfig {
         &self.config
     }
+
+    fn get_time_phase(&self) -> f32 { self.time_phase }
+    fn set_time_phase(&mut self, phase: f32) { self.time_phase = phase; }
 }
 
 /// Evaluate a single waveform shape at normalized cycle position t ∈ [0, 1).
@@ -137,35 +142,26 @@ fn evaluate_shape(shape: WaveformShape, t: f32, param: f32) -> f32 {
     }
 }
 
-/// Evaluate phase (radians) against a shape with start/end windowing. Returns [-1, 1].
+/// Evaluate phase (radians) against a shape with start/end windowing.
+/// Returns shape + offset. May exceed [-1, 1] when offset != 0 — the engine
+/// formula extrapolates linearly and the final byte is clamped to 0..255,
+/// so an offset effectively shifts the wave by `offset * strength` in channel units.
 fn evaluate_phase(config: &EffectConfig, phase: f32) -> f32 {
     let tau = core::f32::consts::TAU;
     let cycle_t = ((phase / tau) % 1.0 + 1.0) % 1.0;
 
     let start = config.waveform_params.start;
     let end = config.waveform_params.end;
+    let offset = config.waveform_params.offset;
 
     if start >= end {
-        return evaluate_shape(config.waveform_shape, cycle_t, config.waveform_params.param);
+        return evaluate_shape(config.waveform_shape, cycle_t, config.waveform_params.param) + offset;
     }
 
-    // sentinel >2.0 means "use the shape's natural boundary value"
-    let sl = if config.waveform_params.start_level > 2.0 {
-        evaluate_shape(config.waveform_shape, 0.0, config.waveform_params.param)
-    } else {
-        config.waveform_params.start_level
-    };
-    let el = if config.waveform_params.end_level > 2.0 {
-        evaluate_shape(config.waveform_shape, 1.0, config.waveform_params.param)
-    } else {
-        config.waveform_params.end_level
-    };
-
-    if cycle_t < start { return sl; }
-    if cycle_t > end   { return el; }
+    if cycle_t < start || cycle_t > end { return offset; }
 
     let local_t = (cycle_t - start) / (end - start);
-    evaluate_shape(config.waveform_shape, local_t, config.waveform_params.param)
+    evaluate_shape(config.waveform_shape, local_t, config.waveform_params.param) + offset
 }
 
 // ─── Noise Effect ─────────────────────────────────────────────────────────────
@@ -483,6 +479,9 @@ impl Effect for SequencerEffect {
     fn get_config(&self) -> &EffectConfig {
         &self.config
     }
+
+    fn get_time_phase(&self) -> f32 { self.time_phase }
+    fn set_time_phase(&mut self, phase: f32) { self.time_phase = phase; }
 }
 
 // ─── Color Effect ─────────────────────────────────────────────────────────────
@@ -516,6 +515,8 @@ impl Effect for ColorEffect {
         0.0
     }
     fn get_config(&self) -> &EffectConfig { &self.config }
+    fn get_time_phase(&self) -> f32 { self.time_phase }
+    fn set_time_phase(&mut self, phase: f32) { self.time_phase = phase; }
     fn eval_cycle(&self) -> f32 { evaluate_phase(&self.config, self.time_phase) }
     fn eval_cycle_at(&self, world_x: f32, world_y: f32) -> f32 {
         if self.config.fanning == 0.0 || self.config.direction == EffectDirection::None {

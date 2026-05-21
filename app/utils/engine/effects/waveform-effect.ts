@@ -13,6 +13,7 @@ export class WaveformEffect extends BaseOscillatorEffect {
       this.waveformParams.param,
       this.waveformParams.start,
       this.waveformParams.end,
+      this.waveformParams.offset ?? 0,
     );
   }
 
@@ -39,17 +40,18 @@ export class WaveformEffect extends BaseOscillatorEffect {
     const STOPS = 16;
     const stopStrings: string[] = [];
     const { start, end, param } = this.waveformParams;
+    const offset = this.waveformParams.offset ?? 0;
 
     for (let i = 0; i <= STOPS; i++) {
       const t = i / STOPS;
       let raw: number;
       if (t < start || t > end || start >= end) {
-        raw = 0;
+        raw = offset;
       } else {
         const localT = (t - start) / (end - start);
-        raw = evaluateShape(this.waveformShape, localT, param);
+        raw = evaluateShape(this.waveformShape, localT, param) + offset;
       }
-      const norm = (raw + 1) / 2;
+      const norm = Math.max(0, Math.min(1, (raw + 1) / 2));
       const opacity = 0.48 - norm * 0.384;
       const pxPos = t * fanningPx;
       stopStrings.push(`rgba(0, 0, 0, ${opacity.toFixed(3)}) ${pxPos.toFixed(1)}px`);

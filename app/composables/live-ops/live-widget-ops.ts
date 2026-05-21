@@ -77,6 +77,8 @@ export interface SectionSetActivePayload {
 registerLiveOp<SectionSetActivePayload>('section.setActive', {
   scope: 'shared',
   throttle: 'immediate',
+  persist: true,
+  coalesceKey: (p) => `section:${p.pageId}:${p.sectionId}`,
   apply: ({ pageId, sectionId, keys }) => {
     // Lazy import so this module can be imported before Pinia is initialized —
     // same pattern as live-bus-store's handlePageChange.

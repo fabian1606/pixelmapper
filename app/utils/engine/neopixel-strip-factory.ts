@@ -54,8 +54,8 @@ function makeChaser(defaultVal: number): Channel['chaserConfig'] {
     stepsCount: 1,
     activeEditStep: 0,
     isPlaying: false,
-    stepDuration: { mode: 'time' as const, timeMs: 1000, beatValue: 1, beatOffset: 0 },
-    fadeDuration: { mode: 'time' as const, timeMs: 0, beatValue: 0, beatOffset: 0 },
+    stepDuration: { mode: 'beat' as const, timeMs: 1000, beatValue: 1, beatOffset: 0 },
+    fadeDuration: { mode: 'beat' as const, timeMs: 0, beatValue: 0, beatOffset: 0 },
   });
 }
 

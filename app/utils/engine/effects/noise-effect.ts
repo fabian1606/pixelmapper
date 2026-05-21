@@ -5,7 +5,7 @@ import { perlin2D, seededRandom } from "./noise-math";
 
 export class NoiseEffect extends BaseEffect {
   public override fanning: number = 0;
-  public override speed: SpeedConfig = { mode: 'time', timeMs: 500, beatValue: 1, beatOffset: 0 };
+  public override speed: SpeedConfig = { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
 
   public noiseParams: NoiseParams = {
     noiseType: 'white',

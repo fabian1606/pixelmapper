@@ -13,7 +13,7 @@ export abstract class BaseOscillatorEffect extends BaseEffect {
   public override strength: number = 100;
   public reverse: boolean = false;
 
-  public speed: SpeedConfig = { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 };
+  public speed: SpeedConfig = { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 };
   public fanning: number = 0.5;
 
   protected timePhase: number = 0;

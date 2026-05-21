@@ -338,9 +338,8 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBle
     w.f32(waveformParams.param ?? 0.5);
     w.f32(waveformParams.start ?? 0);
     w.f32(waveformParams.end ?? 1);
-    // startLevel/endLevel: use explicit value if set, else 999.0 = "use natural shape value"
-    w.f32(waveformParams.startLevel ?? 999.0);
-    w.f32(waveformParams.endLevel ?? 999.0);
+    // Vertical baseline offset in [-1, 1] (0 = centered on base channel value).
+    w.f32(waveformParams.offset ?? 0);
     w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
 
     // Effect type discriminator + noise parameters (always written; Waveforms use defaults)

@@ -52,9 +52,11 @@ export function evaluateShape(shape: WaveformShape, t: number, param: number = 0
 
 /**
  * Evaluate a phase value (in radians) against a shape with start/end windowing.
- * Before `start`: holds at `startLevel` (or shape's natural value at t=0 if omitted).
- * After `end`: holds at `endLevel` (or shape's natural value at t=1 if omitted).
- * Between `start` and `end`: evaluates the full waveform cycle.
+ * Between `start` and `end`: evaluates the shape + offset.
+ * Outside the active zone: holds at `offset` (so the wave is visually continuous
+ * with the inactive baseline).
+ * Result may exceed [-1, 1] when offset != 0 — the engine clamps the final
+ * channel value, so an offset effectively shifts the wave by offset × strength.
  */
 export function evaluatePhase(
   phase: number,
@@ -62,21 +64,16 @@ export function evaluatePhase(
   param: number,
   start: number,
   end: number,
-  startLevel?: number,
-  endLevel?: number,
+  offset: number = 0,
 ): number {
   const cycleT = (((phase / TAU) % 1) + 1) % 1;
 
-  if (start >= end) return evaluateShape(shape, cycleT, param);
+  if (start >= end) return evaluateShape(shape, cycleT, param) + offset;
 
-  const sl = startLevel ?? evaluateShape(shape, 0, param);
-  const el = endLevel ?? evaluateShape(shape, 1, param);
-
-  if (cycleT < start) return sl;
-  if (cycleT > end) return el;
+  if (cycleT < start || cycleT > end) return offset;
 
   const localT = (cycleT - start) / (end - start);
-  return evaluateShape(shape, localT, param);
+  return evaluateShape(shape, localT, param) + offset;
 }
 
 /**

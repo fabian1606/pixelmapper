@@ -135,7 +135,7 @@ export function sectionRelease(args: {
   const page = liveStore.activePage;
   if (!page) return false;
   const bound = findBoundPreset(page, args.widgetId, args.controlId, engineStore.savedPresets, engineStore.selectedPresetId);
-  if (!bound) return true;
+  if (!bound) return false;
   const { section } = bound.membership;
   const isFlash = section.mode === 'flash' || bound.preset.type === 'flash';
   // Single/multi-select sections without a flash preset stay latched on release.

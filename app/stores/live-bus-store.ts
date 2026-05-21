@@ -56,13 +56,24 @@ export interface LiveOpConfig<T = any> {
   throttle: 'raf' | 'immediate' | number;
   /** Replace pending op of same type (default), or append (e.g. queue of distinct events) */
   merge?: 'replace' | 'append';
-  /**
-   * True if the op mutates state that lives in serializeProject() output.
-   * When set, local dispatches mark the engine dirty so a snapshot is
-   * scheduled. Awareness ops (cursor, selection, camera, …) leave this unset
-   * so harmless background traffic never triggers a snapshot.
-   */
+  /** @deprecated Use `persist` instead — kept as alias for migration. */
   persistent?: boolean;
+  /**
+   * Op effect should land in `project_changes` (event log) so reload replays it.
+   * Independent of `broadcast`: a persistent op also marks the engine dirty so a
+   * compacting snapshot is scheduled. Awareness ops (cursor, selection, camera,
+   * preview-style events) leave this unset.
+   */
+  persist?: boolean;
+  /** Whether to broadcast this op to peers via the realtime channel. Default true. */
+  broadcast?: boolean;
+  /**
+   * Optional dedup key for the persist queue: ops with the same key within a
+   * flush window are coalesced (only the latest payload survives). Default
+   * behaviour: ops with `merge: 'replace'` (or unset) dedup by their type; ops
+   * with `merge: 'append'` are never deduped.
+   */
+  coalesceKey?: (payload: T) => string;
   apply: (payload: T, userId: string, ctx: LiveContext, sessionId: string) => void;
 }
 
@@ -83,6 +94,117 @@ export function registerLiveOp<T>(type: string, config: LiveOpConfig<T>) {
 
 export function getLiveOpConfig(type: string): LiveOpConfig | undefined {
   return registry.get(type);
+}
+
+function isPersistent(config: LiveOpConfig): boolean {
+  return config.persist ?? config.persistent ?? false;
+}
+
+// ─── Persist queue (DB-tail, shared between LiveBus and history commands) ────
+// Both `dispatch()` for persistent live-ops and the history layer push entries
+// here. A single in-flight guard (`inFlightFlush`) serializes the round-trip
+// to the push-change edge function so `lastSeenSequenceNumber` stays accurate
+// across snapshots. Coalescing (dedupKey) keeps per-frame ops like knob drags
+// from filling the event log with 60Hz junk — only the latest payload per key
+// inside a settle window is persisted.
+
+export interface PersistEntry {
+  type: string;
+  payload: any;
+  dedupKey?: string;
+  resolve?: (seq: number | undefined) => void;
+  reject?: (err: unknown) => void;
+}
+
+export type PersistHook = (
+  entries: Array<{ type: string; payload: any }>,
+) => Promise<Array<number | undefined>>;
+
+const PERSIST_SETTLE_MS = 250;
+
+const persistByKey = new Map<string, PersistEntry>();
+const persistAppend: PersistEntry[] = [];
+let persistFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let inFlightFlush: Promise<void> | null = null;
+let persistHook: PersistHook | null = null;
+
+export function setPersistHook(hook: PersistHook | null): void {
+  persistHook = hook;
+}
+
+export function enqueuePersist(entry: PersistEntry): void {
+  if (entry.dedupKey) {
+    // Replacing an earlier entry: resolve its promise with undefined so the
+    // history layer's .then() can still increment its commands-since-snapshot
+    // counter without leaving an orphaned, never-resolving promise behind.
+    const prev = persistByKey.get(entry.dedupKey);
+    if (prev && prev !== entry) prev.resolve?.(undefined);
+    persistByKey.set(entry.dedupKey, entry);
+  } else {
+    persistAppend.push(entry);
+  }
+  if (persistFlushTimer != null) clearTimeout(persistFlushTimer);
+  persistFlushTimer = setTimeout(() => { flushPersistQueue(); }, PERSIST_SETTLE_MS);
+}
+
+/**
+ * Drain pending persist entries to the configured hook. Serialized via
+ * `inFlightFlush`: a second concurrent caller awaits the in-flight round-trip,
+ * then runs its own pass. Safe to call from doSaveSnapshot, beforeunload, or
+ * Cmd+S — guarantees that `lastSeenSequenceNumber` (updated synchronously
+ * inside the hook) reflects every entry that was queued before the call.
+ */
+export async function flushPersistQueue(): Promise<void> {
+  if (inFlightFlush) await inFlightFlush;
+  if (persistFlushTimer != null) { clearTimeout(persistFlushTimer); persistFlushTimer = null; }
+  if (persistByKey.size === 0 && persistAppend.length === 0) return;
+  if (!persistHook) return; // hook not wired yet — keep entries, next dispatch will re-arm timer
+
+  const batch: PersistEntry[] = [...persistByKey.values(), ...persistAppend];
+  persistByKey.clear();
+  persistAppend.length = 0;
+
+  inFlightFlush = (async () => {
+    try {
+      const seqs = await persistHook!(batch.map(e => ({ type: e.type, payload: e.payload })));
+      for (let i = 0; i < batch.length; i++) batch[i].resolve?.(seqs[i]);
+    } catch (err) {
+      console.warn('[LiveBus] persist flush failed:', err);
+      // Re-queue dedup entries only if no newer payload has arrived since;
+      // append entries are unconditionally re-queued so history commands don't
+      // silently disappear. The rejected promises let callers see the failure.
+      for (const e of batch) {
+        if (e.dedupKey) {
+          if (!persistByKey.has(e.dedupKey)) persistByKey.set(e.dedupKey, e);
+        } else {
+          persistAppend.push(e);
+        }
+        e.reject?.(err);
+      }
+      if (persistByKey.size > 0 || persistAppend.length > 0) {
+        if (persistFlushTimer != null) clearTimeout(persistFlushTimer);
+        persistFlushTimer = setTimeout(() => { flushPersistQueue(); }, PERSIST_SETTLE_MS);
+      }
+    }
+  })();
+  try { await inFlightFlush; } finally { inFlightFlush = null; }
+}
+
+/** Snapshot of pending persist entries — used by beforeunload to drain via keepalive fetch. */
+export function getPersistQueueSnapshot(): Array<{ type: string; payload: any }> {
+  return [...persistByKey.values(), ...persistAppend]
+    .map(e => ({ type: e.type, payload: e.payload }));
+}
+
+/** Drop all pending entries without resolving callers. Used on project switch
+ *  to discard ops queued against the previous project. Callers that care about
+ *  not losing data must `await flushPersistQueue()` before calling this. */
+export function clearPersistQueue(): void {
+  for (const e of persistByKey.values()) e.resolve?.(undefined);
+  for (const e of persistAppend) e.resolve?.(undefined);
+  persistByKey.clear();
+  persistAppend.length = 0;
+  if (persistFlushTimer != null) { clearTimeout(persistFlushTimer); persistFlushTimer = null; }
 }
 
 // ─── Pinia Store ──────────────────────────────────────────────────────────────
@@ -155,23 +277,33 @@ export const useLiveBusStore = defineStore('live-bus', () => {
   }
 
   // ─── Outbound dispatch ─────────────────────────────────────────────────────
+  // Persistence is independent of broadcast: a persistent op MUST land in the
+  // event log even when the realtime channel is offline (solo session, initial
+  // load before SUBSCRIBED, transient network drop). Previously this dispatch
+  // returned early when disconnected, which silently lost BPM, modifier scrubs,
+  // color overrides etc. across reloads.
   function dispatch<T>(type: string, payload: T) {
     const config = registry.get(type);
     if (!config) {
       console.warn(`[LiveBus] No config for op "${type}"`);
       return;
     }
-    if (!isConnected.value || !channel || !currentUserId) {
-      // Drop silently — per-design we only sync while connected
-      return;
-    }
 
-    // dispatch() is only called by local-origin code paths; remote ops go
-    // through handleIncoming() → apply(). So we can mark dirty unconditionally
-    // for persistent ops, no isApplyingRemote() guard needed.
-    if (config.persistent) {
+    const persist = isPersistent(config);
+    const broadcast = config.broadcast ?? true;
+
+    if (persist) {
+      const dedupKey = config.coalesceKey?.(payload)
+        ?? (config.merge !== 'append' ? type : undefined);
+      enqueuePersist({ type, payload, dedupKey });
+      // Mark engine dirty so the snapshot timer also runs as a compaction
+      // safety net. dispatch() is local-origin only, so no isApplyingRemote
+      // guard needed.
       useEngineStore().markEngineDirty?.();
     }
+
+    if (!broadcast) return;
+    if (!isConnected.value || !channel || !currentUserId) return;
 
     const op: LiveOp<T> = { type, payload, userId: currentUserId, sessionId: TAB_SESSION_ID };
 

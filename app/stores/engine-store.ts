@@ -26,7 +26,16 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 // mutations on project load even before any UI page has been visited.
 import '~/components/engine/commands/connector-commands';
 import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
-import { useLiveBusStore } from '~/stores/live-bus-store';
+import {
+  useLiveBusStore,
+  setPersistHook,
+  enqueuePersist,
+  flushPersistQueue,
+  clearPersistQueue,
+  getPersistQueueSnapshot,
+  getLiveOpConfig,
+  type LiveContext,
+} from '~/stores/live-bus-store';
 import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -40,16 +49,23 @@ export const useEngineStore = defineStore('engine', () => {
   /** The preset actually rendering: top of flash stack, or the latched base preset. */
   const effectivePresetId = computed<string | null>(() => flashStack.value.at(-1)?.presetId ?? selectedPresetId.value);
 
-  /** Global overwrite stack (highest priority). Top entry overrides all preset/effect output. */
+  /** Global overwrite stack (highest priority). Top entry's effect is visible. */
   type OverwriteEntry = {
     key: string;
     type: GlobalFunctionType;
     config: GlobalFunctionConfig;
-    /** Snapshot of channel stepValues[0] before overwrite, keyed by `${fixId}:${chIdx}`. */
-    snapshot: Map<string, number>;
   };
   const overwriteStack = ref<OverwriteEntry[]>([]);
   const effectiveOverwrite = computed(() => overwriteStack.value.at(-1) ?? null);
+
+  /**
+   * One snapshot of the "clean" channel state, captured the moment the stack
+   * goes from empty → non-empty. Restored when the stack returns to empty.
+   * Per-entry snapshots cannot work because removing a non-top entry would
+   * leave the stack-top entry's snapshot referencing already-overwritten state.
+   */
+  type ChannelSnap = { stepValues: number[]; stepsCount: number; isPlaying: boolean };
+  let baseSnapshot: Map<string, ChannelSnap> | null = null;
 
   /** Strobe needs a timer to alternate dimmer values. Only the top-of-stack strobe is active. */
   let strobeTimer: ReturnType<typeof setInterval> | null = null;
@@ -60,27 +76,72 @@ export const useEngineStore = defineStore('engine', () => {
     strobePhase = false;
   }
 
-  function _writeOverwriteToChannels(entry: OverwriteEntry) {
-    const fixtures = flatFixtures.value;
-    if (entry.type === 'blackout') {
-      for (const f of fixtures) {
-        for (const ch of f.channels) {
-          if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = 0;
+  /** Snapshot ALL channels that any overwrite type could touch. */
+  function _captureBaseSnapshot(): Map<string, ChannelSnap> {
+    const snap = new Map<string, ChannelSnap>();
+    for (const f of flatFixtures.value) {
+      for (let i = 0; i < f.channels.length; i++) {
+        const ch = f.channels[i]!;
+        if (ch.role === 'DIMMER' || ch.type === 'RED' || ch.type === 'GREEN' || ch.type === 'BLUE') {
+          snap.set(`${f.id}:${i}`, {
+            stepValues: [...ch.chaserConfig.stepValues],
+            stepsCount: ch.chaserConfig.stepsCount,
+            isPlaying: ch.chaserConfig.isPlaying,
+          });
         }
       }
-    } else if (entry.type === 'blind') {
-      const cfg = entry.config as BlindConfig;
+    }
+    return snap;
+  }
+
+  function _restoreBaseSnapshot(snap: Map<string, ChannelSnap>) {
+    for (const f of flatFixtures.value) {
+      for (let i = 0; i < f.channels.length; i++) {
+        const key = `${f.id}:${i}`;
+        const entry = snap.get(key);
+        if (entry) {
+          const cfg = f.channels[i]!.chaserConfig;
+          cfg.stepValues = [...entry.stepValues];
+          cfg.stepsCount = entry.stepsCount;
+          cfg.isPlaying = entry.isPlaying;
+        }
+      }
+    }
+  }
+
+  /** Flatten a channel to a single static step value, stopping any running chaser. */
+  function _setStaticValue(ch: { chaserConfig: { stepValues: number[]; stepsCount: number; isPlaying: boolean } }, value: number) {
+    ch.chaserConfig.stepValues[0] = value;
+    ch.chaserConfig.stepsCount = 1;
+    ch.chaserConfig.isPlaying = false;
+  }
+
+  /** Apply the current top-of-stack overwrite to channels (start strobe timer if needed). */
+  function _applyTopOverwrite() {
+    _stopStrobeTimer();
+    const top = overwriteStack.value.at(-1);
+    if (!top) return;
+    const fixtures = flatFixtures.value;
+
+    if (top.type === 'blackout') {
+      for (const f of fixtures) {
+        for (const ch of f.channels) {
+          if (ch.role === 'DIMMER') _setStaticValue(ch, 0);
+        }
+      }
+    } else if (top.type === 'blind') {
+      const cfg = top.config as BlindConfig;
       const rgb = parseHexColor(cfg.color ?? '#ffffff') ?? { r: 255, g: 255, b: 255 };
       for (const f of fixtures) {
         for (const ch of f.channels) {
-          if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = 255;
-          else if (ch.type === 'RED')   ch.chaserConfig.stepValues[0] = rgb.r;
-          else if (ch.type === 'GREEN') ch.chaserConfig.stepValues[0] = rgb.g;
-          else if (ch.type === 'BLUE')  ch.chaserConfig.stepValues[0] = rgb.b;
+          if (ch.role === 'DIMMER') _setStaticValue(ch, 255);
+          else if (ch.type === 'RED')   _setStaticValue(ch, rgb.r);
+          else if (ch.type === 'GREEN') _setStaticValue(ch, rgb.g);
+          else if (ch.type === 'BLUE')  _setStaticValue(ch, rgb.b);
         }
       }
-    } else if (entry.type === 'strobe') {
-      const cfg = entry.config as StrobeConfig;
+    } else if (top.type === 'strobe') {
+      const cfg = top.config as StrobeConfig;
       const hz = cfg.beatSync
         ? (engine.globalBpm.value / 60) * (cfg.beatDivision ?? 8)
         : (cfg.frequency ?? 8);
@@ -90,7 +151,7 @@ export const useEngineStore = defineStore('engine', () => {
         const v = strobePhase ? 255 : 0;
         for (const f of fixtures) {
           for (const ch of f.channels) {
-            if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = v;
+            if (ch.role === 'DIMMER') _setStaticValue(ch, v);
           }
         }
         flushEngineOutput();
@@ -100,69 +161,45 @@ export const useEngineStore = defineStore('engine', () => {
     }
   }
 
-  function _snapshotAffectedChannels(type: GlobalFunctionType): Map<string, number> {
-    const snap = new Map<string, number>();
-    const affects = (chType: string, chRole: string) => {
-      if (type === 'blackout' || type === 'strobe') return chRole === 'DIMMER';
-      if (type === 'blind') return chRole === 'DIMMER' || chType === 'RED' || chType === 'GREEN' || chType === 'BLUE';
-      return false;
-    };
-    for (const f of flatFixtures.value) {
-      for (let i = 0; i < f.channels.length; i++) {
-        const ch = f.channels[i]!;
-        if (affects(ch.type, ch.role)) {
-          snap.set(`${f.id}:${i}`, ch.chaserConfig.stepValues[0] ?? 0);
-        }
-      }
-    }
-    return snap;
-  }
-
-  function _restoreSnapshot(snap: Map<string, number>) {
-    for (const f of flatFixtures.value) {
-      for (let i = 0; i < f.channels.length; i++) {
-        const key = `${f.id}:${i}`;
-        if (snap.has(key)) {
-          f.channels[i]!.chaserConfig.stepValues[0] = snap.get(key)!;
-        }
-      }
-    }
-  }
-
   function pressOverwrite(key: string, type: GlobalFunctionType, config: GlobalFunctionConfig) {
-    if (overwriteStack.value.some(e => e.key === key)) return;
-    _stopStrobeTimer();
-    const snapshot = _snapshotAffectedChannels(type);
-    const entry: OverwriteEntry = { key, type, config, snapshot };
-    overwriteStack.value.push(entry);
-    _writeOverwriteToChannels(entry);
+    // If the same key is already on the stack (e.g. missed release after a
+    // dropped pointer event), remove it first so the new press is fresh.
+    const existingIdx = overwriteStack.value.findIndex(e => e.key === key);
+    const wasEmpty = overwriteStack.value.length === 0;
+    if (existingIdx !== -1) overwriteStack.value.splice(existingIdx, 1);
+    if (wasEmpty) {
+      baseSnapshot = _captureBaseSnapshot();
+    }
+    overwriteStack.value.push({ key, type, config });
+    if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+    _applyTopOverwrite();
     flushEngineOutput();
   }
 
   function releaseOverwrite(key: string) {
     const idx = overwriteStack.value.findIndex(e => e.key === key);
     if (idx === -1) return;
-    const entry = overwriteStack.value[idx]!;
     overwriteStack.value.splice(idx, 1);
     _stopStrobeTimer();
-    _restoreSnapshot(entry.snapshot);
-    // Re-apply whatever overwrite is now on top (if any)
-    const top = overwriteStack.value.at(-1);
-    if (top) {
-      // Refresh its snapshot from current (restored) state, then re-apply
-      top.snapshot = _snapshotAffectedChannels(top.type);
-      _writeOverwriteToChannels(top);
+    if (overwriteStack.value.length === 0) {
+      if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+      baseSnapshot = null;
+    } else {
+      // Restore base first so a different overwrite type (e.g. strobe → blind)
+      // doesn't leak the previous overwrite's values into untouched channels.
+      if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+      _applyTopOverwrite();
     }
     flushEngineOutput();
   }
 
   function clearOverwriteStack() {
     _stopStrobeTimer();
-    // Restore from bottom-up so we end with the original state
-    while (overwriteStack.value.length > 0) {
-      const entry = overwriteStack.value.pop()!;
-      _restoreSnapshot(entry.snapshot);
+    if (overwriteStack.value.length > 0 && baseSnapshot) {
+      _restoreBaseSnapshot(baseSnapshot);
     }
+    overwriteStack.value.splice(0);
+    baseSnapshot = null;
     flushEngineOutput();
   }
 
@@ -679,6 +716,10 @@ export const useEngineStore = defineStore('engine', () => {
     engineDirty = false;
     snapshotInFlight = false;
     persistenceHooksReady = false;
+    // Clear persist queue from any previous project and remove the old hook so
+    // stale entries cannot be flushed against the new project's connection.
+    clearPersistQueue();
+    setPersistHook(null);
 
     const { data, error } = await supabase.functions.invoke('load-project', {
       body: { projectId },
@@ -717,11 +758,49 @@ export const useEngineStore = defineStore('engine', () => {
       applyProjectSnapshot(data.snapshot);
     }
 
-    // Replay the tail: changes after the snapshot's sequence_number
+    // Replay the tail: changes after the snapshot's sequence_number.
+    // The tail may contain two kinds of records:
+    //   1. History commands (Undo-able ops) — replayed via the command registry.
+    //   2. Persistent live-ops (BPM, modifier scrubs, color overrides, section
+    //      latches, …) — replayed via the live-op registry. These are written
+    //      to project_changes by the LiveBus persist queue and were NOT in the
+    //      tail before this architectural change.
     const tail: Array<{ command_type: string; payload: any; sequence_number: number; user_id: string }> = data.tail ?? [];
+    // Build a minimal LiveContext for replaying live-ops without a realtime
+    // channel. We only need the engineStore reference; awareness fields are
+    // empty because replay happens before any collaborators are present.
+    const replayLiveCtx: LiveContext = {
+      cursors: new Map(),
+      remoteSelections: new Map(),
+      remoteEditingModifier: new Map(),
+      remoteEditSteps: new Map(),
+      remoteCameras: new Map(),
+      triggerCursorUpdate: () => {},
+      triggerSelectionUpdate: () => {},
+      triggerEditingModifierUpdate: () => {},
+      triggerEditStepUpdate: () => {},
+      triggerCameraUpdate: () => {},
+      displayNameOf: () => '',
+      colorOf: () => '',
+      engineStore: useEngineStore(),
+    };
     for (const change of tail) {
+      // Try history command registry first
       const cmd = commandFromPayload(change.command_type, change.payload, getReplayContext());
-      if (cmd) cmd.execute();
+      if (cmd) { cmd.execute(); continue; }
+
+      // Fall back to live-op registry
+      const liveOp = getLiveOpConfig(change.command_type);
+      if (liveOp) {
+        try {
+          liveOp.apply(change.payload, change.user_id ?? '', replayLiveCtx, '');
+        } catch (e) {
+          console.warn(`[loadProject] live-op replay failed for "${change.command_type}":`, e);
+        }
+        continue;
+      }
+
+      console.warn(`[loadProject] no handler for tail entry "${change.command_type}"`);
     }
     if (tail.length > 0) {
       lastSeenSequenceNumber.value = tail[tail.length - 1].sequence_number;
@@ -752,47 +831,37 @@ export const useEngineStore = defineStore('engine', () => {
       }
     }
 
-    // ── Persistence: batched pushChange ──────────────────────────────────────
-    // Commands queue locally and flush as one bulk INSERT after a short settle
-    // window. A 60 Hz drag → 1 edge-function call instead of ~60.
-    type PendingChange = {
-      commandType: string;
-      payload: object;
-      resolve: (seq: number | undefined) => void;
-      reject: (err: unknown) => void;
-    };
-    let pendingChanges: PendingChange[] = [];
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
-    const FLUSH_SETTLE_MS = 250;
+    // ── Persistence: unified queue ──────────────────────────────────────────
+    // Both history commands AND persistent live-ops flow through the LiveBus
+    // persist queue. A single in-flight guard there serializes the push-change
+    // round-trip; `lastSeenSequenceNumber` is updated synchronously inside the
+    // hook, so any caller awaiting flushPersistQueue() sees an accurate value
+    // before reading it. This is the architectural fix for the
+    // race-against-snapshot bug that produced stale-state reloads.
 
-    async function flushPendingChanges() {
-      if (flushTimer != null) {
-        clearTimeout(flushTimer);
-        flushTimer = null;
+    async function persistBatch(
+      entries: Array<{ type: string; payload: any }>,
+    ): Promise<Array<number | undefined>> {
+      const { data, error } = await supabase.functions.invoke('push-change', {
+        body: {
+          projectId,
+          changes: entries.map(e => ({ commandType: e.type, payload: e.payload })),
+        },
+      });
+      if (error) throw error;
+      const seqs: number[] = data?.sequenceNumbers ?? [];
+      const maxSeq = seqs.length ? seqs[seqs.length - 1] : undefined;
+      if (maxSeq != null && maxSeq > lastSeenSequenceNumber.value) {
+        lastSeenSequenceNumber.value = maxSeq;
       }
-      if (pendingChanges.length === 0) return;
-      const batch = pendingChanges;
-      pendingChanges = [];
-      try {
-        const { data, error } = await supabase.functions.invoke('push-change', {
-          body: {
-            projectId,
-            changes: batch.map(c => ({ commandType: c.commandType, payload: c.payload })),
-          },
-        });
-        if (error) throw error;
-        const seqs: number[] = data?.sequenceNumbers ?? [];
-        for (let i = 0; i < batch.length; i++) batch[i].resolve(seqs[i]);
-      } catch (err) {
-        for (const c of batch) c.reject(err);
-      }
+      return seqs;
     }
-    commitPendingChanges = flushPendingChanges;
+    setPersistHook(persistBatch);
+    commitPendingChanges = flushPersistQueue;
 
-    // Build a snapshot of the full project state. Drains pending Commands
-    // first so lastSeenSequenceNumber matches the state we're about to
-    // capture. Reused by the time-triggered snapshot, the command-count
-    // threshold in use-history, and the beforeunload handler.
+    // Build a snapshot of the full project state. The caller must drain the
+    // persist queue first (via flushPersistQueue) so lastSeenSequenceNumber
+    // matches the state about to be captured.
     function buildSnapshot() {
       const pinnedStore = usePinnedModifiersStore();
       const liveStore = useLiveModeStore();
@@ -815,7 +884,7 @@ export const useEngineStore = defineStore('engine', () => {
     }
 
     async function doSaveSnapshot() {
-      await flushPendingChanges();
+      await flushPersistQueue();
       const snapshot = buildSnapshot();
       await supabase.functions.invoke('save-snapshot', {
         body: {
@@ -826,13 +895,14 @@ export const useEngineStore = defineStore('engine', () => {
       });
     }
 
-    // Wire up persistence hooks so future commands are pushed to Supabase
+    // History commands flow into the same persist queue. Each one carries its
+    // own resolve/reject so use-history can still chain its snapshot-threshold
+    // logic off the returned sequence number. History commands are append-only
+    // (no dedup) — every undo-able op is recorded individually.
     setPersistenceHooks({
       pushChange: (commandType, payload) =>
         new Promise<number | undefined>((resolve, reject) => {
-          pendingChanges.push({ commandType, payload, resolve, reject });
-          if (flushTimer != null) clearTimeout(flushTimer);
-          flushTimer = setTimeout(flushPendingChanges, FLUSH_SETTLE_MS);
+          enqueuePersist({ type: commandType, payload, resolve, reject });
         }),
       saveSnapshot: doSaveSnapshot,
       markDirty: markEngineDirty,
@@ -860,23 +930,26 @@ export const useEngineStore = defineStore('engine', () => {
     const pushChangeUrl = `${supabaseUrl}/functions/v1/push-change`;
     const saveSnapshotUrl = `${supabaseUrl}/functions/v1/save-snapshot`;
 
-    // On unload: flush any commands still waiting in the debounce window AND,
-    // if anything is dirty, send a final snapshot so reload picks up the
-    // latest live state (BPM, channel scrubs, modifier params, …).
-    // fetch({ keepalive: true }) is sent by the browser even after the page tears down,
-    // unlike a normal async fetch which the browser cancels on navigation/reload.
+    // On unload: push any pending persist-queue entries (live-ops + history
+    // commands still in the settle window) and, if the engine is dirty, a final
+    // snapshot. The snapshot is intentionally sent AFTER the push-change so
+    // that lastSeenSequenceNumber in the snapshot matches the tail — but
+    // because keepalive fetches are fire-and-forget we send both and let the
+    // server's natural write ordering (insert before snapshot is read on reload)
+    // do the right thing. fetch({ keepalive: true }) survives tab close.
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
-        if (flushTimer != null) clearTimeout(flushTimer);
         if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
         if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
         if (!cachedToken) return;
 
-        // (a) Drain pending push-changes
-        if (pendingChanges.length > 0) {
+        // (a) Drain pending persist queue
+        const pending = getPersistQueueSnapshot();
+        clearPersistQueue();
+        if (pending.length > 0) {
           const changesBody = JSON.stringify({
             projectId,
-            changes: pendingChanges.map(c => ({ commandType: c.commandType, payload: c.payload })),
+            changes: pending.map(e => ({ commandType: e.type, payload: e.payload })),
           });
           fetch(pushChangeUrl, {
             method: 'POST',
@@ -886,7 +959,11 @@ export const useEngineStore = defineStore('engine', () => {
           });
         }
 
-        // (b) Final snapshot if any local mutation happened since the last flush
+        // (b) Final snapshot if any mutation happened since the last compacting
+        // snapshot. We use lastSeenSequenceNumber from before this call, which
+        // may be slightly stale if the keepalive above races. That is
+        // acceptable: the snapshot captures in-memory state; on reload the tail
+        // from snapshotSeq will replay any commands with higher seq numbers.
         if (engineDirty) {
           try {
             const snapshot = buildSnapshot();

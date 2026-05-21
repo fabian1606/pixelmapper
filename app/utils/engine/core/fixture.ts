@@ -164,8 +164,8 @@ export class Fixture {
       stepsCount: 1,
       activeEditStep: 0,
       isPlaying: false,
-      stepDuration: { mode: 'time', timeMs: 1000, beatValue: 1, beatOffset: 0 },
-      fadeDuration: { mode: 'time', timeMs: 0, beatValue: 0, beatOffset: 0 },
+      stepDuration: { mode: 'beat', timeMs: 1000, beatValue: 1, beatOffset: 0 },
+      fadeDuration: { mode: 'beat', timeMs: 0, beatValue: 0, beatOffset: 0 },
     });
 
     const fixture = new Fixture(id, [

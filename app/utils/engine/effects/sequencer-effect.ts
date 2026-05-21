@@ -54,7 +54,7 @@ function evalPattern(params: SequencerParams, nx: number, ny: number, halfCycle 
 
 export class SequencerEffect extends BaseEffect {
   public override fanning: number = 0;
-  public override speed: SpeedConfig = { mode: 'time', timeMs: 500, beatValue: 1, beatOffset: 0 };
+  public override speed: SpeedConfig = { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
 
   public sequencerParams: SequencerParams = {
     patternType: 'split',
