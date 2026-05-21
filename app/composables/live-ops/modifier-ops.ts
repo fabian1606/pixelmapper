@@ -17,6 +17,7 @@ registerLiveOp<ModifierUpdatePayload>('modifier.update', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
+  persistent: true,
   apply: ({ effectId, changes, sequencerChanges }, _userId, ctx) => {
     const effects = ctx.engineStore.activeEffects;
     const effect = effects.find((e: any) => e.id === effectId);
@@ -37,6 +38,7 @@ registerLiveOp<{ effects: any[] }>('modifier.sync', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
+  persistent: true,
   apply: ({ effects }, _userId, ctx) => {
     const reconstructed = cloneEffectsList(effects);
     const active = ctx.engineStore.activeEffects;

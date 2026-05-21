@@ -56,6 +56,13 @@ export interface LiveOpConfig<T = any> {
   throttle: 'raf' | 'immediate' | number;
   /** Replace pending op of same type (default), or append (e.g. queue of distinct events) */
   merge?: 'replace' | 'append';
+  /**
+   * True if the op mutates state that lives in serializeProject() output.
+   * When set, local dispatches mark the engine dirty so a snapshot is
+   * scheduled. Awareness ops (cursor, selection, camera, …) leave this unset
+   * so harmless background traffic never triggers a snapshot.
+   */
+  persistent?: boolean;
   apply: (payload: T, userId: string, ctx: LiveContext, sessionId: string) => void;
 }
 
@@ -157,6 +164,13 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     if (!isConnected.value || !channel || !currentUserId) {
       // Drop silently — per-design we only sync while connected
       return;
+    }
+
+    // dispatch() is only called by local-origin code paths; remote ops go
+    // through handleIncoming() → apply(). So we can mark dirty unconditionally
+    // for persistent ops, no isApplyingRemote() guard needed.
+    if (config.persistent) {
+      useEngineStore().markEngineDirty?.();
     }
 
     const op: LiveOp<T> = { type, payload, userId: currentUserId, sessionId: TAB_SESSION_ID };

@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { BaseConnector, type ConnectorMeta, type EngineConnectorState } from './base-connector';
+import { BaseConnector, type ConnectorMeta, type ConnectorStatus, type EngineConnectorState } from './base-connector';
 import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildStripConfigPacket } from './binary-encoder';
 import { buildScopedPackets, scopedFingerprint } from './scoped-encoder';
 
@@ -25,6 +25,12 @@ export class WebSocketConnector extends BaseConnector {
 
   private ws: WebSocket | null = null;
 
+  // ── Reconnect machinery ──────────────────────────────────────────────────
+  private static readonly CONNECT_TIMEOUT_MS = 5000;
+  private static readonly RETRY_INTERVAL_MS  = 2000;
+  private retryTimer:      ReturnType<typeof setTimeout> | null = null;
+  private connectWatchdog: ReturnType<typeof setTimeout> | null = null;
+
   private cachedBpm      = -1;
   private cachedLayoutFp:   string = '';
   private cachedChannelsFp: string = '';
@@ -40,59 +46,135 @@ export class WebSocketConnector extends BaseConnector {
     // outputCount stays 0 — parameter-based, ESP32 renders locally
   }
 
+  /**
+   * Open a WebSocket to the strip device. Idempotent: any prior socket / timer
+   * is torn down first so the function is safe to call from a retry tick as
+   * well as from a user click.
+   *
+   * `autoReconnect` is **not** set here — it arms only on a successful 'open'.
+   * That cleanly separates "first attempt" (manual click or initial auto-try)
+   * from "retry loop" (drop after a previously successful connection).
+   */
   async connect() {
-    if (!this.url.value) {
-      this.status.value = 'error';
-      this.errorMessage.value = 'WebSocket-URL fehlt';
-      return;
-    }
-    if (this.fixtureId.value == null) {
-      this.status.value = 'error';
-      this.errorMessage.value = 'Keine Strip-Fixture ausgewählt';
-      return;
-    }
+    this.clearTimers();
+    this.teardownSocket();
+
+    if (!this.url.value)              return this.failTo('error', 'WebSocket-URL fehlt');
+    if (this.fixtureId.value == null) return this.failTo('error', 'Keine Strip-Fixture ausgewählt');
 
     this.status.value = 'connecting';
     this.errorMessage.value = null;
-    this.frameCount = 0;
-    this.cachedBpm = -1;
-    this.cachedLayoutFp = '';
-    this.cachedChannelsFp = '';
-    this.cachedEffectsFp = '';
-    this.cachedStripFp = '';
-    this.firmwareVersion.value = null;
+    this.resetCaches();
 
+    let ws: WebSocket;
     try {
-      const ws = new WebSocket(this.url.value);
-      ws.binaryType = 'arraybuffer';
-      this.ws = ws;
-
-      await new Promise<void>((resolve, reject) => {
-        const onOpen = () => { ws.removeEventListener('error', onErr); resolve(); };
-        const onErr  = () => { ws.removeEventListener('open', onOpen); reject(new Error('WebSocket connection failed')); };
-        ws.addEventListener('open',  onOpen, { once: true });
-        ws.addEventListener('error', onErr,  { once: true });
-      });
-
-      ws.addEventListener('message', (ev) => this.handleMessage(ev));
-      ws.addEventListener('close',   ()    => this.handleClose());
-      ws.addEventListener('error',   ()    => this.pushLog('[ws] error'));
-
-      this.status.value = 'connected';
-      this.pushLog('[ws] connected — requesting version');
-      this.send(buildVersionRequestPacket());
-    } catch (e: any) {
-      this.status.value = 'error';
-      this.errorMessage.value = e?.message ?? 'Connection failed';
-      this.pushLog(`[ws] error: ${this.errorMessage.value}`);
+      ws = new WebSocket(this.url.value);
+    } catch (e) {
+      return this.handleConnectFailure(e as Error);
     }
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+
+    // Stuck-in-connecting watchdog: if no 'open' within CONNECT_TIMEOUT_MS,
+    // treat as a failed attempt and decide retry vs. give up.
+    this.connectWatchdog = setTimeout(() => {
+      if (this.status.value === 'connecting') {
+        this.pushLog('[ws] connect watchdog — tearing down stale socket');
+        this.handleConnectFailure(new Error('Connect timeout'));
+      }
+    }, WebSocketConnector.CONNECT_TIMEOUT_MS);
+
+    ws.addEventListener('open',    () => this.handleOpen());
+    ws.addEventListener('message', (ev) => this.handleMessage(ev));
+    ws.addEventListener('close',   () => this.handleClose());
+    ws.addEventListener('error',   () => this.handleError());
   }
 
   async disconnect() {
-    try { this.ws?.close(); } catch (_) {}
-    this.ws = null;
+    this.autoReconnect.value = false;
+    this.clearTimers();
+    this.teardownSocket();
     this.status.value = 'disconnected';
     this.errorMessage.value = null;
+  }
+
+  private handleOpen() {
+    this.clearConnectWatchdog();
+    this.status.value = 'connected';
+    this.autoReconnect.value = true;
+    this.pushLog('[ws] connected — requesting version');
+    this.send(buildVersionRequestPacket());
+  }
+
+  private handleError() {
+    // Force a teardown + decide retry rather than just logging — half-broken
+    // sockets that errored without closing kept the old code "connected" while
+    // silently dropping frames.
+    this.pushLog('[ws] error');
+    this.errorMessage.value = 'WebSocket error';
+    this.teardownSocket();
+    this.scheduleNextStep();
+  }
+
+  private handleConnectFailure(e: Error) {
+    this.pushLog(`[ws] connect failed: ${e.message}`);
+    this.errorMessage.value = e.message;
+    this.teardownSocket();
+    this.scheduleNextStep();
+  }
+
+  /**
+   * Either schedule a retry (if armed) or settle in the terminal-for-now state.
+   * Called from every failure path so the decision lives in exactly one place.
+   */
+  private scheduleNextStep() {
+    this.clearConnectWatchdog();
+    if (this.autoReconnect.value) {
+      // Stay visually "connecting" between attempts so the UI doesn't flicker.
+      this.status.value = 'connecting';
+      this.retryTimer = setTimeout(
+        () => this.connect(),
+        WebSocketConnector.RETRY_INTERVAL_MS,
+      );
+      this.pushLog(`[ws] retry in ${WebSocketConnector.RETRY_INTERVAL_MS}ms`);
+    } else {
+      this.status.value = this.errorMessage.value ? 'error' : 'disconnected';
+    }
+  }
+
+  /**
+   * Detach handlers BEFORE close() so the spec-allowed late `onclose` doesn't
+   * re-enter scheduleNextStep() with a stale state.
+   */
+  private teardownSocket() {
+    if (this.ws) {
+      try {
+        this.ws.onopen = this.ws.onmessage = this.ws.onclose = this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+  }
+
+  private clearTimers() {
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    this.clearConnectWatchdog();
+  }
+
+  private clearConnectWatchdog() {
+    if (this.connectWatchdog) { clearTimeout(this.connectWatchdog); this.connectWatchdog = null; }
+  }
+
+  private resetCaches() {
+    this.frameCount = 0;
+    this.cachedBpm = -1;
+    this.cachedLayoutFp = this.cachedChannelsFp = this.cachedEffectsFp = this.cachedStripFp = '';
+    this.firmwareVersion.value = null;
+  }
+
+  private failTo(status: ConnectorStatus, msg: string) {
+    this.status.value = status;
+    this.errorMessage.value = msg;
   }
 
   /** No-op — ESP32 renders its own DMX via the local Rust engine */
@@ -219,10 +301,8 @@ export class WebSocketConnector extends BaseConnector {
   }
 
   private handleClose() {
-    this.ws = null;
-    if (this.status.value === 'connected') {
-      this.status.value = 'disconnected';
-      this.pushLog('[ws] closed');
-    }
+    this.teardownSocket();
+    this.pushLog('[ws] closed');
+    this.scheduleNextStep();
   }
 }

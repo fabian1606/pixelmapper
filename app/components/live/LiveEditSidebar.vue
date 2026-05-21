@@ -8,6 +8,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import {
   UpdateLivePageCommand,
   UpdateControllerChildMappingCommand,
+  UpdateWidgetMappingCommand,
   SetWidgetControllerInstanceCommand,
   AddLiveSectionCommand,
   RemoveLiveSectionCommand,
@@ -24,6 +25,11 @@ import {
   type SectionMember,
   type SectionMode,
   type SectionSource,
+  type GlobalFunctionType,
+  type StrobeConfig,
+  type BlindConfig,
+  defaultStrobeConfig,
+  defaultBlindConfig,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
 import { getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
@@ -88,6 +94,60 @@ function bindInstance(instanceId: string) {
   history.execute(new SetWidgetControllerInstanceCommand(store.activePageId, twin.id, instanceId || null));
 }
 
+// ── Selected plain-button editing ────────────────────────────────────────────
+
+/** Single selected non-twin widget (any type except controller-twin). */
+const selectedButton = computed<LiveWidget | null>(() => {
+  if (store.selectedWidgetIds.size !== 1) return null;
+  const id = Array.from(store.selectedWidgetIds)[0];
+  const widget = store.activePage?.widgets.find(w => w.id === id);
+  return widget && widget.type !== 'controller-twin' ? widget : null;
+});
+
+function patchWidget(patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>>) {
+  const w = selectedButton.value;
+  if (!w || !store.activePageId) return;
+  history.execute(new UpdateWidgetMappingCommand(store.activePageId, w.id, patch));
+}
+
+function setButtonMappingType(type: LiveMapping['type']) {
+  const base: LiveMapping = { type };
+  if (type === 'global-function') {
+    base.globalFunction = 'strobe';
+    base.globalFunctionConfig = defaultStrobeConfig();
+  }
+  patchWidget({ mapping: base });
+}
+
+function setButtonGlobalFunction(fn: GlobalFunctionType) {
+  const w = selectedButton.value;
+  if (!w) return;
+  let config = fn === 'strobe' ? defaultStrobeConfig() : fn === 'blind' ? defaultBlindConfig() : {};
+  patchWidget({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
+}
+
+function setButtonStrobeConfig(patch: Partial<StrobeConfig>) {
+  const w = selectedButton.value;
+  if (!w) return;
+  const existing = (w.mapping.globalFunctionConfig ?? {}) as StrobeConfig;
+  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultStrobeConfig(), ...existing, ...patch } } });
+}
+
+function setButtonBlindConfig(patch: Partial<BlindConfig>) {
+  const w = selectedButton.value;
+  if (!w) return;
+  const existing = (w.mapping.globalFunctionConfig ?? {}) as BlindConfig;
+  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultBlindConfig(), ...existing, ...patch } } });
+}
+
+function setButtonLabel(label: string) {
+  patchWidget({ label });
+}
+
+function setButtonColor(color: string) {
+  patchWidget({ color });
+}
+
 // Per-control mapping editor
 
 const selectedControl = computed(() => {
@@ -116,11 +176,34 @@ function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'lab
 }
 
 function setMappingType(type: LiveMapping['type']) {
-  patchChild({ mapping: { type } });
+  if (type === 'global-function') {
+    patchChild({ mapping: { type, globalFunction: 'strobe', globalFunctionConfig: defaultStrobeConfig() } });
+  } else {
+    patchChild({ mapping: { type } });
+  }
 }
 
 function setMappingPreset(presetId: string) {
   patchChild({ mapping: { type: 'preset', presetId } });
+}
+
+function setChildGlobalFunction(fn: GlobalFunctionType) {
+  const config = fn === 'strobe' ? defaultStrobeConfig() : fn === 'blind' ? defaultBlindConfig() : {};
+  patchChild({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
+}
+
+function setChildStrobeConfig(patch: Partial<StrobeConfig>) {
+  const child = selectedChild.value;
+  if (!child) return;
+  const existing = (child.mapping.globalFunctionConfig ?? {}) as StrobeConfig;
+  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultStrobeConfig(), ...existing, ...patch } } });
+}
+
+function setChildBlindConfig(patch: Partial<BlindConfig>) {
+  const child = selectedChild.value;
+  if (!child) return;
+  const existing = (child.mapping.globalFunctionConfig ?? {}) as BlindConfig;
+  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultBlindConfig(), ...existing, ...patch } } });
 }
 
 function setLabel(label: string) {
@@ -665,6 +748,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <option value="preset">Preset</option>
             <option value="channel">Channel</option>
             <option value="effect-param">Effect parameter</option>
+            <option value="global-function">Global Function</option>
             <option value="page-switch">Page switch</option>
           </select>
           <div v-else class="w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-muted-foreground">
@@ -682,6 +766,78 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <option value="">— choose —</option>
             <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
           </select>
+        </div>
+
+        <!-- Global Function config (controller-twin per-control) -->
+        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'global-function'" class="flex flex-col gap-2">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Function</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedChild.mapping.globalFunction ?? 'strobe'"
+            @change="(e) => setChildGlobalFunction((e.target as HTMLSelectElement).value as GlobalFunctionType)"
+          >
+            <option value="strobe">Strobe</option>
+            <option value="blind">Blind (Full White)</option>
+            <option value="blackout">Blackout</option>
+          </select>
+
+          <template v-if="selectedChild.mapping.globalFunction === 'strobe'">
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Beat sync</label>
+              <input
+                type="checkbox"
+                :checked="(selectedChild.mapping.globalFunctionConfig as any)?.beatSync ?? false"
+                @change="(e) => setChildStrobeConfig({ beatSync: (e.target as HTMLInputElement).checked })"
+              />
+            </div>
+            <div v-if="!(selectedChild.mapping.globalFunctionConfig as any)?.beatSync" class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Hz</label>
+              <input
+                type="number"
+                min="0.5"
+                max="25"
+                step="0.5"
+                class="flex-1 bg-background border border-border rounded px-2 py-1"
+                :value="(selectedChild.mapping.globalFunctionConfig as any)?.frequency ?? 8"
+                @change="(e) => setChildStrobeConfig({ frequency: Number((e.target as HTMLInputElement).value) })"
+              />
+            </div>
+            <div v-else class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Division</label>
+              <select
+                class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
+                :value="String((selectedChild.mapping.globalFunctionConfig as any)?.beatDivision ?? 8)"
+                @change="(e) => setChildStrobeConfig({ beatDivision: Number((e.target as HTMLSelectElement).value) })"
+              >
+                <option value="1">1 (quarter)</option>
+                <option value="2">2 (8th)</option>
+                <option value="4">4 (16th)</option>
+                <option value="8">8 (32nd)</option>
+                <option value="0.5">½ (half)</option>
+                <option value="0.25">¼ (whole)</option>
+              </select>
+            </div>
+          </template>
+
+          <template v-if="selectedChild.mapping.globalFunction === 'blind'">
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Color</label>
+              <input
+                type="color"
+                class="flex-1 h-7 bg-background border border-border rounded"
+                :value="(selectedChild.mapping.globalFunctionConfig as any)?.color ?? '#ffffff'"
+                @change="(e) => setChildBlindConfig({ color: (e.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Dimmer ramp</label>
+              <input
+                type="checkbox"
+                :checked="(selectedChild.mapping.globalFunctionConfig as any)?.dimmerCurve ?? false"
+                @change="(e) => setChildBlindConfig({ dimmerCurve: (e.target as HTMLInputElement).checked })"
+              />
+            </div>
+          </template>
         </div>
 
         <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
@@ -703,6 +859,149 @@ const MODE_LABELS: Record<SectionMode, string> = {
             :value="selectedChild?.color ?? '#3b82f6'"
             @change="(e) => setColor((e.target as HTMLInputElement).value)"
           />
+        </div>
+      </div>
+
+      <!-- ── Plain widget properties (button, slider, etc.) ─────────────── -->
+      <div
+        v-else-if="selectedButton && !selectionSection"
+        class="flex flex-col gap-4"
+      >
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Widget</span>
+
+        <!-- Label -->
+        <div class="flex flex-col gap-1">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Label</span>
+          <input
+            type="text"
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            placeholder="Button label"
+            :value="selectedButton.label ?? ''"
+            @change="(e) => setButtonLabel((e.target as HTMLInputElement).value)"
+          />
+        </div>
+
+        <!-- Color -->
+        <div class="flex flex-col gap-1">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Color</span>
+          <input
+            type="color"
+            class="w-full h-8 bg-background border border-border rounded"
+            :value="selectedButton.color ?? '#334155'"
+            @change="(e) => setButtonColor((e.target as HTMLInputElement).value)"
+          />
+        </div>
+
+        <!-- Mapping type (only for buttons) -->
+        <div v-if="selectedButton.type === 'button'" class="flex flex-col gap-2">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Action</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedButton.mapping.type"
+            @change="(e) => setButtonMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
+          >
+            <option value="none">None</option>
+            <option value="preset">Preset</option>
+            <option value="global-function">Global Function</option>
+            <option value="page-switch">Page Switch</option>
+          </select>
+
+          <!-- Preset picker -->
+          <div v-if="selectedButton.mapping.type === 'preset'" class="flex flex-col gap-1">
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedButton.mapping.presetId ?? ''"
+              @change="(e) => patchWidget({ mapping: { type: 'preset', presetId: (e.target as HTMLSelectElement).value } })"
+            >
+              <option value="">— choose preset —</option>
+              <option v-for="p in engineStore.savedPresets" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+
+          <!-- Global Function config -->
+          <div v-if="selectedButton.mapping.type === 'global-function'" class="flex flex-col gap-2">
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedButton.mapping.globalFunction ?? 'strobe'"
+              @change="(e) => setButtonGlobalFunction((e.target as HTMLSelectElement).value as GlobalFunctionType)"
+            >
+              <option value="strobe">Strobe</option>
+              <option value="blind">Blind (Full White)</option>
+              <option value="blackout">Blackout</option>
+            </select>
+
+            <!-- Strobe config -->
+            <template v-if="selectedButton.mapping.globalFunction === 'strobe'">
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Beat sync</label>
+                <input
+                  type="checkbox"
+                  :checked="(selectedButton.mapping.globalFunctionConfig as any)?.beatSync ?? false"
+                  @change="(e) => setButtonStrobeConfig({ beatSync: (e.target as HTMLInputElement).checked })"
+                />
+              </div>
+              <div v-if="!(selectedButton.mapping.globalFunctionConfig as any)?.beatSync" class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Hz</label>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="25"
+                  step="0.5"
+                  class="flex-1 bg-background border border-border rounded px-2 py-1"
+                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.frequency ?? 8"
+                  @change="(e) => setButtonStrobeConfig({ frequency: Number((e.target as HTMLInputElement).value) })"
+                />
+              </div>
+              <div v-else class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Division</label>
+                <select
+                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
+                  :value="String((selectedButton.mapping.globalFunctionConfig as any)?.beatDivision ?? 8)"
+                  @change="(e) => setButtonStrobeConfig({ beatDivision: Number((e.target as HTMLSelectElement).value) })"
+                >
+                  <option value="1">1 (quarter)</option>
+                  <option value="2">2 (8th)</option>
+                  <option value="4">4 (16th)</option>
+                  <option value="8">8 (32nd)</option>
+                  <option value="0.5">½ (half)</option>
+                  <option value="0.25">¼ (whole)</option>
+                </select>
+              </div>
+            </template>
+
+            <!-- Blind config -->
+            <template v-if="selectedButton.mapping.globalFunction === 'blind'">
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Color</label>
+                <input
+                  type="color"
+                  class="flex-1 h-7 bg-background border border-border rounded"
+                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.color ?? '#ffffff'"
+                  @change="(e) => setButtonBlindConfig({ color: (e.target as HTMLInputElement).value })"
+                />
+              </div>
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Dimmer ramp</label>
+                <input
+                  type="checkbox"
+                  :checked="(selectedButton.mapping.globalFunctionConfig as any)?.dimmerCurve ?? false"
+                  @change="(e) => setButtonBlindConfig({ dimmerCurve: (e.target as HTMLInputElement).checked })"
+                />
+              </div>
+            </template>
+          </div>
+
+          <!-- Page switch picker -->
+          <div v-if="selectedButton.mapping.type === 'page-switch'" class="flex flex-col gap-1">
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedButton.mapping.targetPageId ?? ''"
+              @change="(e) => patchWidget({ mapping: { type: 'page-switch', targetPageId: (e.target as HTMLSelectElement).value } })"
+            >
+              <option value="">— choose page —</option>
+              <option v-for="pg in store.pages" :key="pg.id" :value="pg.id">{{ pg.name }}</option>
+            </select>
+          </div>
         </div>
       </div>
 

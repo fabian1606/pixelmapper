@@ -40,6 +40,14 @@ export class SerialConnector extends BaseConnector {
   private readAbort: AbortController | null = null;
   private readLoopDone: Promise<void> = Promise.resolve();
 
+  // ── Reconnect machinery ──────────────────────────────────────────────────
+  // Best-effort only — Web Serial requires a user gesture for the initial
+  // requestPort() but subsequent port.open() calls do not, so we can reopen
+  // the same port within a session. If the device disappears entirely we
+  // give up and the user has to click Verbinden (which re-triggers gesture).
+  private static readonly RETRY_INTERVAL_MS = 2000;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
   private cachedBpm      = -1;
   private cachedLayout   = -1;
   private cachedChannels = -1;
@@ -55,10 +63,15 @@ export class SerialConnector extends BaseConnector {
   }
 
   async connect() {
+    this.clearRetryTimer();
     this.status.value = 'connecting';
     this.errorMessage.value = null;
     try {
-      this.port = await (navigator as any).serial.requestPort();
+      // First-time connect needs a user gesture (requestPort). Retries reuse
+      // the existing port object — no gesture required.
+      if (!this.port) {
+        this.port = await (navigator as any).serial.requestPort();
+      }
       await this.port!.open({ baudRate: this.baudRate });
       this.writer = this.port!.writable!.getWriter();
       // Reset caches so everything is sent fresh on first onEngineState call
@@ -75,6 +88,7 @@ export class SerialConnector extends BaseConnector {
       // Listen for [boot] message or timeout after 3s.
       await this.waitForBoot(3000);
       this.status.value = 'connected';
+      this.autoReconnect.value = true;
       this.pushLog('[serial] ESP32 ready — syncing engine state');
       // Send VERSION_REQ after a short additional delay
       setTimeout(() => {
@@ -84,9 +98,52 @@ export class SerialConnector extends BaseConnector {
         }
       }, 500);
     } catch (e: any) {
-      this.status.value = 'error';
-      this.errorMessage.value = e?.message ?? 'Connection failed';
+      this.handleConnectFailure(e);
     }
+  }
+
+  /**
+   * Called whenever the connection drops mid-session (read-loop error) or the
+   * connect() attempt itself throws. Tears down handles, then either schedules
+   * a retry (if armed) or settles into 'error' so the user can re-trigger.
+   */
+  private handleConnectFailure(e: Error) {
+    const msg = e?.message ?? 'Connection failed';
+    this.pushLog(`[serial] connect failed: ${msg}`);
+    this.errorMessage.value = msg;
+    this.teardownHandles();
+
+    // Device disappeared — port handle is dead, we need a fresh requestPort
+    // gesture from the user. Stop the retry loop.
+    if (e.name === 'NotFoundError' || /no longer|not found|invalid state/i.test(msg)) {
+      this.port = null;
+      this.autoReconnect.value = false;
+    }
+
+    if (this.autoReconnect.value) {
+      this.status.value = 'connecting';
+      this.retryTimer = setTimeout(
+        () => this.connect(),
+        SerialConnector.RETRY_INTERVAL_MS,
+      );
+      this.pushLog(`[serial] retry in ${SerialConnector.RETRY_INTERVAL_MS}ms`);
+    } else {
+      this.status.value = 'error';
+    }
+  }
+
+  /** Release writer + abort read-loop without touching the port itself. */
+  private async teardownHandles() {
+    this.readAbort?.abort();
+    this.readAbort = null;
+    try { await this.readLoopDone; } catch {}
+    try { this.writer?.releaseLock(); } catch {}
+    this.writer = null;
+    try { await this.port?.close(); } catch {}
+  }
+
+  private clearRetryTimer() {
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
   }
 
   private waitForBoot(timeoutMs: number): Promise<void> {
@@ -111,12 +168,9 @@ export class SerialConnector extends BaseConnector {
   }
 
   async disconnect() {
-    this.readAbort?.abort();
-    this.readAbort = null;
-    await this.readLoopDone;
-    try { this.writer?.releaseLock(); } catch (_) {}
-    this.writer = null;
-    try { await this.port?.close(); } catch (_) {}
+    this.autoReconnect.value = false;
+    this.clearRetryTimer();
+    await this.teardownHandles();
     this.port   = null;
     this.status.value = 'disconnected';
     this.errorMessage.value = null;
@@ -284,20 +338,25 @@ export class SerialConnector extends BaseConnector {
   }
 
   private startReadLoop() {
-    this.readAbort = new AbortController();
+    const ctrl = new AbortController();
+    this.readAbort = ctrl;
     const port = this.port!;
 
     const run = async () => {
       const textDecoder = new TextDecoder();
       const reader = port.readable!.getReader();
       const onAbort = () => reader.cancel().catch(() => {});
-      this.readAbort!.signal.addEventListener('abort', onAbort);
+      ctrl.signal.addEventListener('abort', onAbort);
       let partial = '';
+      let dropError: unknown = null;
       try {
         while (true) {
           const { value, done } = await reader.read();
-          if (done) { console.log('[serial] reader done'); break; }
-          console.log('[serial] rx bytes:', value?.length);
+          if (done) {
+            // 'done' without an abort means the device went away.
+            if (!ctrl.signal.aborted) dropError = new Error('Serial port closed');
+            break;
+          }
           partial += textDecoder.decode(value, { stream: true });
           const lines = partial.split('\n');
           partial = lines.pop() ?? '';
@@ -313,10 +372,16 @@ export class SerialConnector extends BaseConnector {
             this.pushLog(t);
           }
         }
-      } catch (_) {
+      } catch (e) {
+        if (!ctrl.signal.aborted) dropError = e;
       } finally {
-        this.readAbort?.signal.removeEventListener('abort', onAbort);
-        reader.releaseLock();
+        ctrl.signal.removeEventListener('abort', onAbort);
+        try { reader.releaseLock(); } catch {}
+      }
+      // Only trigger reconnect when the loop ended unexpectedly. A user-issued
+      // disconnect aborts the signal first so this path is skipped.
+      if (dropError && this.status.value === 'connected') {
+        this.handleConnectFailure(dropError as Error);
       }
     };
 

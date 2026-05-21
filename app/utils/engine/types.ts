@@ -111,7 +111,7 @@ export interface ChannelChaserConfig {
   fadeDuration: SpeedConfig;
 }
 
-export type EffectDirection = 'NONE' | 'LINEAR' | 'RADIAL' | 'SYMMETRICAL';
+export type EffectDirection = 'NONE' | 'LINEAR' | 'RADIAL' | 'SYMMETRICAL' | 'ANGULAR';
 
 /**
  * Defines the direction and spread of a spatial effect in the Fixture Editor.

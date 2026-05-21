@@ -16,18 +16,26 @@ const beatActive = ref(false);
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let beatTimeout: ReturnType<typeof setTimeout> | null = null;
 
+function pulse() {
+  beatActive.value = true;
+  setTimeout(() => { beatActive.value = false; }, 120);
+}
+
 function startBeatInterval() {
   if (intervalId) clearInterval(intervalId);
+  if (beatTimeout) clearTimeout(beatTimeout);
   const ms = 60000 / (bpm.value || 120);
-  intervalId = setInterval(() => {
-    beatActive.value = true;
-    if (beatTimeout) clearTimeout(beatTimeout);
-    beatTimeout = setTimeout(() => { beatActive.value = false; }, 120);
-  }, ms);
+  const elapsed = Date.now() - engineStore.clockEpoch;
+  const phase = ((elapsed % ms) + ms) % ms;
+  const delay = ms - phase;
+  beatTimeout = setTimeout(() => {
+    pulse();
+    intervalId = setInterval(pulse, ms);
+  }, delay);
 }
 
 onMounted(() => {
-  watch(bpm, startBeatInterval, { immediate: true });
+  watch([bpm, () => engineStore.clockEpoch], startBeatInterval, { immediate: true });
 });
 
 onUnmounted(() => {

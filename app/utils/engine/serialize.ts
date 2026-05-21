@@ -77,6 +77,15 @@ export interface ProjectSnapshot {
   selectedPresetId?: string | null
   /** WebSocket connectors to restore on reload. */
   connectors?: ConnectorSnapshot[]
+  /** Global BPM at snapshot time — restored on reload. */
+  globalBpm?: number
+  /** Shared clock epoch — restored so effects render deterministically. */
+  clockEpoch?: number
+  /**
+   * Latched active-member sets for single/multi-select sections (sectionId →
+   * memberKey[]). Restored on reload so lit-up buttons survive a page refresh.
+   */
+  activeSectionMembers?: Record<string, string[]>
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -142,6 +151,9 @@ export function serializeProject(
   liveControllers: string[] = [],
   selectedPresetId: string | null = null,
   connectors: ConnectorSnapshot[] = [],
+  globalBpm: number = 120,
+  clockEpoch: number = Date.now(),
+  activeSectionMembers: Record<string, string[]> = {},
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -153,6 +165,9 @@ export function serializeProject(
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
     selectedPresetId,
     connectors: JSON.parse(JSON.stringify(connectors)),
+    globalBpm,
+    clockEpoch,
+    activeSectionMembers,
   }
 }
 
@@ -232,6 +247,9 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   activeEffects: Effect[]
   livePages: LivePage[]
   selectedPresetId: string | null
+  globalBpm: number
+  clockEpoch: number
+  activeSectionMembers: Record<string, string[]>
 } {
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
@@ -241,5 +259,8 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
     selectedPresetId: snapshot.selectedPresetId ?? null,
+    globalBpm: snapshot.globalBpm ?? 120,
+    clockEpoch: snapshot.clockEpoch ?? Date.now(),
+    activeSectionMembers: snapshot.activeSectionMembers ?? {},
   }
 }

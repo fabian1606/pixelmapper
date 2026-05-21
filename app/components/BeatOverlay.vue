@@ -10,13 +10,15 @@ const liveBus = useLiveBusStore();
 
 const bpmInput = ref(engineStore.engine?.globalBpm.value ?? 120);
 
-function applyBpm(newBpm: number) {
+function applyBpm(newBpm: number, epochMs?: number) {
   const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
   if (!engineStore.engine) return;
   engineStore.engine.globalBpm.value = clamped;
   engineStore.engine.postBpm(clamped);
-  engineStore.setClockEpoch(Date.now());
+  const epoch = epochMs ?? Date.now();
+  engineStore.setClockEpoch(epoch);
   liveBus.dispatch('engine.bpm', { bpm: clamped });
+  if (epochMs !== undefined) liveBus.dispatch('engine.clock', { epochMs: epoch });
   bpmInput.value = clamped;
 }
 
@@ -45,7 +47,7 @@ function onTap() {
       diffs.push(tapTimes.value[i] - tapTimes.value[i - 1]);
     }
     const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-    applyBpm(60000 / avg);
+    applyBpm(60000 / avg, tapTimes.value[0]);
   }
 }
 

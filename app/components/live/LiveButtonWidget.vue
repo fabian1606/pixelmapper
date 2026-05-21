@@ -20,8 +20,20 @@ const pressed = ref(false);
 
 const section = useSectionBinding({ widget: () => props.widget });
 
+const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout' };
+
+function autoLabel(w: typeof props.widget): string | null {
+  const m = w.mapping;
+  if (m.type === 'global-function' && m.globalFunction) return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
+  if (m.type === 'preset' && m.presetId) {
+    const p = engineStore.savedPresets.find((sp: any) => sp.id === m.presetId);
+    if (p?.name) return p.name;
+  }
+  return null;
+}
+
 // Visual label/color: section binding wins when this widget is part of a section.
-const displayLabel = computed(() => section.effectiveLabel.value ?? props.widget.label ?? props.widget.type);
+const displayLabel = computed(() => section.effectiveLabel.value ?? props.widget.label ?? autoLabel(props.widget) ?? props.widget.type);
 const displayColor = computed(() => section.effectiveColor.value ?? props.widget.color ?? '#334155');
 
 // Single/multi-select sections also light up when "active" without being held.
@@ -50,6 +62,18 @@ function applyOwnMapping(active: boolean) {
     if (ch) {
       ch.stepValues = [active ? 255 : 0];
       engineStore.triggerCanvasSync?.();
+    }
+  } else if (mapping.type === 'global-function' && mapping.globalFunction) {
+    if (active) {
+      engineStore.pressOverwrite(props.widget.id, mapping.globalFunction, mapping.globalFunctionConfig ?? {});
+      queueMicrotask(() => liveBus.dispatch('overwrite.press', {
+        key: props.widget.id,
+        type: mapping.globalFunction!,
+        config: mapping.globalFunctionConfig ?? {},
+      }));
+    } else {
+      engineStore.releaseOverwrite(props.widget.id);
+      queueMicrotask(() => liveBus.dispatch('overwrite.release', { key: props.widget.id }));
     }
   }
 }

@@ -191,6 +191,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             1 => EffectDirection::Linear,
             2 => EffectDirection::Radial,
             3 => EffectDirection::Symmetrical,
+            4 => EffectDirection::Angular,
             _ => EffectDirection::None,
         };
 

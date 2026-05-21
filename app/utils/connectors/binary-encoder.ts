@@ -44,7 +44,7 @@ export const CHANNEL_TYPE_ID: Record<string, number> = {
 };
 
 const SPEED_MODE_ID: Record<string, number> = { time: 0, beat: 1, infinite: 2 };
-const DIRECTION_ID:  Record<string, number> = { NONE: 0, LINEAR: 1, RADIAL: 2, SYMMETRICAL: 3 };
+const DIRECTION_ID:  Record<string, number> = { NONE: 0, LINEAR: 1, RADIAL: 2, SYMMETRICAL: 3, ANGULAR: 4 };
 
 // ── Low-level buffer writer ───────────────────────────────────────────────────
 

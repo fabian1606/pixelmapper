@@ -15,6 +15,7 @@ registerLiveOp<ChannelUpdatePayload>('channel.update', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
+  persistent: true,
   apply: ({ channels }, _userId, ctx) => {
     const fixtures = ctx.engineStore.flatFixtures;
     for (const entry of channels) {

@@ -100,6 +100,7 @@ registerLiveOp<ColorOverridePayload>('color.override', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
+  persistent: true,
   apply: ({ key, rgb }) => {
     const engineStore = useEngineStore();
     const preset = engineStore.savedPresets.find((p: any) => p.id === key);

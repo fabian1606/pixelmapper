@@ -22,6 +22,19 @@ export const useConnectionsStore = defineStore('connections', () => {
   }
 
   /**
+   * Tear down every connector (kills their retry timers via `disconnect()`) and
+   * empty the list. Called by engine-store before applying a new project's
+   * snapshot so connectors from the previous project don't keep retrying in
+   * the background or accidentally inherit the new project's IDs.
+   */
+  async function reset() {
+    for (const c of connectors) {
+      try { await c.disconnect(); } catch {}
+    }
+    connectors.splice(0, connectors.length);
+  }
+
+  /**
    * Extract a 512-byte slice for a specific universe from the flat DMX buffer.
    * Universe 1 → bytes 0-511, Universe 2 → bytes 512-1023, etc.
    */
@@ -97,6 +110,7 @@ export const useConnectionsStore = defineStore('connections', () => {
     connectors,
     add,
     remove,
+    reset,
     sendFrame,
     notifyEngineState,
     getUsedUniverses,

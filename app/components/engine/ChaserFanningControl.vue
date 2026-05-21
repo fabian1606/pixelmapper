@@ -50,6 +50,7 @@ function onDirectionChange(val: any) {
             <SelectItem value="LINEAR" class="text-xs">Linear</SelectItem>
             <SelectItem value="RADIAL" class="text-xs">Radial</SelectItem>
             <SelectItem value="SYMMETRICAL" class="text-xs">Symmetrical</SelectItem>
+            <SelectItem value="ANGULAR" class="text-xs">Angular</SelectItem>
           </SelectGroup>
         </SelectContent>
       </Select>

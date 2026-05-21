@@ -1,6 +1,6 @@
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { useLiveModeStore } from '~/stores/live-mode-store';
-import { useHistory } from '~/components/engine/composables/use-history';
+import { useHistory, triggerSaveSnapshot } from '~/components/engine/composables/use-history';
 import {
   AddLiveWidgetCommand,
   RemoveLiveWidgetCommand,
@@ -182,6 +182,7 @@ export function useLiveShortcuts() {
     { key: 'Delete',                     label: 'Delete',        handler: deleteSelected },
     { key: 'Backspace',                  label: 'Delete',        handler: deleteSelected },
     { key: 'Escape',                     label: 'Clear Sel.',    handler: clearSelection },
+    { key: 's', ctrl: true,              label: 'Force Snapshot', handler: () => triggerSaveSnapshot() },
   ]);
 
   return {

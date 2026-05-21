@@ -25,14 +25,18 @@ export const lastSeenSequenceNumber = ref<number>(0);
 const persistenceHooks = {
   pushChange: null as ((commandType: string, payload: object) => Promise<number | undefined>) | null,
   saveSnapshot: null as (() => Promise<void>) | null,
+  /** Called after any local mutation that may need to land in a snapshot. */
+  markDirty: null as (() => void) | null,
 };
 
 export function setPersistenceHooks(hooks: {
   pushChange: (commandType: string, payload: object) => Promise<number | undefined>;
   saveSnapshot: () => Promise<void>;
+  markDirty?: () => void;
 }) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
+  persistenceHooks.markDirty = hooks.markDirty ?? null;
 }
 
 export function triggerSaveSnapshot() {
@@ -47,6 +51,7 @@ export function triggerSaveSnapshot() {
  */
 export function persistChange(commandType: string, payload: object) {
   if (!persistenceHooks.pushChange) return;
+  persistenceHooks.markDirty?.();
   persistenceHooks.pushChange(commandType, payload).then((seq) => {
     if (seq != null) lastSeenSequenceNumber.value = seq;
     commandsSinceSnapshot.value++;
@@ -68,6 +73,7 @@ export function useHistory() {
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
     version.value++;
+    persistenceHooks.markDirty?.();
 
     if (isSerializable(command) && persistenceHooks.pushChange) {
       const payload = command.toPayload();
@@ -99,6 +105,7 @@ export function useHistory() {
     command.undo();
     future.value.push(command);
     version.value++;
+    persistenceHooks.markDirty?.();
 
     // Persist the undo by pushing an inverse forward-command to the DB so
     // (a) the change survives reload and (b) collaborators see the undo too.
@@ -125,6 +132,7 @@ export function useHistory() {
     command.execute();
     past.value.push(command);
     version.value++;
+    persistenceHooks.markDirty?.();
 
     // Persist the redo too — same pattern as forward execute.
     if (isSerializable(command) && persistenceHooks.pushChange) {

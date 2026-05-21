@@ -97,6 +97,23 @@ export class WaveformEffect extends BaseOscillatorEffect {
         top: `${vTop}px`,
         backgroundImage: `repeating-radial-gradient(circle at ${ox - vLeft}px ${oy - vTop}px, ${gradientBody})`,
       };
+    } else if (this.direction === 'ANGULAR') {
+      const size = Math.max(worldWidth, worldHeight) * 2;
+      const fromDeg = this.reverse ? angleDeg + 180 : angleDeg;
+      const conicStops = stopStrings.map((s, i) => {
+        const deg = (i / STOPS) * 360;
+        const rgba = s.replace(/[\d.]+px$/, `${deg.toFixed(1)}deg`);
+        return rgba;
+      }).join(', ');
+      return {
+        position: 'absolute',
+        width: `${size}px`,
+        height: `${size}px`,
+        left: `${ox - size / 2}px`,
+        top: `${oy - size / 2}px`,
+        backgroundImage: `conic-gradient(from ${fromDeg}deg at 50% 50%, ${conicStops})`,
+        borderRadius: '50%',
+      };
     }
     return {};
   }

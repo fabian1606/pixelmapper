@@ -7,7 +7,7 @@ import FixtureEditor from '~/components/engine/FixtureEditor.vue';
 import FixtureSidebar from '~/components/engine/FixtureSidebar.vue';
 import FixturePropertiesSidebar from '~/components/engine/FixturePropertiesSidebar.vue';
 import { SidebarProvider } from '@/components/ui/sidebar';
-import { useHistory } from '~/components/engine/composables/use-history';
+import { useHistory, triggerSaveSnapshot } from '~/components/engine/composables/use-history';
 import { useWorkspaceOperations } from '~/components/engine/composables/use-workspace-operations';
 import { UpdateFixtureTypesCommand } from '~/components/engine/commands/update-fixture-types-command';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
@@ -152,6 +152,7 @@ useShortcuts([
   { key: 'Backspace',                           label: 'Delete Selected', handler: handleDeleteSelected },
   { key: 'a',         shift: true,              label: 'Add Fixture',    handler: () => { addDialogOpen.value = true } },
   { key: 'p',         shift: true,              label: 'Save as Preset', handler: () => fixtureSidebarRef.value?.quickSave() },
+  { key: 's',         ctrl: true,               label: 'Force Snapshot', handler: () => triggerSaveSnapshot() },
 ])
 </script>
 

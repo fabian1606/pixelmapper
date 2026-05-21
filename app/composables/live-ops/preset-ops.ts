@@ -11,6 +11,7 @@ interface PresetSetPayload { presetId: string | null; }
 registerLiveOp<PresetSetPayload>('preset.set', {
   scope: 'shared',
   throttle: 'immediate',
+  persistent: true,
   apply: ({ presetId }) => {
     setActivePreset(presetId, { broadcast: false, persist: false });
   },

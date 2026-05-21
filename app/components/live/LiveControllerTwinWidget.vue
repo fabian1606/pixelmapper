@@ -54,7 +54,7 @@ function getChild(id: string) {
 }
 
 // ── Mapping dispatch ────────────────────────────────────────────────────────
-function applyMapping(mapping: LiveMapping, active: boolean, value?: number) {
+function applyMapping(mapping: LiveMapping, active: boolean, value?: number, controlId?: string) {
   if (mapping.type === 'preset' && mapping.presetId && active) {
     setActivePreset(mapping.presetId);
   } else if (mapping.type === 'channel' && mapping.fixtureId != null && mapping.channelOffset != null) {
@@ -66,6 +66,17 @@ function applyMapping(mapping: LiveMapping, active: boolean, value?: number) {
     }
   } else if (mapping.type === 'page-switch' && mapping.targetPageId && active) {
     store.setActivePage(mapping.targetPageId);
+  } else if (mapping.type === 'global-function' && mapping.globalFunction) {
+    const key = `${props.widget.id}::${controlId ?? ''}`;
+    if (active) {
+      engineStore.pressOverwrite(key, mapping.globalFunction, mapping.globalFunctionConfig ?? {});
+      queueMicrotask(() => liveBus.dispatch('overwrite.press', {
+        key, type: mapping.globalFunction!, config: mapping.globalFunctionConfig ?? {},
+      }));
+    } else {
+      engineStore.releaseOverwrite(key);
+      queueMicrotask(() => liveBus.dispatch('overwrite.release', { key }));
+    }
   }
 }
 
@@ -324,10 +335,20 @@ function pickLabelPosition(ctrl: ControllerControl): 'inside' | 'below' {
  * actually bound — the definition's default ("Pad 0,0") is not shown so
  * unbound buttons stay clean. Manual child-label override is honored.
  */
+const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout' };
+
 function resolveLabelText(controlId: string, _ctrl: ControllerControl): string {
   const bound = boundPresetFor(controlId);
   if (bound) return bound.label ?? bound.preset.name ?? '';
-  return getChild(controlId)?.label ?? '';
+  const child = getChild(controlId);
+  if (child?.label) return child.label;
+  const m = child?.mapping;
+  if (m?.type === 'global-function' && m.globalFunction) return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
+  if (m?.type === 'preset' && m.presetId) {
+    const p = engineStore.savedPresets.find((sp: any) => sp.id === m.presetId);
+    if (p?.name) return p.name;
+  }
+  return '';
 }
 
 interface LabelMetrics {
@@ -489,7 +510,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ctrl.id });
     if (!sectionHandled) {
       const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, true);
+      if (child) applyMapping(child.mapping, true, undefined, ctrl.id);
     }
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ctrl.id,
@@ -504,7 +525,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ctrl.id });
     if (!sectionHandled) {
       const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, false);
+      if (child) applyMapping(child.mapping, false, undefined, ctrl.id);
     }
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ctrl.id,
@@ -772,7 +793,7 @@ function attachDriver() {
       const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ev.controlId });
       if (!sectionHandled) {
         const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, true);
+        if (child) applyMapping(child.mapping, true, undefined, ev.controlId);
       }
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, true);
@@ -781,7 +802,7 @@ function attachDriver() {
       const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ev.controlId });
       if (!sectionHandled) {
         const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, false);
+        if (child) applyMapping(child.mapping, false, undefined, ev.controlId);
       }
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, false);

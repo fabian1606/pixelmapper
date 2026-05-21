@@ -21,17 +21,27 @@ const beatActive = ref(false);
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let beatTimeout: ReturnType<typeof setTimeout> | null = null;
 
-function startBeatInterval() {
-  if (intervalId) clearInterval(intervalId);
-  const ms = 60000 / (bpm.value || 120);
-  intervalId = setInterval(() => {
-    beatActive.value = true;
-    if (beatTimeout) clearTimeout(beatTimeout);
-    beatTimeout = setTimeout(() => { beatActive.value = false; }, 120);
-  }, ms);
+function pulse() {
+  beatActive.value = true;
+  setTimeout(() => { beatActive.value = false; }, 120);
 }
 
-onMounted(() => { watch(bpm, startBeatInterval, { immediate: true }); });
+function startBeatInterval() {
+  if (intervalId) clearInterval(intervalId);
+  if (beatTimeout) clearTimeout(beatTimeout);
+  const ms = 60000 / (bpm.value || 120);
+  const elapsed = Date.now() - engineStore.clockEpoch;
+  const phase = ((elapsed % ms) + ms) % ms;
+  const delay = ms - phase;
+  beatTimeout = setTimeout(() => {
+    pulse();
+    intervalId = setInterval(pulse, ms);
+  }, delay);
+}
+
+onMounted(() => {
+  watch([bpm, () => engineStore.clockEpoch], startBeatInterval, { immediate: true });
+});
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId);
   if (beatTimeout) clearTimeout(beatTimeout);
@@ -42,13 +52,15 @@ onUnmounted(() => {
 const tapTimes = ref<number[]>([]);
 let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
 
-function applyBpm(newBpm: number) {
+function applyBpm(newBpm: number, epochMs?: number) {
   const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
   if (!engineStore.engine) return;
   engineStore.engine.globalBpm.value = clamped;
   engineStore.engine.postBpm(clamped);
-  engineStore.setClockEpoch(Date.now());
+  const epoch = epochMs ?? Date.now();
+  engineStore.setClockEpoch(epoch);
   liveBus.dispatch('engine.bpm', { bpm: clamped });
+  if (epochMs !== undefined) liveBus.dispatch('engine.clock', { epochMs: epoch });
 }
 
 function onTap() {
@@ -64,7 +76,7 @@ function onTap() {
     for (let i = 1; i < tapTimes.value.length; i++) {
       diffs.push(tapTimes.value[i] - tapTimes.value[i - 1]);
     }
-    applyBpm(60000 / (diffs.reduce((a, b) => a + b, 0) / diffs.length));
+    applyBpm(60000 / (diffs.reduce((a, b) => a + b, 0) / diffs.length), tapTimes.value[0]);
   }
 }
 

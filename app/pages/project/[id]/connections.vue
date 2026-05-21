@@ -129,6 +129,20 @@ function nextOutputMapping(connector: BaseConnector, index: number, universe: nu
   return next;
 }
 
+/**
+ * Human-readable status. Folds the autoReconnect-while-connecting case into a
+ * dedicated label so the user knows the connector is actively retrying rather
+ * than stuck.
+ */
+function statusLabel(connector: BaseConnector): string {
+  const s = connector.status.value;
+  if (s === 'connecting' && connector.autoReconnect.value) return 'neu verbinden…';
+  if (s === 'connecting') return 'verbinden…';
+  if (s === 'connected')  return 'verbunden';
+  if (s === 'error')      return 'Fehler';
+  return 'getrennt';
+}
+
 function asSerial(c: BaseConnector): SerialConnector | null {
   return c instanceof SerialConnector ? c : null;
 }
@@ -391,8 +405,8 @@ function assignedCount(connector: BaseConnector): number {
           <div v-if="connector.errorMessage.value" class="text-xs text-red-400 truncate">
             {{ connector.errorMessage.value }}
           </div>
-          <div v-else class="text-xs text-muted-foreground capitalize">
-            {{ connector.status.value }}
+          <div v-else class="text-xs text-muted-foreground">
+            {{ statusLabel(connector) }}
           </div>
         </div>
 
@@ -418,15 +432,25 @@ function assignedCount(connector: BaseConnector): number {
           Einrichten
         </button>
 
+        <!--
+          "Trennen" shows whenever the connector is actively trying to stay
+          connected — either currently connected OR mid-retry-loop. That's the
+          only way for the user to stop the 2 s retry cycle.
+        -->
         <button
-          v-if="connector.status.value === 'connected' && !asSerial(connector)?.isFlashing.value"
+          v-if="(connector.status.value === 'connected' || connector.autoReconnect.value) && !asSerial(connector)?.isFlashing.value"
           class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
           @click="connector.disconnect()"
         >
           Trennen
         </button>
+        <!--
+          "Verbinden" only appears when we're idle (not connected, not retrying).
+          During retries it would do nothing useful since connect() is already
+          being called on a timer.
+        -->
         <button
-          v-else-if="connector.status.value !== 'connected'"
+          v-else-if="connector.status.value !== 'connected' && !connector.autoReconnect.value"
           class="px-2 py-1 rounded text-xs border transition-colors"
           :class="asWebSocket(connector) && !asWebSocket(connector)!.url.value
             ? 'border-border/40 text-muted-foreground/40 cursor-not-allowed'

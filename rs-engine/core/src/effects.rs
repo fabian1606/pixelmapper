@@ -42,6 +42,12 @@ impl BaseOscillator {
             EffectDirection::Linear => dx * angle.cos() + dy * angle.sin(),
             EffectDirection::Radial => (dx * dx + dy * dy).sqrt(),
             EffectDirection::Symmetrical => (dx * angle.cos() + dy * angle.sin()).abs(),
+            EffectDirection::Angular => {
+                let mut delta = dy.atan2(dx) - angle;
+                if delta > core::f32::consts::PI { delta -= core::f32::consts::TAU; }
+                if delta < -core::f32::consts::PI { delta += core::f32::consts::TAU; }
+                delta / core::f32::consts::TAU
+            }
             EffectDirection::None => 0.0,
         }
     }
@@ -522,6 +528,12 @@ impl Effect for ColorEffect {
             EffectDirection::Linear     => dx * angle.cos() + dy * angle.sin(),
             EffectDirection::Radial     => (dx * dx + dy * dy).sqrt(),
             EffectDirection::Symmetrical => (dx * angle.cos() + dy * angle.sin()).abs(),
+            EffectDirection::Angular    => {
+                let mut delta = dy.atan2(dx) - angle;
+                if delta > core::f32::consts::PI { delta -= core::f32::consts::TAU; }
+                if delta < -core::f32::consts::PI { delta += core::f32::consts::TAU; }
+                delta / core::f32::consts::TAU
+            }
             EffectDirection::None       => 0.0,
         };
         let fanning = self.config.fanning.max(0.0001);

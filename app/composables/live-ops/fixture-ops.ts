@@ -9,6 +9,7 @@ registerLiveOp<FixtureDragPayload>('fixture.drag', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
+  persistent: true,
   apply: ({ fixtures }, _userId, ctx) => {
     const flat = ctx.engineStore.flatFixtures;
     let mutated = false;

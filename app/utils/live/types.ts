@@ -6,7 +6,30 @@ export interface LiveControllerInstance {
   definitionKey: string
 }
 
-export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'none'
+export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'none'
+
+export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout'
+
+export interface StrobeConfig {
+  frequency: number
+  beatSync: boolean
+  beatDivision: number
+}
+
+export interface BlindConfig {
+  color: string
+  dimmerCurve: boolean
+}
+
+export type GlobalFunctionConfig = StrobeConfig | BlindConfig | Record<string, never>
+
+export function defaultStrobeConfig(): StrobeConfig {
+  return { frequency: 8, beatSync: false, beatDivision: 8 }
+}
+
+export function defaultBlindConfig(): BlindConfig {
+  return { color: '#ffffff', dimmerCurve: false }
+}
 
 export interface LiveMapping {
   type: LiveMappingType
@@ -20,6 +43,9 @@ export interface LiveMapping {
   paramKey?: string
   // page-switch
   targetPageId?: string
+  // global-function
+  globalFunction?: GlobalFunctionType
+  globalFunctionConfig?: GlobalFunctionConfig
 }
 
 /**

@@ -39,6 +39,13 @@ export abstract class BaseConnector {
   errorMessage = ref<string | null>(null);
   logs: LogLine[] = reactive([]);
 
+  /**
+   * Armed only after the first successful `'connected'` transition. When true,
+   * a drop/error triggers a 2-second retry loop. Cleared by manual disconnect()
+   * so the user can stop the loop. Not persisted — purely session-state.
+   */
+  autoReconnect = ref(false);
+
   /** Number of physical DMX outputs this connector has (0 = parameter-based, no direct DMX output). */
   outputCount = 0;
 

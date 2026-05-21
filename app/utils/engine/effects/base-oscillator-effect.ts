@@ -58,6 +58,12 @@ export abstract class BaseOscillatorEffect extends BaseEffect {
         return Math.sqrt(dx * dx + dy * dy);
       case 'SYMMETRICAL':
         return Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));
+      case 'ANGULAR': {
+        let delta = Math.atan2(dy, dx) - angle;
+        if (delta > Math.PI) delta -= 2 * Math.PI;
+        if (delta < -Math.PI) delta += 2 * Math.PI;
+        return delta / (2 * Math.PI);
+      }
       default:
         return dx * Math.cos(angle) + dy * Math.sin(angle);
     }
@@ -133,6 +139,18 @@ export abstract class BaseOscillatorEffect extends BaseEffect {
         left: `${vLeft}px`,
         top: `${vTop}px`,
         backgroundImage: `repeating-radial-gradient(circle at ${ox - vLeft}px ${oy - vTop}px, ${cTrough} 0px, ${cCrest} ${fanningPx / 2}px, ${cTrough} ${fanningPx}px)`
+      };
+    } else if (this.direction === 'ANGULAR') {
+      const size = Math.max(worldWidth, worldHeight) * 2;
+      const fromDeg = this.reverse ? angleDeg + 180 : angleDeg;
+      return {
+        position: 'absolute',
+        width: `${size}px`,
+        height: `${size}px`,
+        left: `${ox - size / 2}px`,
+        top: `${oy - size / 2}px`,
+        backgroundImage: `conic-gradient(from ${fromDeg}deg at 50% 50%, ${cTrough}, ${cCrest} 50%, ${cTrough} 100%)`,
+        borderRadius: '50%',
       };
     }
     return {};

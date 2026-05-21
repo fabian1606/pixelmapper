@@ -190,7 +190,8 @@ export function useChaserModifiers(
     if (!effectEngine) return;
 
     // Is this a continuous value change? If so, debounce the commit
-    const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning';
+    const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning'
+      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams';
     const isDirection = key === 'direction';
 
     let before: Effect[] | null = null;

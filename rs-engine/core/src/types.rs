@@ -79,6 +79,8 @@ pub enum EffectDirection {
     Radial,
     #[serde(rename = "SYMMETRICAL")]
     Symmetrical,
+    #[serde(rename = "ANGULAR")]
+    Angular,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

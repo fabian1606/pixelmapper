@@ -6,6 +6,7 @@ import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
+import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_FX_BIN,
   buildLayoutBin, buildChannelsBin, buildEffectsBin,
@@ -26,6 +27,9 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 import '~/components/engine/commands/connector-commands';
 import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
+import { parseHexColor } from '~/utils/engine/color-math';
+import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 
 export const useEngineStore = defineStore('engine', () => {
@@ -35,6 +39,132 @@ export const useEngineStore = defineStore('engine', () => {
   const flashStack = ref<Array<{ key: string; presetId: string }>>([]);
   /** The preset actually rendering: top of flash stack, or the latched base preset. */
   const effectivePresetId = computed<string | null>(() => flashStack.value.at(-1)?.presetId ?? selectedPresetId.value);
+
+  /** Global overwrite stack (highest priority). Top entry overrides all preset/effect output. */
+  type OverwriteEntry = {
+    key: string;
+    type: GlobalFunctionType;
+    config: GlobalFunctionConfig;
+    /** Snapshot of channel stepValues[0] before overwrite, keyed by `${fixId}:${chIdx}`. */
+    snapshot: Map<string, number>;
+  };
+  const overwriteStack = ref<OverwriteEntry[]>([]);
+  const effectiveOverwrite = computed(() => overwriteStack.value.at(-1) ?? null);
+
+  /** Strobe needs a timer to alternate dimmer values. Only the top-of-stack strobe is active. */
+  let strobeTimer: ReturnType<typeof setInterval> | null = null;
+  let strobePhase = false;
+
+  function _stopStrobeTimer() {
+    if (strobeTimer != null) { clearInterval(strobeTimer); strobeTimer = null; }
+    strobePhase = false;
+  }
+
+  function _writeOverwriteToChannels(entry: OverwriteEntry) {
+    const fixtures = flatFixtures.value;
+    if (entry.type === 'blackout') {
+      for (const f of fixtures) {
+        for (const ch of f.channels) {
+          if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = 0;
+        }
+      }
+    } else if (entry.type === 'blind') {
+      const cfg = entry.config as BlindConfig;
+      const rgb = parseHexColor(cfg.color ?? '#ffffff') ?? { r: 255, g: 255, b: 255 };
+      for (const f of fixtures) {
+        for (const ch of f.channels) {
+          if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = 255;
+          else if (ch.type === 'RED')   ch.chaserConfig.stepValues[0] = rgb.r;
+          else if (ch.type === 'GREEN') ch.chaserConfig.stepValues[0] = rgb.g;
+          else if (ch.type === 'BLUE')  ch.chaserConfig.stepValues[0] = rgb.b;
+        }
+      }
+    } else if (entry.type === 'strobe') {
+      const cfg = entry.config as StrobeConfig;
+      const hz = cfg.beatSync
+        ? (engine.globalBpm.value / 60) * (cfg.beatDivision ?? 8)
+        : (cfg.frequency ?? 8);
+      const halfPeriodMs = Math.max(10, 500 / Math.max(0.1, hz));
+      const tick = () => {
+        strobePhase = !strobePhase;
+        const v = strobePhase ? 255 : 0;
+        for (const f of fixtures) {
+          for (const ch of f.channels) {
+            if (ch.role === 'DIMMER') ch.chaserConfig.stepValues[0] = v;
+          }
+        }
+        flushEngineOutput();
+      };
+      tick();
+      strobeTimer = setInterval(tick, halfPeriodMs);
+    }
+  }
+
+  function _snapshotAffectedChannels(type: GlobalFunctionType): Map<string, number> {
+    const snap = new Map<string, number>();
+    const affects = (chType: string, chRole: string) => {
+      if (type === 'blackout' || type === 'strobe') return chRole === 'DIMMER';
+      if (type === 'blind') return chRole === 'DIMMER' || chType === 'RED' || chType === 'GREEN' || chType === 'BLUE';
+      return false;
+    };
+    for (const f of flatFixtures.value) {
+      for (let i = 0; i < f.channels.length; i++) {
+        const ch = f.channels[i]!;
+        if (affects(ch.type, ch.role)) {
+          snap.set(`${f.id}:${i}`, ch.chaserConfig.stepValues[0] ?? 0);
+        }
+      }
+    }
+    return snap;
+  }
+
+  function _restoreSnapshot(snap: Map<string, number>) {
+    for (const f of flatFixtures.value) {
+      for (let i = 0; i < f.channels.length; i++) {
+        const key = `${f.id}:${i}`;
+        if (snap.has(key)) {
+          f.channels[i]!.chaserConfig.stepValues[0] = snap.get(key)!;
+        }
+      }
+    }
+  }
+
+  function pressOverwrite(key: string, type: GlobalFunctionType, config: GlobalFunctionConfig) {
+    if (overwriteStack.value.some(e => e.key === key)) return;
+    _stopStrobeTimer();
+    const snapshot = _snapshotAffectedChannels(type);
+    const entry: OverwriteEntry = { key, type, config, snapshot };
+    overwriteStack.value.push(entry);
+    _writeOverwriteToChannels(entry);
+    flushEngineOutput();
+  }
+
+  function releaseOverwrite(key: string) {
+    const idx = overwriteStack.value.findIndex(e => e.key === key);
+    if (idx === -1) return;
+    const entry = overwriteStack.value[idx]!;
+    overwriteStack.value.splice(idx, 1);
+    _stopStrobeTimer();
+    _restoreSnapshot(entry.snapshot);
+    // Re-apply whatever overwrite is now on top (if any)
+    const top = overwriteStack.value.at(-1);
+    if (top) {
+      // Refresh its snapshot from current (restored) state, then re-apply
+      top.snapshot = _snapshotAffectedChannels(top.type);
+      _writeOverwriteToChannels(top);
+    }
+    flushEngineOutput();
+  }
+
+  function clearOverwriteStack() {
+    _stopStrobeTimer();
+    // Restore from bottom-up so we end with the original state
+    while (overwriteStack.value.length > 0) {
+      const entry = overwriteStack.value.pop()!;
+      _restoreSnapshot(entry.snapshot);
+    }
+    flushEngineOutput();
+  }
 
   const engine = markRaw(new EffectEngine());
 
@@ -131,6 +261,53 @@ export const useEngineStore = defineStore('engine', () => {
    */
   let commitPendingChanges: () => Promise<void> = async () => {};
   function commitPendingPersistence() { return commitPendingChanges(); }
+
+  // ── Time-triggered snapshot persistence ───────────────────────────────────
+  // The snapshot captures all "live" state that has no dedicated Command
+  // (BPM, direct channel mutations, in-flight modifier params, etc.). It is
+  // the safety net that bounds how stale a reload can be. Triggered by:
+  //   - 10s of idle after the last dirty mark, OR
+  //   - 30s hard cap during continuous editing.
+  let engineDirty = false;
+  let snapshotInFlight = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let hardCapTimer: ReturnType<typeof setTimeout> | null = null;
+  let persistenceHooksReady = false;
+  let triggerSaveSnapshotInternal: () => Promise<void> = async () => {};
+  const SNAPSHOT_IDLE_MS = 10_000;
+  const SNAPSHOT_HARDCAP_MS = 30_000;
+
+  function markEngineDirty() {
+    engineDirty = true;
+    // Setting the flag pre-wiring is harmless — the first dirty event after
+    // loadProject() finishes wiring will arm both timers.
+    if (!persistenceHooksReady) return;
+    if (idleTimer != null) clearTimeout(idleTimer);
+    idleTimer = setTimeout(flushSnapshotIfDirty, SNAPSHOT_IDLE_MS);
+    if (hardCapTimer == null) {
+      hardCapTimer = setTimeout(flushSnapshotIfDirty, SNAPSHOT_HARDCAP_MS);
+    }
+  }
+
+  async function flushSnapshotIfDirty() {
+    if (snapshotInFlight) {
+      // Leave dirty=true; whichever timer fires after the in-flight save will retry.
+      return;
+    }
+    if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
+    if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
+    if (!engineDirty) return;
+    engineDirty = false;
+    snapshotInFlight = true;
+    try {
+      await triggerSaveSnapshotInternal();
+    } catch (err) {
+      console.warn('[engine] time-triggered snapshot failed:', err);
+      engineDirty = true; // retry on next dirty mark
+    } finally {
+      snapshotInFlight = false;
+    }
+  }
 
   function setOverride(bufferIndex: number, value: number) {
     const next = new Map(getOverrideMap());
@@ -230,6 +407,12 @@ export const useEngineStore = defineStore('engine', () => {
 
     const history = useHistory();
     const connectionsStore = useConnectionsStore();
+    const liveStore = useLiveModeStore();
+
+    // Clear overwrite stack on page switch (avoids stuck overwrite after navigation).
+    watch(() => liveStore.activePageId, () => {
+      overwriteStack.value.splice(0);
+    });
 
     // Sync UI trigger on history undo/redo. Also re-flush the engine pipeline
     // since the deep-watcher rebuilds are gone — without an explicit flush
@@ -453,19 +636,29 @@ export const useEngineStore = defineStore('engine', () => {
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
     const connectionsStore = useConnectionsStore();
     connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId } = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers } = deserializeProject(snapshot);
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
     activeEffects.value = effects;
     engine.effects = activeEffects.value;
     selectedPresetId.value = restoredPresetId;
+    // Restore global engine state captured in the snapshot (BPM + shared clock)
+    engine.globalBpm.value = restoredBpm;
+    engine.postBpm(restoredBpm);
+    clockEpoch.value = restoredEpoch;
+    engine.postEpoch(restoredEpoch);
     triggerRef(sceneNodes);
     // Load live pages SYNCHRONOUSLY so the tail replay (which runs immediately
     // after this in loadProject) sees the pages and can mutate them. Earlier
     // dynamic-import version dropped any tail live-widget commands silently.
     const liveStore = useLiveModeStore();
     liveStore.loadPages(livePages);
+    // Restore latched section state so buttons remain lit after reload.
+    // loadPages resets activeSectionMembers — this re-populates it from snapshot.
+    liveStore.activeSectionMembers = new Map(
+      Object.entries(restoredSectionMembers).map(([k, v]) => [k, new Set(v)]),
+    );
     liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
     // Reset the worker engine so no stale state from a previous project leaks
     // into the first frames, then dispatch fresh packets.
@@ -479,6 +672,13 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
+
+    // Reset snapshot timer state in case a previous project was loaded.
+    if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
+    if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
+    engineDirty = false;
+    snapshotInFlight = false;
+    persistenceHooksReady = false;
 
     const { data, error } = await supabase.functions.invoke('load-project', {
       body: { projectId },
@@ -507,6 +707,10 @@ export const useEngineStore = defineStore('engine', () => {
     // Disconnect any hardware-controller instances from the previous project
     // so MIDI/HID ports don't leak across project loads. Bindings cleared too.
     await useControllerStore().reset();
+    // Same idea for output connectors — kill their websockets + retry timers
+    // before applyProjectSnapshot() recreates the (possibly differently-shaped)
+    // connector list from the new project's snapshot.
+    await useConnectionsStore().reset();
 
     // Apply the base snapshot if present
     if (data.snapshot) {
@@ -534,6 +738,17 @@ export const useEngineStore = defineStore('engine', () => {
       for (const inst of liveStore.liveControllers) {
         const driver = controllerStore.createDriver(inst.id, inst.definitionKey);
         if (driver) driver.connect().catch((e: unknown) => console.warn('[engine] auto-connect failed:', inst.id, e));
+      }
+    }
+
+    // Auto-connect WebSocket strip connectors that are fully configured. One
+    // attempt per connector; the per-connector autoReconnect flag arms only on
+    // a successful 'connected', so failed initial attempts leave the card
+    // showing "Verbinden" instead of spinning forever. Serial is intentionally
+    // skipped — requestPort() needs a user gesture.
+    for (const c of useConnectionsStore().connectors) {
+      if (c instanceof WebSocketConnector && c.url.value && c.fixtureId.value != null) {
+        c.connect().catch((e: unknown) => console.warn('[engine] ws auto-connect failed:', c.id, e));
       }
     }
 
@@ -574,6 +789,43 @@ export const useEngineStore = defineStore('engine', () => {
     }
     commitPendingChanges = flushPendingChanges;
 
+    // Build a snapshot of the full project state. Drains pending Commands
+    // first so lastSeenSequenceNumber matches the state we're about to
+    // capture. Reused by the time-triggered snapshot, the command-count
+    // threshold in use-history, and the beforeunload handler.
+    function buildSnapshot() {
+      const pinnedStore = usePinnedModifiersStore();
+      const liveStore = useLiveModeStore();
+      return serializeProject(
+        sceneNodes.value,
+        savedPresets.value,
+        pinnedStore.pinnedModifiers,
+        globalBases.value,
+        activeEffects.value,
+        liveStore.pages,
+        liveStore.liveControllers,
+        selectedPresetId.value,
+        connectionsStore.getSnapshots(),
+        engine.globalBpm.value,
+        clockEpoch.value,
+        Object.fromEntries(
+          [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
+        ),
+      );
+    }
+
+    async function doSaveSnapshot() {
+      await flushPendingChanges();
+      const snapshot = buildSnapshot();
+      await supabase.functions.invoke('save-snapshot', {
+        body: {
+          projectId,
+          snapshot,
+          sequenceNumber: lastSeenSequenceNumber.value,
+        },
+      });
+    }
+
     // Wire up persistence hooks so future commands are pushed to Supabase
     setPersistenceHooks({
       pushChange: (commandType, payload) =>
@@ -582,34 +834,17 @@ export const useEngineStore = defineStore('engine', () => {
           if (flushTimer != null) clearTimeout(flushTimer);
           flushTimer = setTimeout(flushPendingChanges, FLUSH_SETTLE_MS);
         }),
-      saveSnapshot: async () => {
-        // Drain any queued commands first so lastSeenSequenceNumber matches
-        // the state the snapshot is about to capture.
-        await flushPendingChanges();
-        const { data: pinnedStore } = await import('~/stores/pinned-modifiers-store').then(m => ({
-          data: m.usePinnedModifiersStore(),
-        }));
-        const liveStore = useLiveModeStore();
-        const snapshot = serializeProject(
-          sceneNodes.value,
-          savedPresets.value,
-          pinnedStore.pinnedModifiers,
-          globalBases.value,
-          activeEffects.value,
-          liveStore.pages,
-          liveStore.liveControllers,
-          selectedPresetId.value,
-          connectionsStore.getSnapshots(),
-        );
-        await supabase.functions.invoke('save-snapshot', {
-          body: {
-            projectId,
-            snapshot,
-            sequenceNumber: lastSeenSequenceNumber.value,
-          },
-        });
-      },
+      saveSnapshot: doSaveSnapshot,
+      markDirty: markEngineDirty,
     });
+
+    // Allow markEngineDirty() to arm its timers and bind the snapshot trigger
+    // to the just-wired hook.
+    triggerSaveSnapshotInternal = doSaveSnapshot;
+    persistenceHooksReady = true;
+    // If a live op fired during loadProject (before hooks were ready), the
+    // dirty flag is set but no timer is armed. Arm them now.
+    if (engineDirty) markEngineDirty();
 
     projectLoading.value = false;
 
@@ -623,24 +858,53 @@ export const useEngineStore = defineStore('engine', () => {
       ?? (supabase as any).supabaseUrl
       ?? '';
     const pushChangeUrl = `${supabaseUrl}/functions/v1/push-change`;
+    const saveSnapshotUrl = `${supabaseUrl}/functions/v1/save-snapshot`;
 
-    // On unload: flush any commands still waiting in the debounce window.
+    // On unload: flush any commands still waiting in the debounce window AND,
+    // if anything is dirty, send a final snapshot so reload picks up the
+    // latest live state (BPM, channel scrubs, modifier params, …).
     // fetch({ keepalive: true }) is sent by the browser even after the page tears down,
     // unlike a normal async fetch which the browser cancels on navigation/reload.
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
         if (flushTimer != null) clearTimeout(flushTimer);
-        if (pendingChanges.length === 0 || !cachedToken) return;
-        const body = JSON.stringify({
-          projectId,
-          changes: pendingChanges.map(c => ({ commandType: c.commandType, payload: c.payload })),
-        });
-        fetch(pushChangeUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
-          body,
-          keepalive: true,
-        });
+        if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
+        if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
+        if (!cachedToken) return;
+
+        // (a) Drain pending push-changes
+        if (pendingChanges.length > 0) {
+          const changesBody = JSON.stringify({
+            projectId,
+            changes: pendingChanges.map(c => ({ commandType: c.commandType, payload: c.payload })),
+          });
+          fetch(pushChangeUrl, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
+            body: changesBody,
+            keepalive: true,
+          });
+        }
+
+        // (b) Final snapshot if any local mutation happened since the last flush
+        if (engineDirty) {
+          try {
+            const snapshot = buildSnapshot();
+            const snapBody = JSON.stringify({
+              projectId,
+              snapshot,
+              sequenceNumber: lastSeenSequenceNumber.value,
+            });
+            fetch(saveSnapshotUrl, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
+              body: snapBody,
+              keepalive: true,
+            });
+          } catch (err) {
+            console.warn('[engine] beforeunload snapshot failed:', err);
+          }
+        }
       }, { once: true });
     }
   }
@@ -650,6 +914,11 @@ export const useEngineStore = defineStore('engine', () => {
     selectedPresetId,
     flashStack,
     effectivePresetId,
+    overwriteStack,
+    effectiveOverwrite,
+    pressOverwrite,
+    releaseOverwrite,
+    clearOverwriteStack,
     clockEpoch,
     setClockEpoch,
     engine,
@@ -680,5 +949,6 @@ export const useEngineStore = defineStore('engine', () => {
     applyProjectSnapshot,
     getReplayContext,
     commitPendingPersistence,
+    markEngineDirty,
   };
 });
