@@ -202,11 +202,17 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY))
 
   if (data.stripConfig) {
-    const sc: StripConfig = { ...data.stripConfig, points: [] }
+    // Default shapeType for legacy snapshots predating the line/circle support.
+    const sc: StripConfig = {
+      ...data.stripConfig,
+      shapeType: data.stripConfig.shapeType ?? 'bezier',
+      points: [],
+    }
     // Back-compat: snapshots created before the polyline refactor encode the
     // strip as fixturePosition + fixtureSize + rotation. Reconstruct two
     // vertices along the rotated axis so old projects load identically.
-    if (data.stripConfig.points && data.stripConfig.points.length >= 2) {
+    const minPoints = sc.shapeType === 'circle' ? 1 : 2;
+    if (data.stripConfig.points && data.stripConfig.points.length >= minPoints) {
       sc.points = data.stripConfig.points.map(p => ({ x: p.x, y: p.y }))
     } else {
       const W = 3000, H = 3000 // WORLD_WIDTH/HEIGHT — avoid circular import

@@ -214,7 +214,7 @@ defineExpose({
             <span class="text-xs text-muted-foreground w-20 shrink-0">Stacking</span>
             <Select
               :model-value="effectEngine?.stackBlendMode?.value ?? 'add'"
-              @update:model-value="(v: any) => { if (effectEngine) effectEngine.stackBlendMode.value = v as BlendMode }"
+              @update:model-value="(v: any) => { if (effectEngine) { effectEngine.stackBlendMode.value = v as BlendMode; handleChange(); } }"
             >
               <SelectTrigger class="h-7 text-xs flex-1" @click.stop @pointerdown.stop>
                 <span>{{ BLEND_MODE_LABELS[effectEngine?.stackBlendMode?.value ?? 'add'] }}</span>

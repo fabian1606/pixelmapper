@@ -113,18 +113,19 @@ function syncFixtures() {
       })),
       strip: f.stripConfig
         ? {
+            shapeType: f.stripConfig.shapeType,
             ledCount: f.stripConfig.ledCount,
             groupSize: f.stripConfig.groupSize,
-            // Target arc-length in world-pixels. The renderer walks from the
-            // star anchor (points[0]) along the curve for exactly this length,
-            // trimming a too-long polyline or extending a too-short one along
-            // its tangent. Length stays constant regardless of vertex moves.
+            // Target arc-length in world-pixels. For bezier this is the curve
+            // length walked from points[0]; for line it's the segment length;
+            // for circle it's the circumference (radius derived from this).
             targetLength: f.stripConfig.lengthMeters * PIXELS_PER_METER,
             points: f.stripConfig.points.map(p => [p.x, p.y] as [number, number]),
             // -1 means no vertex focused; the renderer skips the highlight ring.
             selectedVertexIdx: (props.editingVertex && props.editingVertex.fixtureId === f.id)
               ? props.editingVertex.idx
               : -1,
+            clockwise: f.stripConfig.clockwise ?? true,
           }
         : null,
     };

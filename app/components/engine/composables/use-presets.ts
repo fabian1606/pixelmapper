@@ -71,18 +71,6 @@ export function usePresets() {
     if (selectedPresetId.value === id) selectedPresetId.value = null;
   }
 
-  function renamePreset(id: string, newName: string): void {
-    const preset = savedPresets.value.find((p) => p.id === id);
-    if (preset) preset.name = newName;
-  }
-
-  function setPresetColor(id: string, color: string | undefined): void {
-    const preset = savedPresets.value.find((p) => p.id === id);
-    if (!preset) return;
-    if (color) preset.color = color;
-    else delete preset.color;
-  }
-
   return {
     savedPresets,
     selectedPresetId,
@@ -92,7 +80,5 @@ export function usePresets() {
     savePreset,
     overwritePreset,
     deletePreset,
-    renamePreset,
-    setPresetColor,
   };
 }

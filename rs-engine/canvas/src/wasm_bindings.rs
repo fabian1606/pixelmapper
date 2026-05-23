@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use femtovg::{Canvas, renderer::OpenGl};
 use crate::spatial::SpatialIndex;
-use crate::types::FixtureCanvasData;
+use crate::types::{FixtureCanvasData, StripShapeType};
 use crate::svg_render::{SvgCachedFixture, parse_svg};
 
 const FIXTURE_RADIUS: f32 = 18.0;
@@ -36,12 +36,19 @@ fn point_near_polyline_sq(px: f32, py: f32, points: &[[f32; 2]], threshold_sq: f
     false
 }
 
-/// Strip-curve hit test: samples the CAPPED curve (same one the renderer
+/// Strip-curve hit test: samples the CAPPED shape (same one the renderer
 /// draws) and checks distance to each chord. Clicking outside the rendered
 /// portion of the strip (e.g. a control-polyline tail that got trimmed) does
 /// NOT count as a hit, which matches the visual.
-fn point_near_strip_curve_sq(px: f32, py: f32, control_points: &[[f32; 2]], target_length: f32, threshold_sq: f32) -> bool {
-    let (samples, _cum) = crate::render::sample_strip_curve_capped(control_points, target_length);
+fn point_near_strip_curve_sq(
+    px: f32, py: f32,
+    shape: StripShapeType,
+    control_points: &[[f32; 2]],
+    target_length: f32,
+    clockwise: bool,
+    threshold_sq: f32,
+) -> bool {
+    let (samples, _cum) = crate::render::sample_strip_capped_dir(shape, control_points, target_length, clockwise);
     point_near_polyline_sq(px, py, &samples, threshold_sq)
 }
 
@@ -229,7 +236,7 @@ impl WasmCanvas {
                 None => continue,
             };
             if let Some(strip) = &f.strip {
-                if point_near_strip_curve_sq(wx, wy, &strip.points, strip.target_length, hit_dist_sq) {
+                if point_near_strip_curve_sq(wx, wy, strip.shape_type, &strip.points, strip.target_length, strip.clockwise, hit_dist_sq) {
                     return Some(f.id.clone());
                 }
                 // Strip AABB hit but cursor isn't actually on the curve.
@@ -287,10 +294,14 @@ impl WasmCanvas {
         None
     }
 
-    /// Hit-test for NeoPixel strip handles. Only fires for strips currently
-    /// in EDIT mode (i.e. `editing == true`). Returns one of:
+    /// Hit-test for NeoPixel strip handles. Returns one of:
     ///   - "<fixtureId>:vertex:<idx>"  → vertex handle hit (drag to move)
     ///   - "<fixtureId>:mid:<idx>"     → mid-segment handle hit (click to insert)
+    /// Shape-specific behavior:
+    ///   bezier → vertex + mid handles, ONLY when `editing == true`
+    ///   line   → vertex handles for points[0] and points[1] always (no edit-mode
+    ///            gating, no mid handles). The user grabs the visible end LEDs.
+    ///   circle → no handles at all; clicks fall through to body hit-test.
     /// Vertex handles take priority over mid-handles.
     #[wasm_bindgen]
     pub fn hit_test_strip_endpoint(&self, vx: f32, vy: f32) -> Option<String> {
@@ -305,8 +316,14 @@ impl WasmCanvas {
 
         // First pass: vertex handles (priority).
         for fixture in &self.fixtures {
-            if !fixture.editing { continue; }
             let strip = match &fixture.strip { Some(s) => s, None => continue };
+            match strip.shape_type {
+                StripShapeType::Bezier => {
+                    if !fixture.editing { continue; }
+                }
+                StripShapeType::Line => { /* always hit-test endpoints */ }
+                StripShapeType::Circle => continue,
+            }
             for (i, p) in strip.points.iter().enumerate() {
                 let d = (wx - p[0]).powi(2) + (wy - p[1]).powi(2);
                 if d <= vert_r_sq {
@@ -314,11 +331,11 @@ impl WasmCanvas {
                 }
             }
         }
-        // Second pass: mid-segment handles, placed at the ARC-LENGTH midpoint
-        // of each Bézier segment so they always sit on the visible curve.
+        // Second pass: mid-segment handles (bezier edit-mode only).
         for fixture in &self.fixtures {
             if !fixture.editing { continue; }
             let strip = match &fixture.strip { Some(s) => s, None => continue };
+            if strip.shape_type != StripShapeType::Bezier { continue; }
             if strip.points.len() < 2 { continue; }
             let (samples, cum) = crate::render::sample_strip_curve(&strip.points);
             for i in 0..strip.points.len() - 1 {

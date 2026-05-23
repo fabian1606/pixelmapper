@@ -10,8 +10,8 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { Plus, AlertTriangle } from 'lucide-vue-next';
-import type { NeoPixelChipType, StripConfig } from '~/utils/engine/core/fixture';
+import { Plus } from 'lucide-vue-next';
+import type { NeoPixelChipType, StripConfig, StripShapeType } from '~/utils/engine/core/fixture';
 import {
   createNeoPixelStripFixture,
   channelsPerPixel,
@@ -27,9 +27,17 @@ const emit = defineEmits<{
 
 const name = ref('NeoPixel Strip');
 const chipType = ref<NeoPixelChipType>('WS2812B');
+const shapeType = ref<StripShapeType>('bezier');
+const clockwise = ref(true);
 const ledCount = ref(60);
 const ledsPerMeter = ref(60);
 const groupSize = ref(1);
+
+const SHAPE_OPTIONS: { value: StripShapeType; label: string }[] = [
+  { value: 'bezier', label: 'Bezier Curve' },
+  { value: 'line',   label: 'Straight Line' },
+  { value: 'circle', label: 'Circle' },
+];
 
 const CHIP_OPTIONS: { value: NeoPixelChipType; label: string; channels: number }[] = [
   { value: 'WS2812B',      label: 'WS2812B (RGB)',     channels: 3 },
@@ -50,8 +58,9 @@ const lengthMeters = computed(() =>
 const pixelCount = computed(() => logicalPixelCount(ledCount.value, groupSize.value));
 const chPerPixel = computed(() => channelsPerPixel(chipType.value));
 const totalChannels = computed(() => pixelCount.value * chPerPixel.value);
+// Circle diameter in meters: circumference = ledCount/ledsPerMeter, diameter = circumference/π
+const circleDiameterM = computed(() => lengthMeters.value / Math.PI);
 
-const overflowsUniverse = computed(() => totalChannels.value > 512);
 
 const groupSizeClamped = computed(() => Math.min(Math.max(1, groupSize.value), ledCount.value));
 
@@ -61,12 +70,14 @@ function handleAdd() {
   if (ledCount.value < 1 || ledsPerMeter.value < 1) return;
 
   const config: StripConfig = {
+    shapeType: shapeType.value,
     chipType: chipType.value,
     ledCount: ledCount.value,
     ledsPerMeter: ledsPerMeter.value,
     groupSize: groupSizeClamped.value,
     lengthMeters: lengthMeters.value,
-    points: [], // factory generates initial 2 vertices
+    points: [], // factory generates initial vertices per shape
+    clockwise: clockwise.value,
   };
 
   // id and startAddress get reassigned by useWorkspaceOperations.handleAddOflFixtures.
@@ -167,14 +178,65 @@ function handleAdd() {
       </div>
     </div>
 
+    <!-- ── Row 3: Shape + Direction ─────────────────────────────────────────── -->
+    <div class="grid grid-cols-12 gap-4">
+      <div :class="shapeType === 'circle' ? 'col-span-8' : 'col-span-12'" class="space-y-2.5">
+        <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Shape</Label>
+        <Select v-model="shapeType">
+          <SelectTrigger class="h-10 bg-background border-border">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="opt in SHAPE_OPTIONS"
+              :key="opt.value"
+              :value="opt.value"
+              class="text-xs"
+            >
+              {{ opt.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div v-if="shapeType === 'circle'" class="col-span-4 space-y-2.5">
+        <Label class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Direction</Label>
+        <div class="flex gap-1 h-10">
+          <button
+            type="button"
+            class="flex-1 rounded border text-xs font-medium transition-colors"
+            :class="clockwise
+              ? 'bg-primary/15 border-primary/40 text-primary'
+              : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+            @click="clockwise = true"
+          >CW</button>
+          <button
+            type="button"
+            class="flex-1 rounded border text-xs font-medium transition-colors"
+            :class="!clockwise
+              ? 'bg-primary/15 border-primary/40 text-primary'
+              : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+            @click="clockwise = false"
+          >CCW</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Computed Summary Strip ──────────────────────────────────────────── -->
     <div class="rounded-lg border border-border bg-muted/30 px-4 py-3">
       <div class="grid grid-cols-4 gap-4 text-center">
         <div>
-          <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Length</p>
-          <p class="text-base font-semibold text-foreground tabular-nums mt-1">
-            {{ lengthMeters.toFixed(2) }} <span class="text-xs text-muted-foreground">m</span>
-          </p>
+          <template v-if="shapeType === 'circle'">
+            <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Diameter</p>
+            <p class="text-base font-semibold text-foreground tabular-nums mt-1">
+              {{ (circleDiameterM * 100).toFixed(1) }} <span class="text-xs text-muted-foreground">cm</span>
+            </p>
+          </template>
+          <template v-else>
+            <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Length</p>
+            <p class="text-base font-semibold text-foreground tabular-nums mt-1">
+              {{ lengthMeters.toFixed(2) }} <span class="text-xs text-muted-foreground">m</span>
+            </p>
+          </template>
         </div>
         <div>
           <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Logical Pixels</p>
@@ -189,27 +251,11 @@ function handleAdd() {
           </p>
         </div>
         <div>
-          <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Total DMX</p>
-          <p
-            class="text-base font-semibold tabular-nums mt-1"
-            :class="overflowsUniverse ? 'text-destructive' : 'text-foreground'"
-          >
+          <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Total Channels</p>
+          <p class="text-base font-semibold tabular-nums mt-1 text-foreground">
             {{ totalChannels }}
           </p>
         </div>
-      </div>
-    </div>
-
-    <!-- ── Universe Overflow Warning ───────────────────────────────────────── -->
-    <div
-      v-if="overflowsUniverse"
-      class="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3"
-    >
-      <AlertTriangle class="size-4 text-destructive shrink-0 mt-0.5" />
-      <div class="text-xs text-destructive leading-snug">
-        <strong>Strip exceeds a single DMX universe</strong> ({{ totalChannels }} channels &gt; 512).
-        Increase <em>Group Size</em> to {{ Math.ceil(totalChannels / 512) }}× to fit, or accept the overflow
-        and adjust the start address manually after adding.
       </div>
     </div>
 

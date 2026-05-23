@@ -31,14 +31,14 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: 'projectId required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  // Accept both single-form { commandType, payload } and array-form { changes: [...] }.
-  // Array form: a single bulk INSERT preserves caller order in returned sequence_numbers.
-  type Change = { commandType: string; payload: unknown };
+  // Accept both single-form { commandType, payload, changeId? } and array-form { changes: [...] }.
+  // `changeId` is the client-generated idempotency key — same id on retry returns the existing row.
+  type Change = { commandType: string; payload: unknown; changeId?: string };
   let changes: Change[];
   if (Array.isArray(body.changes)) {
     changes = body.changes;
   } else if (body.commandType && body.payload !== undefined) {
-    changes = [{ commandType: body.commandType, payload: body.payload }];
+    changes = [{ commandType: body.commandType, payload: body.payload, changeId: body.changeId }];
   } else {
     return new Response(
       JSON.stringify({ error: 'either { commandType, payload } or { changes: [...] } required' }),
@@ -46,30 +46,43 @@ Deno.serve(async (req: Request) => {
     );
   }
   if (changes.length === 0) {
-    return new Response(JSON.stringify({ sequenceNumbers: [] }), {
+    return new Response(JSON.stringify({ sequenceNumbers: [], changeIds: [] }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
+  // Assign a server-side change_id if the client didn't supply one (back-compat).
   const rows = changes.map(c => ({
     project_id: projectId,
     user_id: user.id,
     command_type: c.commandType,
     payload: c.payload,
+    change_id: c.changeId ?? crypto.randomUUID(),
   }));
 
+  // Idempotent upsert: on (project_id, change_id) conflict, the existing row is preserved
+  // (sequence_number is `generated always as identity` so it cannot be changed). The
+  // returned data reflects the existing row, so retries see the same sequence_number.
   const { data, error } = await supabase
     .from('project_changes')
-    .insert(rows)
-    .select('sequence_number');
+    .upsert(rows, { onConflict: 'project_id,change_id', ignoreDuplicates: false })
+    .select('sequence_number, change_id');
 
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  const sequenceNumbers = (data ?? []).map(r => r.sequence_number as number);
+  // Re-order response to match request order, since upsert may return rows in a different order.
+  // We match by change_id (which is unique per request).
+  const byChangeId = new Map<string, { sequence_number: number; change_id: string }>();
+  for (const r of (data ?? [])) byChangeId.set(r.change_id as string, r as any);
+  const ordered = rows.map(r => byChangeId.get(r.change_id) ?? null);
+
+  const sequenceNumbers = ordered.map(r => r?.sequence_number as number | undefined);
+  const changeIds       = ordered.map(r => r?.change_id as string | undefined);
+
   return new Response(
-    JSON.stringify({ sequenceNumbers, sequenceNumber: sequenceNumbers[0] }),
+    JSON.stringify({ sequenceNumbers, sequenceNumber: sequenceNumbers[0], changeIds }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   );
 });

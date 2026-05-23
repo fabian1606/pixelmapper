@@ -7,6 +7,7 @@ import { AddFixturesCommand } from '../commands/add-fixture-command';
 import { MoveFixtureCommand } from '../commands/move-fixture-command';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 import type { Fixture } from '~/utils/engine/core/fixture';
+import { syncStripBounds } from '~/utils/engine/neopixel-strip-factory';
 
 export function useWorkspaceOperations(
   sceneNodes: Ref<SceneNode[]>,
@@ -42,21 +43,41 @@ export function useWorkspaceOperations(
 
       const channelCount = f.channels.length;
 
-      // If this fixture would cross the 512 boundary of its current universe, move to
-      // the start of the next universe to avoid split fixtures.
-      const localAddr = ((currentAddress - 1) % 512) + 1; // 1-based within universe
-      if (localAddr + channelCount - 1 > 512) {
-        const universeStart = Math.floor((currentAddress - 1) / 512) * 512 + 1;
-        currentAddress = universeStart + 512; // first address of next universe
+      // Strip fixtures are driven via WebSocket buffer — their channels are all in
+      // one contiguous buffer regardless of DMX universe boundaries, so the 512-
+      // channel universe split does not apply to them.
+      if (!f.stripConfig) {
+        const localAddr = ((currentAddress - 1) % 512) + 1;
+        if (localAddr + channelCount - 1 > 512) {
+          const universeStart = Math.floor((currentAddress - 1) / 512) * 512 + 1;
+          currentAddress = universeStart + 512;
+        }
       }
 
       f.startAddress = currentAddress;
       currentAddress += channelCount;
 
-      f.fixturePosition = {
-        x: 0.5 + (i * 0.02),
-        y: 0.5 + (i * 0.02),
-      };
+      // For non-strip fixtures: assign a cascading initial position. For
+      // strips, the factory already centered the geometry; cascade the
+      // strip's points (not just fixturePosition) so the spatial-index
+      // AABB stays in sync with the visible geometry — otherwise circle/
+      // line strips become unclickable for i > 0.
+      if (f.stripConfig) {
+        const cascadeWorldDx = i * 0.02 * 3000; // matches old normalized offset
+        const cascadeWorldDy = i * 0.02 * 3000;
+        if (i !== 0) {
+          for (const p of f.stripConfig.points) {
+            p.x += cascadeWorldDx;
+            p.y += cascadeWorldDy;
+          }
+          syncStripBounds(f);
+        }
+      } else {
+        f.fixturePosition = {
+          x: 0.5 + (i * 0.02),
+          y: 0.5 + (i * 0.02),
+        };
+      }
     });
 
     const command = new AddFixturesCommand(sceneNodes.value, fixtures);

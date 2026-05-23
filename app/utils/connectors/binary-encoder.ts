@@ -1,7 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Effect } from '~/utils/engine/types';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
-import { sampleCurveCapped, pointAtArcLength, type SampledCurve } from '~/utils/engine/strip-geometry';
+import { sampleStripCapped, pointAtArcLength, type SampledCurve } from '~/utils/engine/strip-geometry';
 import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
 
 // ── Packet type constants ─────────────────────────────────────────────────────
@@ -177,9 +177,10 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
     let stripLedCount = 0;
     let stripGroupSize = 1;
     let stripBeamIndex: Map<string, number> | null = null;
-    if (f.stripConfig && f.stripConfig.points.length >= 2 && f.beams.length > 0) {
+    const minStripPoints = f.stripConfig?.shapeType === 'circle' ? 1 : 2;
+    if (f.stripConfig && f.stripConfig.points.length >= minStripPoints && f.beams.length > 0) {
       const targetLen = f.stripConfig.lengthMeters * PIXELS_PER_METER;
-      stripCurve = sampleCurveCapped(f.stripConfig.points, targetLen);
+      stripCurve = sampleStripCapped(f.stripConfig.shapeType, f.stripConfig.points, targetLen, f.stripConfig.clockwise ?? true);
       stripLedCount = Math.max(1, f.stripConfig.ledCount);
       stripGroupSize = Math.max(1, f.stripConfig.groupSize);
       stripBeamIndex = new Map();
@@ -187,7 +188,7 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
     }
 
     w.u16(groupIndex);
-    w.u8(f.channels.length);
+    w.u16(f.channels.length);
 
     for (const ch of f.channels) {
       let worldX = f.fixturePosition.x;
@@ -196,13 +197,15 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       if (stripCurve && stripBeamIndex && ch.beamId) {
         // Place each logical pixel at the center of its physical-LED group on
         // the (already-capped-to-target-length) curve. Matches the renderer's
-        // LED distribution in render.rs:299: t = 0.025 + (led_idx/(led_count-1)) * 0.95.
+        // LED distribution in render.rs (different for circle vs open shapes).
         const idx = stripBeamIndex.get(ch.beamId);
         if (idx !== undefined) {
           const firstLed = idx * stripGroupSize;
           const lastLed = Math.min(firstLed + stripGroupSize - 1, stripLedCount - 1);
           const centerLed = (firstLed + lastLed) / 2;
-          const t = stripLedCount > 1 ? 0.025 + (centerLed / (stripLedCount - 1)) * 0.95 : 0.5;
+          const t = f.stripConfig?.shapeType === 'circle'
+            ? (stripLedCount >= 1 ? centerLed / stripLedCount : 0)
+            : (stripLedCount > 1 ? 0.025 + (centerLed / (stripLedCount - 1)) * 0.95 : 0.5);
           const p = pointAtArcLength(stripCurve, t * stripCurve.totalLength);
           worldX = p.x / WORLD_WIDTH;
           worldY = p.y / WORLD_HEIGHT;

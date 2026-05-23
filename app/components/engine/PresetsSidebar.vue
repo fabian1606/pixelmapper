@@ -9,6 +9,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { SavePresetCommand, DeletePresetCommand, OverwritePresetCommand } from '~/components/engine/commands/preset-commands';
+import { UpdatePresetMetadataCommand } from '~/components/engine/commands/update-preset-metadata-command';
 import type { Preset, PresetCategory, PresetCategoryType } from '~/utils/engine/preset-types';
 import { CHANNEL_CATEGORIES } from '~/utils/engine/channel-categories';
 import {
@@ -70,8 +71,6 @@ const {
   savedPresets,
   selectedPresetId,
   getUnsavedChanges,
-  renamePreset,
-  setPresetColor,
   getActivePresetResolved,
 } = usePresets();
 
@@ -191,9 +190,13 @@ function quickSaveVariant(basePreset: Preset) {
 import type { OverwriteTarget, PresetType } from '~/utils/engine/preset-types';
 
 function setPresetType(preset: Preset, type: PresetType, target: OverwriteTarget | undefined = undefined) {
-  preset.type = type;
-  if (target) preset.overwriteTarget = target;
-  else preset.overwriteTarget = undefined;
+  history.execute(new UpdatePresetMetadataCommand(
+    preset.id,
+    { type: preset.type, overwriteTarget: preset.overwriteTarget ?? null },
+    { type, overwriteTarget: target ?? null },
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+  ));
 }
 
 function getVariantTypeDescription(variant: Preset) {
@@ -244,13 +247,38 @@ function startRename(preset: Preset) {
 
 function confirmRename() {
   if (!renamingId.value) return;
-  renamePreset(renamingId.value, renameValue.value.trim() || 'Untitled');
+  const id = renamingId.value;
+  const preset = savedPresets.value.find(p => p.id === id);
+  if (!preset) { renamingId.value = null; return; }
+  const newName = renameValue.value.trim() || 'Untitled';
+  if (newName !== preset.name) {
+    history.execute(new UpdatePresetMetadataCommand(
+      id,
+      { name: preset.name },
+      { name: newName },
+      () => savedPresets.value,
+      (presets) => { savedPresets.value = presets; },
+    ));
+  }
   renamingId.value = null;
 }
 
 function handleRenameKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') confirmRename();
   if (e.key === 'Escape') renamingId.value = null;
+}
+
+function handlePresetColorChange(preset: Preset, newColor: string) {
+  const before = preset.color ?? null;
+  const after = newColor || null;
+  if (before === after) return;
+  history.execute(new UpdatePresetMetadataCommand(
+    preset.id,
+    { color: before },
+    { color: after },
+    () => savedPresets.value,
+    (presets) => { savedPresets.value = presets; },
+  ));
 }
 
 function handleRenameBlur() {
@@ -491,7 +519,7 @@ defineExpose({
                       type="color"
                       class="absolute inset-0 opacity-0 cursor-pointer"
                       :value="presetDisplayColor(preset)"
-                      @input="(e) => setPresetColor(preset.id, (e.target as HTMLInputElement).value)"
+                      @change="(e) => handlePresetColorChange(preset, (e.target as HTMLInputElement).value)"
                     />
                   </label>
 
@@ -617,7 +645,7 @@ defineExpose({
                             type="color"
                             class="absolute inset-0 opacity-0 cursor-pointer"
                             :value="presetDisplayColor(variant)"
-                            @input="(e) => setPresetColor(variant.id, (e.target as HTMLInputElement).value)"
+                            @change="(e) => handlePresetColorChange(variant, (e.target as HTMLInputElement).value)"
                           />
                         </label>
                         <template v-if="renamingId === variant.id">

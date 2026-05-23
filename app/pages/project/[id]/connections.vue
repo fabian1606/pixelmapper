@@ -16,6 +16,9 @@ import { SerialConnector } from '~/utils/connectors/serial-connector';
 import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
 import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
+import { SetStripShapeCommand, type StripShapeSnapshot } from '~/components/engine/commands/set-strip-shape-command';
+import { regenerateStripPointsForShape } from '~/utils/engine/neopixel-strip-factory';
+import type { StripShapeType } from '~/utils/engine/core/fixture';
 import {
   AddConnectorCommand,
   RemoveConnectorCommand,
@@ -170,6 +173,46 @@ function snapshotStrip(f: ReturnType<typeof fixtureFor>): StripConfigSnapshot | 
     ledsPerMeter: f.stripConfig.ledsPerMeter,
     chipType:     f.stripConfig.chipType,
   };
+}
+
+function commitStripShape(connector: WebSocketConnector, newShape: StripShapeType) {
+  const f = fixtureFor(connector);
+  if (!f || !f.stripConfig) return;
+  if (f.stripConfig.shapeType === newShape) return;
+
+  const before: StripShapeSnapshot = {
+    id: f.id,
+    shapeType: f.stripConfig.shapeType,
+    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
+    clockwise: f.stripConfig.clockwise ?? true,
+  };
+  regenerateStripPointsForShape(f, newShape);
+  const after: StripShapeSnapshot = {
+    id: f.id,
+    shapeType: f.stripConfig.shapeType,
+    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
+    clockwise: f.stripConfig.clockwise ?? true,
+  };
+  f.stripConfig.shapeType = before.shapeType;
+  f.stripConfig.points = before.points.map(p => ({ x: p.x, y: p.y }));
+
+  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
+  engineStore.flushEngineOutput();
+}
+
+function commitStripClockwise(connector: WebSocketConnector, cw: boolean) {
+  const f = fixtureFor(connector);
+  if (!f || !f.stripConfig || f.stripConfig.shapeType !== 'circle') return;
+  if ((f.stripConfig.clockwise ?? true) === cw) return;
+  const before: StripShapeSnapshot = {
+    id: f.id,
+    shapeType: f.stripConfig.shapeType,
+    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
+    clockwise: f.stripConfig.clockwise ?? true,
+  };
+  const after: StripShapeSnapshot = { ...before, clockwise: cw };
+  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
+  engineStore.flushEngineOutput();
 }
 
 function commitStripPatch(connector: WebSocketConnector, patch: Partial<StripConfigSnapshot>) {
@@ -570,6 +613,41 @@ function assignedCount(connector: BaseConnector): number {
               />
             </label>
           </div>
+          <label class="text-xs text-muted-foreground">
+            Shape
+            <select
+              class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+              :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.shapeType ?? 'bezier'"
+              @change="commitStripShape(asWebSocket(connector)!, ($event.target as HTMLSelectElement).value as StripShapeType)"
+            >
+              <option value="bezier">Bezier Curve</option>
+              <option value="line">Straight Line</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+          <template v-if="fixtureFor(asWebSocket(connector)!)?.stripConfig?.shapeType === 'circle'">
+            <label class="text-xs text-muted-foreground">
+              Direction
+              <div class="flex gap-1 mt-1">
+                <button
+                  type="button"
+                  class="flex-1 rounded border text-xs py-1 transition-colors"
+                  :class="(fixtureFor(asWebSocket(connector)!)?.stripConfig?.clockwise ?? true)
+                    ? 'bg-primary/15 border-primary/40 text-primary'
+                    : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+                  @click="commitStripClockwise(asWebSocket(connector)!, true)"
+                >CW</button>
+                <button
+                  type="button"
+                  class="flex-1 rounded border text-xs py-1 transition-colors"
+                  :class="!(fixtureFor(asWebSocket(connector)!)?.stripConfig?.clockwise ?? true)
+                    ? 'bg-primary/15 border-primary/40 text-primary'
+                    : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+                  @click="commitStripClockwise(asWebSocket(connector)!, false)"
+                >CCW</button>
+              </div>
+            </label>
+          </template>
         </template>
       </div>
 

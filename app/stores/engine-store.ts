@@ -25,10 +25,15 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 // 'connector.update' factories so the tail replay can recreate connector
 // mutations on project load even before any UI page has been visited.
 import '~/components/engine/commands/connector-commands';
-import { resetFixtureChannels } from '~/components/engine/composables/preset-apply';
+// Side-effect import — registers all live-op handlers (section.setActive,
+// preset-ops, etc.) so getLiveOpConfig() resolves during tail replay even
+// before any live-mode UI component has been mounted.
+import '~/composables/live-ops/index';
+import { resetFixtureChannels, reconstructEffect } from '~/components/engine/composables/preset-apply';
 import {
   useLiveBusStore,
   setPersistHook,
+  setPersistAckHook,
   enqueuePersist,
   flushPersistQueue,
   clearPersistQueue,
@@ -40,6 +45,7 @@ import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfi
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
+import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -66,6 +72,7 @@ export const useEngineStore = defineStore('engine', () => {
    */
   type ChannelSnap = { stepValues: number[]; stepsCount: number; isPlaying: boolean };
   let baseSnapshot: Map<string, ChannelSnap> | null = null;
+  let baseEffectsSnapshot: import('~/utils/engine/types').Effect[] | null = null;
 
   /** Strobe needs a timer to alternate dimmer values. Only the top-of-stack strobe is active. */
   let strobeTimer: ReturnType<typeof setInterval> | null = null;
@@ -76,22 +83,26 @@ export const useEngineStore = defineStore('engine', () => {
     strobePhase = false;
   }
 
-  /** Snapshot ALL channels that any overwrite type could touch. */
+  /** Snapshot ALL channels — an overwrite preset can touch any channel type. */
   function _captureBaseSnapshot(): Map<string, ChannelSnap> {
     const snap = new Map<string, ChannelSnap>();
     for (const f of flatFixtures.value) {
       for (let i = 0; i < f.channels.length; i++) {
         const ch = f.channels[i]!;
-        if (ch.role === 'DIMMER' || ch.type === 'RED' || ch.type === 'GREEN' || ch.type === 'BLUE') {
-          snap.set(`${f.id}:${i}`, {
-            stepValues: [...ch.chaserConfig.stepValues],
-            stepsCount: ch.chaserConfig.stepsCount,
-            isPlaying: ch.chaserConfig.isPlaying,
-          });
-        }
+        snap.set(`${f.id}:${i}`, {
+          stepValues: [...ch.chaserConfig.stepValues],
+          stepsCount: ch.chaserConfig.stepsCount,
+          isPlaying: ch.chaserConfig.isPlaying,
+        });
       }
     }
     return snap;
+  }
+
+  function _restoreEffectsSnapshot(snap: import('~/utils/engine/types').Effect[]) {
+    const cloned = cloneEffectsList(snap);
+    activeEffects.value.splice(0, activeEffects.value.length, ...cloned);
+    engine.effects = activeEffects.value;
   }
 
   function _restoreBaseSnapshot(snap: Map<string, ChannelSnap>) {
@@ -116,12 +127,66 @@ export const useEngineStore = defineStore('engine', () => {
     ch.chaserConfig.isPlaying = false;
   }
 
+  function _findOverwritePreset(type: GlobalFunctionType): Preset | undefined {
+    const activeId = effectivePresetId.value;
+    if (!activeId) return undefined;
+    const byId = new Map(savedPresets.value.map(p => [p.id, p]));
+    let rootId = activeId;
+    for (let i = 0; i < 16; i++) {
+      const cur = byId.get(rootId);
+      if (!cur?.basePresetId) break;
+      rootId = cur.basePresetId;
+    }
+    return savedPresets.value.find(
+      p => (p.id === rootId || p.basePresetId === rootId)
+        && p.type === 'overwrite'
+        && p.overwriteTarget === type
+    );
+  }
+
   /** Apply the current top-of-stack overwrite to channels (start strobe timer if needed). */
   function _applyTopOverwrite() {
     _stopStrobeTimer();
     const top = overwriteStack.value.at(-1);
     if (!top) return;
     const fixtures = flatFixtures.value;
+
+    const overwritePreset = _findOverwritePreset(top.type);
+    if (overwritePreset) {
+      const fixtureMap = new Map(fixtures.map(f => [f.id, f]));
+      // Strip any existing effects targeting fixtures the overwrite preset controls,
+      // so its own modifiers fully take over instead of stacking on top.
+      const overwriteFixtureIds = new Set(overwritePreset.categories.flatMap(c => c.fixtureIds));
+      for (let i = activeEffects.value.length - 1; i >= 0; i--) {
+        const eff = activeEffects.value[i];
+        if (eff?.targetFixtureIds?.some(id => overwriteFixtureIds.has(id))) {
+          activeEffects.value.splice(i, 1);
+        }
+      }
+      for (const cat of overwritePreset.categories) {
+        for (const fixtureId of cat.fixtureIds) {
+          const fixture = fixtureMap.get(fixtureId);
+          if (!fixture) continue;
+          for (const snap of cat.channels) {
+            const ch = fixture.channels[snap.channelIndex];
+            if (!ch) continue;
+            ch.chaserConfig.stepValues = [...snap.stepValues];
+            ch.chaserConfig.stepsCount = snap.stepValues.length;
+            ch.chaserConfig.isPlaying = snap.chaserConfig?.isPlaying ?? false;
+            if (snap.chaserConfig) Object.assign(ch.chaserConfig, { ...snap.chaserConfig });
+          }
+        }
+        for (const modSnap of cat.modifiers) {
+          const eff = reconstructEffect(modSnap);
+          if (eff) {
+            eff.targetFixtureIds = [...cat.fixtureIds];
+            activeEffects.value.push(eff);
+          }
+        }
+      }
+      engine.effects = activeEffects.value;
+      return;
+    }
 
     if (top.type === 'blackout') {
       for (const f of fixtures) {
@@ -169,9 +234,11 @@ export const useEngineStore = defineStore('engine', () => {
     if (existingIdx !== -1) overwriteStack.value.splice(existingIdx, 1);
     if (wasEmpty) {
       baseSnapshot = _captureBaseSnapshot();
+      baseEffectsSnapshot = cloneEffectsList(activeEffects.value);
     }
     overwriteStack.value.push({ key, type, config });
     if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+    if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
     _applyTopOverwrite();
     flushEngineOutput();
   }
@@ -183,11 +250,14 @@ export const useEngineStore = defineStore('engine', () => {
     _stopStrobeTimer();
     if (overwriteStack.value.length === 0) {
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
       baseSnapshot = null;
+      baseEffectsSnapshot = null;
     } else {
       // Restore base first so a different overwrite type (e.g. strobe → blind)
       // doesn't leak the previous overwrite's values into untouched channels.
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
       _applyTopOverwrite();
     }
     flushEngineOutput();
@@ -195,11 +265,13 @@ export const useEngineStore = defineStore('engine', () => {
 
   function clearOverwriteStack() {
     _stopStrobeTimer();
-    if (overwriteStack.value.length > 0 && baseSnapshot) {
-      _restoreBaseSnapshot(baseSnapshot);
+    if (overwriteStack.value.length > 0) {
+      if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
+      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
     }
     overwriteStack.value.splice(0);
     baseSnapshot = null;
+    baseEffectsSnapshot = null;
     flushEngineOutput();
   }
 
@@ -414,7 +486,7 @@ export const useEngineStore = defineStore('engine', () => {
       // so any polyline mutation must bust the layout cache even when the AABB
       // happens not to move.
       if (f.stripConfig) {
-        fp += `s${f.stripConfig.lengthMeters}:`;
+        fp += `s${f.stripConfig.shapeType}:${f.stripConfig.lengthMeters}:`;
         for (const p of f.stripConfig.points) fp += `${p.x},${p.y};`;
       }
       for (const ch of f.channels) {
@@ -720,6 +792,45 @@ export const useEngineStore = defineStore('engine', () => {
     // stale entries cannot be flushed against the new project's connection.
     clearPersistQueue();
     setPersistHook(null);
+    setPersistAckHook(null);
+
+    // ── WAL Recovery ────────────────────────────────────────────────────────
+    // Push any pending changes that survived a crash / failed unload from a
+    // previous session BEFORE loading the snapshot+tail. The push-change edge
+    // function is idempotent via (project_id, change_id) so re-pushing an entry
+    // that already made it last time is safe — the server returns the existing
+    // sequence_number. We then drop the WAL entries that the server confirmed.
+    try {
+      const pending = await walGetPending(projectId);
+      if (pending.length > 0) {
+        console.info(`[engine] WAL recovery: pushing ${pending.length} unacked change(s)`);
+        const { data: recData, error: recErr } = await supabase.functions.invoke('push-change', {
+          body: {
+            projectId,
+            changes: pending.map(e => ({
+              commandType: e.commandType,
+              payload: e.payload,
+              changeId: e.id,
+            })),
+          },
+        });
+        if (recErr) throw recErr;
+        // Only ack the entries the server confirmed. Filter out null/undefined
+        // (one row failed → keep that one in the WAL for next retry).
+        const returnedIds: Array<string | undefined> = recData?.changeIds ?? [];
+        const ackedIds = returnedIds.filter((id): id is string => typeof id === 'string');
+        // Edge case: server didn't return changeIds at all (e.g. old function
+        // pre-deployment). Then assume all pending entries made it.
+        const toAck = ackedIds.length > 0 || returnedIds.length > 0
+          ? ackedIds
+          : pending.map(e => e.id);
+        await walMarkAcked(toAck);
+      }
+    } catch (err) {
+      // Don't block the load on recovery failure — degrade gracefully. The WAL
+      // entries stay; the next attempt (or the next reload) will retry.
+      console.error('[engine] WAL recovery failed — proceeding with possibly stale state:', err);
+    }
 
     const { data, error } = await supabase.functions.invoke('load-project', {
       body: { projectId },
@@ -840,23 +951,33 @@ export const useEngineStore = defineStore('engine', () => {
     // race-against-snapshot bug that produced stale-state reloads.
 
     async function persistBatch(
-      entries: Array<{ type: string; payload: any }>,
+      entries: Array<{ type: string; payload: any; changeId?: string }>,
     ): Promise<Array<number | undefined>> {
       const { data, error } = await supabase.functions.invoke('push-change', {
         body: {
           projectId,
-          changes: entries.map(e => ({ commandType: e.type, payload: e.payload })),
+          changes: entries.map(e => ({
+            commandType: e.type,
+            payload: e.payload,
+            changeId: e.changeId,
+          })),
         },
       });
       if (error) throw error;
-      const seqs: number[] = data?.sequenceNumbers ?? [];
-      const maxSeq = seqs.length ? seqs[seqs.length - 1] : undefined;
+      const seqs: number[] = (data?.sequenceNumbers ?? []).filter((s: any) => s != null);
+      const maxSeq = seqs.length ? Math.max(...seqs) : undefined;
       if (maxSeq != null && maxSeq > lastSeenSequenceNumber.value) {
         lastSeenSequenceNumber.value = maxSeq;
       }
-      return seqs;
+      return data?.sequenceNumbers ?? [];
     }
     setPersistHook(persistBatch);
+    // ACK hook: when the server confirms a batch, drop the matching WAL entries
+    // so they aren't re-pushed on the next reload's recovery pass.
+    setPersistAckHook((changeIds) => {
+      walMarkAcked(changeIds).catch(err =>
+        console.warn('[engine] walMarkAcked failed:', err));
+    });
     commitPendingChanges = flushPersistQueue;
 
     // Build a snapshot of the full project state. The caller must drain the
@@ -865,6 +986,7 @@ export const useEngineStore = defineStore('engine', () => {
     function buildSnapshot() {
       const pinnedStore = usePinnedModifiersStore();
       const liveStore = useLiveModeStore();
+      const connectionsStore = useConnectionsStore();
       return serializeProject(
         sceneNodes.value,
         savedPresets.value,
@@ -900,12 +1022,14 @@ export const useEngineStore = defineStore('engine', () => {
     // logic off the returned sequence number. History commands are append-only
     // (no dedup) — every undo-able op is recorded individually.
     setPersistenceHooks({
-      pushChange: (commandType, payload) =>
+      pushChange: (commandType, payload, changeId) =>
         new Promise<number | undefined>((resolve, reject) => {
-          enqueuePersist({ type: commandType, payload, resolve, reject });
+          enqueuePersist({ type: commandType, payload, changeId, resolve, reject });
         }),
       saveSnapshot: doSaveSnapshot,
       markDirty: markEngineDirty,
+      walAppend: (entry) => walAppend(entry),
+      currentProjectId: () => currentProjectId.value,
     });
 
     // Allow markEngineDirty() to arm its timers and bind the snapshot trigger
@@ -930,26 +1054,31 @@ export const useEngineStore = defineStore('engine', () => {
     const pushChangeUrl = `${supabaseUrl}/functions/v1/push-change`;
     const saveSnapshotUrl = `${supabaseUrl}/functions/v1/save-snapshot`;
 
-    // On unload: push any pending persist-queue entries (live-ops + history
-    // commands still in the settle window) and, if the engine is dirty, a final
-    // snapshot. The snapshot is intentionally sent AFTER the push-change so
-    // that lastSeenSequenceNumber in the snapshot matches the tail — but
-    // because keepalive fetches are fire-and-forget we send both and let the
-    // server's natural write ordering (insert before snapshot is read on reload)
-    // do the right thing. fetch({ keepalive: true }) survives tab close.
+    // On unload: best-effort keepalive push so the next reload's WAL recovery
+    // has less work. CORRECTNESS no longer depends on this fetch succeeding —
+    // every entry in the persist queue ALSO has a WAL row in IndexedDB, and
+    // those are reconciled on the next loadProject() via the idempotent
+    // push-change endpoint. We therefore deliberately DO NOT clearPersistQueue()
+    // here: if the keepalive is dropped (browser limit, network), the entries
+    // stay in memory; if the tab actually closes, the WAL takes over.
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
         if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
         if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
         if (!cachedToken) return;
 
-        // (a) Drain pending persist queue
+        // (a) Optimistic keepalive push — passes changeIds so the server can
+        // dedupe against entries that were already written by an in-flight
+        // batch and against the next session's WAL recovery.
         const pending = getPersistQueueSnapshot();
-        clearPersistQueue();
         if (pending.length > 0) {
           const changesBody = JSON.stringify({
             projectId,
-            changes: pending.map(e => ({ commandType: e.type, payload: e.payload })),
+            changes: pending.map(e => ({
+              commandType: e.type,
+              payload: e.payload,
+              changeId: e.changeId,
+            })),
           });
           fetch(pushChangeUrl, {
             method: 'POST',
@@ -959,12 +1088,21 @@ export const useEngineStore = defineStore('engine', () => {
           });
         }
 
-        // (b) Final snapshot if any mutation happened since the last compacting
-        // snapshot. We use lastSeenSequenceNumber from before this call, which
-        // may be slightly stale if the keepalive above races. That is
-        // acceptable: the snapshot captures in-memory state; on reload the tail
-        // from snapshotSeq will replay any commands with higher seq numbers.
-        if (engineDirty) {
+        // (b) Final snapshot — but ONLY if there are no pending entries left.
+        //
+        // If there are pending entries, the keepalive push above will (on
+        // success) assign them sequence numbers > lastSeenSequenceNumber, while
+        // the snapshot we'd send here was built from in-memory state that
+        // ALREADY includes those commands' effects but carries the stale
+        // lastSeenSequenceNumber. On reload, tail = `> stale-seq` would replay
+        // those commands → double-apply for non-idempotent ops like AddFixtures.
+        //
+        // Skipping the snapshot in that case is safe because:
+        //   - Every SerializableCommand is in the WAL → recovered next load.
+        //   - The pending entries themselves carry changeIds → idempotent
+        //     against the keepalive push above.
+        //   - Tail replay from the last committed snapshot rebuilds state.
+        if (engineDirty && pending.length === 0) {
           try {
             const snapshot = buildSnapshot();
             const snapBody = JSON.stringify({

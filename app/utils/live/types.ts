@@ -6,7 +6,7 @@ export interface LiveControllerInstance {
   definitionKey: string
 }
 
-export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'none'
+export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'none'
 
 export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout'
 
@@ -38,6 +38,7 @@ export interface LiveMapping {
   // channel
   fixtureId?: string | number
   channelOffset?: number
+  channelType?: string  // used when targeting a group (all fixtures with this channel type)
   // effect-param
   effectId?: string
   paramKey?: string
@@ -46,6 +47,9 @@ export interface LiveMapping {
   // global-function
   globalFunction?: GlobalFunctionType
   globalFunctionConfig?: GlobalFunctionConfig
+  // dimmer-group
+  groupId?: string | number
+  fixtureIds?: (string | number)[]
 }
 
 /**

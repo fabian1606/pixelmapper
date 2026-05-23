@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
-use crate::types::{FixtureCanvasData, FixtureBeam, StripData};
+use crate::types::{FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
 use crate::svg_render::{SvgCachedFixture, draw_svg_fixture};
 
 pub struct RenderState {
@@ -191,6 +191,88 @@ pub fn sample_strip_curve_capped(
     (samples, cum)
 }
 
+// ─── Shape-specific sampling ─────────────────────────────────────────────────
+
+const CIRCLE_SAMPLES: usize = 96;
+
+/// Linear sample of a 2-point straight segment, length-capped to `target_length`.
+pub fn sample_line_capped(points: &[[f32; 2]], target_length: f32) -> (Vec<[f32; 2]>, Vec<f32>) {
+    if points.is_empty() {
+        return (Vec::new(), vec![0.0]);
+    }
+    let p0 = points[0];
+    let p1 = if points.len() >= 2 {
+        points[1]
+    } else {
+        [p0[0] + target_length, p0[1]]
+    };
+    let mut dx = p1[0] - p0[0];
+    let mut dy = p1[1] - p0[1];
+    let mut len = (dx * dx + dy * dy).sqrt();
+    if len < 0.0001 { dx = 1.0; dy = 0.0; len = 1.0; }
+    let ux = dx / len;
+    let uy = dy / len;
+    let t_len = target_length.max(0.0);
+    let steps = 24usize;
+    let mut out = Vec::with_capacity(steps + 1);
+    let mut cum = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let s = (i as f32 / steps as f32) * t_len;
+        out.push([p0[0] + ux * s, p0[1] + uy * s]);
+        cum.push(s);
+    }
+    (out, cum)
+}
+
+/// Parametric circle sample around a single center point.
+///
+/// `target_length` is interpreted as the circle's **diameter** (derived from
+/// ledCount/ledsPerMeter), so the visible circle width matches the physical
+/// strip length. LEDs are then distributed over the full circumference
+/// `π · diameter`. LED 0 sits at 12 o'clock; wraps clockwise.
+pub fn sample_circle(points: &[[f32; 2]], target_length: f32, clockwise: bool) -> (Vec<[f32; 2]>, Vec<f32>) {
+    let c = if points.is_empty() { [0.0, 0.0] } else { points[0] };
+    let diameter = target_length.max(0.0);
+    if diameter <= 0.0001 {
+        return (vec![c], vec![0.0]);
+    }
+    let radius = diameter / 2.0;
+    let circumference = 2.0 * std::f32::consts::PI * radius;
+    let dir = if clockwise { 1.0_f32 } else { -1.0_f32 };
+    let mut out = Vec::with_capacity(CIRCLE_SAMPLES + 1);
+    let mut cum = Vec::with_capacity(CIRCLE_SAMPLES + 1);
+    for i in 0..=CIRCLE_SAMPLES {
+        let t = i as f32 / CIRCLE_SAMPLES as f32;
+        let angle = -std::f32::consts::FRAC_PI_2 + dir * t * 2.0 * std::f32::consts::PI;
+        out.push([c[0] + angle.cos() * radius, c[1] + angle.sin() * radius]);
+        cum.push(t * circumference);
+    }
+    (out, cum)
+}
+
+/// Shape-aware capped polyline sampler. Branches on `shape_type` and feeds the
+/// shape-specific generator. Mirrors TS `sampleStripCapped`.
+pub fn sample_strip_capped(
+    shape: StripShapeType,
+    points: &[[f32; 2]],
+    target_length: f32,
+) -> (Vec<[f32; 2]>, Vec<f32>) {
+    sample_strip_capped_dir(shape, points, target_length, true)
+}
+
+pub fn sample_strip_capped_dir(
+    shape: StripShapeType,
+    points: &[[f32; 2]],
+    target_length: f32,
+    clockwise: bool,
+) -> (Vec<[f32; 2]>, Vec<f32>) {
+    match shape {
+        StripShapeType::Line   => sample_line_capped(points, target_length),
+        StripShapeType::Circle => sample_circle(points, target_length, clockwise),
+        StripShapeType::Bezier => sample_strip_curve_capped(points, target_length),
+    }
+}
+
 /// Draws a diamond (rotated square) anchor handle centred at (cx, cy).
 /// Visual style mirrors the Vue `SpatialHandle.vue` origin handle:
 /// solid primary-yellow fill, dark inner border, faint outer glow.
@@ -259,12 +341,16 @@ fn draw_strip_fixture(
     scale: f32,
 ) {
     let points = &strip.points;
-    if points.len() < 2 { return; }
+    let min_points = match strip.shape_type {
+        StripShapeType::Circle => 1,
+        _ => 2,
+    };
+    if points.len() < min_points { return; }
 
-    // Capped curve: always exactly `target_length`, trimmed from the non-star
-    // end or extended along the last tangent. This is what the strip ACTUALLY
-    // looks like (vs. the control polyline which may be longer or shorter).
-    let (samples, cum) = sample_strip_curve_capped(points, strip.target_length);
+    // Capped polyline: always exactly `target_length`. For bezier this trims
+    // or extends the Catmull-Rom curve; for line it's a linear segment; for
+    // circle it's a parametric ring with derived radius.
+    let (samples, cum) = sample_strip_capped_dir(strip.shape_type, points, strip.target_length, strip.clockwise);
     let total_len = *cum.last().unwrap_or(&0.0);
     if total_len <= 0.0 || samples.len() < 2 { return; }
 
@@ -296,10 +382,20 @@ fn draw_strip_fixture(
             Some(b) => read_color(b.r_index, b.g_index, b.b_index, b.dimmer_index, dmx_buffer),
             None    => read_color(fixture.r_index, fixture.g_index, fixture.b_index, fixture.dimmer_index, dmx_buffer),
         };
-        let t = if led_count > 1 {
-            0.025 + (led_idx as f32 / (led_count - 1) as f32) * 0.95
-        } else {
-            0.5
+        // Circle wraps around, so LED 0 and LED N should sit next to each
+        // other — distribute uniformly over the full perimeter without the
+        // 5% inset used for open shapes (bezier/line).
+        let t = match strip.shape_type {
+            StripShapeType::Circle => {
+                if led_count >= 1 { led_idx as f32 / led_count as f32 } else { 0.0 }
+            }
+            _ => {
+                if led_count > 1 {
+                    0.025 + (led_idx as f32 / (led_count - 1) as f32) * 0.95
+                } else {
+                    0.5
+                }
+            }
         };
         let pos = sample_at_arc_length(&samples, &cum, t * total_len);
         let mut dot = Path::new();
@@ -323,8 +419,10 @@ fn draw_strip_fixture(
         canvas.stroke_path(&mut outline, &stroke);
     }
 
-    // 4. Editing handles — only when explicitly in edit mode.
-    if fixture.editing {
+    // 4. Editing handles — only when explicitly in edit mode AND for bezier
+    //    shapes. line/circle have no separate handles: the LED-dots themselves
+    //    serve as the interactive elements (handled by JS-side hit-testing).
+    if fixture.editing && strip.shape_type == StripShapeType::Bezier {
         let handle_r = 6.0 / scale;
         let handle_stroke_w = 1.5 / scale;
         let handle_fill = Color::rgba(20, 20, 20, 255);

@@ -6,7 +6,7 @@
  * Everything here works in WORLD-PIXEL coordinates — the same space as
  * `StripConfig.points`.
  */
-import type { StripPoint } from './core/fixture';
+import type { StripPoint, StripShapeType } from './core/fixture';
 
 // ─── Catmull-Rom → cubic Bézier conversion ────────────────────────────────────
 
@@ -173,6 +173,150 @@ export function sampleCurveCapped(points: StripPoint[], targetLength: number): S
   }
 
   return raw;
+}
+
+// ─── Shape-specific sampling ─────────────────────────────────────────────────
+
+/** Number of samples used to discretize a circle (one full revolution). */
+const CIRCLE_SAMPLES = 96;
+
+/**
+ * Linear sample of a 2-point straight segment, length-capped to `targetLength`.
+ * If the segment is shorter than `targetLength`, it's extended along its
+ * direction (or +x if degenerate). Always returns ≥ 2 samples.
+ */
+export function sampleLineCapped(points: StripPoint[], targetLength: number): SampledCurve {
+  if (points.length < 1) return { points: [], cumulative: [0], totalLength: 0 };
+  const p0 = points[0]!;
+  const p1 = points[1] ?? { x: p0.x + targetLength, y: p0.y };
+  let dx = p1.x - p0.x;
+  let dy = p1.y - p0.y;
+  let len = Math.hypot(dx, dy);
+  if (len < 0.0001) { dx = 1; dy = 0; len = 1; }
+  const ux = dx / len;
+  const uy = dy / len;
+  const tLen = Math.max(targetLength, 0);
+  const steps = 24;
+  const out: StripPoint[] = [];
+  const cum: number[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const s = (i / steps) * tLen;
+    out.push({ x: p0.x + ux * s, y: p0.y + uy * s });
+    cum.push(s);
+  }
+  return { points: out, cumulative: cum, totalLength: tLen };
+}
+
+/**
+ * Parametric circle sample around a single center point.
+ *
+ * `targetLength` is interpreted as the circle's **diameter** (derived from
+ * `ledCount / ledsPerMeter`) — so the visible circle's width matches the
+ * physical strip length. The geometric arc length the LEDs are distributed
+ * over is the full circumference `π · diameter`.
+ *
+ * LED 0 sits at 12 o'clock (angle -π/2) and the strip wraps clockwise.
+ */
+export function sampleCircle(center: StripPoint | undefined, targetLength: number, clockwise = true): SampledCurve {
+  const c = center ?? { x: 0, y: 0 };
+  const diameter = Math.max(targetLength, 0);
+  if (diameter <= 0.0001) {
+    return { points: [{ ...c }], cumulative: [0], totalLength: 0 };
+  }
+  const radius = diameter / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dir = clockwise ? 1 : -1;
+  const out: StripPoint[] = [];
+  const cum: number[] = [];
+  for (let i = 0; i <= CIRCLE_SAMPLES; i++) {
+    const t = i / CIRCLE_SAMPLES;
+    // Start at 12 o'clock (-π/2), direction controlled by clockwise flag.
+    const angle = -Math.PI / 2 + dir * t * 2 * Math.PI;
+    out.push({
+      x: c.x + Math.cos(angle) * radius,
+      y: c.y + Math.sin(angle) * radius,
+    });
+    cum.push(t * circumference);
+  }
+  return { points: out, cumulative: cum, totalLength: circumference };
+}
+
+/**
+ * Shape-aware dispatcher: returns a capped polyline sampling of the strip's
+ * geometry. Both renderer and modifier-evaluation use this so LED positions
+ * line up exactly between TS and Rust.
+ */
+export function sampleStripCapped(
+  shape: StripShapeType,
+  points: StripPoint[],
+  targetLength: number,
+  clockwise = true,
+): SampledCurve {
+  switch (shape) {
+    case 'line':   return sampleLineCapped(points, targetLength);
+    case 'circle': return sampleCircle(points[0], targetLength, clockwise);
+    case 'bezier':
+    default:       return sampleCurveCapped(points, targetLength);
+  }
+}
+
+/** Shape-aware AABB of the visible strip geometry. */
+export function stripBounds(
+  shape: StripShapeType,
+  points: StripPoint[],
+  targetLength: number,
+): Bounds {
+  if (shape === 'circle') {
+    const c = points[0] ?? { x: 0, y: 0 };
+    // targetLength = diameter (see sampleCircle), so radius = targetLength / 2.
+    const r = Math.max(targetLength, 0) / 2;
+    return { minX: c.x - r, minY: c.y - r, maxX: c.x + r, maxY: c.y + r };
+  }
+  if (shape === 'line') {
+    const p0 = points[0] ?? { x: 0, y: 0 };
+    const p1 = points[1] ?? { x: p0.x + targetLength, y: p0.y };
+    return {
+      minX: Math.min(p0.x, p1.x),
+      minY: Math.min(p0.y, p1.y),
+      maxX: Math.max(p0.x, p1.x),
+      maxY: Math.max(p0.y, p1.y),
+    };
+  }
+  return curveBounds(points);
+}
+
+/**
+ * Shape-aware length enforcement.
+ *   bezier → scale points around anchor via `enforceCurveLength`
+ *   line   → place `p[1]` exactly `targetLength` away from `p[0]` along current direction
+ *            (or vice-versa when `anchorIdx === 1`, so the dragged endpoint stays put)
+ *   circle → no-op (radius is implicit)
+ * Mutates `points` in place.
+ */
+export function enforceStripShape(
+  shape: StripShapeType,
+  points: StripPoint[],
+  targetLength: number,
+  anchorIdx: number | null,
+): void {
+  if (shape === 'bezier') {
+    enforceCurveLength(points, targetLength, anchorIdx);
+    return;
+  }
+  if (shape === 'circle') {
+    return;
+  }
+  // line
+  if (points.length < 2 || targetLength <= 0.001) return;
+  // Anchor = the endpoint that should stay put. Default to vertex 0.
+  const anchor = anchorIdx === 1 ? points[1]! : points[0]!;
+  const moving = anchorIdx === 1 ? points[0]! : points[1]!;
+  let dx = moving.x - anchor.x;
+  let dy = moving.y - anchor.y;
+  let len = Math.hypot(dx, dy);
+  if (len < 0.0001) { dx = 1; dy = 0; len = 1; }
+  moving.x = anchor.x + (dx / len) * targetLength;
+  moving.y = anchor.y + (dy / len) * targetLength;
 }
 
 /** Arc-length lookup: returns the world position at distance `s` along the curve. */

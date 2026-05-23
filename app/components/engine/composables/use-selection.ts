@@ -5,7 +5,7 @@ import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { FixtureRotationSnapshot } from '../commands/rotate-fixture-command';
 import type { StripPointsSnapshot } from '../commands/reshape-strip-command';
-import { syncStripBounds } from '~/utils/engine/neopixel-strip-factory';
+import { syncStripBounds, enforceStripLength } from '~/utils/engine/neopixel-strip-factory';
 
 export type Interaction =
   | { type: 'idle' }
@@ -187,8 +187,14 @@ export function useSelection(
     selectedIds.value = effectiveSelectedIds;
 
     // Two-click model for strips: 1st click selects, 2nd click enters edit mode.
-    // Any selection change to a different/non-strip fixture exits edit mode.
-    if (fixture.stripConfig && wasAlreadySelected && !event.shiftKey) {
+    // ONLY for bezier strips — line/circle have no edit mode (LED-dot hit-tests
+    // handle direct endpoint/center grabs, see hit_test_strip_endpoint).
+    if (
+      fixture.stripConfig &&
+      fixture.stripConfig.shapeType === 'bezier' &&
+      wasAlreadySelected &&
+      !event.shiftKey
+    ) {
       editingId.value = fixture.id;
     } else if (editingId.value !== null && editingId.value !== fixture.id) {
       editingId.value = null;
@@ -365,9 +371,15 @@ export function useSelection(
       if (!p) return;
       p.x = event.shiftKey ? snapWorld(world.x) : world.x;
       p.y = event.shiftKey ? snapWorld(world.y) : world.y;
-      // No length enforcement — the renderer trims/extends the curve to the
-      // strip's target length, walking from the star (vertex 0) anchor.
-      syncStripBounds(f);
+      // For bezier, the renderer trims/extends the curve to target length;
+      // no in-place enforcement needed (matches existing behavior). For line,
+      // the user drags one endpoint and we snap the OTHER endpoint along the
+      // current direction so the visible length stays exactly target_length.
+      if (f.stripConfig.shapeType === 'line') {
+        enforceStripLength(f, iv.vertexIndex);
+      } else {
+        syncStripBounds(f);
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue';
+import { Zap } from 'lucide-vue-next';
 import type { LiveWidget } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
@@ -39,6 +40,22 @@ const displayColor = computed(() => section.effectiveColor.value ?? props.widget
 // Single/multi-select sections also light up when "active" without being held.
 const visuallyActive = computed(() => pressed.value || section.isActive.value);
 
+const isFlash = computed(() => {
+  // Section flash mode
+  if (section.membership.value?.section.mode === 'flash') return true;
+  // Section bound preset is flash
+  if (section.boundPreset.value?.type === 'flash') return true;
+  const { mapping } = props.widget;
+  // Own mapping preset is flash or overwrite
+  if (mapping.type === 'preset' && mapping.presetId) {
+    const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
+    if (preset?.type === 'flash' || preset?.type === 'overwrite') return true;
+  }
+  // Global functions are always hold-to-active (flash behavior)
+  if (mapping.type === 'global-function') return true;
+  return false;
+});
+
 const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
   if (pageId === props.pageId && widgetId === props.widget.id) {
     pressed.value = active;
@@ -50,7 +67,19 @@ function applyOwnMapping(active: boolean) {
   const { mapping } = props.widget;
   if (mapping.type === 'preset' && mapping.presetId) {
     const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
-    if (preset?.type === 'flash') {
+    if (preset?.type === 'overwrite' && preset.overwriteTarget) {
+      if (active) {
+        engineStore.pressOverwrite(props.widget.id, preset.overwriteTarget, {});
+        queueMicrotask(() => liveBus.dispatch('overwrite.press', {
+          key: props.widget.id,
+          type: preset.overwriteTarget!,
+          config: {},
+        }));
+      } else {
+        engineStore.releaseOverwrite(props.widget.id);
+        queueMicrotask(() => liveBus.dispatch('overwrite.release', { key: props.widget.id }));
+      }
+    } else if (preset?.type === 'flash') {
       if (active) pressFlashPreset(props.widget.id, mapping.presetId);
       else releaseFlashPreset(props.widget.id);
     } else if (active) {
@@ -98,7 +127,7 @@ function onPointerUp() {
 
 <template>
   <button
-    class="w-full h-full rounded flex items-center justify-center text-sm font-medium transition-all select-none border"
+    class="w-full h-full rounded flex items-center justify-center text-sm font-medium transition-all select-none border relative"
     :class="[
       visuallyActive
         ? 'brightness-150 scale-95'
@@ -115,5 +144,6 @@ function onPointerUp() {
     @pointerleave="onPointerUp"
   >
     <span class="truncate px-2">{{ displayLabel }}</span>
+    <Zap v-if="isFlash" class="absolute bottom-0.5 right-0.5 size-2.5 text-yellow-400 drop-shadow" :stroke-width="2.5" />
   </button>
 </template>

@@ -46,9 +46,6 @@ export function commandFromPayload(
   ctx: ReplayContext,
 ): Command | null {
   const factory = registry.get(commandType)
-  if (!factory) {
-    console.warn(`[CommandRegistry] No factory for commandType "${commandType}"`)
-    return null
-  }
+  if (!factory) return null
   return factory(payload, ctx)
 }

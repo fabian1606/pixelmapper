@@ -53,15 +53,118 @@ function getChild(id: string) {
   return props.widget.controllerChildren?.find(c => c.controlId === id);
 }
 
+// Per-control base values for virtual dimmer (no DIMMER channel).
+// Key: `${controlId}:${fixtureId}:${channelIndex}`
+const dimmerBaseValues = new Map<string, number>();
+// Tracks the last mapping target per controlId to detect mapping changes.
+const dimmerLastTarget = new Map<string, string>();
+
+function clearDimmerBase(controlId: string) {
+  for (const key of [...dimmerBaseValues.keys()]) {
+    if (key.startsWith(`${controlId}:`)) dimmerBaseValues.delete(key);
+  }
+}
+
+function getFixturesForDimmerGroup(mapping: LiveMapping): any[] {
+  if (mapping.fixtureId != null && !mapping.groupId) {
+    const f = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
+    return f ? [f] : [];
+  }
+
+  if (mapping.groupId) {
+    const findGroup = (nodes: any[]): any => {
+      for (const node of nodes) {
+        if (String(node.id) === String(mapping.groupId)) return node;
+        if (node.children?.length) {
+          const found = findGroup(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    const group = findGroup(engineStore.sceneNodes);
+    if (group?.getAllFixtures) return group.getAllFixtures();
+  }
+
+  return [];
+}
+
+function applyDimmerGroup(mapping: LiveMapping, value: number, active: boolean, controlId: string) {
+  const fixtures = getFixturesForDimmerGroup(mapping);
+  const v = value !== undefined ? value : (active ? 1 : 0);
+
+  // Clear base values if the mapping target has changed
+  const targetKey = `${mapping.groupId ?? ''}:${mapping.fixtureId ?? ''}`;
+  if (dimmerLastTarget.get(controlId) !== targetKey) {
+    clearDimmerBase(controlId);
+    dimmerLastTarget.set(controlId, targetKey);
+  }
+
+  for (const fixture of fixtures) {
+    const dimmerChannels = fixture.channels.filter((ch: any) => ch.role === 'DIMMER');
+    if (dimmerChannels.length > 0) {
+      for (const ch of dimmerChannels) {
+        ch.chaserConfig.stepValues = [Math.round(v * 255)];
+      }
+    } else {
+      for (let i = 0; i < fixture.channels.length; i++) {
+        const ch = fixture.channels[i];
+        if (ch.role !== 'COLOR') continue;
+        const key = `${controlId}:${fixture.id}:${i}`;
+        if (!dimmerBaseValues.has(key)) {
+          dimmerBaseValues.set(key, ch.chaserConfig.stepValues[0] ?? 255);
+        }
+        const base = dimmerBaseValues.get(key)!;
+        ch.chaserConfig.stepValues = [Math.round(v * base)];
+      }
+    }
+  }
+  engineStore.triggerCanvasSync?.();
+}
+
 // ── Mapping dispatch ────────────────────────────────────────────────────────
 function applyMapping(mapping: LiveMapping, active: boolean, value?: number, controlId?: string) {
   if (mapping.type === 'preset' && mapping.presetId && active) {
     setActivePreset(mapping.presetId);
-  } else if (mapping.type === 'channel' && mapping.fixtureId != null && mapping.channelOffset != null) {
-    const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-    const ch = fixture?.channels[mapping.channelOffset];
-    if (ch) {
-      (ch as any).stepValues = [value !== undefined ? Math.round(value * 255) : (active ? 255 : 0)];
+  } else if (mapping.type === 'channel') {
+    const dmxValue = value !== undefined ? Math.round(value * 255) : (active ? 255 : 0);
+    if (mapping.groupId && mapping.channelType) {
+      const fixtures = getFixturesForDimmerGroup(mapping);
+      for (const fixture of fixtures) {
+        for (const ch of fixture.channels) {
+          if (ch.type === mapping.channelType) {
+            ch.chaserConfig.stepValues = [dmxValue];
+          }
+        }
+      }
+      engineStore.triggerCanvasSync?.();
+    } else if (mapping.fixtureId != null && mapping.channelOffset != null) {
+      const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
+      const ch = fixture?.channels[mapping.channelOffset];
+      if (ch) {
+        ch.chaserConfig.stepValues = [dmxValue];
+        engineStore.triggerCanvasSync?.();
+      }
+    }
+  } else if (mapping.type === 'dimmer-group') {
+    applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, controlId ?? '');
+  } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null && value !== undefined) {
+    const effect = engineStore.activeEffects.find((e: any) => e.id === mapping.effectId);
+    if (effect) {
+      const key = mapping.paramKey;
+      if (key === 'strength') {
+        effect.strength = value;
+      } else if (key === 'speed') {
+        if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
+      } else if (key === 'fanning') {
+        effect.fanning = value;
+      } else if (key.startsWith('waveformParams.')) {
+        const paramName = key.split('.')[1];
+        if (!effect.waveformParams) effect.waveformParams = { param: 0.5, start: 0, end: 1 };
+        if (paramName === 'param') effect.waveformParams.param = value;
+        else if (paramName === 'start') effect.waveformParams.start = value;
+        else if (paramName === 'end') effect.waveformParams.end = value;
+      }
       engineStore.triggerCanvasSync?.();
     }
   } else if (mapping.type === 'page-switch' && mapping.targetPageId && active) {
@@ -87,6 +190,7 @@ type ButtonRig = {
   origFill: string;
   labelEl?: SVGTextElement;
   labelPosition: 'inside' | 'below';
+  flashIconEl?: SVGPathElement;
 };
 type SliderRig = {
   kind: 'slider';
@@ -137,6 +241,22 @@ function isSectionActive(controlId: string): boolean {
  * Pick the "bound color" for a control: section slot's color override wins
  * (color-variants), then the preset's natural colour, then child override.
  */
+function isFlashControl(id: string): boolean {
+  const bound = boundPresetFor(id);
+  if (bound) {
+    if (bound.membership.section.mode === 'flash') return true;
+    if (bound.preset.type === 'flash') return true;
+  }
+  const child = getChild(id);
+  if (child?.mapping.type === 'preset' && child.mapping.presetId) {
+    const p = engineStore.savedPresets.find((sp: any) => sp.id === child.mapping.presetId);
+    if (p?.type === 'flash') return true;
+  }
+  // Global functions are always hold-to-active (flash behavior)
+  if (child?.mapping.type === 'global-function') return true;
+  return false;
+}
+
 function boundColorFor(id: string): string | null {
   const bound = boundPresetFor(id);
   if (bound) {
@@ -467,6 +587,45 @@ function applyButtonLabel(id: string) {
   }
 }
 
+// Lucide Zap icon path (24×24 viewbox)
+const ZAP_PATH = 'M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z';
+
+function createFlashIcon(ctrl: ControllerControl, svg: SVGSVGElement): SVGPathElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', ZAP_PATH);
+  // Scale Lucide 24×24 path to fit ~35% of the smaller button dimension, placed bottom-right
+  const iconSize = Math.min(ctrl.rect.w, ctrl.rect.h) * 0.38;
+  const scale = iconSize / 24;
+  // Position so icon sits in bottom-right corner with small margin
+  const margin = iconSize * 0.1;
+  const x = ctrl.rect.x + ctrl.rect.w - iconSize - margin;
+  const y = ctrl.rect.y + ctrl.rect.h - iconSize - margin;
+  path.setAttribute('transform', `translate(${x} ${y}) scale(${scale})`);
+  path.setAttribute('fill', '#facc15');
+  path.setAttribute('opacity', '0.9');
+  path.setAttribute('pointer-events', 'none');
+  svg.appendChild(path);
+  return path;
+}
+
+function applyFlashIcon(id: string) {
+  const rig = rigs.get(id);
+  if (!rig || rig.kind !== 'button') return;
+  const flash = isFlashControl(id);
+  if (flash && !rig.flashIconEl) {
+    const svg = host.value?.querySelector('svg') as SVGSVGElement | null;
+    const def = definition.value;
+    const ctrl = def?.controls.find(c => c.id === id);
+    if (svg && ctrl) {
+      rig.flashIconEl = createFlashIcon(ctrl, svg);
+    }
+  } else if (!flash && rig.flashIconEl) {
+    rig.flashIconEl.remove();
+    rig.flashIconEl = undefined;
+  }
+}
+
 function createButtonLabel(ctrl: ControllerControl, svg: SVGSVGElement, position: 'inside' | 'below'): SVGTextElement {
   const NS = 'http://www.w3.org/2000/svg';
   const text = document.createElementNS(NS, 'text');
@@ -501,6 +660,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
   rigs.set(ctrl.id, { kind: 'button', el, origFill, labelEl, labelPosition });
   applyButtonLabel(ctrl.id);
   applyButtonFill(ctrl.id);
+  applyFlashIcon(ctrl.id);
 
   const onDown = (e: PointerEvent) => {
     if (props.editMode) return;
@@ -591,6 +751,8 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     el.style.cursor = '';
     el.classList.remove('ctrl-selected');
     labelEl.remove();
+    const rig2 = rigs.get(ctrl.id);
+    if (rig2?.kind === 'button') rig2.flashIconEl?.remove();
   });
 }
 
@@ -706,7 +868,10 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
 watch(pressedControls, () => {
   for (const id of rigs.keys()) {
     const rig = rigs.get(id);
-    if (rig?.kind === 'button') applyButtonFill(id);
+    if (rig?.kind === 'button') {
+      applyButtonFill(id);
+      sendLedFeedback(id);
+    }
   }
 }, { deep: true });
 
@@ -718,12 +883,14 @@ watch(faderValues, () => {
 }, { deep: true });
 
 watch(() => props.widget.controllerChildren, () => {
-  // Color / label of a child override changed → repaint that button.
+  // Color / label of a child override changed → repaint that button and sync LED.
   for (const id of rigs.keys()) {
     const rig = rigs.get(id);
     if (rig?.kind !== 'button') continue;
     applyButtonFill(id);
     applyButtonLabel(id);
+    applyFlashIcon(id);
+    sendLedFeedback(id);
   }
 }, { deep: true });
 
@@ -736,6 +903,7 @@ watch(
     () => store.activeSectionMembers,
     () => store.activePage?.sections,
     () => engineStore.savedPresets,
+    () => engineStore.selectedPresetId,
     () => store.sectionMappingMode,
     () => props.editMode,
   ],
@@ -745,6 +913,7 @@ watch(
       if (rig?.kind !== 'button') continue;
       applyButtonFill(id);
       applyButtonLabel(id);
+      applyFlashIcon(id);
       sendLedFeedback(id);
     }
   },

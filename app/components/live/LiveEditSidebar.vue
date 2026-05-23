@@ -166,6 +166,90 @@ const selectedChild = computed<ControllerChildBinding | null>(() => {
 
 const presets = computed(() => engineStore.savedPresets ?? []);
 
+// ── Dimmer-group helpers ────────────────────────────────────────────────────
+
+const dimmerGroupNodes = computed(() =>
+  (engineStore.sceneNodes as any[]).filter(n => n.children != null),
+);
+
+function dimmerGroupValue(mapping: LiveMapping): string {
+  if (mapping.groupId) return `group:${mapping.groupId}`;
+  if (mapping.fixtureId != null) return `fixture:${mapping.fixtureId}`;
+  return '';
+}
+
+function setDimmerGroupForWidget(raw: string) {
+  if (!raw) {
+    patchWidget({ mapping: { type: 'dimmer-group' } });
+  } else if (raw.startsWith('group:')) {
+    patchWidget({ mapping: { type: 'dimmer-group', groupId: raw.slice(6), fixtureId: undefined } });
+  } else {
+    patchWidget({ mapping: { type: 'dimmer-group', fixtureId: raw.slice(8), groupId: undefined } });
+  }
+}
+
+function setDimmerGroupForChild(raw: string) {
+  if (!raw) {
+    patchChild({ mapping: { type: 'dimmer-group' } });
+  } else if (raw.startsWith('group:')) {
+    patchChild({ mapping: { type: 'dimmer-group', groupId: raw.slice(6), fixtureId: undefined } });
+  } else {
+    patchChild({ mapping: { type: 'dimmer-group', fixtureId: raw.slice(8), groupId: undefined } });
+  }
+}
+
+// ── Channel (DMX) with group support ───────────────────────────────────────
+
+function findGroupFixtures(groupId: string | number): any[] {
+  const findGroup = (nodes: any[]): any => {
+    for (const node of nodes) {
+      if (String(node.id) === String(groupId)) return node;
+      if (node.children?.length) { const f = findGroup(node.children); if (f) return f; }
+    }
+    return null;
+  };
+  const g = findGroup(engineStore.sceneNodes as any[]);
+  return g?.getAllFixtures?.() ?? [];
+}
+
+function channelTypesForGroup(groupId: string | number): string[] {
+  const fixtures = findGroupFixtures(groupId);
+  const seen = new Set<string>();
+  for (const f of fixtures) {
+    for (const ch of f.channels) {
+      if (ch.type) seen.add(ch.type);
+    }
+  }
+  return [...seen].sort();
+}
+
+// shared value helper for channel mapping (group:X or fixture:X)
+function channelTargetValue(mapping: LiveMapping): string {
+  if (mapping.groupId) return `group:${mapping.groupId}`;
+  if (mapping.fixtureId != null) return `fixture:${mapping.fixtureId}`;
+  return '';
+}
+
+function setChannelTargetForWidget(raw: string) {
+  if (!raw) {
+    patchWidget({ mapping: { type: 'channel' } });
+  } else if (raw.startsWith('group:')) {
+    patchWidget({ mapping: { type: 'channel', groupId: raw.slice(6), fixtureId: undefined, channelOffset: undefined } });
+  } else {
+    patchWidget({ mapping: { type: 'channel', fixtureId: raw.slice(8), groupId: undefined, channelType: undefined } });
+  }
+}
+
+function setChannelTargetForChild(raw: string) {
+  if (!raw) {
+    patchChild({ mapping: { type: 'channel' } });
+  } else if (raw.startsWith('group:')) {
+    patchChild({ mapping: { type: 'channel', groupId: raw.slice(6), fixtureId: undefined, channelOffset: undefined } });
+  } else {
+    patchChild({ mapping: { type: 'channel', fixtureId: raw.slice(8), groupId: undefined, channelType: undefined } });
+  }
+}
+
 function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>) {
   const twin = selectedTwin.value;
   const ctrl = selectedControl.value;
@@ -738,15 +822,29 @@ const MODE_LABELS: Record<SectionMode, string> = {
 
         <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
           <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Type</span>
+          <!-- Slider controls: only fader-relevant options -->
           <select
-            v-if="!focusedControlSection"
+            v-if="!focusedControlSection && selectedControl?.type === 'slider'"
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedChild?.mapping?.type ?? 'none'"
+            @change="(e) => setMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
+          >
+            <option value="none">— none —</option>
+            <option value="channel">Channel (DMX)</option>
+            <option value="dimmer-group">Dimmer Group</option>
+            <option value="effect-param">Effect parameter</option>
+          </select>
+          <!-- Button/other controls: all options -->
+          <select
+            v-else-if="!focusedControlSection"
             class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
             :value="selectedChild?.mapping?.type ?? 'none'"
             @change="(e) => setMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
           >
             <option value="none">— none —</option>
             <option value="preset">Preset</option>
-            <option value="channel">Channel</option>
+            <option value="channel">Channel (DMX)</option>
+            <option value="dimmer-group">Dimmer Group</option>
             <option value="effect-param">Effect parameter</option>
             <option value="global-function">Global Function</option>
             <option value="page-switch">Page switch</option>
@@ -765,6 +863,106 @@ const MODE_LABELS: Record<SectionMode, string> = {
           >
             <option value="">— choose —</option>
             <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
+          </select>
+        </div>
+
+        <!-- Channel picker (controller-twin) -->
+        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'channel'" class="flex flex-col gap-1">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="channelTargetValue(selectedChild.mapping)"
+            @change="(e) => setChannelTargetForChild((e.target as HTMLSelectElement).value)"
+          >
+            <option value="">— choose group or fixture —</option>
+            <optgroup v-if="dimmerGroupNodes.length" label="Groups">
+              <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">{{ node.name }}</option>
+            </optgroup>
+            <optgroup label="Fixtures">
+              <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">{{ f.name }}</option>
+            </optgroup>
+          </select>
+
+          <!-- Group selected → pick channel type -->
+          <template v-if="selectedChild?.mapping.groupId">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel Type</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedChild.mapping.channelType ?? ''"
+              @change="(e) => { if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, channelType: (e.target as HTMLSelectElement).value } }); }"
+            >
+              <option value="">— choose type —</option>
+              <option v-for="t in channelTypesForGroup(selectedChild.mapping.groupId)" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </template>
+
+          <!-- Fixture selected → pick channel index -->
+          <template v-else-if="selectedChild?.mapping.fixtureId != null">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedChild?.mapping.channelOffset ?? ''"
+              @change="(e) => {
+                const channelOffset = Number((e.target as HTMLSelectElement).value);
+                if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, channelOffset } });
+              }"
+            >
+              <option value="">— choose channel —</option>
+              <option v-for="(ch, idx) in engineStore.flatFixtures.find(f => f.id === selectedChild?.mapping.fixtureId)?.channels ?? []" :key="idx" :value="idx">
+                {{ ch.oflChannelName || `Ch ${idx}` }}
+              </option>
+            </select>
+          </template>
+        </div>
+
+        <!-- Dimmer group picker (controller-twin) -->
+        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'dimmer-group'" class="flex flex-col gap-1">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="dimmerGroupValue(selectedChild.mapping)"
+            @change="(e) => setDimmerGroupForChild((e.target as HTMLSelectElement).value)"
+          >
+            <option value="">— choose group or fixture —</option>
+            <optgroup v-if="dimmerGroupNodes.length" label="Groups">
+              <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">
+                {{ node.name }}
+              </option>
+            </optgroup>
+            <optgroup label="Fixtures">
+              <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">
+                {{ f.name }}
+              </option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- Effect parameter picker (controller-twin) -->
+        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'effect-param'" class="flex flex-col gap-1">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Effect</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedChild.mapping.effectId ?? ''"
+            @change="(e) => patchChild({ mapping: { type: 'effect-param', effectId: (e.target as HTMLSelectElement).value } })"
+          >
+            <option value="">— choose effect —</option>
+            <option v-for="eff in engineStore.activeEffects" :key="eff.id" :value="eff.id">
+              {{ eff.id }}
+            </option>
+          </select>
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Parameter</span>
+          <select
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedChild?.mapping.paramKey ?? ''"
+            @change="(e) => { if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, paramKey: (e.target as HTMLSelectElement).value } }); }"
+          >
+            <option value="">— choose parameter —</option>
+            <option value="strength">Strength</option>
+            <option value="speed">Speed</option>
+            <option value="fanning">Fanning</option>
+            <option value="waveformParams.param">Waveform Param</option>
+            <option value="waveformParams.start">Waveform Start</option>
+            <option value="waveformParams.end">Waveform End</option>
           </select>
         </div>
 
@@ -892,18 +1090,35 @@ const MODE_LABELS: Record<SectionMode, string> = {
           />
         </div>
 
-        <!-- Mapping type (only for buttons) -->
-        <div v-if="selectedButton.type === 'button'" class="flex flex-col gap-2">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Action</span>
+        <!-- Mapping type (buttons and sliders) -->
+        <div v-if="selectedButton.type === 'button' || selectedButton.type === 'slider'" class="flex flex-col gap-2">
+          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">{{ selectedButton.type === 'button' ? 'Action' : 'Control' }}</span>
+          <!-- Button: all options -->
           <select
+            v-if="selectedButton.type === 'button'"
             class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
             :value="selectedButton.mapping.type"
             @change="(e) => setButtonMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
           >
             <option value="none">None</option>
             <option value="preset">Preset</option>
+            <option value="channel">Channel (DMX)</option>
+            <option value="dimmer-group">Dimmer Group</option>
+            <option value="effect-param">Effect Parameter</option>
             <option value="global-function">Global Function</option>
             <option value="page-switch">Page Switch</option>
+          </select>
+          <!-- Slider: only fader-relevant options -->
+          <select
+            v-else-if="selectedButton.type === 'slider'"
+            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+            :value="selectedButton.mapping.type"
+            @change="(e) => setButtonMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
+          >
+            <option value="none">None</option>
+            <option value="channel">Channel (DMX)</option>
+            <option value="dimmer-group">Dimmer Group</option>
+            <option value="effect-param">Effect Parameter</option>
           </select>
 
           <!-- Preset picker -->
@@ -1000,6 +1215,106 @@ const MODE_LABELS: Record<SectionMode, string> = {
             >
               <option value="">— choose page —</option>
               <option v-for="pg in store.pages" :key="pg.id" :value="pg.id">{{ pg.name }}</option>
+            </select>
+          </div>
+
+          <!-- Channel picker (button + slider) -->
+          <div v-if="selectedButton.mapping.type === 'channel'" class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="channelTargetValue(selectedButton.mapping)"
+              @change="(e) => setChannelTargetForWidget((e.target as HTMLSelectElement).value)"
+            >
+              <option value="">— choose group or fixture —</option>
+              <optgroup v-if="dimmerGroupNodes.length" label="Groups">
+                <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">{{ node.name }}</option>
+              </optgroup>
+              <optgroup label="Fixtures">
+                <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">{{ f.name }}</option>
+              </optgroup>
+            </select>
+
+            <!-- Group selected → pick channel type -->
+            <template v-if="selectedButton.mapping.groupId">
+              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel Type</span>
+              <select
+                class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+                :value="selectedButton.mapping.channelType ?? ''"
+                @change="(e) => { if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, channelType: (e.target as HTMLSelectElement).value } }); }"
+              >
+                <option value="">— choose type —</option>
+                <option v-for="t in channelTypesForGroup(selectedButton.mapping.groupId)" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </template>
+
+            <!-- Fixture selected → pick channel index -->
+            <template v-else-if="selectedButton.mapping.fixtureId != null">
+              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel</span>
+              <select
+                class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+                :value="selectedButton.mapping.channelOffset ?? ''"
+                @change="(e) => {
+                  const channelOffset = Number((e.target as HTMLSelectElement).value);
+                  if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, channelOffset } });
+                }"
+              >
+                <option value="">— choose channel —</option>
+                <option v-for="(ch, idx) in engineStore.flatFixtures.find(f => f.id === selectedButton?.mapping.fixtureId)?.channels ?? []" :key="idx" :value="idx">
+                  {{ ch.oflChannelName || `Ch ${idx}` }}
+                </option>
+              </select>
+            </template>
+          </div>
+
+          <!-- Dimmer group picker -->
+          <div v-if="selectedButton.mapping.type === 'dimmer-group'" class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="dimmerGroupValue(selectedButton.mapping)"
+              @change="(e) => setDimmerGroupForWidget((e.target as HTMLSelectElement).value)"
+            >
+              <option value="">— choose group or fixture —</option>
+              <optgroup v-if="dimmerGroupNodes.length" label="Groups">
+                <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">
+                  {{ node.name }}
+                </option>
+              </optgroup>
+              <optgroup label="Fixtures">
+                <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">
+                  {{ f.name }}
+                </option>
+              </optgroup>
+            </select>
+          </div>
+
+          <!-- Effect parameter picker -->
+          <div v-if="selectedButton.mapping.type === 'effect-param'" class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Effect</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedButton.mapping.effectId ?? ''"
+              @change="(e) => patchWidget({ mapping: { type: 'effect-param', effectId: (e.target as HTMLSelectElement).value } })"
+            >
+              <option value="">— choose effect —</option>
+              <option v-for="eff in engineStore.activeEffects" :key="eff.id" :value="eff.id">
+                {{ eff.id }}
+              </option>
+            </select>
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Parameter</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedButton.mapping.paramKey ?? ''"
+              @change="(e) => { if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, paramKey: (e.target as HTMLSelectElement).value } }); }"
+            >
+              <option value="">— choose parameter —</option>
+              <option value="strength">Strength</option>
+              <option value="speed">Speed</option>
+              <option value="fanning">Fanning</option>
+              <option value="waveformParams.param">Waveform Param</option>
+              <option value="waveformParams.start">Waveform Start</option>
+              <option value="waveformParams.end">Waveform End</option>
             </select>
           </div>
         </div>

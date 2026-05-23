@@ -35,21 +35,27 @@ export interface StripPoint {
 }
 
 /**
+ * Visual shape of an LED strip. Drives how `points` is interpreted:
+ *   bezier → ≥2 vertices, Catmull-Rom spline (free-form curve)
+ *   line   → exactly 2 vertices, straight segment
+ *   circle → exactly 1 vertex (center); radius derived from target length / (2π)
+ */
+export type StripShapeType = 'bezier' | 'line' | 'circle';
+
+/**
  * Parametric definition of a NeoPixel LED strip fixture.
  * Stored on Fixture.stripConfig when the fixture is a programmatically generated strip.
  *
- * The strip's physical shape is a polyline of `points` (≥ 2 vertices) in
- * world-pixel coordinates. LEDs are distributed evenly along the polyline's
- * total arc length.
+ * `shapeType` selects how `points` is interpreted (see StripShapeType).
+ * LEDs are distributed evenly along the shape's arc length up to `lengthMeters · 250 px`.
  *
  * Beams = logical pixels (groups of `groupSize` physical LEDs sharing a color).
  *   logicalPixelCount = ceil(ledCount / groupSize)
  * DMX channels = logicalPixelCount * channelsPerPixel(chipType)
- *
- * `lengthMeters` is the LOGICAL length implied by `ledCount / ledsPerMeter`.
- * The polyline's geometric length is independent — the user may shape it freely.
  */
 export interface StripConfig {
+  /** Visual shape: bezier (free-form), line (2-pt straight), circle (1-pt center). */
+  shapeType: StripShapeType;
   chipType: NeoPixelChipType;
   /** Number of physical LEDs on the strip. */
   ledCount: number;
@@ -59,8 +65,10 @@ export interface StripConfig {
   groupSize: number;
   /** Logical strip length = ledCount / ledsPerMeter. */
   lengthMeters: number;
-  /** Polyline vertices in world-pixel coordinates. Must contain ≥ 2 points. */
+  /** Shape vertices in world-pixel coordinates. bezier: ≥2 | line: =2 | circle: =1 (center). */
   points: StripPoint[];
+  /** Circle only: true = clockwise, false = counter-clockwise. Default true. */
+  clockwise?: boolean;
 }
 
 export class Fixture {

@@ -82,7 +82,7 @@ pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
 
     for _ in 0..fixture_count {
         let group_index   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-        let channel_count = match c.read_u8()     { Some(v) => v as usize, None => return -1 };
+        let channel_count = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
 
         let mut channels = Vec::with_capacity(channel_count);
         for _ in 0..channel_count {

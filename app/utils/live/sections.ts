@@ -43,7 +43,7 @@ export function resolveSectionSource(source: SectionSource | string, ctx: Sectio
         if (!cur?.basePresetId) break;
         rootId = cur.basePresetId;
       }
-      const variants = ctx.savedPresets.filter(p => p.basePresetId === rootId);
+      const variants = ctx.savedPresets.filter(p => p.basePresetId === rootId && p.type !== 'overwrite');
       const root = byId.get(rootId);
       const list = root ? [root, ...variants] : variants;
       return list.map(preset => ({ preset }));

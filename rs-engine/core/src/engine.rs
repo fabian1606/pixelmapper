@@ -388,17 +388,32 @@ impl EffectEngine {
             };
 
             for group_idx in groups {
-                let r_target = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "RED");
-                let r_idx = r_target.map(|t| t.dmx_index);
-                let g_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "GREEN").map(|t| t.dmx_index);
-                let b_idx = self.targets.iter().find(|t| t.group_index == group_idx && t.channel_type == "BLUE").map(|t| t.dmx_index);
+                // Multi-pixel fixtures (LED strips, matrices) have many R/G/B
+                // triples per group — pair them by position so EACH pixel gets
+                // its own hue rotation with its own world coords for spatial cycle.
+                let reds: Vec<(usize, f32, f32)> = self.targets.iter()
+                    .filter(|t| t.group_index == group_idx && t.channel_type == "RED")
+                    .map(|t| (t.dmx_index, t.world_x, t.world_y))
+                    .collect();
+                let greens: Vec<usize> = self.targets.iter()
+                    .filter(|t| t.group_index == group_idx && t.channel_type == "GREEN")
+                    .map(|t| t.dmx_index)
+                    .collect();
+                let blues: Vec<usize> = self.targets.iter()
+                    .filter(|t| t.group_index == group_idx && t.channel_type == "BLUE")
+                    .map(|t| t.dmx_index)
+                    .collect();
 
-                if let (Some(ri), Some(gi), Some(bi)) = (r_idx, g_idx, b_idx) {
+                let pixel_count = reds.len().min(greens.len()).min(blues.len());
+                for p in 0..pixel_count {
+                    let (ri, wx, wy) = reds[p];
+                    let gi = greens[p];
+                    let bi = blues[p];
+
                     let r = self.render_buffer[ri] / 255.0;
                     let g = self.render_buffer[gi] / 255.0;
                     let b = self.render_buffer[bi] / 255.0;
 
-                    let (wx, wy) = r_target.map(|t| (t.world_x, t.world_y)).unwrap_or((0.5, 0.5));
                     let cycle = effect.eval_cycle_at(wx, wy);
                     let eff_hue = cp.hue_shift + cycle * cp.hue_range;
                     let eff_sat = (cp.saturation + cycle * cp.sat_range).clamp(0.0, 2.0);

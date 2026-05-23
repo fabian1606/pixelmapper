@@ -22,25 +22,78 @@ const commandsSinceSnapshot = ref(0);
 
 export const lastSeenSequenceNumber = ref<number>(0);
 
+export interface WalEntryForHooks {
+  id: string;
+  projectId: string;
+  commandType: string;
+  payload: unknown;
+  enqueuedAt: number;
+}
+
 const persistenceHooks = {
-  pushChange: null as ((commandType: string, payload: object) => Promise<number | undefined>) | null,
+  /** Persist a single command. `changeId` is the client-generated idempotency key
+   *  (UUID) which must match the WAL entry written via `walAppend`. */
+  pushChange: null as ((commandType: string, payload: object, changeId: string) => Promise<number | undefined>) | null,
   saveSnapshot: null as (() => Promise<void>) | null,
   /** Called after any local mutation that may need to land in a snapshot. */
   markDirty: null as (() => void) | null,
+  /** Append a pending change to the IndexedDB WAL. Fire-and-forget — local
+   *  apply does not block on the write, but the entry IS durable before any
+   *  network call happens because the WAL write is queued first. */
+  walAppend: null as ((entry: WalEntryForHooks) => Promise<void>) | null,
+  /** Current project id — needed for WAL scoping. */
+  currentProjectId: null as (() => string | null) | null,
 };
 
 export function setPersistenceHooks(hooks: {
-  pushChange: (commandType: string, payload: object) => Promise<number | undefined>;
+  pushChange: (commandType: string, payload: object, changeId: string) => Promise<number | undefined>;
   saveSnapshot: () => Promise<void>;
   markDirty?: () => void;
+  walAppend?: (entry: WalEntryForHooks) => Promise<void>;
+  currentProjectId?: () => string | null;
 }) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
   persistenceHooks.markDirty = hooks.markDirty ?? null;
+  persistenceHooks.walAppend = hooks.walAppend ?? null;
+  persistenceHooks.currentProjectId = hooks.currentProjectId ?? null;
 }
 
 export function triggerSaveSnapshot() {
   persistenceHooks.saveSnapshot?.();
+}
+
+/**
+ * Single point of truth for: (1) WAL write, (2) server push, (3) snapshot-counter.
+ * All four call sites (persistChange, execute, undo-inverse, redo) funnel through here.
+ */
+function persistOne(commandType: string, payload: object, label: string) {
+  if (!persistenceHooks.pushChange) return;
+  const changeId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  // WAL FIRST — durable before any network call. The promise is not awaited so
+  // local apply stays synchronous, but the IDB transaction is already queued.
+  const projectId = persistenceHooks.currentProjectId?.() ?? '';
+  if (projectId && persistenceHooks.walAppend) {
+    persistenceHooks.walAppend({
+      id: changeId,
+      projectId,
+      commandType,
+      payload,
+      enqueuedAt: Date.now(),
+    }).catch(err => console.warn(`[history] WAL append failed (${label}):`, err));
+  }
+
+  persistenceHooks.pushChange(commandType, payload, changeId).then((seq) => {
+    if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
+    commandsSinceSnapshot.value++;
+    if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
+      commandsSinceSnapshot.value = 0;
+      persistenceHooks.saveSnapshot();
+    }
+  }).catch(err => console.warn(`[history] persist ${label} failed:`, err));
 }
 
 /**
@@ -52,14 +105,7 @@ export function triggerSaveSnapshot() {
 export function persistChange(commandType: string, payload: object) {
   if (!persistenceHooks.pushChange) return;
   persistenceHooks.markDirty?.();
-  persistenceHooks.pushChange(commandType, payload).then((seq) => {
-    if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
-    commandsSinceSnapshot.value++;
-    if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
-      commandsSinceSnapshot.value = 0;
-      persistenceHooks.saveSnapshot();
-    }
-  }).catch(err => console.warn('[history] persistChange failed:', err));
+  persistOne(commandType, payload, 'persistChange');
 }
 
 export function useHistory() {
@@ -75,18 +121,8 @@ export function useHistory() {
     version.value++;
     persistenceHooks.markDirty?.();
 
-    if (isSerializable(command) && persistenceHooks.pushChange) {
-      const payload = command.toPayload();
-      persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
-        if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
-        commandsSinceSnapshot.value++;
-        if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
-          commandsSinceSnapshot.value = 0;
-          persistenceHooks.saveSnapshot();
-        }
-      }).catch(err => {
-        console.warn('[history] persist failed:', err);
-      });
+    if (isSerializable(command)) {
+      persistOne(command.commandType, command.toPayload(), 'execute');
     }
   }
 
@@ -110,18 +146,11 @@ export function useHistory() {
     // Persist the undo by pushing an inverse forward-command to the DB so
     // (a) the change survives reload and (b) collaborators see the undo too.
     // Only commands that opt-in via inverse() participate; others stay local.
-    if (command.inverse && persistenceHooks.pushChange) {
+    if (command.inverse) {
       const inv = command.inverse();
       if (inv && isSerializable(inv)) {
         const sCmd = inv as SerializableCommand;
-        persistenceHooks.pushChange(sCmd.commandType, sCmd.toPayload()).then((seq) => {
-          if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
-          commandsSinceSnapshot.value++;
-          if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
-            commandsSinceSnapshot.value = 0;
-            persistenceHooks.saveSnapshot();
-          }
-        }).catch(err => console.warn('[history] persist undo failed:', err));
+        persistOne(sCmd.commandType, sCmd.toPayload(), 'undo');
       }
     }
   }
@@ -134,17 +163,8 @@ export function useHistory() {
     version.value++;
     persistenceHooks.markDirty?.();
 
-    // Persist the redo too — same pattern as forward execute.
-    if (isSerializable(command) && persistenceHooks.pushChange) {
-      const payload = command.toPayload();
-      persistenceHooks.pushChange(command.commandType, payload).then((seq) => {
-        if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
-        commandsSinceSnapshot.value++;
-        if (commandsSinceSnapshot.value >= SNAPSHOT_INTERVAL && persistenceHooks.saveSnapshot) {
-          commandsSinceSnapshot.value = 0;
-          persistenceHooks.saveSnapshot();
-        }
-      }).catch(err => console.warn('[history] persist redo failed:', err));
+    if (isSerializable(command)) {
+      persistOne(command.commandType, command.toPayload(), 'redo');
     }
   }
 

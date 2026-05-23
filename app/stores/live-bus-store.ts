@@ -111,25 +111,41 @@ function isPersistent(config: LiveOpConfig): boolean {
 export interface PersistEntry {
   type: string;
   payload: any;
+  /** Client-generated idempotency key (UUID). Optional for legacy live-op
+   *  dispatches that don't go through the history layer; history-originated
+   *  entries always carry one so WAL ACK can target them precisely. */
+  changeId?: string;
   dedupKey?: string;
   resolve?: (seq: number | undefined) => void;
   reject?: (err: unknown) => void;
 }
 
 export type PersistHook = (
-  entries: Array<{ type: string; payload: any }>,
+  entries: Array<{ type: string; payload: any; changeId?: string }>,
 ) => Promise<Array<number | undefined>>;
 
-const PERSIST_SETTLE_MS = 250;
+/** Called after a successful flush with all `changeId`s the server acknowledged. */
+export type PersistAckHook = (changeIds: string[]) => void;
+
+// Reduced from 250ms — the WAL makes correctness independent of this window, so
+// we only need enough batching to coalesce same-frame writes. 50ms gives ~3
+// animation frames of grace for back-to-back commands without spamming the
+// server with one request per command.
+const PERSIST_SETTLE_MS = 50;
 
 const persistByKey = new Map<string, PersistEntry>();
 const persistAppend: PersistEntry[] = [];
 let persistFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlightFlush: Promise<void> | null = null;
 let persistHook: PersistHook | null = null;
+let persistAckHook: PersistAckHook | null = null;
 
 export function setPersistHook(hook: PersistHook | null): void {
   persistHook = hook;
+}
+
+export function setPersistAckHook(hook: PersistAckHook | null): void {
+  persistAckHook = hook;
 }
 
 export function enqueuePersist(entry: PersistEntry): void {
@@ -166,8 +182,21 @@ export async function flushPersistQueue(): Promise<void> {
 
   inFlightFlush = (async () => {
     try {
-      const seqs = await persistHook!(batch.map(e => ({ type: e.type, payload: e.payload })));
+      const seqs = await persistHook!(batch.map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId })));
       for (let i = 0; i < batch.length; i++) batch[i].resolve?.(seqs[i]);
+      // Notify WAL that these changeIds are durable on the server now — but
+      // ONLY for entries where the server actually returned a sequence number.
+      // Entries with undefined seq either failed silently on the server or were
+      // dropped from the response; keep them in the WAL so the next loadProject
+      // recovery retries via the idempotent push-change endpoint.
+      if (persistAckHook) {
+        const ackedIds: string[] = [];
+        for (let i = 0; i < batch.length; i++) {
+          const e = batch[i];
+          if (e.changeId && seqs[i] != null) ackedIds.push(e.changeId);
+        }
+        if (ackedIds.length > 0) persistAckHook(ackedIds);
+      }
     } catch (err) {
       console.warn('[LiveBus] persist flush failed:', err);
       // Re-queue dedup entries only if no newer payload has arrived since;
@@ -191,9 +220,9 @@ export async function flushPersistQueue(): Promise<void> {
 }
 
 /** Snapshot of pending persist entries — used by beforeunload to drain via keepalive fetch. */
-export function getPersistQueueSnapshot(): Array<{ type: string; payload: any }> {
+export function getPersistQueueSnapshot(): Array<{ type: string; payload: any; changeId?: string }> {
   return [...persistByKey.values(), ...persistAppend]
-    .map(e => ({ type: e.type, payload: e.payload }));
+    .map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId }));
 }
 
 /** Drop all pending entries without resolving callers. Used on project switch
@@ -304,6 +333,9 @@ export const useLiveBusStore = defineStore('live-bus', () => {
 
     if (!broadcast) return;
     if (!isConnected.value || !channel || !currentUserId) return;
+    // Solo session — no peers to receive the broadcast. Persistence already
+    // ran above, so reloads still see the latest state via the event log.
+    if (presenceUsers.value.length <= 1) return;
 
     const op: LiveOp<T> = { type, payload, userId: currentUserId, sessionId: TAB_SESSION_ID };
 

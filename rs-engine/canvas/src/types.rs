@@ -21,40 +21,60 @@ pub struct FixtureBeam {
     pub svg_element_id: Option<String>,
 }
 
+/// Visual shape of an LED strip. Drives how `points` is interpreted by the
+/// renderer (see `sample_strip_capped`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StripShapeType {
+    Bezier,
+    Line,
+    Circle,
+}
+
+fn default_bezier() -> StripShapeType { StripShapeType::Bezier }
+
 /// Visualization-only metadata for parametric NeoPixel LED strips.
 ///
 /// Beams already encode logical pixels (one per addressable color group).
 /// `ledCount` lets the renderer draw the individual physical LED dots —
 /// when `groupSize > 1`, N consecutive LEDs share the color of one beam.
 ///
-/// `points` is the polyline shape of the strip in WORLD-PIXEL coordinates
-/// (not normalized, not fixture-local). The renderer ignores the fixture's
-/// rotation/position when `strip` is present — the polyline already encodes
-/// world placement.
+/// `points` is interpreted per `shape_type`:
+///   bezier → ≥2 vertices, Catmull-Rom spline
+///   line   → exactly 2 vertices (start/end of the straight segment)
+///   circle → exactly 1 vertex (center); radius = target_length / (2π)
+/// Coordinates are in WORLD-PIXEL space (not normalized, not fixture-local).
+/// The renderer ignores the fixture's rotation/position when `strip` is
+/// present — `points` already encodes world placement.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StripData {
+    #[serde(rename = "shapeType", default = "default_bezier")]
+    pub shape_type: StripShapeType,
     #[serde(rename = "ledCount")]
     pub led_count: usize,
     #[serde(rename = "groupSize")]
     pub group_size: usize,
     /// Target arc-length in world-pixels (= lengthMeters × 250). The renderer
-    /// walks from `points[0]` (star anchor) along the Catmull-Rom curve for
-    /// exactly this distance — trimming the tail if the polyline is longer,
-    /// extending in the last tangent direction if it's shorter. So the strip
-    /// is ALWAYS rendered at exactly this length regardless of vertex moves.
+    /// walks from `points[0]` (star anchor) along the shape for exactly this
+    /// distance. For circle, the radius is derived from this value.
     #[serde(rename = "targetLength", default)]
     pub target_length: f32,
-    /// Polyline vertices in world-pixel coordinates. Always ≥ 2.
+    /// Shape vertices in world-pixel coordinates. bezier: ≥2 | line: =2 | circle: =1 (center).
     #[serde(default)]
     pub points: Vec<[f32; 2]>,
     /// Index of the currently focused vertex (set when the user clicks a
     /// handle). The renderer draws a highlight ring; the JS side uses it as
     /// the target for keyboard Delete/Backspace. `-1` = no focused vertex.
+    /// Only used in bezier edit-mode.
     #[serde(rename = "selectedVertexIdx", default = "neg_one")]
     pub selected_vertex_idx: i32,
+    /// Circle only: true = clockwise, false = counter-clockwise. Default true.
+    #[serde(default = "default_true")]
+    pub clockwise: bool,
 }
 
 fn neg_one() -> i32 { -1 }
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureCanvasData {
