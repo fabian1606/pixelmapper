@@ -68,6 +68,13 @@ export interface WaveformShapeParams {
    * hold value in the inactive (start/end) zones.
    */
   offset?: number;
+  /**
+   * Explicit floor level for the inactive (pre-start / post-end) zone, as a
+   * fraction of the base channel value (0..1). Decoupled from strength: floor=0
+   * always yields black regardless of strength. Undefined or negative = disabled
+   * (falls back to legacy offset-based hold behavior).
+   */
+  floor?: number;
 }
 
 export type ChannelType =
@@ -156,6 +163,20 @@ export interface EffectContext {
   y: number;
 }
 
+export type DisplacementPatternType = 'perlin' | 'white';
+
+export interface DisplacementParams {
+  patternType: DisplacementPatternType;
+  /** X-axis displacement amount in normalized world units (0–0.5). */
+  amountX: number;
+  /** Y-axis displacement amount in normalized world units (0–0.5). */
+  amountY: number;
+  /** Spatial frequency of the displacement field (0.1–10). */
+  scale: number;
+  /** Seed for deterministic white-noise displacement. */
+  seed: number;
+}
+
 export type BlendMode = 'add' | 'override' | 'multiply' | 'max' | 'min';
 
 export interface Effect {
@@ -239,6 +260,11 @@ export interface Effect {
    * Color-specific parameters. Only present when the effect is a ColorEffect.
    */
   colorParams?: ColorParams;
+
+  /**
+   * Displacement-specific parameters. Only present when the effect is a DisplacementEffect.
+   */
+  displacementParams?: DisplacementParams;
 
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).

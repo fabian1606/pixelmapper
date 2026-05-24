@@ -5,6 +5,7 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
+import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
 import type { RGB } from '~/utils/live/color-utils';
 import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
@@ -75,6 +76,17 @@ export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
     eff.targetFixtureIds = [...snap.targetFixtureIds];
     eff.strength = snap.strength;
     if (snap.colorParams) eff.colorParams = { ...snap.colorParams };
+    return eff;
+  }
+
+  if (snap.effectType === 'DisplacementEffect') {
+    const eff = new DisplacementEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    eff.strength = snap.strength;
+    eff.speed = { ...snap.speed };
+    if (snap.displacementParams) eff.displacementParams = { ...snap.displacementParams };
     return eff;
   }
 

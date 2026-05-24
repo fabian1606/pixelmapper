@@ -42,6 +42,14 @@ const start = computed(() => props.params.start);
 const end = computed(() => props.params.end);
 const scale = computed(() => props.strength / 100);
 const offset = computed(() => props.params.offset ?? 0);
+// Floor handle: explicit inactive-zone level (0..1, fraction of base color).
+// undefined / negative = disabled (legacy offset-based behavior).
+const floorRaw = computed(() => props.params.floor);
+const floorActive = computed(() => floorRaw.value !== undefined && floorRaw.value >= 0);
+const floor = computed(() => floorActive.value ? clamp(floorRaw.value!, 0, 1) : 0.5);
+
+// Floor handle visual position: y=0 → floor=1 (top, full color), y=SVG_H → floor=0 (black).
+const floorHandleY = computed(() => SVG_H * (1 - floor.value));
 
 // ─── Snap positions based on speed config ────────────────────────────────────
 const snapPositions = computed((): number[] => {
@@ -78,12 +86,19 @@ const waveformPoints = computed(() => {
   const off = offset.value;
   const pts: string[] = [];
   const samples = 120;
+  const fa = floorActive.value;
+  const fy = floorHandleY.value;
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
-    const raw = evaluatePhase(t * TAU, props.shape, props.params.param, start.value, end.value, off);
     const cx = (t * SVG_W).toFixed(1);
-    const cy = (SVG_H / 2 - raw * WAVE_AMP * s).toFixed(1);
-    pts.push(`${cx},${cy}`);
+    let cy: number;
+    if (fa && (t < start.value || t > end.value)) {
+      cy = fy;
+    } else {
+      const raw = evaluatePhase(t * TAU, props.shape, props.params.param, start.value, end.value, off);
+      cy = SVG_H / 2 - raw * WAVE_AMP * s;
+    }
+    pts.push(`${cx},${cy.toFixed(1)}`);
   }
   return pts.join(' ');
 });
@@ -172,14 +187,18 @@ const paramHandlePos = computed(() => {
 // Both handles are linked to the same offset — dragging either one shifts the
 // entire wave up/down. The y-position reflects the offset baseline (scaled by
 // strength so the visual matches the engine output).
+// Start/End handles map directly to offset ∈ [-1, +1] across the full SVG
+// height, independent of strength. This lets the user pull the baseline all
+// the way to the bottom (offset=-1 → inactive zone = black at 100% strength)
+// regardless of the current strength setting.
 const startHandlePos = computed(() => ({
   cx: start.value * SVG_W,
-  cy: SVG_H / 2 - offset.value * WAVE_AMP * scale.value,
+  cy: SVG_H / 2 - offset.value * WAVE_AMP,
 }));
 
 const endHandlePos = computed(() => ({
   cx: end.value * SVG_W,
-  cy: SVG_H / 2 - offset.value * WAVE_AMP * scale.value,
+  cy: SVG_H / 2 - offset.value * WAVE_AMP,
 }));
 
 // ─── Generic drag utility ─────────────────────────────────────────────────────
@@ -208,13 +227,12 @@ function startDrag(
 }
 
 // ─── Shared offset-from-ry helper ────────────────────────────────────────────
-// Inverse of: cy = SVG_H/2 - offset * WAVE_AMP * scale
-// → offset = (0.5 - ry) / (WAVE_AMP/SVG_H) / scale
-// When strength is 0, fall back to a scale of 1 to keep dragging responsive.
+// Inverse of: cy = SVG_H/2 - offset * WAVE_AMP
+// → offset = (0.5 - ry) / (WAVE_AMP/SVG_H)
+// Decoupled from strength: the full SVG height always maps to offset ∈ [-1, 1].
 function offsetFromRy(ry: number): number {
   const ampFrac = WAVE_AMP / SVG_H;
-  const s = scale.value === 0 ? 1 : scale.value;
-  const raw = clamp((0.5 - ry) / ampFrac / s, -1, 1);
+  const raw = clamp((0.5 - ry) / ampFrac, -1, 1);
   return Math.abs(raw) < 0.05 ? 0 : Math.round(raw * 100) / 100;
 }
 
@@ -255,6 +273,22 @@ function onStrengthDrag(e: MouseEvent) {
     const newStrength = clamp(Math.round(((0.5 - ry) / effectiveFrac) * 100), -100, 100);
     emit('update:strength', newStrength);
   });
+}
+
+// ─── Floor handle drag (y-axis only, fraction of base 0..1) ──────────────────
+function onFloorDrag(e: MouseEvent) {
+  startDrag(e, (_rx, ry) => {
+    const frac = clamp(1 - ry, 0, 1);
+    const snapped = Math.round(frac * 100) / 100;
+    emit('update:params', { ...props.params, floor: snapped });
+  });
+}
+
+// Double-click toggles the floor handle on/off. When enabled, starts at 0 (black).
+function onFloorToggle(e: MouseEvent) {
+  e.stopPropagation();
+  emit('update:params', { ...props.params, floor: floorActive.value ? -1 : 0 });
+  emit('change-end');
 }
 
 // ─── Shape-param handle drag (x-axis, y for sawtooth direction) ──────────────
@@ -355,9 +389,9 @@ function miniPoints(shape: WaveformShape): string {
         <line
           v-if="offset !== 0"
           :x1="0"
-          :y1="SVG_H / 2 - offset * WAVE_AMP * scale"
+          :y1="SVG_H / 2 - offset * WAVE_AMP"
           :x2="SVG_W"
-          :y2="SVG_H / 2 - offset * WAVE_AMP * scale"
+          :y2="SVG_H / 2 - offset * WAVE_AMP"
           stroke="#eab308"
           stroke-opacity="0.2"
           stroke-width="1"
@@ -397,6 +431,35 @@ function miniPoints(shape: WaveformShape): string {
           stroke-linecap="round"
           stroke-linejoin="round"
         />
+
+        <!-- ── Floor handle (x=0, vertical only) ── -->
+        <!-- Always visible; matches the styling of start/end handles for grabability. -->
+        <!-- Sits at the floor level when active, at the midline when disabled. -->
+        <line
+          v-if="floorActive"
+          :x1="0"
+          :y1="floorHandleY"
+          :x2="SVG_W"
+          :y2="floorHandleY"
+          stroke="#eab308"
+          stroke-opacity="0.25"
+          stroke-width="1"
+          stroke-dasharray="2 3"
+        />
+        <circle
+          :cx="6"
+          :cy="floorActive ? floorHandleY : SVG_H / 2"
+          r="5"
+          fill="#eab308"
+          :fill-opacity="floorActive ? 1 : 0.5"
+          stroke="rgba(0,0,0,0.6)"
+          stroke-width="1.5"
+          style="cursor: ns-resize"
+          @mousedown.stop="onFloorDrag"
+          @dblclick.stop="onFloorToggle"
+        >
+          <title>Floor / Inaktivzone-Level. Ziehen zum Setzen, Doppelklick deaktiviert.</title>
+        </circle>
 
         <!-- ── Start boundary line ── -->
         <line

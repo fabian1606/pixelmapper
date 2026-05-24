@@ -93,10 +93,12 @@ const {
 const {
   activeModifiers,
   availableChannelTypes,
+  canAddDisplacement,
   addWaveformModifier,
   addNoiseModifier,
   addSequencerModifier,
   addColorModifier,
+  addDisplacementModifier,
   addPinnedModifier,
   switchModifierType,
   handleModifierDragEnd,
@@ -239,6 +241,7 @@ defineExpose({
             :available-channel-types="availableChannelTypes"
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
+            :can-add-displacement="canAddDisplacement"
             :base-hue="baseHue"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
@@ -251,6 +254,7 @@ defineExpose({
             @add-noise-modifier="addNoiseModifier"
             @add-sequencer-modifier="addSequencerModifier"
             @add-color-modifier="addColorModifier"
+            @add-displacement-modifier="addDisplacementModifier"
             @add-pinned-modifier="handleAddPinnedModifier"
             @pin-modifier="handlePinModifier"
             @switch-modifier-type="switchModifierType"

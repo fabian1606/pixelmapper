@@ -4,13 +4,14 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
-import { Plus, Trash2, ChevronDown, Star } from 'lucide-vue-next';
+import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
+import { Plus, Trash2, ChevronDown, Star, Waves } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams } from '~/utils/engine/types';
+import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams, DisplacementParams } from '~/utils/engine/types';
 import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import ChaserFanningControl from './ChaserFanningControl.vue';
@@ -19,6 +20,7 @@ import WaveformEditor from './WaveformEditor.vue';
 import NoiseEditor from './NoiseEditor.vue';
 import SequencerEditor from './SequencerEditor.vue';
 import ColorEditor from './ColorEditor.vue';
+import DisplacementEditor from './DisplacementEditor.vue';
 
 const props = defineProps<{
   activeModifiers: Effect[];
@@ -26,6 +28,7 @@ const props = defineProps<{
   availableChannelTypes: ChannelType[];
   pinnedModifiers: PinnedModifier[];
   pinnedEffectIds: Set<string>;
+  canAddDisplacement: boolean;
   baseHue?: number;  // 0..360, current fixture hue for ColorEditor strip anchoring
 }>();
 
@@ -43,7 +46,8 @@ const emit = defineEmits<{
   (e: 'add-pinned-modifier', snapshot: PresetModifierSnapshot): void;
   (e: 'pin-modifier', effect: Effect): void;
   (e: 'add-color-modifier'): void;
-  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color'): void;
+  (e: 'add-displacement-modifier'): void;
+  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement'): void;
   (e: 'dropdown-open-change', open: boolean): void;
   (e: 'reorder-modifiers', fromIndex: number, toIndex: number): void;
 }>();
@@ -95,6 +99,14 @@ function isColorModifier(modifier: Effect): boolean {
   return toRaw(modifier) instanceof ColorEffect;
 }
 
+function isDisplacementModifier(modifier: Effect): boolean {
+  return toRaw(modifier) instanceof DisplacementEffect;
+}
+
+function displacementParams(modifier: Effect): DisplacementParams {
+  return (modifier as any).displacementParams ?? { patternType: 'perlin', amountX: 0.1, amountY: 0.1, scale: 2, seed: 0 };
+}
+
 function colorParams(modifier: Effect): ColorParams {
   return (modifier as any).colorParams ?? { hueShift: 0, saturation: 1 };
 }
@@ -121,6 +133,7 @@ function hasColorCycle(modifier: Effect): boolean {
 }
 
 function modifierTypeName(modifier: Effect): string {
+  if (isDisplacementModifier(modifier)) return 'Displacement';
   if (isColorModifier(modifier)) return 'Color';
   if (isSequencerModifier(modifier)) return 'Sequencer';
   if (isNoiseModifier(modifier)) return 'Noise';
@@ -150,27 +163,34 @@ function modifierTypeName(modifier: Effect): string {
     >
       <!-- Modifier Header -->
       <div
-        class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20"
-        :class="dragFromIndex === i ? 'cursor-grabbing' : 'cursor-grab'"
+        class="flex items-center justify-between p-3 border-b border-border/60"
+        :class="[
+          isDisplacementModifier(modifier) ? 'bg-amber-500/5 border-amber-500/20' : 'bg-muted/20',
+          dragFromIndex === i ? 'cursor-grabbing' : 'cursor-grab',
+        ]"
         @mousedown="onDragHandleMousedown($event, i)"
       >
-        <Select
-          :model-value="modifierTypeName(modifier)"
-          @update:model-value="(v: any) => {
-            const next = v as 'Waveform' | 'Noise' | 'Sequencer' | 'Color';
-            if (next !== modifierTypeName(modifier)) emit('switch-modifier-type', modifier, next);
-          }"
-        >
-          <SelectTrigger class="w-[140px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" @click.stop>
-            <SelectValue placeholder="Select Effect" />
-          </SelectTrigger>
-          <SelectContent @pointerdown.stop>
-            <SelectItem value="Waveform" class="text-xs">Waveform</SelectItem>
-            <SelectItem value="Noise" class="text-xs">Noise</SelectItem>
-            <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
-            <SelectItem value="Color" class="text-xs">Color</SelectItem>
-          </SelectContent>
-        </Select>
+        <div class="flex items-center gap-1.5">
+          <Waves v-if="isDisplacementModifier(modifier)" class="h-3.5 w-3.5 text-amber-400 shrink-0" />
+          <Select
+            :model-value="modifierTypeName(modifier)"
+            @update:model-value="(v: any) => {
+              const next = v as 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement';
+              if (next !== modifierTypeName(modifier)) emit('switch-modifier-type', modifier, next);
+            }"
+          >
+            <SelectTrigger class="w-[130px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" :class="isDisplacementModifier(modifier) ? 'text-amber-400' : ''" @click.stop>
+              <SelectValue placeholder="Select Effect" />
+            </SelectTrigger>
+            <SelectContent @pointerdown.stop>
+              <SelectItem value="Waveform" class="text-xs">Waveform</SelectItem>
+              <SelectItem value="Noise" class="text-xs">Noise</SelectItem>
+              <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
+              <SelectItem value="Color" class="text-xs">Color</SelectItem>
+              <SelectItem v-if="canAddDisplacement || isDisplacementModifier(modifier)" value="Displacement" class="text-xs text-amber-400">Displacement</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-yellow-400" @click.stop="emit('pin-modifier', modifier)">
           <Star class="h-4 w-4" :class="pinnedEffectIds.has(modifier.id) ? 'fill-yellow-400 text-yellow-400' : ''" />
         </Button>
@@ -180,8 +200,8 @@ function modifierTypeName(modifier: Effect): string {
       </div>
 
       <div class="p-3 space-y-4">
-        <!-- Target Channels -->
-        <div class="space-y-2">
+        <!-- Target Channels (not shown for Displacement — applies to all channels by position) -->
+        <div v-if="!isDisplacementModifier(modifier)" class="space-y-2">
           <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>
           <div class="flex flex-wrap gap-1.5">
             <button
@@ -202,8 +222,23 @@ function modifierTypeName(modifier: Effect): string {
           </div>
         </div>
 
+        <!-- Displacement editor -->
+        <template v-if="isDisplacementModifier(modifier)">
+          <div class="pt-1">
+            <Label class="text-[10px] font-semibold tracking-wider text-amber-400/80 uppercase">Displacement</Label>
+          </div>
+          <DisplacementEditor
+            :displacement-params="displacementParams(modifier)"
+            :strength="modifier.strength"
+            @update:displacement-params="(p: DisplacementParams) => emit('update-modifier', modifier, 'displacementParams', p)"
+            @update:strength="(v: number) => emit('update-modifier', modifier, 'strength', v)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Displacement')"
+            @click.stop
+          />
+        </template>
+
         <!-- Color editor -->
-        <template v-if="isColorModifier(modifier)">
+        <template v-else-if="isColorModifier(modifier)">
           <div class="pt-1 border-t border-border/40">
             <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Color</Label>
           </div>
@@ -267,7 +302,7 @@ function modifierTypeName(modifier: Effect): string {
           />
         </template>
 
-        <div v-if="!isColorModifier(modifier) || hasColorCycle(modifier)" class="space-y-3 pt-3 border-t border-border/40">
+        <div v-if="!isDisplacementModifier(modifier) && (!isColorModifier(modifier) || hasColorCycle(modifier))" class="space-y-3 pt-3 border-t border-border/40">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier) && !isColorModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
@@ -321,6 +356,9 @@ function modifierTypeName(modifier: Effect): string {
           <DropdownMenuItem @click="emit('add-noise-modifier')">Noise</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-sequencer-modifier')">Sequencer</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-color-modifier')">Color</DropdownMenuItem>
+          <DropdownMenuItem v-if="canAddDisplacement" class="text-amber-400 gap-2" @click="emit('add-displacement-modifier')">
+            <Waves class="h-4 w-4" /> Displacement
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger class="gap-2">

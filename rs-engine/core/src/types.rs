@@ -116,10 +116,18 @@ pub struct WaveformShapeParams {
     /// Vertical baseline of the wave in [-1, 1]. 0 = centered on base channel value.
     /// Also acts as the hold value in the inactive (pre-start / post-end) zones.
     pub offset: f32,
+    /// Explicit floor level for the inactive zone as a fraction of base (0..1),
+    /// applied AFTER strength — so floor=0 always yields black in inactive zones
+    /// regardless of strength. Sentinel < 0 (default -1) disables this and falls
+    /// back to the legacy offset-based hold behavior.
+    #[serde(default = "default_floor")]
+    pub floor: f32,
 }
 
+fn default_floor() -> f32 { -1.0 }
+
 impl Default for WaveformShapeParams {
-    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, offset: 0.0 } }
+    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, offset: 0.0, floor: -1.0 } }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
@@ -236,6 +244,43 @@ impl Default for ColorParams {
     fn default() -> Self { ColorParams { hue_shift: 0.0, saturation: 1.0, hue_range: 0.0, sat_range: 0.0 } }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DisplacementPatternType {
+    #[default]
+    Perlin,
+    White,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DisplacementParams {
+    #[serde(rename = "patternType", default)]
+    pub pattern_type: DisplacementPatternType,
+    #[serde(rename = "amountX", default = "displacement_amount_default")]
+    pub amount_x: f32,
+    #[serde(rename = "amountY", default = "displacement_amount_default")]
+    pub amount_y: f32,
+    #[serde(default = "displacement_scale_default")]
+    pub scale: f32,
+    #[serde(default)]
+    pub seed: u32,
+}
+
+fn displacement_amount_default() -> f32 { 0.1 }
+fn displacement_scale_default() -> f32 { 2.0 }
+
+impl Default for DisplacementParams {
+    fn default() -> Self {
+        DisplacementParams {
+            pattern_type: DisplacementPatternType::Perlin,
+            amount_x: 0.1,
+            amount_y: 0.1,
+            scale: 2.0,
+            seed: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectConfig {
     #[serde(rename = "targetChannels")]
@@ -262,6 +307,8 @@ pub struct EffectConfig {
     pub sequencer_params: Option<SequencerParams>,
     #[serde(rename = "colorParams", default)]
     pub color_params: Option<ColorParams>,
+    #[serde(rename = "displacementParams", default)]
+    pub displacement_params: Option<DisplacementParams>,
     #[serde(rename = "effectType", default)]
     pub effect_type: String,
 }

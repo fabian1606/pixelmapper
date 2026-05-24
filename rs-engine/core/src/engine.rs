@@ -307,17 +307,50 @@ impl EffectEngine {
         // 3. Apply effects
         // Fine channels (resolution == 0) are skipped — they have no independent effect layer.
         // Effects target the coarse channel only and use its 0-255 render_buffer slot.
-        for target in &self.targets {
+
+        // 3.0 Displacement pre-pass: compute per-target (dx, dy) from all active DisplacementEffects.
+        // These offsets perturb the world position seen by all subsequent effects.
+        let displacement_offsets: Vec<(f32, f32)> = self.targets.iter().map(|target| {
+            let mut dx = 0.0f32;
+            let mut dy = 0.0f32;
+            for effect in &self.effects {
+                let config = effect.get_config();
+                if config.displacement_params.is_none() { continue; }
+                // Check fixture targeting
+                if let Some(groups) = &config.target_group_indices {
+                    if !groups.contains(&target.group_index) { continue; }
+                }
+                // Check channel targeting
+                if !config.target_channels.is_empty() && !config.target_channels.contains(&target.channel_type) {
+                    continue;
+                }
+                if let Some((ex, ey)) = effect.sample_displacement(target.world_x, target.world_y) {
+                    dx += ex;
+                    dy += ey;
+                }
+            }
+            (dx, dy)
+        }).collect();
+
+        for (target_idx, target) in self.targets.iter().enumerate() {
             let dmx_index = target.dmx_index;
             if dmx_index >= self.dmx_buffer.len() || target.resolution == 0 {
                 continue;
             }
+            let (disp_x, disp_y) = displacement_offsets[target_idx];
+            let eff_world_x = target.world_x + disp_x;
+            let eff_world_y = target.world_y + disp_y;
 
             for effect in &self.effects {
                 let config = effect.get_config();
 
                 // ColorEffects are pure post-process (Step 3.5) — skip per-channel contribution.
                 if config.color_params.is_some() {
+                    continue;
+                }
+
+                // DisplacementEffects have no DMX contribution — skip.
+                if config.displacement_params.is_some() {
                     continue;
                 }
 
@@ -345,10 +378,14 @@ impl EffectEngine {
                     Some(indices) => indices.len() as u32,
                     None => self.targets.iter().map(|t| t.group_index).max().map(|m| m + 1).unwrap_or(0) as u32,
                 };
-                let wave_value = effect.render(target.world_x, target.world_y, channel_seed, target.group_index as u32, group_count);
+                let wave_value = effect.render(eff_world_x, eff_world_y, channel_seed, target.group_index as u32, group_count);
                 let base_value = self.base_buffer[dmx_index];
 
-                let mapped_value = if config.sequencer_params.is_some() {
+                let mapped_value = if wave_value.is_nan() {
+                    // Inactive-zone floor override: explicit fraction of base,
+                    // decoupled from strength. floor=0 → black, floor=1 → full color.
+                    (base_value * config.waveform_params.floor.clamp(0.0, 1.0)).clamp(0.0, 255.0)
+                } else if config.sequencer_params.is_some() {
                     // Sequencer blend: ON (wave=0) keeps base, OFF (wave=-1) scales toward black.
                     // strength 0–255 controls how dark the OFF segments go.
                     let strength_frac = config.strength / 255.0;
@@ -358,7 +395,10 @@ impl EffectEngine {
                         base_value * (1.0 + wave_value * strength_frac)
                     }
                 } else {
-                    let target_max = (base_value + config.strength).min(255.0);
+                    // Peak (wave=+1) always lands at the base color — never above it,
+                    // so an RGB fixture with base=(255,0,0) pulses red↔black, not red↔white.
+                    // Strength controls how deep the trough drops below the base.
+                    let target_max = base_value;
                     let target_min = (base_value - config.strength).max(0.0);
                     target_min + ((wave_value + 1.0) / 2.0) * (target_max - target_min)
                 };

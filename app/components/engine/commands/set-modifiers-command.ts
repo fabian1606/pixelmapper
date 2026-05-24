@@ -6,6 +6,7 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
+import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
 
 /**
  * Deep clones an array of effects to decouple them from the live engine state.
@@ -14,11 +15,13 @@ import { ColorEffect } from '~/utils/engine/effects/color-effect';
 /** Detects the Effect class from either a live instance or a plain JSON object. */
 function instantiateEffect(effect: any): Effect {
   // Live class instances
+  if (effect instanceof DisplacementEffect) return new DisplacementEffect();
   if (effect instanceof ColorEffect) return new ColorEffect();
   if (effect instanceof SequencerEffect) return new SequencerEffect();
   if (effect instanceof NoiseEffect) return new NoiseEffect();
   if (effect instanceof WaveformEffect) return new WaveformEffect();
   // Plain JSON (after JSON.parse(JSON.stringify(...))) — detect by property fingerprint
+  if (effect?.displacementParams) return new DisplacementEffect();
   if (effect?.colorParams) return new ColorEffect();
   if (effect?.sequencerParams) return new SequencerEffect();
   if (effect?.noiseParams) return new NoiseEffect();
@@ -54,6 +57,9 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
     }
     if ('colorParams' in effect && (effect as any).colorParams) {
       (clone as any).colorParams = { ...(effect as any).colorParams };
+    }
+    if ('displacementParams' in effect && (effect as any).displacementParams) {
+      (clone as any).displacementParams = { ...(effect as any).displacementParams };
     }
 
     // Internal state like timePhase should theoretically be cloned too

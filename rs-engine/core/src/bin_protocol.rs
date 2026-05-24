@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
+use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, DisplacementParams, DisplacementPatternType, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -36,6 +36,18 @@ impl<'a> Cursor<'a> {
         ];
         self.pos += 4;
         Some(f32::from_le_bytes(bytes))
+    }
+
+    fn read_u32_le(&mut self) -> Option<u32> {
+        if self.remaining() < 4 { return None; }
+        let v = u32::from_le_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+            self.data[self.pos + 2],
+            self.data[self.pos + 3],
+        ]);
+        self.pos += 4;
+        Some(v)
     }
 
     fn read_speed_config(&mut self) -> Option<SpeedConfig> {
@@ -206,6 +218,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         let shape_start       = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let shape_end         = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let shape_offset      = match c.read_f32_le() { Some(v) => v, None => return -1 };
+        let shape_floor       = match c.read_f32_le() { Some(v) => v, None => return -1 };
         let waveform_shape = match shape_byte {
             0 => WaveformShape::Sine,
             1 => WaveformShape::Square,
@@ -289,7 +302,28 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             None
         };
 
-        let effect_type = if color_params.is_some() {
+        // Displacement parameters
+        let is_displacement_byte = match c.read_u8() { Some(v) => v, None => return -1 };
+        let displacement_params = if is_displacement_byte == 1 {
+            let pattern_byte = match c.read_u8()     { Some(v) => v, None => return -1 };
+            let amount_x     = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let amount_y     = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let scale        = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let seed         = match c.read_u32_le() { Some(v) => v, None => return -1 };
+            Some(DisplacementParams {
+                pattern_type: if pattern_byte == 1 { DisplacementPatternType::White } else { DisplacementPatternType::Perlin },
+                amount_x,
+                amount_y,
+                scale,
+                seed,
+            })
+        } else {
+            None
+        };
+
+        let effect_type = if displacement_params.is_some() {
+            "DisplacementEffect".to_string()
+        } else if color_params.is_some() {
             "ColorEffect".to_string()
         } else if sequencer_params.is_some() {
             "SequencerEffect".to_string()
@@ -309,10 +343,11 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             fanning,
             speed,
             waveform_shape,
-            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, offset: shape_offset },
+            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, offset: shape_offset, floor: shape_floor },
             noise_params,
             sequencer_params,
             color_params,
+            displacement_params,
             effect_type,
         });
     }

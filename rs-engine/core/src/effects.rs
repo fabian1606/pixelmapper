@@ -8,6 +8,8 @@ pub trait Effect {
     fn eval_cycle_at(&self, world_x: f32, world_y: f32) -> f32 { let _ = (world_x, world_y); self.eval_cycle() }
     fn get_time_phase(&self) -> f32 { 0.0 }
     fn set_time_phase(&mut self, _phase: f32) {}
+    /// Returns Some((dx, dy)) if this effect is a DisplacementEffect, else None.
+    fn sample_displacement(&self, _world_x: f32, _world_y: f32) -> Option<(f32, f32)> { None }
 }
 
 pub struct BaseOscillator {
@@ -158,7 +160,12 @@ fn evaluate_phase(config: &EffectConfig, phase: f32) -> f32 {
         return evaluate_shape(config.waveform_shape, cycle_t, config.waveform_params.param) + offset;
     }
 
-    if cycle_t < start || cycle_t > end { return offset; }
+    if cycle_t < start || cycle_t > end {
+        // NaN signals "use explicit floor override" — the engine maps it to
+        // base * floor, bypassing the strength-scaled lerp.
+        if config.waveform_params.floor >= 0.0 { return f32::NAN; }
+        return offset;
+    }
 
     let local_t = (cycle_t - start) / (end - start);
     evaluate_shape(config.waveform_shape, local_t, config.waveform_params.param) + offset
@@ -546,10 +553,66 @@ impl Effect for ColorEffect {
     }
 }
 
+// ─── Displacement Effect ──────────────────────────────────────────────────────
+
+pub struct DisplacementEffect {
+    pub config: EffectConfig,
+    pub time: f32,
+}
+
+impl DisplacementEffect {
+    pub fn new(config: EffectConfig) -> Self {
+        Self { config, time: 0.0 }
+    }
+
+    /// Returns (dx, dy) displacement in normalized world space for (world_x, world_y).
+    pub fn sample(&self, world_x: f32, world_y: f32) -> (f32, f32) {
+        use crate::types::DisplacementPatternType;
+        let dp = self.config.displacement_params.unwrap_or_default();
+        let strength = self.config.strength / 255.0;
+        let t = self.time / 1000.0;
+        match dp.pattern_type {
+            DisplacementPatternType::Perlin => {
+                let seed_f = dp.seed as f32;
+                let dx = perlin2d(world_x * dp.scale + t + seed_f * 0.01, world_y * dp.scale + seed_f * 0.0031) * dp.amount_x * strength;
+                let dy = perlin2d(world_x * dp.scale + seed_f * 0.0053, world_y * dp.scale + t + seed_f * 0.01) * dp.amount_y * strength;
+                (dx, dy)
+            }
+            DisplacementPatternType::White => {
+                let sx = ((world_x * 10000.0) as i32 as u32)
+                    .wrapping_add(((world_y * 10000.0) as i32 as u32).wrapping_mul(100003))
+                    .wrapping_add(dp.seed.wrapping_mul(7));
+                let sy = sx ^ 0xdeadbeefu32;
+                let dx = (seeded_random(sx) * 2.0 - 1.0) * dp.amount_x * strength;
+                let dy = (seeded_random(sy) * 2.0 - 1.0) * dp.amount_y * strength;
+                (dx, dy)
+            }
+        }
+    }
+}
+
+impl Effect for DisplacementEffect {
+    fn get_config(&self) -> &EffectConfig { &self.config }
+
+    fn update(&mut self, delta_time_ms: f32, _abs_time_ms: f32, _global_bpm: f32) {
+        self.time += delta_time_ms;
+    }
+
+    fn render(&self, _world_x: f32, _world_y: f32, _channel_seed: u32, _group_index: u32, _group_count: u32) -> f32 {
+        0.0
+    }
+
+    fn sample_displacement(&self, world_x: f32, world_y: f32) -> Option<(f32, f32)> {
+        Some(self.sample(world_x, world_y))
+    }
+}
+
 // ─── Effect factory ───────────────────────────────────────────────────────────
 
 pub fn create_effect(config: EffectConfig) -> Box<dyn Effect> {
-    if config.effect_type == "ColorEffect" || config.color_params.is_some() {
+    if config.effect_type == "DisplacementEffect" || config.displacement_params.is_some() {
+        Box::new(DisplacementEffect::new(config))
+    } else if config.effect_type == "ColorEffect" || config.color_params.is_some() {
         Box::new(ColorEffect::new(config))
     } else if config.effect_type == "SequencerEffect" || config.sequencer_params.is_some() {
         Box::new(SequencerEffect::new(config))

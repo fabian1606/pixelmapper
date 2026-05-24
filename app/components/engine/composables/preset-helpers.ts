@@ -113,5 +113,6 @@ export function snapshotEffect(effect: Effect): PresetModifierSnapshot {
     noiseParams: (effect as any).noiseParams ? { ...(effect as any).noiseParams } : undefined,
     sequencerParams: (effect as any).sequencerParams ? { ...(effect as any).sequencerParams } : undefined,
     colorParams: (effect as any).colorParams ? { ...(effect as any).colorParams } : undefined,
+    displacementParams: (effect as any).displacementParams ? { ...(effect as any).displacementParams } : undefined,
   };
 }

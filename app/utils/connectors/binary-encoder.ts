@@ -343,6 +343,8 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBle
     w.f32(waveformParams.end ?? 1);
     // Vertical baseline offset in [-1, 1] (0 = centered on base channel value).
     w.f32(waveformParams.offset ?? 0);
+    // Inactive-zone floor override (0..1 = explicit, <0 = disabled).
+    w.f32(waveformParams.floor ?? -1);
     w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
 
     // Effect type discriminator + noise parameters (always written; Waveforms use defaults)
@@ -384,6 +386,19 @@ export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBle
       w.f32(colorP.saturation ?? 1);
       w.f32(colorP.hueRange ?? 0);
       w.f32(colorP.satRange ?? 0);
+    }
+
+    // Displacement parameters
+    const dispP = (effect as any).displacementParams;
+    const isDisp = !!dispP;
+    const DISP_PATTERN_ID: Record<string, number> = { perlin: 0, white: 1 };
+    w.u8(isDisp ? 1 : 0);
+    if (isDisp) {
+      w.u8(DISP_PATTERN_ID[dispP.patternType] ?? 0);
+      w.f32(dispP.amountX ?? 0.1);
+      w.f32(dispP.amountY ?? 0.1);
+      w.f32(dispP.scale ?? 2);
+      w.u32(dispP.seed ?? 0);
     }
   }
 

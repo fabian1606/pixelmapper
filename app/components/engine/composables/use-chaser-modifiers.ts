@@ -7,6 +7,7 @@ import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
 import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
+import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -58,6 +59,10 @@ export function useChaserModifiers(
     });
   });
 
+  const canAddDisplacement = computed(() =>
+    activeModifiers.value.some(m => !(toRaw(m) instanceof DisplacementEffect))
+  );
+
   function addWaveformModifier() {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
@@ -100,6 +105,20 @@ export function useChaserModifiers(
     effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
     emit('change');
     commitModifiers(before, 'Add Noise Modifier');
+  }
+
+  function addDisplacementModifier() {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const effect = new DisplacementEffect();
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effect.strength = 100;
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Displacement Modifier');
   }
 
   function cloneModifier(effect: Effect): Effect {
@@ -191,7 +210,7 @@ export function useChaserModifiers(
 
     // Is this a continuous value change? If so, debounce the commit
     const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning'
-      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams';
+      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams' || key === 'displacementParams';
     const isDirection = key === 'direction';
 
     let before: Effect[] | null = null;
@@ -362,12 +381,12 @@ export function useChaserModifiers(
     commitModifiers(before, 'Add Pinned Modifier');
   }
 
-  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color') {
+  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement') {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
 
     const raw = toRaw(effect);
-    const current = raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
+    const current = raw instanceof DisplacementEffect ? 'Displacement' : raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
     if (type === current) return;
 
     const targetChannels = [...(effect.targetChannels || [])];
@@ -383,7 +402,13 @@ export function useChaserModifiers(
       : 0.5;
 
     let replacement: Effect;
-    if (type === 'Noise') {
+    if (type === 'Displacement') {
+      const d = new DisplacementEffect();
+      d.targetChannels = targetChannels;
+      d.targetFixtureIds = targetFixtureIds;
+      d.strength = strength;
+      replacement = d as unknown as Effect;
+    } else if (type === 'Noise') {
       const n = new NoiseEffect();
       n.targetChannels = targetChannels;
       n.targetFixtureIds = targetFixtureIds;
@@ -460,10 +485,12 @@ export function useChaserModifiers(
   return {
     availableChannelTypes,
     activeModifiers,
+    canAddDisplacement,
     addWaveformModifier,
     addNoiseModifier,
     addSequencerModifier,
     addColorModifier,
+    addDisplacementModifier,
     addPinnedModifier,
     switchModifierType,
     handleModifierDragEnd,
