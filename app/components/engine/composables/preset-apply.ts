@@ -6,6 +6,7 @@ import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
+import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
 import type { RGB } from '~/utils/live/color-utils';
 import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
@@ -87,6 +88,20 @@ export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
     eff.strength = snap.strength;
     eff.speed = { ...snap.speed };
     if (snap.displacementParams) eff.displacementParams = { ...snap.displacementParams };
+    return eff;
+  }
+
+  if (snap.effectType === 'SpeedCurveEffect') {
+    const eff = new SpeedCurveEffect();
+    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
+    eff.targetChannels = [...snap.targetChannels];
+    eff.targetFixtureIds = [...snap.targetFixtureIds];
+    if (snap.speedCurveParams) {
+      eff.speedCurveParams = {
+        ...snap.speedCurveParams,
+        points: snap.speedCurveParams.points.map(p => ({ ...p })),
+      };
+    }
     return eff;
   }
 

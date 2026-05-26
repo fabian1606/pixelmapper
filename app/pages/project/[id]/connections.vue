@@ -25,6 +25,8 @@ import {
   UpdateConnectorConfigCommand,
 } from '~/components/engine/commands/connector-commands';
 import EspWebFlasher from '~/components/connectors/EspWebFlasher.vue';
+import { Fixture } from '~/utils/engine/core/fixture';
+import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
 
 // ID of the connector currently being configured via the USB wizard.
 // null = wizard closed. Single wizard instance, target picked per click.
@@ -159,10 +161,110 @@ const stripFixtures = computed(() =>
   engineStore.flatFixtures.filter(f => f.stripConfig)
 );
 
+/** Non-strip fixtures usable as ESP-NOW broadcast source (single RGB / DRGB-Fader). */
+const broadcastFixtures = computed(() =>
+  engineStore.flatFixtures.filter(f => !f.stripConfig)
+);
+
+/** Create a DRGB-Fader fixture and bind it as the connector's ESP-NOW broadcast source. */
+function createAndBindBroadcastFixture(connector: WebSocketConnector) {
+  const existing = engineStore.flatFixtures;
+  let nextId = 1000;
+  let maxAddr = 0;
+  for (const f of existing) {
+    // Strip fixtures occupy DMX addresses too — must not collide. Strip
+    // channel count = logicalPixels * channelsPerPixel; approximate via
+    // ceil(ledCount/groupSize) * 3 (firmware v1 = WS2812B/RGB only).
+    const span = f.stripConfig
+      ? Math.ceil(Math.max(1, f.stripConfig.ledCount) / Math.max(1, f.stripConfig.groupSize)) * 3
+      : f.channels.length;
+    const end = f.startAddress + span - 1;
+    if (end > maxAddr) maxAddr = end;
+    const m = /^ofl-(\d+)$/.exec(String(f.id));
+    if (m) {
+      const n = parseInt(m[1]!, 10);
+      if (Number.isFinite(n) && n >= nextId) nextId = n + 1;
+    }
+  }
+  const fixture = Fixture.createRGBFixture(`ofl-${nextId}`);
+  fixture.name = `${connector.label.value || 'ESP'} Audience`;
+  fixture.startAddress = maxAddr + 1;
+  fixture.fixturePosition = { x: 0.5, y: 0.5 };
+  fixture.fixtureSize = { x: 1, y: 1 };
+  history.execute(new AddFixturesCommand(engineStore.sceneNodes, [fixture]));
+  patchConnector(connector, { espNowFixtureId: String(fixture.id) });
+  engineStore.flushEngineOutput();
+}
+
 function fixtureFor(connector: WebSocketConnector) {
-  const id = connector.fixtureId.value;
+  const id = connector.fixtureId;
   if (id == null) return null;
   return engineStore.flatFixtures.find(f => String(f.id) === String(id)) ?? null;
+}
+
+function fixtureForSlot(connector: WebSocketConnector, slotIndex: number) {
+  const id = connector.fixtureSlots.value[slotIndex]?.fixtureId;
+  if (id == null) return null;
+  return engineStore.flatFixtures.find(f => String(f.id) === String(id)) ?? null;
+}
+
+function updateSlotFixture(connector: WebSocketConnector, slotIndex: number, fixtureId: string | null) {
+  const slots = connector.fixtureSlots.value.slice();
+  if (slots[slotIndex]) {
+    slots[slotIndex] = { ...slots[slotIndex]!, fixtureId: fixtureId ?? '' };
+  }
+  patchConnector(connector, { fixtureSlots: slots });
+}
+
+function updateSlotPin(connector: WebSocketConnector, slotIndex: number, pin: number | null) {
+  const slots = connector.fixtureSlots.value.slice();
+  if (slots[slotIndex]) {
+    slots[slotIndex] = { ...slots[slotIndex]!, pin };
+  }
+  patchConnector(connector, { fixtureSlots: slots });
+}
+
+function addSlot(connector: WebSocketConnector) {
+  const slots = [...connector.fixtureSlots.value, { fixtureId: '', pin: null }];
+  patchConnector(connector, { fixtureSlots: slots });
+}
+
+function removeSlot(connector: WebSocketConnector, slotIndex: number) {
+  const slots = connector.fixtureSlots.value.slice();
+  slots.splice(slotIndex, 1);
+  patchConnector(connector, { fixtureSlots: slots });
+}
+
+function commitStripPatchForSlot(connector: WebSocketConnector, slotIndex: number, patch: Partial<StripConfigSnapshot>) {
+  const f = fixtureForSlot(connector, slotIndex);
+  const before = snapshotStrip(f);
+  if (!f || !before) return;
+  const after: StripConfigSnapshot = { ...before, ...patch };
+  if (after.ledCount === before.ledCount && after.groupSize === before.groupSize && after.ledsPerMeter === before.ledsPerMeter && after.chipType === before.chipType) return;
+  history.execute(new UpdateStripConfigCommand(engineStore.flatFixtures, f.id, before, after));
+  engineStore.flushEngineOutput();
+}
+
+function commitStripShapeForSlot(connector: WebSocketConnector, slotIndex: number, newShape: StripShapeType) {
+  const f = fixtureForSlot(connector, slotIndex);
+  if (!f || !f.stripConfig) return;
+  if (f.stripConfig.shapeType === newShape) return;
+  const before: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
+  regenerateStripPointsForShape(f, newShape);
+  const after: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
+  f.stripConfig.shapeType = before.shapeType;
+  f.stripConfig.points = before.points.map(p => ({ x: p.x, y: p.y }));
+  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
+  engineStore.flushEngineOutput();
+}
+
+function commitStripClockwiseForSlot(connector: WebSocketConnector, slotIndex: number, cw: boolean) {
+  const f = fixtureForSlot(connector, slotIndex);
+  if (!f || !f.stripConfig || f.stripConfig.shapeType !== 'circle') return;
+  if ((f.stripConfig.clockwise ?? true) === cw) return;
+  const before: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
+  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, { ...before, clockwise: cw }));
+  engineStore.flushEngineOutput();
 }
 
 function snapshotStrip(f: ReturnType<typeof fixtureFor>): StripConfigSnapshot | null {
@@ -522,7 +624,7 @@ function assignedCount(connector: BaseConnector): number {
         </button>
       </div>
 
-      <!-- WebSocketConnector settings: URL + Fixture binding -->
+      <!-- WebSocketConnector settings: URL + Fixture-Slot binding -->
       <div
         v-if="asWebSocket(connector)"
         class="flex flex-col gap-1.5 px-1"
@@ -538,25 +640,181 @@ function assignedCount(connector: BaseConnector): number {
             @change="patchConnector(connector, { url: ($event.target as HTMLInputElement).value })"
           />
         </label>
-        <label class="text-xs text-muted-foreground">
-          Strip-Fixture
-          <select
-            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-            :value="String(asWebSocket(connector)!.fixtureId.value ?? '')"
-            @change="patchConnector(connector, { fixtureId: ($event.target as HTMLSelectElement).value || null })"
-          >
-            <option value="">— keine —</option>
-            <option
-              v-for="f in stripFixtures"
-              :key="String(f.id)"
-              :value="String(f.id)"
+
+        <!-- Per-Slot: Fixture + GPIO-Pin -->
+        <div
+          v-for="(slot, slotIndex) in asWebSocket(connector)!.fixtureSlots.value"
+          :key="slotIndex"
+          class="flex flex-col gap-1 pt-1 border-t border-border/30 mt-0.5"
+        >
+          <div class="flex items-center justify-between gap-1">
+            <span class="text-xs text-muted-foreground font-medium">
+              Streifen {{ asWebSocket(connector)!.fixtureSlots.value.length > 1 ? slotIndex + 1 : '' }}
+            </span>
+            <button
+              v-if="asWebSocket(connector)!.fixtureSlots.value.length > 1"
+              class="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              title="Streifen entfernen"
+              @click="removeSlot(asWebSocket(connector)!, slotIndex)"
             >
-              {{ f.name || `Fixture ${f.id}` }}
-              ({{ f.stripConfig?.ledCount }} LEDs)
-            </option>
-          </select>
-        </label>
-        <div class="flex items-center gap-3 flex-wrap">
+              <Trash2 :size="12" />
+            </button>
+          </div>
+          <div class="flex gap-1.5 items-end">
+            <label class="text-xs text-muted-foreground flex-1 min-w-0">
+              Strip-Fixture
+              <select
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="String(slot.fixtureId ?? '')"
+                @change="updateSlotFixture(asWebSocket(connector)!, slotIndex, ($event.target as HTMLSelectElement).value || null)"
+              >
+                <option value="">— keine —</option>
+                <option
+                  v-for="f in stripFixtures"
+                  :key="String(f.id)"
+                  :value="String(f.id)"
+                >
+                  {{ f.name || `Fixture ${f.id}` }}
+                  ({{ f.stripConfig?.ledCount }} LEDs)
+                </option>
+              </select>
+            </label>
+            <label class="text-xs text-muted-foreground w-16 shrink-0">
+              GPIO-Pin
+              <input
+                type="number"
+                min="0" max="48" step="1"
+                placeholder="—"
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="slot.pin ?? ''"
+                @change="updateSlotPin(asWebSocket(connector)!, slotIndex, ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : null)"
+              />
+            </label>
+          </div>
+
+          <!-- Strip parameter editor for this slot -->
+          <template v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)">
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <label class="text-xs text-muted-foreground">
+                LED-Anzahl
+                <input
+                  type="number"
+                  min="1" max="2048" step="1"
+                  class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.ledCount ?? 0"
+                  @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { ledCount: Number(($event.target as HTMLInputElement).value) })"
+                />
+              </label>
+              <label class="text-xs text-muted-foreground">
+                Gruppe
+                <input
+                  type="number"
+                  min="1" max="64" step="1"
+                  class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.groupSize ?? 1"
+                  @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { groupSize: Number(($event.target as HTMLInputElement).value) })"
+                />
+              </label>
+              <label class="text-xs text-muted-foreground">
+                LEDs/m
+                <input
+                  type="number"
+                  min="1" max="500" step="1"
+                  class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.ledsPerMeter ?? 60"
+                  @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { ledsPerMeter: Number(($event.target as HTMLInputElement).value) })"
+                />
+              </label>
+            </div>
+            <label class="text-xs text-muted-foreground">
+              Shape
+              <select
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.shapeType ?? 'bezier'"
+                @change="commitStripShapeForSlot(asWebSocket(connector)!, slotIndex, ($event.target as HTMLSelectElement).value as StripShapeType)"
+              >
+                <option value="bezier">Bezier Curve</option>
+                <option value="line">Straight Line</option>
+                <option value="circle">Circle</option>
+              </select>
+            </label>
+            <template v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.shapeType === 'circle'">
+              <label class="text-xs text-muted-foreground">
+                Direction
+                <div class="flex gap-1 mt-1">
+                  <button
+                    type="button"
+                    class="flex-1 rounded border text-xs py-1 transition-colors"
+                    :class="(fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.clockwise ?? true)
+                      ? 'bg-primary/15 border-primary/40 text-primary'
+                      : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+                    @click="commitStripClockwiseForSlot(asWebSocket(connector)!, slotIndex, true)"
+                  >CW</button>
+                  <button
+                    type="button"
+                    class="flex-1 rounded border text-xs py-1 transition-colors"
+                    :class="!(fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.clockwise ?? true)
+                      ? 'bg-primary/15 border-primary/40 text-primary'
+                      : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
+                    @click="commitStripClockwiseForSlot(asWebSocket(connector)!, slotIndex, false)"
+                  >CCW</button>
+                </div>
+              </label>
+            </template>
+          </template>
+        </div>
+
+        <!-- Add strip slot button -->
+        <button
+          class="mt-1 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-1 py-0.5 rounded hover:bg-accent transition-colors self-start"
+          @click="addSlot(asWebSocket(connector)!)"
+        >
+          <Plus :size="12" />
+          Streifen hinzufügen
+        </button>
+
+        <!-- ESP-NOW Audience-Broadcast Fixture -->
+        <div class="flex flex-col gap-1 pt-2 mt-1 border-t border-border/30">
+          <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
+            <input
+              type="checkbox"
+              :checked="asWebSocket(connector)!.espNowEnabled.value"
+              @change="patchConnector(connector, { espNowEnabled: ($event.target as HTMLInputElement).checked })"
+            />
+            <span>Audience Broadcast (ESP-NOW) aktiv</span>
+          </label>
+          <div class="flex gap-1.5 items-end">
+            <label class="text-xs text-muted-foreground flex-1 min-w-0">
+              Broadcast-Fixture
+              <select
+                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :value="asWebSocket(connector)!.espNowFixtureId.value != null ? String(asWebSocket(connector)!.espNowFixtureId.value) : ''"
+                @change="patchConnector(connector, { espNowFixtureId: ($event.target as HTMLSelectElement).value || null })"
+              >
+                <option value="">— aus —</option>
+                <option
+                  v-for="f in broadcastFixtures"
+                  :key="String(f.id)"
+                  :value="String(f.id)"
+                >
+                  {{ f.name || `Fixture ${f.id}` }}
+                </option>
+              </select>
+            </label>
+            <button
+              class="px-2 py-1 rounded text-xs border border-border bg-background hover:bg-accent transition-colors whitespace-nowrap"
+              title="Neue DRGB-Fader-Fixture erzeugen und binden"
+              @click="createAndBindBroadcastFixture(asWebSocket(connector)!)"
+            >
+              <Plus :size="10" class="inline" /> Neu
+            </button>
+          </div>
+          <p class="text-[10px] text-muted-foreground/80 leading-snug">
+            Sendet die Farbe dieser Fixture als 4-Byte ColorCommand per ESP-NOW Broadcast — Publikum-ESPs ohne WLAN können so mitleuchten.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3 flex-wrap mt-0.5">
           <div
             v-if="asWebSocket(connector)!.firmwareVersion.value"
             class="text-xs text-muted-foreground"
@@ -578,77 +836,6 @@ function assignedCount(connector: BaseConnector): number {
         <p v-if="!stripFixtures.length" class="text-xs text-yellow-400/80">
           Es gibt noch keine LED-Strip-Fixture in dieser Szene.
         </p>
-
-        <!-- Strip parameter editor (two-way binding to fixture.stripConfig) -->
-        <template v-if="fixtureFor(asWebSocket(connector)!)">
-          <div class="grid grid-cols-3 gap-2 pt-1 border-t border-border/40 mt-1">
-            <label class="text-xs text-muted-foreground">
-              LED-Anzahl
-              <input
-                type="number"
-                min="1" max="2048" step="1"
-                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.ledCount ?? 0"
-                @change="commitStripPatch(asWebSocket(connector)!, { ledCount: Number(($event.target as HTMLInputElement).value) })"
-              />
-            </label>
-            <label class="text-xs text-muted-foreground">
-              Gruppe
-              <input
-                type="number"
-                min="1" max="64" step="1"
-                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.groupSize ?? 1"
-                @change="commitStripPatch(asWebSocket(connector)!, { groupSize: Number(($event.target as HTMLInputElement).value) })"
-              />
-            </label>
-            <label class="text-xs text-muted-foreground">
-              LEDs/m
-              <input
-                type="number"
-                min="1" max="500" step="1"
-                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.ledsPerMeter ?? 60"
-                @change="commitStripPatch(asWebSocket(connector)!, { ledsPerMeter: Number(($event.target as HTMLInputElement).value) })"
-              />
-            </label>
-          </div>
-          <label class="text-xs text-muted-foreground">
-            Shape
-            <select
-              class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-              :value="fixtureFor(asWebSocket(connector)!)?.stripConfig?.shapeType ?? 'bezier'"
-              @change="commitStripShape(asWebSocket(connector)!, ($event.target as HTMLSelectElement).value as StripShapeType)"
-            >
-              <option value="bezier">Bezier Curve</option>
-              <option value="line">Straight Line</option>
-              <option value="circle">Circle</option>
-            </select>
-          </label>
-          <template v-if="fixtureFor(asWebSocket(connector)!)?.stripConfig?.shapeType === 'circle'">
-            <label class="text-xs text-muted-foreground">
-              Direction
-              <div class="flex gap-1 mt-1">
-                <button
-                  type="button"
-                  class="flex-1 rounded border text-xs py-1 transition-colors"
-                  :class="(fixtureFor(asWebSocket(connector)!)?.stripConfig?.clockwise ?? true)
-                    ? 'bg-primary/15 border-primary/40 text-primary'
-                    : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
-                  @click="commitStripClockwise(asWebSocket(connector)!, true)"
-                >CW</button>
-                <button
-                  type="button"
-                  class="flex-1 rounded border text-xs py-1 transition-colors"
-                  :class="!(fixtureFor(asWebSocket(connector)!)?.stripConfig?.clockwise ?? true)
-                    ? 'bg-primary/15 border-primary/40 text-primary'
-                    : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
-                  @click="commitStripClockwise(asWebSocket(connector)!, false)"
-                >CCW</button>
-              </div>
-            </label>
-          </template>
-        </template>
       </div>
 
       <!-- Expandable outputs section -->

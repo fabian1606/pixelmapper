@@ -177,6 +177,22 @@ export interface DisplacementParams {
   seed: number;
 }
 
+export interface CurvePoint {
+  /** Normalized x position in the cycle [0, 1], must be monotonically increasing. */
+  x: number;
+  /** Speed multiplier [0, maxMultiplier]. 1.0 = unchanged speed. */
+  y: number;
+}
+
+export interface SpeedCurveParams {
+  /** Control points defining the speed multiplier curve. At least [{x:0},{x:1}]. */
+  points: CurvePoint[];
+  /** Y-axis maximum (slider upper bound). Typical: 4. */
+  maxMultiplier: number;
+  /** How many beats one full curve cycle spans. */
+  cycleBeats: 1 | 2 | 4 | 8;
+}
+
 export type BlendMode = 'add' | 'override' | 'multiply' | 'max' | 'min';
 
 export interface Effect {
@@ -265,6 +281,11 @@ export interface Effect {
    * Displacement-specific parameters. Only present when the effect is a DisplacementEffect.
    */
   displacementParams?: DisplacementParams;
+
+  /**
+   * Speed-curve-specific parameters. Only present when the effect is a SpeedCurveEffect.
+   */
+  speedCurveParams?: SpeedCurveParams;
 
   /**
    * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).

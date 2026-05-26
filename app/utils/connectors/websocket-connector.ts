@@ -1,14 +1,22 @@
 import { ref } from 'vue';
 import { BaseConnector, type ConnectorMeta, type ConnectorStatus, type EngineConnectorState } from './base-connector';
-import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildStripConfigPacket } from './binary-encoder';
-import { buildScopedPackets, scopedFingerprint } from './scoped-encoder';
+import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildEspNowSlotPacket, buildEspNowEnablePacket } from './binary-encoder';
+import {
+  buildMultiScopedPackets, multiScopedFingerprint,
+  type FixtureSlotInput,
+} from './scoped-encoder';
 
 // ── WebSocketConnector ────────────────────────────────────────────────────────
-// One ESP32-S3 node per instance. Each connector binds to a single LED-strip
-// fixture in the scene. On every engine frame we build packets scoped to that
-// fixture (DMX-indices rebased to 0, effects filtered + bitmask rewritten) and
-// stream them as WebSocket binary frames. ESP32-S3 runs the same Rust engine
-// locally — it just sees a single-fixture world.
+// One ESP32-S3 node per instance. Each connector can bind to one or more
+// LED-strip fixtures (slots), all connected to this ESP on different GPIO pins.
+// On every engine frame we build packets scoped to those fixtures (DMX-indices
+// rebased to 0, effects filtered + bitmask rewritten) and stream them as
+// WebSocket binary frames. The ESP32-S3 runs the same Rust engine locally.
+
+export interface FixtureSlot {
+  fixtureId: string | number;
+  pin: number | null;
+}
 
 export class WebSocketConnector extends BaseConnector {
   readonly meta: ConnectorMeta = {
@@ -17,11 +25,20 @@ export class WebSocketConnector extends BaseConnector {
     icon: 'Wifi',
   };
 
-  url        = ref<string>('');
-  fixtureId  = ref<string | number | null>(null);
-  label      = ref<string>('');
+  url           = ref<string>('');
+  fixtureSlots  = ref<FixtureSlot[]>([]);
+  label         = ref<string>('');
   firmwareVersion = ref<string | null>(null);
-  devicePin  = ref<number | null>(null);
+  devicePin     = ref<number | null>(null);
+  /** Optional RGB-Fader fixture broadcast via ESP-NOW from this ESP. */
+  espNowFixtureId = ref<string | number | null>(null);
+  /** Whether ESP-NOW broadcasting is enabled on the device (persisted in NVS). */
+  espNowEnabled   = ref<boolean>(false);
+
+  /** Backward-compat: first slot's fixtureId (or null). */
+  get fixtureId(): string | number | null {
+    return this.fixtureSlots.value[0]?.fixtureId ?? null;
+  }
 
   private ws: WebSocket | null = null;
 
@@ -37,12 +54,17 @@ export class WebSocketConnector extends BaseConnector {
   private cachedEffectsFp:  string = '';
   private cachedStripFp:    string = '';
   private frameCount = 0;
-  private readonly TIMESYNC_INTERVAL = 30;
+  private cachedSlotsFp:    string = '';
+  private cachedEspNowFp:    string = '';
+  private cachedEspNowEnFp:  string = '';
+  private readonly TIMESYNC_INTERVAL = 1;
 
   constructor(id: string, url = '', fixtureId: string | number | null = null) {
     super(id);
     this.url.value = url;
-    this.fixtureId.value = fixtureId;
+    if (fixtureId != null) {
+      this.fixtureSlots.value = [{ fixtureId, pin: null }];
+    }
     // outputCount stays 0 — parameter-based, ESP32 renders locally
   }
 
@@ -59,8 +81,9 @@ export class WebSocketConnector extends BaseConnector {
     this.clearTimers();
     this.teardownSocket();
 
-    if (!this.url.value)              return this.failTo('error', 'WebSocket-URL fehlt');
-    if (this.fixtureId.value == null) return this.failTo('error', 'Keine Strip-Fixture ausgewählt');
+    if (!this.url.value)                         return this.failTo('error', 'WebSocket-URL fehlt');
+    if (!this.fixtureSlots.value.length)         return this.failTo('error', 'Keine Strip-Fixture ausgewählt');
+    if (!this.fixtureSlots.value[0]?.fixtureId)  return this.failTo('error', 'Keine Strip-Fixture ausgewählt');
 
     this.status.value = 'connecting';
     this.errorMessage.value = null;
@@ -168,7 +191,7 @@ export class WebSocketConnector extends BaseConnector {
   private resetCaches() {
     this.frameCount = 0;
     this.cachedBpm = -1;
-    this.cachedLayoutFp = this.cachedChannelsFp = this.cachedEffectsFp = this.cachedStripFp = '';
+    this.cachedLayoutFp = this.cachedChannelsFp = this.cachedEffectsFp = this.cachedStripFp = this.cachedSlotsFp = this.cachedEspNowFp = this.cachedEspNowEnFp = '';
     this.firmwareVersion.value = null;
   }
 
@@ -182,11 +205,8 @@ export class WebSocketConnector extends BaseConnector {
 
   override onEngineState(state: EngineConnectorState) {
     if (this.status.value !== 'connected' || !this.ws) return;
-    if (this.fixtureId.value == null) return;
-
-    const target = this.fixtureId.value;
-    const fixture = state.fixtures.find(f => String(f.id) === String(target));
-    if (!fixture) return;
+    const slots = this.fixtureSlots.value;
+    if (!slots.length || !slots[0]?.fixtureId) return;
 
     const first = this.frameCount === 0;
 
@@ -195,42 +215,59 @@ export class WebSocketConnector extends BaseConnector {
       this.cachedBpm = state.bpm;
     }
 
-    // Strip-config: chip type + ledCount + groupSize + ledsPerMeter.
-    // Sent on connect and whenever any of these change on the bound fixture.
-    if (fixture.stripConfig) {
-      const sc = fixture.stripConfig;
-      const stripFp = `${sc.chipType}:${sc.ledCount}:${sc.groupSize}:${sc.ledsPerMeter}`;
-      if (first || stripFp !== this.cachedStripFp) {
-        this.send(buildStripConfigPacket({
-          chipType:     sc.chipType,
-          ledCount:     sc.ledCount,
-          groupSize:    sc.groupSize,
-          ledsPerMeter: sc.ledsPerMeter,
-        }));
-        this.cachedStripFp = stripFp;
-        this.pushLog(`[sync] strip ${sc.chipType} count=${sc.ledCount} group=${sc.groupSize}`);
-      }
+    // Unified path: always go through the multi-slot encoder, even with one
+    // slot. This ensures the per-slot GPIO pin (configured in the UI) reaches
+    // the firmware via TYPE_STRIP_SLOTS — TYPE_STRIP_CONFIG has no pin field
+    // and would force the firmware to fall back to its NVS-persisted pin.
+    // Fall back to the firmware-reported pin when the user hasn't set one in
+    // the UI — avoids sending pin=0 (which isn't a valid LED data pin).
+    const defaultPin = this.devicePin.value;
+    const slotInputs: FixtureSlotInput[] = [];
+    for (const slot of slots) {
+      const fixture = state.fixtures.find(f => String(f.id) === String(slot.fixtureId));
+      if (fixture) slotInputs.push({ fixture, pin: slot.pin ?? defaultPin });
+    }
+    if (!slotInputs.length) return;
+
+    // Push espNowEnabled toggle whenever it changes. Independent of the
+    // fixture-bound slot packet — firmware persists this to NVS and lives-
+    // inits / shuts down ESP-NOW accordingly.
+    const enFp = this.espNowEnabled.value ? '1' : '0';
+    if (first || enFp !== this.cachedEspNowEnFp) {
+      this.send(buildEspNowEnablePacket(this.espNowEnabled.value));
+      this.cachedEspNowEnFp = enFp;
+      this.pushLog(`[sync] espnow-enable ${this.espNowEnabled.value ? 'on' : 'off'}`);
     }
 
-    const fp = scopedFingerprint(fixture, state.effects, state.blendMode);
+    const extraFixture = this.espNowFixtureId.value != null
+      ? (state.fixtures.find(f => String(f.id) === String(this.espNowFixtureId.value)) ?? null)
+      : null;
 
-    if (first || fp.layout !== this.cachedLayoutFp || fp.channels !== this.cachedChannelsFp || fp.effects !== this.cachedEffectsFp) {
-      const scoped = buildScopedPackets(fixture, state.effects, state.blendMode);
+    const fp = multiScopedFingerprint(slotInputs, state.effects, state.blendMode, extraFixture);
 
-      if (first || fp.layout !== this.cachedLayoutFp) {
-        this.send(scoped.layoutPacket);
-        this.cachedLayoutFp = fp.layout;
-        this.pushLog(`[sync] layout ${scoped.layoutPacket.length}B`);
+    if (first || fp.strip !== this.cachedStripFp ||
+        fp.layout !== this.cachedLayoutFp ||
+        fp.channels !== this.cachedChannelsFp ||
+        fp.effects !== this.cachedEffectsFp ||
+        fp.espNow !== this.cachedEspNowFp) {
+      const scoped = buildMultiScopedPackets(slotInputs, state.effects, state.blendMode, extraFixture);
+
+      if (scoped.stripSlotsPacket && (first || fp.strip !== this.cachedStripFp)) {
+        this.send(scoped.stripSlotsPacket);
+        this.cachedStripFp = fp.strip;
+        this.pushLog(`[sync] strip-slots ${scoped.stripSlotsPacket.length}B (${slotInputs.length} slot${slotInputs.length === 1 ? '' : 's'})`);
       }
-      if (first || fp.channels !== this.cachedChannelsFp) {
-        this.send(scoped.channelsPacket);
-        this.cachedChannelsFp = fp.channels;
-        this.pushLog(`[sync] channels ${scoped.channelsPacket.length}B`);
-      }
-      if (first || fp.effects !== this.cachedEffectsFp) {
-        this.send(scoped.effectsPacket);
-        this.cachedEffectsFp = fp.effects;
-        this.pushLog(`[sync] effects ${scoped.effectsPacket.length}B`);
+      if (first || fp.layout !== this.cachedLayoutFp)     { this.send(scoped.layoutPacket);   this.cachedLayoutFp   = fp.layout;   this.pushLog(`[sync] layout ${scoped.layoutPacket.length}B`);   }
+      if (first || fp.channels !== this.cachedChannelsFp) { this.send(scoped.channelsPacket); this.cachedChannelsFp = fp.channels; this.pushLog(`[sync] channels ${scoped.channelsPacket.length}B`); }
+      if (first || fp.effects !== this.cachedEffectsFp)   { this.send(scoped.effectsPacket);  this.cachedEffectsFp  = fp.effects;  this.pushLog(`[sync] effects ${scoped.effectsPacket.length}B`);  }
+      if (first || fp.espNow !== this.cachedEspNowFp) {
+        const layout = scoped.espNowLayout;
+        const pkt = buildEspNowSlotPacket(layout
+          ? { enabled: true,  dmxStart: layout.dmxStart, rIdx: layout.rIdx, gIdx: layout.gIdx, bIdx: layout.bIdx, dimIdx: layout.dimIdx }
+          : { enabled: false, dmxStart: 0, rIdx: 0, gIdx: 1, bIdx: 2, dimIdx: 3 });
+        this.send(pkt);
+        this.cachedEspNowFp = fp.espNow;
+        this.pushLog(`[sync] espnow-slot ${pkt.length}B (${layout ? 'on' : 'off'})`);
       }
     }
 
@@ -246,34 +283,75 @@ export class WebSocketConnector extends BaseConnector {
   }
 
   setFixtureId(id: string | number | null) {
-    if (this.fixtureId.value === id) return;
-    this.fixtureId.value = id;
-    // Force a full resync on next frame
-    this.cachedLayoutFp = '';
-    this.cachedChannelsFp = '';
-    this.cachedEffectsFp = '';
-    this.cachedStripFp = '';
-    this.frameCount = 0;
+    const current = this.fixtureSlots.value[0]?.fixtureId ?? null;
+    if (String(current) === String(id)) return;
+    if (id == null) {
+      this.fixtureSlots.value = [];
+    } else {
+      const existingPin = this.fixtureSlots.value[0]?.pin ?? null;
+      this.fixtureSlots.value = [{ fixtureId: id, pin: existingPin }];
+    }
+    this.resetCaches();
+  }
+
+  setFixtureSlots(slots: FixtureSlot[]) {
+    this.fixtureSlots.value = slots;
+    this.resetCaches();
+  }
+
+  addFixtureSlot(fixtureId: string | number, pin: number | null = null) {
+    this.fixtureSlots.value = [...this.fixtureSlots.value, { fixtureId, pin }];
+    this.resetCaches();
+  }
+
+  removeFixtureSlot(index: number) {
+    const slots = this.fixtureSlots.value.slice();
+    slots.splice(index, 1);
+    this.fixtureSlots.value = slots;
+    this.resetCaches();
+  }
+
+  updateFixtureSlot(index: number, patch: Partial<FixtureSlot>) {
+    const slots = this.fixtureSlots.value.slice();
+    if (slots[index]) {
+      slots[index] = { ...slots[index]!, ...patch };
+      this.fixtureSlots.value = slots;
+      this.resetCaches();
+    }
   }
 
   override getConfig() {
     return {
-      url:           this.url.value,
-      fixtureId:     this.fixtureId.value,
-      label:         this.label.value,
-      devicePin:     this.devicePin.value,
-      outputMapping: this.outputMapping.value.slice(),
+      url:             this.url.value,
+      fixtureSlots:    this.fixtureSlots.value.slice(),
+      label:           this.label.value,
+      devicePin:       this.devicePin.value,
+      espNowFixtureId: this.espNowFixtureId.value,
+      espNowEnabled:   this.espNowEnabled.value,
+      outputMapping:   this.outputMapping.value.slice(),
     };
   }
 
   static fromConfig(id: string, config: Record<string, unknown>): WebSocketConnector {
-    const wc = new WebSocketConnector(
-      id,
-      String(config.url ?? ''),
-      (config.fixtureId as string | number | null) ?? null,
-    );
+    const wc = new WebSocketConnector(id, String(config.url ?? ''));
     wc.label.value     = String(config.label ?? '');
     wc.devicePin.value = config.devicePin != null ? Number(config.devicePin) : null;
+    wc.espNowFixtureId.value = (config.espNowFixtureId as string | number | null | undefined) ?? null;
+    wc.espNowEnabled.value   = config.espNowEnabled === true;
+
+    if (Array.isArray(config.fixtureSlots) && config.fixtureSlots.length) {
+      // New format
+      wc.fixtureSlots.value = (config.fixtureSlots as FixtureSlot[]).map(s => ({
+        fixtureId: s.fixtureId,
+        pin:       s.pin ?? null,
+      }));
+    } else if (config.fixtureId != null) {
+      // Legacy format: single fixtureId stored directly
+      wc.fixtureSlots.value = [{
+        fixtureId: config.fixtureId as string | number,
+        pin:       config.devicePin != null ? Number(config.devicePin) : null,
+      }];
+    }
     return wc;
   }
 

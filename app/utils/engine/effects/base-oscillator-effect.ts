@@ -40,7 +40,11 @@ export abstract class BaseOscillatorEffect extends BaseEffect {
 
   protected resolveSpeedToMs(speed: SpeedConfig, engine: EffectEngine): number {
     if (speed.mode === 'infinite') return Infinity;
-    if (speed.mode === 'beat') return (60000 / engine.globalBpm.value) * speed.beatValue;
+    if (speed.mode === 'beat') {
+      const bpm = engine.globalBpm.value;
+      if (bpm <= 0) return Infinity;
+      return (60000 / bpm) * speed.beatValue;
+    }
     return speed.timeMs;
   }
 

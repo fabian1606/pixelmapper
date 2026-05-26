@@ -8,6 +8,7 @@ import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
+import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -61,6 +62,10 @@ export function useChaserModifiers(
 
   const canAddDisplacement = computed(() =>
     activeModifiers.value.some(m => !(toRaw(m) instanceof DisplacementEffect))
+  );
+
+  const canAddSpeedCurve = computed(() =>
+    activeModifiers.value.some(m => !(toRaw(m) instanceof SpeedCurveEffect) && !(toRaw(m) instanceof DisplacementEffect))
   );
 
   function addWaveformModifier() {
@@ -119,6 +124,19 @@ export function useChaserModifiers(
     effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
     emit('change');
     commitModifiers(before, 'Add Displacement Modifier');
+  }
+
+  function addSpeedCurveModifier() {
+    const before = captureModifiers();
+    if (!effectEngine || !before) return;
+    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
+    const effect = new SpeedCurveEffect();
+    effect.targetChannels = [...availableChannelTypes.value];
+    effect.targetFixtureIds = props.fixtures.map(f => f.id);
+    effectEngine.addEffect(effect);
+    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    emit('change');
+    commitModifiers(before, 'Add Speed Curve Modifier');
   }
 
   function cloneModifier(effect: Effect): Effect {
@@ -210,7 +228,7 @@ export function useChaserModifiers(
 
     // Is this a continuous value change? If so, debounce the commit
     const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning'
-      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams' || key === 'displacementParams';
+      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams' || key === 'displacementParams' || key === 'speedCurveParams';
     const isDirection = key === 'direction';
 
     let before: Effect[] | null = null;
@@ -381,12 +399,12 @@ export function useChaserModifiers(
     commitModifiers(before, 'Add Pinned Modifier');
   }
 
-  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement') {
+  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement' | 'SpeedCurve') {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
 
     const raw = toRaw(effect);
-    const current = raw instanceof DisplacementEffect ? 'Displacement' : raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
+    const current = raw instanceof SpeedCurveEffect ? 'SpeedCurve' : raw instanceof DisplacementEffect ? 'Displacement' : raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
     if (type === current) return;
 
     const targetChannels = [...(effect.targetChannels || [])];
@@ -402,7 +420,12 @@ export function useChaserModifiers(
       : 0.5;
 
     let replacement: Effect;
-    if (type === 'Displacement') {
+    if (type === 'SpeedCurve') {
+      const sc = new SpeedCurveEffect();
+      sc.targetChannels = targetChannels;
+      sc.targetFixtureIds = targetFixtureIds;
+      replacement = sc as unknown as Effect;
+    } else if (type === 'Displacement') {
       const d = new DisplacementEffect();
       d.targetChannels = targetChannels;
       d.targetFixtureIds = targetFixtureIds;
@@ -486,11 +509,13 @@ export function useChaserModifiers(
     availableChannelTypes,
     activeModifiers,
     canAddDisplacement,
+    canAddSpeedCurve,
     addWaveformModifier,
     addNoiseModifier,
     addSequencerModifier,
     addColorModifier,
     addDisplacementModifier,
+    addSpeedCurveModifier,
     addPinnedModifier,
     switchModifierType,
     handleModifierDragEnd,

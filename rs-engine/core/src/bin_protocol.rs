@@ -1,5 +1,5 @@
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, DisplacementParams, DisplacementPatternType, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape, WaveformShapeParams};
+use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, CurvePoint, DisplacementParams, DisplacementPatternType, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedCurveParams, SpeedMode, WaveformShape, WaveformShapeParams};
 
 // ── Cursor-based byte reader ──────────────────────────────────────────────────
 
@@ -321,7 +321,26 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             None
         };
 
-        let effect_type = if displacement_params.is_some() {
+        // Speed curve parameters
+        let is_speed_curve_byte = match c.read_u8() { Some(v) => v, None => return -1 };
+        let speed_curve_params = if is_speed_curve_byte == 1 {
+            let point_count = match c.read_u8() { Some(v) => v as usize, None => return -1 };
+            let mut points = Vec::with_capacity(point_count);
+            for _ in 0..point_count {
+                let px = match c.read_f32_le() { Some(v) => v, None => return -1 };
+                let py = match c.read_f32_le() { Some(v) => v, None => return -1 };
+                points.push(CurvePoint { x: px, y: py });
+            }
+            let max_multiplier = match c.read_f32_le() { Some(v) => v, None => return -1 };
+            let cycle_beats    = match c.read_u8()     { Some(v) => v, None => return -1 };
+            Some(SpeedCurveParams { points, max_multiplier, cycle_beats })
+        } else {
+            None
+        };
+
+        let effect_type = if speed_curve_params.is_some() {
+            "SpeedCurveEffect".to_string()
+        } else if displacement_params.is_some() {
             "DisplacementEffect".to_string()
         } else if color_params.is_some() {
             "ColorEffect".to_string()
@@ -348,6 +367,7 @@ pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             sequencer_params,
             color_params,
             displacement_params,
+            speed_curve_params,
             effect_type,
         });
     }

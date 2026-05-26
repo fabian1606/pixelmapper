@@ -94,11 +94,13 @@ const {
   activeModifiers,
   availableChannelTypes,
   canAddDisplacement,
+  canAddSpeedCurve,
   addWaveformModifier,
   addNoiseModifier,
   addSequencerModifier,
   addColorModifier,
   addDisplacementModifier,
+  addSpeedCurveModifier,
   addPinnedModifier,
   switchModifierType,
   handleModifierDragEnd,
@@ -242,6 +244,7 @@ defineExpose({
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
             :can-add-displacement="canAddDisplacement"
+            :can-add-speed-curve="canAddSpeedCurve"
             :base-hue="baseHue"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
@@ -255,6 +258,7 @@ defineExpose({
             @add-sequencer-modifier="addSequencerModifier"
             @add-color-modifier="addColorModifier"
             @add-displacement-modifier="addDisplacementModifier"
+            @add-speed-curve-modifier="addSpeedCurveModifier"
             @add-pinned-modifier="handleAddPinnedModifier"
             @pin-modifier="handlePinModifier"
             @switch-modifier-type="switchModifierType"

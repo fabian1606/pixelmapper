@@ -50,8 +50,14 @@ export function applyConfig(c: BaseConnector, config: Record<string, unknown>): 
     if ('url'   in config) c.url.value   = String(config.url ?? '');
     if ('label' in config) c.label.value = String(config.label ?? '');
     if ('devicePin' in config) c.devicePin.value = config.devicePin != null ? Number(config.devicePin) : null;
-    // setFixtureId clears the resync caches — must use the method, not the ref.
-    if ('fixtureId' in config) c.setFixtureId((config.fixtureId as string | number | null) ?? null);
+    if ('espNowFixtureId' in config) c.espNowFixtureId.value = (config.espNowFixtureId as string | number | null | undefined) ?? null;
+    if ('espNowEnabled'   in config) c.espNowEnabled.value   = config.espNowEnabled === true;
+    // setFixtureSlots/setFixtureId clear resync caches — must use the methods.
+    if ('fixtureSlots' in config && Array.isArray(config.fixtureSlots)) {
+      c.setFixtureSlots((config.fixtureSlots as import('./websocket-connector').FixtureSlot[]));
+    } else if ('fixtureId' in config) {
+      c.setFixtureId((config.fixtureId as string | number | null) ?? null);
+    }
   } else if (c instanceof SerialConnector) {
     if ('baudRate' in config) c.baudRate = Number(config.baudRate ?? 921600);
   }

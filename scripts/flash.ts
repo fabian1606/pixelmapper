@@ -16,8 +16,9 @@
 import { $ } from 'bun';
 
 const TARGETS: Record<string, { dir: string; env: string; label: string }> = {
-  ws: { dir: 'pio-ws', env: 'esp32s3_neopixel', label: 'ESP32-S3 NeoPixel (pio-ws)' },
-  p4: { dir: 'pio',    env: 'waveshare_p4_poe', label: 'ESP32-P4 PoE (pio)' },
+  ws:      { dir: 'pio-ws', env: 'esp32s3_neopixel',     label: 'ESP32-S3 NeoPixel WiFi (pio-ws)' },
+  'ws-eth':{ dir: 'pio-ws', env: 'esp32s3_eth_neopixel', label: 'ESP32-S3 NeoPixel Ethernet (pio-ws)' },
+  p4:      { dir: 'pio',    env: 'waveshare_p4_poe',     label: 'ESP32-P4 PoE (pio)' },
 };
 
 const args = process.argv.slice(2);

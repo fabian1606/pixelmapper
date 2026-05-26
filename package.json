@@ -14,10 +14,13 @@
     "release": "bun run scripts/release.ts",
     "flash": "bun run scripts/flash.ts",
     "flash:ws": "bun run scripts/flash.ts ws",
+    "flash:ws-eth": "bun run scripts/flash.ts ws-eth",
     "flash:p4": "bun run scripts/flash.ts p4",
     "build:ws": "bun run scripts/flash.ts ws --build",
+    "build:ws-eth": "bun run scripts/flash.ts ws-eth --build",
     "build:p4": "bun run scripts/flash.ts p4 --build",
     "monitor:ws": "bun run scripts/flash.ts ws --monitor",
+    "monitor:ws-eth": "bun run scripts/flash.ts ws-eth --monitor",
     "monitor:p4": "bun run scripts/flash.ts p4 --monitor"
   },
   "dependencies": {

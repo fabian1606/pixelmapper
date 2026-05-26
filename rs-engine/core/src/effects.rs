@@ -1,4 +1,4 @@
-use crate::types::{EffectConfig, EffectDirection, NoiseType, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape};
+use crate::types::{CurvePoint, EffectConfig, EffectDirection, NoiseType, SequencerPatternType, SpeedConfig, SpeedMode, WaveformShape};
 
 pub trait Effect {
     fn update(&mut self, delta_time_ms: f32, abs_time_ms: f32, global_bpm: f32);
@@ -607,10 +607,127 @@ impl Effect for DisplacementEffect {
     }
 }
 
+// ─── Curve math helpers ───────────────────────────────────────────────────────
+
+const CURVE_LUT_SAMPLES: usize = 256;
+
+/// Centripetal Catmull-Rom segment evaluation for y at local t ∈ [0,1].
+fn catmull_rom_y(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    0.5 * (
+        2.0 * p1
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+    )
+}
+
+/// Samples the Catmull-Rom spline at x ∈ [0,1]. Points must be sorted by x.
+pub fn sample_curve(points: &[CurvePoint], x: f32) -> f32 {
+    let n = points.len();
+    if n < 2 { return 1.0; }
+    let x = x.clamp(0.0, 1.0);
+    let mut i = 1usize;
+    while i < n - 1 && points[i].x < x { i += 1; }
+    let p1 = &points[i - 1];
+    let p2 = &points[i];
+    let seg_w = p2.x - p1.x;
+    let local_t = if seg_w < 1e-9 { 0.0 } else { (x - p1.x) / seg_w };
+    let p0_y = if i > 1 { points[i - 2].y } else { p1.y - (p2.y - p1.y) };
+    let p3_y = if i < n - 1 { points[i + 1].y } else { p2.y + (p2.y - p1.y) };
+    catmull_rom_y(p0_y, p1.y, p2.y, p3_y, local_t).max(0.0)
+}
+
+/// Builds a cumulative integral LUT (size CURVE_LUT_SAMPLES+1) via trapezoid rule.
+pub fn build_cumulative(points: &[CurvePoint]) -> [f32; CURVE_LUT_SAMPLES + 1] {
+    let mut lut = [0.0f32; CURVE_LUT_SAMPLES + 1];
+    let mut sum = 0.0f32;
+    let mut prev = sample_curve(points, 0.0);
+    for i in 1..=CURVE_LUT_SAMPLES {
+        let t = i as f32 / CURVE_LUT_SAMPLES as f32;
+        let curr = sample_curve(points, t);
+        sum += (prev + curr) * 0.5 / CURVE_LUT_SAMPLES as f32;
+        lut[i] = sum;
+        prev = curr;
+    }
+    lut
+}
+
+/// Maps linear phase t ∈ [0,1] → warped phase τ(t) ∈ [0,1] via F⁻¹.
+pub fn warp_phase(lut: &[f32; CURVE_LUT_SAMPLES + 1], t: f32) -> f32 {
+    if t <= 0.0 { return 0.0; }
+    if t >= 1.0 { return 1.0; }
+    let total = lut[CURVE_LUT_SAMPLES];
+    if total < 1e-9 { return t; }
+    let target = t * total;
+    let mut lo = 0usize;
+    let mut hi = CURVE_LUT_SAMPLES;
+    while lo < hi - 1 {
+        let mid = (lo + hi) >> 1;
+        if lut[mid] <= target { lo = mid; } else { hi = mid; }
+    }
+    let lut_lo = lut[lo];
+    let lut_hi = lut[hi];
+    let frac = if lut_hi - lut_lo < 1e-12 { 0.0 } else { (target - lut_lo) / (lut_hi - lut_lo) };
+    ((lo as f32 + frac) / CURVE_LUT_SAMPLES as f32).clamp(0.0, 1.0)
+}
+
+// ─── Speed Curve Effect ───────────────────────────────────────────────────────
+
+pub struct SpeedCurveEffect {
+    config: EffectConfig,
+    abs_time_ms: f32,
+    global_bpm: f32,
+}
+
+impl SpeedCurveEffect {
+    pub fn new(config: EffectConfig) -> Self {
+        Self { config, abs_time_ms: 0.0, global_bpm: 120.0 }
+    }
+
+    fn cycle_duration_ms(&self) -> f32 {
+        let scp = self.config.speed_curve_params.as_ref();
+        let cycle_beats = scp.map(|p| p.cycle_beats as f32).unwrap_or(1.0);
+        let beat_dur = 60000.0 / self.global_bpm.max(1.0);
+        beat_dur * cycle_beats
+    }
+
+    /// Returns the warped absolute time in ms for a given abs_time, using this curve.
+    pub fn warp_time(&self, time_ms: f32) -> f32 {
+        let scp = match &self.config.speed_curve_params {
+            Some(p) => p,
+            None => return time_ms,
+        };
+        let cycle_dur = self.cycle_duration_ms();
+        if cycle_dur < 1.0 { return time_ms; }
+        let cycles = (time_ms / cycle_dur).floor();
+        let phase = ((time_ms % cycle_dur) / cycle_dur).clamp(0.0, 1.0);
+        let lut = build_cumulative(&scp.points);
+        let warped_phase = warp_phase(&lut, phase);
+        cycles * cycle_dur + warped_phase * cycle_dur
+    }
+}
+
+impl Effect for SpeedCurveEffect {
+    fn update(&mut self, _delta_time_ms: f32, abs_time_ms: f32, global_bpm: f32) {
+        self.abs_time_ms = abs_time_ms;
+        self.global_bpm = global_bpm;
+    }
+
+    fn render(&self, _world_x: f32, _world_y: f32, _channel_seed: u32, _group_index: u32, _group_count: u32) -> f32 {
+        0.0
+    }
+
+    fn get_config(&self) -> &EffectConfig { &self.config }
+}
+
 // ─── Effect factory ───────────────────────────────────────────────────────────
 
 pub fn create_effect(config: EffectConfig) -> Box<dyn Effect> {
-    if config.effect_type == "DisplacementEffect" || config.displacement_params.is_some() {
+    if config.effect_type == "SpeedCurveEffect" || config.speed_curve_params.is_some() {
+        Box::new(SpeedCurveEffect::new(config))
+    } else if config.effect_type == "DisplacementEffect" || config.displacement_params.is_some() {
         Box::new(DisplacementEffect::new(config))
     } else if config.effect_type == "ColorEffect" || config.color_params.is_some() {
         Box::new(ColorEffect::new(config))

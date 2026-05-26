@@ -54,7 +54,7 @@ export class SerialConnector extends BaseConnector {
   private cachedEffects  = -1;
   private cachedUniverseMap = '';
   private frameCount     = 0;
-  private readonly TIMESYNC_INTERVAL = 30;
+  private readonly TIMESYNC_INTERVAL = 1;
 
   constructor(id: string, baudRate = 921600) {
     super(id);

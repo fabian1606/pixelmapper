@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue';
 import { Zap } from 'lucide-vue-next';
-import type { LiveWidget } from '~/utils/live/types';
+import type { LiveWidget, SpeedConfig } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
@@ -21,10 +21,20 @@ const pressed = ref(false);
 
 const section = useSectionBinding({ widget: () => props.widget });
 
-const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout' };
+const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed' };
+
+function speedLabel(cfg: SpeedConfig): string {
+  if (cfg.multiplier === 0) return 'Freeze';
+  if (cfg.multiplier === 1) return 'Reset 1×';
+  if (cfg.multiplier === 0.5) return '½×';
+  return `${cfg.multiplier}×`;
+}
 
 function autoLabel(w: typeof props.widget): string | null {
   const m = w.mapping;
+  if (m.type === 'global-function' && m.globalFunction === 'speed') {
+    return speedLabel((m.globalFunctionConfig ?? { multiplier: 1, behavior: 'latch' }) as SpeedConfig);
+  }
   if (m.type === 'global-function' && m.globalFunction) return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
   if (m.type === 'preset' && m.presetId) {
     const p = engineStore.savedPresets.find((sp: any) => sp.id === m.presetId);
@@ -51,7 +61,11 @@ const isFlash = computed(() => {
     const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
     if (preset?.type === 'flash' || preset?.type === 'overwrite') return true;
   }
-  // Global functions are always hold-to-active (flash behavior)
+  // Speed buttons can be latch — only flash when behavior === 'hold'
+  if (mapping.type === 'global-function' && mapping.globalFunction === 'speed') {
+    return (mapping.globalFunctionConfig as SpeedConfig | undefined)?.behavior === 'hold';
+  }
+  // Other global functions are hold-to-active (flash behavior)
   if (mapping.type === 'global-function') return true;
   return false;
 });
@@ -91,6 +105,15 @@ function applyOwnMapping(active: boolean) {
     if (ch) {
       ch.stepValues = [active ? 255 : 0];
       engineStore.triggerCanvasSync?.();
+    }
+  } else if (mapping.type === 'global-function' && mapping.globalFunction === 'speed') {
+    const cfg = (mapping.globalFunctionConfig ?? { multiplier: 1, behavior: 'latch' }) as SpeedConfig;
+    if (active) {
+      engineStore.setSpeedMultiplier(cfg.multiplier);
+      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: cfg.multiplier }));
+    } else if (cfg.behavior === 'hold') {
+      engineStore.setSpeedMultiplier(1);
+      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: 1 }));
     }
   } else if (mapping.type === 'global-function' && mapping.globalFunction) {
     if (active) {

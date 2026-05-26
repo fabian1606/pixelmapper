@@ -8,8 +8,17 @@ registerLiveOp<{ bpm: number }>('engine.bpm', {
   persistent: true,
   apply: ({ bpm }, _userId, ctx) => {
     if (!ctx.engineStore.engine) return;
-    ctx.engineStore.engine.globalBpm.value = bpm;
-    ctx.engineStore.engine.postBpm(bpm);
+    ctx.engineStore.baseBpm.value = bpm;
+  },
+});
+
+registerLiveOp<{ multiplier: number }>('engine.speed', {
+  scope: 'shared',
+  throttle: 'immediate',
+  merge: 'replace',
+  persistent: true,
+  apply: ({ multiplier }, _userId, ctx) => {
+    ctx.engineStore.setSpeedMultiplier(multiplier);
   },
 });
 

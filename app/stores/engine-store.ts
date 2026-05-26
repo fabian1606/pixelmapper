@@ -277,6 +277,14 @@ export const useEngineStore = defineStore('engine', () => {
 
   const engine = markRaw(new EffectEngine());
 
+  // Base BPM (what tap-tempo writes) and speed multiplier (set by speed buttons).
+  // Effective globalBpm = baseBpm * speedMultiplier. multiplier === 0 = freeze.
+  const baseBpm = ref(120);
+  const speedMultiplier = ref(1);
+  function setSpeedMultiplier(m: number) {
+    speedMultiplier.value = m;
+  }
+
   // Create a reactive array for effects that the UI can track,
   // and bind it into the engine so the render loop uses it.
   const activeEffects = ref<import('~/utils/engine/types').Effect[]>([]);
@@ -603,6 +611,11 @@ export const useEngineStore = defineStore('engine', () => {
     // Sync BPM changes to the worker engine
     watch(engine.globalBpm, (bpm) => engine.postBpm(bpm));
 
+    // Derive effective BPM from base × multiplier (multiplier === 0 → freeze)
+    watch([baseBpm, speedMultiplier], ([base, mult]) => {
+      engine.globalBpm.value = base * mult;
+    });
+
     // Frame-receive handler: called by the worker engine on every rendered frame.
     // Runs off the main-thread render loop — Vue cascade can't block it.
     engine.onFrame = (dmx: Uint8Array, elapsedMs: number) => {
@@ -752,7 +765,11 @@ export const useEngineStore = defineStore('engine', () => {
     activeEffects.value = effects;
     engine.effects = activeEffects.value;
     selectedPresetId.value = restoredPresetId;
-    // Restore global engine state captured in the snapshot (BPM + shared clock)
+    // Restore global engine state captured in the snapshot (BPM + shared clock).
+    // Snapshot stores the effective BPM at save time; treat it as the base.
+    // The persistent `engine.speed` live-op will re-apply any latched multiplier.
+    baseBpm.value = restoredBpm;
+    speedMultiplier.value = 1;
     engine.globalBpm.value = restoredBpm;
     engine.postBpm(restoredBpm);
     clockEpoch.value = restoredEpoch;
@@ -937,7 +954,7 @@ export const useEngineStore = defineStore('engine', () => {
     // showing "Verbinden" instead of spinning forever. Serial is intentionally
     // skipped — requestPort() needs a user gesture.
     for (const c of useConnectionsStore().connectors) {
-      if (c instanceof WebSocketConnector && c.url.value && c.fixtureId.value != null) {
+      if (c instanceof WebSocketConnector && c.url.value && c.fixtureId != null) {
         c.connect().catch((e: unknown) => console.warn('[engine] ws auto-connect failed:', c.id, e));
       }
     }
@@ -1136,6 +1153,9 @@ export const useEngineStore = defineStore('engine', () => {
     clearOverwriteStack,
     clockEpoch,
     setClockEpoch,
+    baseBpm,
+    speedMultiplier,
+    setSpeedMultiplier,
     engine,
     activeEffects,
     sceneNodes,

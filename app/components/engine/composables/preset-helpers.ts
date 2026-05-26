@@ -88,7 +88,9 @@ export function getModifierFingerprint(effect: Effect | PresetModifierSnapshot):
   const channels = [...(effect.targetChannels ?? [])].sort().join(',');
   const direction = effect.direction ?? 'LINEAR';
   const reverse = effect.reverse ?? false;
-  return `${effectType}|${channels}|${effect.strength}|${effect.fanning}|${direction}|${reverse}`;
+  const scp = (effect as any).speedCurveParams;
+  const scpStr = scp ? JSON.stringify(scp.points) + scp.maxMultiplier + scp.cycleBeats : '';
+  return `${effectType}|${channels}|${effect.strength}|${effect.fanning}|${direction}|${reverse}|${scpStr}`;
 }
 
 // ─── Effect serialisation ─────────────────────────────────────────────────────
@@ -114,5 +116,8 @@ export function snapshotEffect(effect: Effect): PresetModifierSnapshot {
     sequencerParams: (effect as any).sequencerParams ? { ...(effect as any).sequencerParams } : undefined,
     colorParams: (effect as any).colorParams ? { ...(effect as any).colorParams } : undefined,
     displacementParams: (effect as any).displacementParams ? { ...(effect as any).displacementParams } : undefined,
+    speedCurveParams: (effect as any).speedCurveParams
+      ? { ...(effect as any).speedCurveParams, points: (effect as any).speedCurveParams.points.map((p: any) => ({ ...p })) }
+      : undefined,
   };
 }

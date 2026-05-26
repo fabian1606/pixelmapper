@@ -269,6 +269,37 @@ pub struct DisplacementParams {
 fn displacement_amount_default() -> f32 { 0.1 }
 fn displacement_scale_default() -> f32 { 2.0 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurvePoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeedCurveParams {
+    pub points: Vec<CurvePoint>,
+    #[serde(rename = "maxMultiplier", default = "speed_curve_max_mult_default")]
+    pub max_multiplier: f32,
+    #[serde(rename = "cycleBeats", default = "one_u8")]
+    pub cycle_beats: u8,
+}
+
+fn speed_curve_max_mult_default() -> f32 { 4.0 }
+fn one_u8() -> u8 { 1 }
+
+impl Default for SpeedCurveParams {
+    fn default() -> Self {
+        SpeedCurveParams {
+            points: vec![
+                CurvePoint { x: 0.0, y: 1.0 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ],
+            max_multiplier: 4.0,
+            cycle_beats: 1,
+        }
+    }
+}
+
 impl Default for DisplacementParams {
     fn default() -> Self {
         DisplacementParams {
@@ -309,6 +340,8 @@ pub struct EffectConfig {
     pub color_params: Option<ColorParams>,
     #[serde(rename = "displacementParams", default)]
     pub displacement_params: Option<DisplacementParams>,
+    #[serde(rename = "speedCurveParams", default)]
+    pub speed_curve_params: Option<SpeedCurveParams>,
     #[serde(rename = "effectType", default)]
     pub effect_type: String,
 }

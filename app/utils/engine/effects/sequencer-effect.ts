@@ -75,7 +75,11 @@ export class SequencerEffect extends BaseEffect {
   private resolveSpeedToMs(engine: EffectEngine): number {
     const s = this.speed;
     if (s.mode === 'infinite') return Infinity;
-    if (s.mode === 'beat') return (60000 / engine.globalBpm.value) * s.beatValue;
+    if (s.mode === 'beat') {
+      const bpm = engine.globalBpm.value;
+      if (bpm <= 0) return Infinity;
+      return (60000 / bpm) * s.beatValue;
+    }
     return s.timeMs;
   }
 

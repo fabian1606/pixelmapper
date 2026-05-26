@@ -55,8 +55,7 @@ let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
 function applyBpm(newBpm: number, epochMs?: number) {
   const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
   if (!engineStore.engine) return;
-  engineStore.engine.globalBpm.value = clamped;
-  engineStore.engine.postBpm(clamped);
+  engineStore.baseBpm.value = clamped;
   const epoch = epochMs ?? Date.now();
   engineStore.setClockEpoch(epoch);
   liveBus.dispatch('engine.bpm', { bpm: clamped });

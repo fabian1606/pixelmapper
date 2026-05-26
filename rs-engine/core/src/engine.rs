@@ -69,6 +69,8 @@ pub struct EffectEngine {
     pub targets: Vec<RenderTarget>,
     pub effects: Vec<Box<dyn Effect>>,
     pub stack_blend_mode: BlendMode,
+    /// Accumulated warped time for speed-curve effects (tracked across frames).
+    pub warped_time_ms: f32,
 }
 
 impl Default for EffectEngine {
@@ -109,6 +111,7 @@ impl EffectEngine {
             targets: Vec::new(),
             effects: Vec::new(),
             stack_blend_mode: BlendMode::Add,
+            warped_time_ms: 0.0,
         }
     }
 
@@ -239,10 +242,87 @@ impl EffectEngine {
         self.base_buffer.fill(0.0);
         self.render_buffer.fill(0.0);
 
-        // 1. Update effects
+        // 1. Speed-curve pre-pass: warp time_ms using all active SpeedCurveEffects.
+        // SpeedCurveEffects get unwarped time for their own internal state;
+        // all other effects receive the combined warped time.
         let global_bpm = self.global_bpm;
+
+        // Downcast helper: check if an effect is a SpeedCurveEffect by config field.
+        let has_speed_curve = self.effects.iter()
+            .any(|e| e.get_config().speed_curve_params.is_some());
+
+        let (effective_time_ms, effective_delta_ms) = if has_speed_curve {
+            // Combine all SpeedCurveEffects multiplicatively, then compute warped time.
+            // We evaluate the combined multiplier at the current linear phase and
+            // integrate a tiny step to get the warped absolute time.
+            use crate::effects::{sample_curve, warp_phase};
+
+            // Build a combined LUT per 256 samples: f_total(t) = product of all curves' f_i(t).
+            const SAMPLES: usize = 256;
+            let mut combined = [1.0f32; SAMPLES + 1];
+            for effect in &self.effects {
+                let config = effect.get_config();
+                if let Some(scp) = &config.speed_curve_params {
+                    let beat_dur = 60000.0 / global_bpm.max(1.0);
+                    let cycle_dur = beat_dur * scp.cycle_beats as f32;
+                    if cycle_dur > 0.0 {
+                        for i in 0..=SAMPLES {
+                            let t = i as f32 / SAMPLES as f32;
+                            combined[i] *= sample_curve(&scp.points, t);
+                        }
+                    }
+                }
+            }
+
+            // Use the first SpeedCurveEffect's cycle duration (they should agree; if not, pick first).
+            let cycle_dur = {
+                let mut dur = 1000.0f32;
+                for effect in &self.effects {
+                    let config = effect.get_config();
+                    if let Some(scp) = &config.speed_curve_params {
+                        let beat_dur = 60000.0 / global_bpm.max(1.0);
+                        dur = beat_dur * scp.cycle_beats as f32;
+                        break;
+                    }
+                }
+                dur
+            };
+
+            // Build cumulative LUT for the combined curve.
+            let mut lut = [0.0f32; SAMPLES + 1];
+            {
+                let mut sum = 0.0f32;
+                let mut prev = combined[0];
+                for i in 1..=SAMPLES {
+                    let curr = combined[i];
+                    sum += (prev + curr) * 0.5 / SAMPLES as f32;
+                    lut[i] = sum;
+                    prev = curr;
+                }
+            }
+
+            let cycles = (time_ms / cycle_dur).floor();
+            let phase = ((time_ms % cycle_dur) / cycle_dur).clamp(0.0, 1.0);
+            let warped_phase = warp_phase(&lut, phase);
+            let new_warped = cycles * cycle_dur + warped_phase * cycle_dur;
+            let warped_delta = (new_warped - self.warped_time_ms).max(0.0);
+            self.warped_time_ms = new_warped;
+            (new_warped, warped_delta)
+        } else {
+            self.warped_time_ms = time_ms;
+            (time_ms, delta_time_ms)
+        };
+
+        // 2. Update effects — meta-effects (SpeedCurve, Displacement) use raw time;
+        //    all other effects use the warped time.
         for effect in &mut self.effects {
-            effect.update(delta_time_ms, time_ms, global_bpm);
+            let config = effect.get_config();
+            let is_meta = config.speed_curve_params.is_some() || config.displacement_params.is_some();
+            if is_meta {
+                effect.update(delta_time_ms, time_ms, global_bpm);
+            } else {
+                effect.update(effective_delta_ms, effective_time_ms, global_bpm);
+            }
         }
 
         // 2. Compute base values (Chasers or Defaults)
@@ -349,8 +429,8 @@ impl EffectEngine {
                     continue;
                 }
 
-                // DisplacementEffects have no DMX contribution — skip.
-                if config.displacement_params.is_some() {
+                // DisplacementEffects and SpeedCurveEffects have no DMX contribution — skip.
+                if config.displacement_params.is_some() || config.speed_curve_params.is_some() {
                     continue;
                 }
 

@@ -5,13 +5,14 @@ import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
-import { Plus, Trash2, ChevronDown, Star, Waves } from 'lucide-vue-next';
+import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
+import { Plus, Trash2, ChevronDown, Star, Waves, Activity } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams, DisplacementParams } from '~/utils/engine/types';
+import type { Effect, ChannelType, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams, DisplacementParams, SpeedCurveParams } from '~/utils/engine/types';
 import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import ChaserFanningControl from './ChaserFanningControl.vue';
@@ -21,6 +22,7 @@ import NoiseEditor from './NoiseEditor.vue';
 import SequencerEditor from './SequencerEditor.vue';
 import ColorEditor from './ColorEditor.vue';
 import DisplacementEditor from './DisplacementEditor.vue';
+import SpeedCurveEditor from './SpeedCurveEditor.vue';
 
 const props = defineProps<{
   activeModifiers: Effect[];
@@ -29,6 +31,7 @@ const props = defineProps<{
   pinnedModifiers: PinnedModifier[];
   pinnedEffectIds: Set<string>;
   canAddDisplacement: boolean;
+  canAddSpeedCurve: boolean;
   baseHue?: number;  // 0..360, current fixture hue for ColorEditor strip anchoring
 }>();
 
@@ -47,7 +50,8 @@ const emit = defineEmits<{
   (e: 'pin-modifier', effect: Effect): void;
   (e: 'add-color-modifier'): void;
   (e: 'add-displacement-modifier'): void;
-  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement'): void;
+  (e: 'add-speed-curve-modifier'): void;
+  (e: 'switch-modifier-type', effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement' | 'SpeedCurve'): void;
   (e: 'dropdown-open-change', open: boolean): void;
   (e: 'reorder-modifiers', fromIndex: number, toIndex: number): void;
 }>();
@@ -103,6 +107,14 @@ function isDisplacementModifier(modifier: Effect): boolean {
   return toRaw(modifier) instanceof DisplacementEffect;
 }
 
+function isSpeedCurveModifier(modifier: Effect): boolean {
+  return toRaw(modifier) instanceof SpeedCurveEffect;
+}
+
+function speedCurveParams(modifier: Effect): SpeedCurveParams {
+  return (modifier as any).speedCurveParams ?? { points: [{ x: 0, y: 1 }, { x: 1, y: 1 }], maxMultiplier: 4, cycleBeats: 1 };
+}
+
 function displacementParams(modifier: Effect): DisplacementParams {
   return (modifier as any).displacementParams ?? { patternType: 'perlin', amountX: 0.1, amountY: 0.1, scale: 2, seed: 0 };
 }
@@ -133,6 +145,7 @@ function hasColorCycle(modifier: Effect): boolean {
 }
 
 function modifierTypeName(modifier: Effect): string {
+  if (isSpeedCurveModifier(modifier)) return 'SpeedCurve';
   if (isDisplacementModifier(modifier)) return 'Displacement';
   if (isColorModifier(modifier)) return 'Color';
   if (isSequencerModifier(modifier)) return 'Sequencer';
@@ -165,21 +178,22 @@ function modifierTypeName(modifier: Effect): string {
       <div
         class="flex items-center justify-between p-3 border-b border-border/60"
         :class="[
-          isDisplacementModifier(modifier) ? 'bg-amber-500/5 border-amber-500/20' : 'bg-muted/20',
+          isDisplacementModifier(modifier) ? 'bg-amber-500/5 border-amber-500/20' : isSpeedCurveModifier(modifier) ? 'bg-orange-500/5 border-orange-500/20' : 'bg-muted/20',
           dragFromIndex === i ? 'cursor-grabbing' : 'cursor-grab',
         ]"
         @mousedown="onDragHandleMousedown($event, i)"
       >
         <div class="flex items-center gap-1.5">
           <Waves v-if="isDisplacementModifier(modifier)" class="h-3.5 w-3.5 text-amber-400 shrink-0" />
+          <Activity v-else-if="isSpeedCurveModifier(modifier)" class="h-3.5 w-3.5 text-orange-400 shrink-0" />
           <Select
             :model-value="modifierTypeName(modifier)"
             @update:model-value="(v: any) => {
-              const next = v as 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement';
+              const next = v as 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement' | 'SpeedCurve';
               if (next !== modifierTypeName(modifier)) emit('switch-modifier-type', modifier, next);
             }"
           >
-            <SelectTrigger class="w-[130px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" :class="isDisplacementModifier(modifier) ? 'text-amber-400' : ''" @click.stop>
+            <SelectTrigger class="w-[130px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" :class="isDisplacementModifier(modifier) ? 'text-amber-400' : isSpeedCurveModifier(modifier) ? 'text-orange-400' : ''" @click.stop>
               <SelectValue placeholder="Select Effect" />
             </SelectTrigger>
             <SelectContent @pointerdown.stop>
@@ -188,6 +202,7 @@ function modifierTypeName(modifier: Effect): string {
               <SelectItem value="Sequencer" class="text-xs">Sequencer</SelectItem>
               <SelectItem value="Color" class="text-xs">Color</SelectItem>
               <SelectItem v-if="canAddDisplacement || isDisplacementModifier(modifier)" value="Displacement" class="text-xs text-amber-400">Displacement</SelectItem>
+              <SelectItem v-if="canAddSpeedCurve || isSpeedCurveModifier(modifier)" value="SpeedCurve" class="text-xs text-orange-400">Speed Curve</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -200,8 +215,8 @@ function modifierTypeName(modifier: Effect): string {
       </div>
 
       <div class="p-3 space-y-4">
-        <!-- Target Channels (not shown for Displacement — applies to all channels by position) -->
-        <div v-if="!isDisplacementModifier(modifier)" class="space-y-2">
+        <!-- Target Channels (not shown for Displacement or SpeedCurve — meta-modifiers) -->
+        <div v-if="!isDisplacementModifier(modifier) && !isSpeedCurveModifier(modifier)" class="space-y-2">
           <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>
           <div class="flex flex-wrap gap-1.5">
             <button
@@ -222,8 +237,21 @@ function modifierTypeName(modifier: Effect): string {
           </div>
         </div>
 
+        <!-- Speed Curve editor -->
+        <template v-if="isSpeedCurveModifier(modifier)">
+          <div class="pt-1">
+            <Label class="text-[10px] font-semibold tracking-wider text-orange-400/80 uppercase">Speed Curve</Label>
+          </div>
+          <SpeedCurveEditor
+            :params="speedCurveParams(modifier)"
+            @update:params="(p: SpeedCurveParams) => emit('update-modifier', modifier, 'speedCurveParams', p)"
+            @change-end="emit('handle-modifier-drag-end', 'Update Speed Curve')"
+            @click.stop
+          />
+        </template>
+
         <!-- Displacement editor -->
-        <template v-if="isDisplacementModifier(modifier)">
+        <template v-else-if="isDisplacementModifier(modifier)">
           <div class="pt-1">
             <Label class="text-[10px] font-semibold tracking-wider text-amber-400/80 uppercase">Displacement</Label>
           </div>
@@ -238,7 +266,7 @@ function modifierTypeName(modifier: Effect): string {
         </template>
 
         <!-- Color editor -->
-        <template v-else-if="isColorModifier(modifier)">
+        <template v-else-if="isColorModifier(modifier)" @click.stop>
           <div class="pt-1 border-t border-border/40">
             <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Color</Label>
           </div>
@@ -302,7 +330,7 @@ function modifierTypeName(modifier: Effect): string {
           />
         </template>
 
-        <div v-if="!isDisplacementModifier(modifier) && (!isColorModifier(modifier) || hasColorCycle(modifier))" class="space-y-3 pt-3 border-t border-border/40">
+        <div v-if="!isDisplacementModifier(modifier) && !isSpeedCurveModifier(modifier) && (!isColorModifier(modifier) || hasColorCycle(modifier))" class="space-y-3 pt-3 border-t border-border/40">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier) && !isColorModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
@@ -358,6 +386,9 @@ function modifierTypeName(modifier: Effect): string {
           <DropdownMenuItem @click="emit('add-color-modifier')">Color</DropdownMenuItem>
           <DropdownMenuItem v-if="canAddDisplacement" class="text-amber-400 gap-2" @click="emit('add-displacement-modifier')">
             <Waves class="h-4 w-4" /> Displacement
+          </DropdownMenuItem>
+          <DropdownMenuItem v-if="canAddSpeedCurve" class="text-orange-400 gap-2" @click="emit('add-speed-curve-modifier')">
+            <Activity class="h-4 w-4" /> Speed Curve
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>

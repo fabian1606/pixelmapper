@@ -7,6 +7,7 @@ import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
 import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
 import { ColorEffect } from '~/utils/engine/effects/color-effect';
 import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
+import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
 
 /**
  * Deep clones an array of effects to decouple them from the live engine state.
@@ -15,12 +16,14 @@ import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
 /** Detects the Effect class from either a live instance or a plain JSON object. */
 function instantiateEffect(effect: any): Effect {
   // Live class instances
+  if (effect instanceof SpeedCurveEffect) return new SpeedCurveEffect();
   if (effect instanceof DisplacementEffect) return new DisplacementEffect();
   if (effect instanceof ColorEffect) return new ColorEffect();
   if (effect instanceof SequencerEffect) return new SequencerEffect();
   if (effect instanceof NoiseEffect) return new NoiseEffect();
   if (effect instanceof WaveformEffect) return new WaveformEffect();
   // Plain JSON (after JSON.parse(JSON.stringify(...))) — detect by property fingerprint
+  if (effect?.speedCurveParams) return new SpeedCurveEffect();
   if (effect?.displacementParams) return new DisplacementEffect();
   if (effect?.colorParams) return new ColorEffect();
   if (effect?.sequencerParams) return new SequencerEffect();
@@ -60,6 +63,13 @@ export function cloneEffectsList(effects: Effect[]): Effect[] {
     }
     if ('displacementParams' in effect && (effect as any).displacementParams) {
       (clone as any).displacementParams = { ...(effect as any).displacementParams };
+    }
+    if ('speedCurveParams' in effect && (effect as any).speedCurveParams) {
+      const scp = (effect as any).speedCurveParams;
+      (clone as any).speedCurveParams = {
+        ...scp,
+        points: scp.points.map((p: any) => ({ ...p })),
+      };
     }
 
     // Internal state like timePhase should theoretically be cloned too

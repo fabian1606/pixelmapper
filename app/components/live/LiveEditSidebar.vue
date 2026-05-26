@@ -28,8 +28,10 @@ import {
   type GlobalFunctionType,
   type StrobeConfig,
   type BlindConfig,
+  type SpeedConfig,
   defaultStrobeConfig,
   defaultBlindConfig,
+  defaultSpeedConfig,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
 import { getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
@@ -122,8 +124,18 @@ function setButtonMappingType(type: LiveMapping['type']) {
 function setButtonGlobalFunction(fn: GlobalFunctionType) {
   const w = selectedButton.value;
   if (!w) return;
-  let config = fn === 'strobe' ? defaultStrobeConfig() : fn === 'blind' ? defaultBlindConfig() : {};
+  let config: any = {};
+  if (fn === 'strobe') config = defaultStrobeConfig();
+  else if (fn === 'blind') config = defaultBlindConfig();
+  else if (fn === 'speed') config = defaultSpeedConfig();
   patchWidget({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
+}
+
+function setButtonSpeedConfig(patch: Partial<SpeedConfig>) {
+  const w = selectedButton.value;
+  if (!w) return;
+  const existing = (w.mapping.globalFunctionConfig ?? {}) as SpeedConfig;
+  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultSpeedConfig(), ...existing, ...patch } } });
 }
 
 function setButtonStrobeConfig(patch: Partial<StrobeConfig>) {
@@ -272,8 +284,18 @@ function setMappingPreset(presetId: string) {
 }
 
 function setChildGlobalFunction(fn: GlobalFunctionType) {
-  const config = fn === 'strobe' ? defaultStrobeConfig() : fn === 'blind' ? defaultBlindConfig() : {};
+  let config: any = {};
+  if (fn === 'strobe') config = defaultStrobeConfig();
+  else if (fn === 'blind') config = defaultBlindConfig();
+  else if (fn === 'speed') config = defaultSpeedConfig();
   patchChild({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
+}
+
+function setChildSpeedConfig(patch: Partial<SpeedConfig>) {
+  const child = selectedChild.value;
+  if (!child) return;
+  const existing = (child.mapping.globalFunctionConfig ?? {}) as SpeedConfig;
+  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultSpeedConfig(), ...existing, ...patch } } });
 }
 
 function setChildStrobeConfig(patch: Partial<StrobeConfig>) {
@@ -977,7 +999,34 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <option value="strobe">Strobe</option>
             <option value="blind">Blind (Full White)</option>
             <option value="blackout">Blackout</option>
+            <option value="speed">Speed</option>
           </select>
+
+          <template v-if="selectedChild.mapping.globalFunction === 'speed'">
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Multiplier</label>
+              <input
+                type="number"
+                min="0"
+                max="16"
+                step="0.25"
+                class="flex-1 bg-background border border-border rounded px-2 py-1"
+                :value="(selectedChild.mapping.globalFunctionConfig as any)?.multiplier ?? 2"
+                @change="(e) => setChildSpeedConfig({ multiplier: Number((e.target as HTMLInputElement).value) })"
+              />
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-muted-foreground/70 w-20 shrink-0">Behavior</label>
+              <select
+                class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
+                :value="(selectedChild.mapping.globalFunctionConfig as any)?.behavior ?? 'latch'"
+                @change="(e) => setChildSpeedConfig({ behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
+              >
+                <option value="latch">Latch</option>
+                <option value="hold">Hold</option>
+              </select>
+            </div>
+          </template>
 
           <template v-if="selectedChild.mapping.globalFunction === 'strobe'">
             <div class="flex items-center gap-2 text-xs">
@@ -1143,7 +1192,50 @@ const MODE_LABELS: Record<SectionMode, string> = {
               <option value="strobe">Strobe</option>
               <option value="blind">Blind (Full White)</option>
               <option value="blackout">Blackout</option>
+              <option value="speed">Speed</option>
             </select>
+
+            <!-- Speed config -->
+            <template v-if="selectedButton.mapping.globalFunction === 'speed'">
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Preset</label>
+                <select
+                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
+                  :value="String((selectedButton.mapping.globalFunctionConfig as any)?.multiplier ?? 2)"
+                  @change="(e) => setButtonSpeedConfig({ multiplier: Number((e.target as HTMLSelectElement).value) })"
+                >
+                  <option value="0">Freeze (0×)</option>
+                  <option value="0.25">¼×</option>
+                  <option value="0.5">½×</option>
+                  <option value="1">Reset (1×)</option>
+                  <option value="2">2×</option>
+                  <option value="4">4×</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Multiplier</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="16"
+                  step="0.25"
+                  class="flex-1 bg-background border border-border rounded px-2 py-1"
+                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.multiplier ?? 2"
+                  @change="(e) => setButtonSpeedConfig({ multiplier: Number((e.target as HTMLInputElement).value) })"
+                />
+              </div>
+              <div class="flex items-center gap-2 text-xs">
+                <label class="text-muted-foreground/70 w-20 shrink-0">Behavior</label>
+                <select
+                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
+                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.behavior ?? 'latch'"
+                  @change="(e) => setButtonSpeedConfig({ behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
+                >
+                  <option value="latch">Latch (toggle state)</option>
+                  <option value="hold">Hold (momentary)</option>
+                </select>
+              </div>
+            </template>
 
             <!-- Strobe config -->
             <template v-if="selectedButton.mapping.globalFunction === 'strobe'">

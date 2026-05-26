@@ -8,7 +8,7 @@ export interface LiveControllerInstance {
 
 export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'none'
 
-export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout'
+export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed'
 
 export interface StrobeConfig {
   frequency: number
@@ -21,7 +21,12 @@ export interface BlindConfig {
   dimmerCurve: boolean
 }
 
-export type GlobalFunctionConfig = StrobeConfig | BlindConfig | Record<string, never>
+export interface SpeedConfig {
+  multiplier: number
+  behavior: 'hold' | 'latch'
+}
+
+export type GlobalFunctionConfig = StrobeConfig | BlindConfig | SpeedConfig | Record<string, never>
 
 export function defaultStrobeConfig(): StrobeConfig {
   return { frequency: 8, beatSync: false, beatDivision: 8 }
@@ -29,6 +34,10 @@ export function defaultStrobeConfig(): StrobeConfig {
 
 export function defaultBlindConfig(): BlindConfig {
   return { color: '#ffffff', dimmerCurve: false }
+}
+
+export function defaultSpeedConfig(): SpeedConfig {
+  return { multiplier: 2, behavior: 'latch' }
 }
 
 export interface LiveMapping {
