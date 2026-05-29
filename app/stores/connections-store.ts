@@ -60,7 +60,7 @@ export const useConnectionsStore = defineStore('connections', () => {
         const universe = connector.outputMapping.value[i];
         if (!universe || universe < 1 || universe > totalUniverses) continue;
         const universeBuf = getUniverseBuffer(buf, universe);
-        connector.sendFrame(universeBuf);
+        connector.sendFrame(universeBuf, universe);
       }
     }
   }

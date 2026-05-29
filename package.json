@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "nuxt build",
-    "dev": "concurrently -n nuxt,canvas,core -c cyan,yellow,green \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\"",
+    "dev": "concurrently -n nuxt,canvas,core,artnet -c cyan,yellow,green,magenta \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\"",
+    "artnet-bridge": "bun run tools/artnet-bridge/index.ts",
     "dev:nuxt": "nuxt dev",
     "dev:wasm:canvas": "cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'",
     "dev:wasm:core": "cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'",

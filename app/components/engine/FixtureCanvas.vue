@@ -85,6 +85,19 @@ function syncFixtures() {
         ?? (beamId ? f.channels.find(c => c.type === type && !c.beamId) : undefined);
       return ch != null ? dmxIdx(ch.addressOffset) : null;
     };
+    const hexRgb = (hex: string) => {
+      const h = hex.replace('#', '');
+      return {
+        r: parseInt(h.substring(0, 2), 16) || 0,
+        g: parseInt(h.substring(2, 4), 16) || 0,
+        b: parseInt(h.substring(4, 6), 16) || 0,
+      };
+    };
+    const colorChannels = (beamId?: string) => {
+      let chs = f.channels.filter(c => c.role === 'COLOR' && (!beamId ? !c.beamId : c.beamId === beamId));
+      if (beamId && chs.length === 0) chs = f.channels.filter(c => c.role === 'COLOR' && !c.beamId);
+      return chs.map(c => ({ index: dmxIdx(c.addressOffset), ...hexRgb(c.colorValue) }));
+    };
     return {
       id: String(f.id),
       name: String(f.name),
@@ -97,18 +110,14 @@ function syncFixtures() {
       editing: props.editingId != null && f.id === props.editingId,
       svg: f.definition?.pixelmapper?.customSvg?.enabled ? (f.definition?.pixelmapper?.customSvg?.data ?? null) : null,
       channelStart: f.startAddress,
-      rIndex:      chIdx('RED'),
-      gIndex:      chIdx('GREEN'),
-      bIndex:      chIdx('BLUE'),
+      colorChannels: colorChannels(),
       dimmerIndex: chIdx('DIMMER'),
       beams: f.beams.map(b => ({
         id: String(b.id),
         localX: b.localX,
         localY: b.localY,
         svgElementId: f.definition?.pixelmapper?.customSvg?.headToElement?.[b.id] ?? null,
-        rIndex:      chIdx('RED',    String(b.id)),
-        gIndex:      chIdx('GREEN',  String(b.id)),
-        bIndex:      chIdx('BLUE',   String(b.id)),
+        colorChannels: colorChannels(String(b.id)),
         dimmerIndex: chIdx('DIMMER', String(b.id)),
       })),
       strip: f.stripConfig

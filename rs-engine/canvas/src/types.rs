@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+/// One COLOR-role DMX channel: its absolute 0-based DMX index plus the RGB of
+/// its defined `colorValue` (e.g. red, amber, white). The renderer scales this
+/// RGB by the channel's DMX value and adds it into the mix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorChannel {
+    pub index: usize,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureBeam {
     pub id: String,
@@ -7,13 +18,9 @@ pub struct FixtureBeam {
     pub local_x: f32,
     #[serde(rename = "localY")]
     pub local_y: f32,
-    /// Absolute 0-based DMX index for red channel (None = channel not present)
-    #[serde(rename = "rIndex", default)]
-    pub r_index: Option<usize>,
-    #[serde(rename = "gIndex", default)]
-    pub g_index: Option<usize>,
-    #[serde(rename = "bIndex", default)]
-    pub b_index: Option<usize>,
+    /// COLOR-role channels for this beam (empty = no color channels present)
+    #[serde(rename = "colorChannels", default)]
+    pub color_channels: Vec<ColorChannel>,
     #[serde(rename = "dimmerIndex", default)]
     pub dimmer_index: Option<usize>,
     /// ID of the SVG element that this beam is mapped to (custom SVG fixtures only)
@@ -112,13 +119,9 @@ pub struct FixtureCanvasData {
     #[serde(rename = "channelStart")]
     pub channel_start: usize,
 
-    /// Fallback color channels for single-beam / beamless fixtures
-    #[serde(rename = "rIndex", default)]
-    pub r_index: Option<usize>,
-    #[serde(rename = "gIndex", default)]
-    pub g_index: Option<usize>,
-    #[serde(rename = "bIndex", default)]
-    pub b_index: Option<usize>,
+    /// COLOR-role channels for single-beam / beamless fixtures
+    #[serde(rename = "colorChannels", default)]
+    pub color_channels: Vec<ColorChannel>,
     #[serde(rename = "dimmerIndex", default)]
     pub dimmer_index: Option<usize>,
 

@@ -1,0 +1,9 @@
+{
+  "name": "pixelmapper-artnet-bridge",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "bun run index.ts"
+  }
+}

@@ -299,6 +299,10 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       w.u8(res);
       w.u16(ch.fineAddressOffsets?.[0] !== undefined ? f.startAddress - 1 + ch.fineAddressOffsets[0] : 0xFFFF);
       w.u16(ch.fineAddressOffsets?.[1] !== undefined ? f.startAddress - 1 + ch.fineAddressOffsets[1] : 0xFFFF);
+
+      // Per-channel DMX range (remap bounds). Defaults to full 0-255.
+      w.u8(ch.rangeMin ?? 0);
+      w.u8(ch.rangeMax ?? 255);
     }
   }
 

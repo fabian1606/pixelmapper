@@ -7,6 +7,7 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
+import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_FX_BIN,
   buildLayoutBin, buildChannelsBin, buildEffectsBin,
@@ -25,11 +26,14 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 // 'connector.update' factories so the tail replay can recreate connector
 // mutations on project load even before any UI page has been visited.
 import '~/components/engine/commands/connector-commands';
+// Side-effect import — registers the 'SetChannelRange' factory so per-channel
+// range edits replay correctly on project load.
+import '~/components/engine/commands/set-channel-range-command';
 // Side-effect import — registers all live-op handlers (section.setActive,
 // preset-ops, etc.) so getLiveOpConfig() resolves during tail replay even
 // before any live-mode UI component has been mounted.
 import '~/composables/live-ops/index';
-import { resetFixtureChannels, reconstructEffect } from '~/components/engine/composables/preset-apply';
+import { resetFixtureChannels, applyPreset } from '~/components/engine/composables/preset-apply';
 import {
   useLiveBusStore,
   setPersistHook,
@@ -128,20 +132,25 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function _findOverwritePreset(type: GlobalFunctionType): Preset | undefined {
+    const isMatch = (p: Preset) => p.type === 'overwrite' && p.overwriteTarget === type;
     const activeId = effectivePresetId.value;
-    if (!activeId) return undefined;
-    const byId = new Map(savedPresets.value.map(p => [p.id, p]));
-    let rootId = activeId;
-    for (let i = 0; i < 16; i++) {
-      const cur = byId.get(rootId);
-      if (!cur?.basePresetId) break;
-      rootId = cur.basePresetId;
+    if (activeId) {
+      // Prefer an overwrite tied to the active preset's variant family.
+      const byId = new Map(savedPresets.value.map(p => [p.id, p]));
+      let rootId = activeId;
+      for (let i = 0; i < 16; i++) {
+        const cur = byId.get(rootId);
+        if (!cur?.basePresetId) break;
+        rootId = cur.basePresetId;
+      }
+      const related = savedPresets.value.find(
+        p => (p.id === rootId || p.basePresetId === rootId) && isMatch(p)
+      );
+      if (related) return related;
     }
-    return savedPresets.value.find(
-      p => (p.id === rootId || p.basePresetId === rootId)
-        && p.type === 'overwrite'
-        && p.overwriteTarget === type
-    );
+    // Fall back to a standalone (top-level) overwrite preset for this target,
+    // which applies globally regardless of the active preset.
+    return savedPresets.value.find(p => !p.basePresetId && isMatch(p));
   }
 
   /** Apply the current top-of-stack overwrite to channels (start strobe timer if needed). */
@@ -153,45 +162,36 @@ export const useEngineStore = defineStore('engine', () => {
 
     const overwritePreset = _findOverwritePreset(top.type);
     if (overwritePreset) {
-      const fixtureMap = new Map(fixtures.map(f => [f.id, f]));
-      // Strip any existing effects targeting fixtures the overwrite preset controls,
-      // so its own modifiers fully take over instead of stacking on top.
-      const overwriteFixtureIds = new Set(overwritePreset.categories.flatMap(c => c.fixtureIds));
-      for (let i = activeEffects.value.length - 1; i >= 0; i--) {
-        const eff = activeEffects.value[i];
-        if (eff?.targetFixtureIds?.some(id => overwriteFixtureIds.has(id))) {
-          activeEffects.value.splice(i, 1);
+      // Blackout everything first so an overwrite is a clean slate: only the
+      // channels/effects the override preset defines should be lit, everything
+      // else goes to zero (not the previously-played preset's look).
+      for (const f of fixtures) {
+        for (const ch of f.channels) {
+          ch.chaserConfig.stepValues = [0];
+          ch.chaserConfig.stepsCount = 1;
+          ch.chaserConfig.activeEditStep = 0;
+          ch.chaserConfig.isPlaying = false;
+          ch.currentBaseValue = 0;
         }
       }
-      for (const cat of overwritePreset.categories) {
-        for (const fixtureId of cat.fixtureIds) {
-          const fixture = fixtureMap.get(fixtureId);
-          if (!fixture) continue;
-          for (const snap of cat.channels) {
-            const ch = fixture.channels[snap.channelIndex];
-            if (!ch) continue;
-            ch.chaserConfig.stepValues = [...snap.stepValues];
-            ch.chaserConfig.stepsCount = snap.stepValues.length;
-            ch.chaserConfig.isPlaying = snap.chaserConfig?.isPlaying ?? false;
-            if (snap.chaserConfig) Object.assign(ch.chaserConfig, { ...snap.chaserConfig });
-          }
-        }
-        for (const modSnap of cat.modifiers) {
-          const eff = reconstructEffect(modSnap);
-          if (eff) {
-            eff.targetFixtureIds = [...cat.fixtureIds];
-            activeEffects.value.push(eff);
-          }
-        }
-      }
+      activeEffects.value.splice(0, activeEffects.value.length);
+      // Use the exact same code path as the preset Play button so the result
+      // matches what the user programmed (type-checks snapshots, sets base
+      // values, reconstructs modifiers).
+      applyPreset(overwritePreset, fixtures, activeEffects.value);
       engine.effects = activeEffects.value;
       return;
     }
 
     if (top.type === 'blackout') {
       for (const f of fixtures) {
+        // Prefer killing the dimmer (scales all colors). Fixtures without a
+        // dimmer have no master intensity, so zero their COLOR channels instead.
+        const hasDimmer = f.channels.some(ch => ch.role === 'DIMMER');
         for (const ch of f.channels) {
-          if (ch.role === 'DIMMER') _setStaticValue(ch, 0);
+          if (hasDimmer ? ch.role === 'DIMMER' : ch.role === 'COLOR') {
+            _setStaticValue(ch, 0);
+          }
         }
       }
     } else if (top.type === 'blind') {
@@ -297,7 +297,7 @@ export const useEngineStore = defineStore('engine', () => {
     RED: 0,
     GREEN: 0,
     BLUE: 0,
-    DIMMER: 255,
+    DIMMER: 0,
   });
 
   const flatFixtures = computed(() => {
@@ -498,7 +498,7 @@ export const useEngineStore = defineStore('engine', () => {
         for (const p of f.stripConfig.points) fp += `${p.x},${p.y};`;
       }
       for (const ch of f.channels) {
-        fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
+        fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};${ch.rangeMin ?? 0};${ch.rangeMax ?? 255};`;
       }
       fp += '|';
     }
@@ -956,6 +956,9 @@ export const useEngineStore = defineStore('engine', () => {
     for (const c of useConnectionsStore().connectors) {
       if (c instanceof WebSocketConnector && c.url.value && c.fixtureId != null) {
         c.connect().catch((e: unknown) => console.warn('[engine] ws auto-connect failed:', c.id, e));
+      }
+      if (c instanceof ArtNetConnector && c.bridgeUrl.value) {
+        c.connect().catch((e: unknown) => console.warn('[engine] artnet auto-connect failed:', c.id, e));
       }
     }
 

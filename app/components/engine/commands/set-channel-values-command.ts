@@ -3,6 +3,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Channel } from '~/utils/engine/core/channel';
 import { type SerializableCommand, registerCommand } from './serializable-command';
 import { reactive } from 'vue';
+import { useEngineStore } from '~/stores/engine-store';
 
 export interface ChannelSnapshot {
   stepValues: number[];
@@ -69,6 +70,10 @@ export class SetChannelValuesCommand implements SerializableCommand {
       Object.assign(channel.chaserConfig, JSON.parse(JSON.stringify(state.after.chaserConfig)));
       channel.colorValue = state.after.colorValue;
     }
+    // Rebuild + dispatch the channels packet so the render worker (and any DMX
+    // connector, e.g. ArtNet) picks up the new base values. Without this, a
+    // static-value edit only updates the canvas, never the DMX output.
+    useEngineStore().markChannelsDirty();
   }
 
   undo() {
@@ -79,6 +84,7 @@ export class SetChannelValuesCommand implements SerializableCommand {
       Object.assign(channel.chaserConfig, JSON.parse(JSON.stringify(state.before.chaserConfig)));
       channel.colorValue = state.before.colorValue;
     }
+    useEngineStore().markChannelsDirty();
   }
 }
 

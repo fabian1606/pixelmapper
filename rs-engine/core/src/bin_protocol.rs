@@ -105,17 +105,21 @@ pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             let resolution      = match c.read_u8()     { Some(v) => v,          None => return -1 };
             let fine_offset_0   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
             let fine_offset_1   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
+            let range_min       = match c.read_u8()     { Some(v) => v,          None => return -1 };
+            let range_max       = match c.read_u8()     { Some(v) => v,          None => return -1 };
 
             // We do NOT continue early for resolution==0. Fine channels need to be instantiated
             // as targets so their chaser_config updates the base_buffer.
-            
-            channels.push(LayoutChannelEntry { 
-                dmx_index, 
-                channel_type_id, 
-                world_x, 
+
+            channels.push(LayoutChannelEntry {
+                dmx_index,
+                channel_type_id,
+                world_x,
                 world_y,
                 resolution,
-                fine_offsets: [fine_offset_0, fine_offset_1] 
+                fine_offsets: [fine_offset_0, fine_offset_1],
+                range_min,
+                range_max,
             });
         }
         entries.push(LayoutEntry { group_index, channels });

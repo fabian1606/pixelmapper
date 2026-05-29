@@ -6,6 +6,7 @@ import type { OflCapability, OflWheel, OflWheelSlot } from '~/utils/ofl/types';
 import { getIconForChannel } from '~/utils/engine/channel-categories';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { useHistory } from '~/components/engine/composables/use-history';
+import { useEngineStore } from '~/stores/engine-store';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelCapabilities } from './composables/use-channel-capabilities';
 import { type SnapshotMap } from './commands/set-channel-values-command';
@@ -91,6 +92,7 @@ const dragStartVal = ref(0);
 
 
 const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
+const engineStore = useEngineStore();
 let currentDragSnapshots: SnapshotMap | null = null;
 
 function handleValueChange(newVal: number) {
@@ -137,6 +139,10 @@ function handleValueChange(newVal: number) {
     }
   }
   emit('change', clamped);
+
+  // Live-dispatch to the render worker so DMX connectors (e.g. ArtNet) update
+  // during the drag, not only on release.
+  engineStore.markChannelsDirty();
 
   // If this was a single click, the change is fully complete. Commit history.
   if (isSingleClick && singleClickSnapshots) {

@@ -64,9 +64,14 @@ pub struct RenderTarget {
     pub resolution: u8,
     #[serde(rename = "fineOffsets", default)]
     pub fine_offsets: [usize; 2],
+    #[serde(rename = "rangeMin", default)]
+    pub range_min: u8,
+    #[serde(rename = "rangeMax", default = "default_range_max")]
+    pub range_max: u8,
 }
 
 fn default_resolution() -> u8 { 1 }
+fn default_range_max() -> u8 { 255 }
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

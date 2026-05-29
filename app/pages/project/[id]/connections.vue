@@ -14,6 +14,7 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { OUTPUT_CONNECTOR_REGISTRY, INPUT_CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
 import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
+import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
 import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
 import { SetStripShapeCommand, type StripShapeSnapshot } from '~/components/engine/commands/set-strip-shape-command';
@@ -96,7 +97,7 @@ const statusColor: Record<string, string> = {
   error: 'text-red-400',
 };
 
-function addConnector(type: 'websocket' | 'serial') {
+function addConnector(type: 'websocket' | 'serial' | 'artnet') {
   const entry = OUTPUT_CONNECTOR_REGISTRY.find(e => e.type === type);
   if (!entry) return;
   const id = crypto.randomUUID();
@@ -110,7 +111,7 @@ function addConnector(type: 'websocket' | 'serial') {
 function removeConnector(connector: BaseConnector) {
   history.execute(new RemoveConnectorCommand(
     connector.id,
-    connector.meta.type as 'websocket' | 'serial',
+    connector.meta.type as 'websocket' | 'serial' | 'artnet',
     connector.getConfig(),
   ));
 }
@@ -154,6 +155,10 @@ function asSerial(c: BaseConnector): SerialConnector | null {
 
 function asWebSocket(c: BaseConnector): WebSocketConnector | null {
   return c instanceof WebSocketConnector ? c : null;
+}
+
+function asArtNet(c: BaseConnector): ArtNetConnector | null {
+  return c instanceof ArtNetConnector ? c : null;
 }
 
 /** All LED-strip fixtures in the project, available for binding to a WebSocketConnector. */
@@ -396,6 +401,13 @@ function assignedCount(connector: BaseConnector): number {
         <Plus :size="12" />
         WebSocket LED-Strip ESP32-S3
       </button>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-border bg-background hover:bg-accent transition-colors"
+        @click="addConnector('artnet')"
+      >
+        <Plus :size="12" />
+        ArtNet (lokale Bridge)
+      </button>
     </div>
 
     <EspWebFlasher
@@ -545,7 +557,7 @@ function assignedCount(connector: BaseConnector): number {
 
         <div class="flex-1 min-w-0">
           <div class="font-medium font-mono text-sm">
-            {{ asWebSocket(connector)?.label.value || connector.meta.label }}
+            {{ asWebSocket(connector)?.label.value || asArtNet(connector)?.label.value || connector.meta.label }}
           </div>
           <div v-if="connector.errorMessage.value" class="text-xs text-red-400 truncate">
             {{ connector.errorMessage.value }}
@@ -838,6 +850,69 @@ function assignedCount(connector: BaseConnector): number {
         </p>
       </div>
 
+      <!-- ArtNetConnector settings: Bridge-URL, Ziel-IP, Port, Universe-Anzahl -->
+      <div
+        v-if="asArtNet(connector)"
+        class="flex flex-col gap-1.5 px-1"
+      >
+        <label class="text-xs text-muted-foreground">
+          Label
+          <input
+            type="text"
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="z. B. Bühne West"
+            :value="asArtNet(connector)!.label.value"
+            @change="patchConnector(connector, { label: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+        <label class="text-xs text-muted-foreground">
+          Bridge-URL
+          <input
+            type="text"
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+            placeholder="ws://localhost:7777"
+            :value="asArtNet(connector)!.bridgeUrl.value"
+            :disabled="connector.status.value === 'connected' || connector.status.value === 'connecting'"
+            @change="patchConnector(connector, { bridgeUrl: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+        <div class="flex gap-1.5">
+          <label class="text-xs text-muted-foreground flex-1">
+            ArtNet-Ziel-IP
+            <input
+              type="text"
+              class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+              placeholder="2.255.255.255"
+              :value="asArtNet(connector)!.targetIp.value"
+              @change="patchConnector(connector, { targetIp: ($event.target as HTMLInputElement).value })"
+            />
+          </label>
+          <label class="text-xs text-muted-foreground w-20 shrink-0">
+            Port
+            <input
+              type="number"
+              min="1" max="65535" step="1"
+              class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+              :value="asArtNet(connector)!.artnetPort.value"
+              @change="patchConnector(connector, { artnetPort: Number(($event.target as HTMLInputElement).value) })"
+            />
+          </label>
+          <label class="text-xs text-muted-foreground w-24 shrink-0">
+            Universes
+            <input
+              type="number"
+              min="1" max="64" step="1"
+              class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+              :value="asArtNet(connector)!.outputCount"
+              @change="patchConnector(connector, { outputCount: Number(($event.target as HTMLInputElement).value) })"
+            />
+          </label>
+        </div>
+        <p class="text-[10px] text-muted-foreground/80 leading-snug">
+          Die ArtNet-Bridge muss lokal laufen (z. B. <span class="font-mono">bun run artnet-bridge</span>) und leitet Pakete an die obige Ziel-IP weiter.
+        </p>
+      </div>
+
       <!-- Expandable outputs section -->
       <button
         v-if="connector.outputCount > 0"
@@ -857,7 +932,7 @@ function assignedCount(connector: BaseConnector): number {
           :key="i"
           class="flex items-center gap-2"
         >
-          <span class="text-xs text-muted-foreground w-14">Out {{ i + 1 }}</span>
+          <span class="text-xs text-muted-foreground w-14">Out {{ asArtNet(connector) ? i : i + 1 }}</span>
           <select
             class="flex-1 rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
             :value="connector.outputMapping.value[i] ?? 0"
@@ -869,7 +944,7 @@ function assignedCount(connector: BaseConnector): number {
               :key="u"
               :value="u"
             >
-              U{{ u }}{{ isUniverseUsed(u) ? '' : ' (unused)' }}
+              U{{ asArtNet(connector) ? u - 1 : u }}{{ isUniverseUsed(u) ? '' : ' (unused)' }}
             </option>
           </select>
         </div>

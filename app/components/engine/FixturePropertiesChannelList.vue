@@ -4,6 +4,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import FixturePropertyControl from './FixturePropertyControl.vue';
 import FixtureColorPicker from './FixtureColorPicker.vue';
 import FixturePanTiltPad from './FixturePanTiltPad.vue';
+import FixtureMovementRange from './FixtureMovementRange.vue';
 
 defineProps<{
   channelSections: ChannelSection[];
@@ -35,6 +36,7 @@ function handleBeforeChange(fixtures: Fixture[]) {
         :active-step="activeStep"
         @before-change="handleBeforeChange"
       />
+      <FixtureMovementRange :channel-sections="channelSections" />
     </div>
     <div v-for="(section, idx) in channelSections" :key="idx">
       <!-- Section label: only shown when multiple fixture types are selected -->

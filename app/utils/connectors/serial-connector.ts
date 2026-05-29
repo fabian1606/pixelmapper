@@ -177,7 +177,7 @@ export class SerialConnector extends BaseConnector {
   }
 
   /** No-op — ESP32 renders its own DMX via the local Rust engine */
-  sendFrame(_dmxBuffer: Uint8Array) {}
+  sendFrame(_dmxBuffer: Uint8Array, _universe?: number) {}
 
   override onEngineState(state: EngineConnectorState) {
     if (this.status.value !== 'connected' || !this.writer) return;

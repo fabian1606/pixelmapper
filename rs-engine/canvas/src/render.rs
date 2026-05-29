@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
-use crate::types::{FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
+use crate::types::{ColorChannel, FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
 use crate::svg_render::{SvgCachedFixture, draw_svg_fixture};
 
 pub struct RenderState {
@@ -42,18 +42,25 @@ fn border_color(selected: bool, remote_color: Option<[u8; 3]>) -> Color {
     }
 }
 
-fn read_color(
-    r: Option<usize>, g: Option<usize>, b: Option<usize>,
-    dimmer: Option<usize>, buf: &[u8],
-) -> Color {
-    let get = |i: Option<usize>| i.and_then(|idx| buf.get(idx)).copied().unwrap_or(0);
-    let dim = dimmer.and_then(|idx| buf.get(idx)).copied().unwrap_or(255);
-    Color::rgba(
-        ((get(r) as u16 * dim as u16) / 255) as u8,
-        ((get(g) as u16 * dim as u16) / 255) as u8,
-        ((get(b) as u16 * dim as u16) / 255) as u8,
-        255,
-    )
+fn read_color(channels: &[ColorChannel], dimmer: Option<usize>, buf: &[u8]) -> Color {
+    let dim = dimmer.and_then(|idx| buf.get(idx)).copied().unwrap_or(255) as f32 / 255.0;
+
+    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer
+    // so the fixture is still visible.
+    if channels.is_empty() {
+        let v = (255.0 * dim).round().clamp(0.0, 255.0) as u8;
+        return Color::rgba(v, v, v, 255);
+    }
+
+    let (mut r, mut g, mut b) = (0.0f32, 0.0f32, 0.0f32);
+    for ch in channels {
+        let factor = buf.get(ch.index).copied().unwrap_or(0) as f32 / 255.0;
+        r += ch.r as f32 * factor;
+        g += ch.g as f32 * factor;
+        b += ch.b as f32 * factor;
+    }
+    let clamp = |v: f32| (v * dim).round().clamp(0.0, 255.0) as u8;
+    Color::rgba(clamp(r), clamp(g), clamp(b), 255)
 }
 
 /// Cubic Bézier control points (p0, c1, c2, p1).
@@ -379,8 +386,8 @@ fn draw_strip_fixture(
         let pixel_idx = (led_idx / group_size).min(beam_count.saturating_sub(1));
         let beam: Option<&FixtureBeam> = fixture.beams.get(pixel_idx);
         let color = match beam {
-            Some(b) => read_color(b.r_index, b.g_index, b.b_index, b.dimmer_index, dmx_buffer),
-            None    => read_color(fixture.r_index, fixture.g_index, fixture.b_index, fixture.dimmer_index, dmx_buffer),
+            Some(b) => read_color(&b.color_channels, b.dimmer_index, dmx_buffer),
+            None    => read_color(&fixture.color_channels, fixture.dimmer_index, dmx_buffer),
         };
         // Circle wraps around, so LED 0 and LED N should sit next to each
         // other — distribute uniformly over the full perimeter without the
@@ -594,7 +601,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             let pixel_r = (f32::min(slot_w, slot_h) / 2.0 * 0.8).max(1.5);
 
             for beam in &fixture.beams {
-                let color = read_color(beam.r_index, beam.g_index, beam.b_index, beam.dimmer_index, dmx_buffer);
+                let color = read_color(&beam.color_channels, beam.dimmer_index, dmx_buffer);
                 let bx = beam.local_x * half_w * 2.0;
                 let by = beam.local_y * half_h * 2.0;
                 let mut path = Path::new();
@@ -619,9 +626,9 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             canvas.scale(rx / max_r, ry / max_r);
 
             let color = if let Some(beam) = fixture.beams.first() {
-                read_color(beam.r_index, beam.g_index, beam.b_index, beam.dimmer_index, dmx_buffer)
+                read_color(&beam.color_channels, beam.dimmer_index, dmx_buffer)
             } else {
-                read_color(fixture.r_index, fixture.g_index, fixture.b_index, fixture.dimmer_index, dmx_buffer)
+                read_color(&fixture.color_channels, fixture.dimmer_index, dmx_buffer)
             };
 
             let mut path = Path::new();

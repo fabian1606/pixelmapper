@@ -27,14 +27,23 @@ pub fn parse_svg(svg_data: &str, beams: &[FixtureBeam]) -> Option<SvgCachedFixtu
 }
 
 fn beam_color(beam: &FixtureBeam, dmx: &[u8]) -> Color {
-    let get = |i: Option<usize>| i.and_then(|idx| dmx.get(idx)).copied().unwrap_or(0);
-    let dim = beam.dimmer_index.and_then(|i| dmx.get(i)).copied().unwrap_or(255);
-    Color::rgba(
-        ((get(beam.r_index) as u16 * dim as u16) / 255) as u8,
-        ((get(beam.g_index) as u16 * dim as u16) / 255) as u8,
-        ((get(beam.b_index) as u16 * dim as u16) / 255) as u8,
-        255,
-    )
+    let dim = beam.dimmer_index.and_then(|i| dmx.get(i)).copied().unwrap_or(255) as f32 / 255.0;
+
+    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer.
+    if beam.color_channels.is_empty() {
+        let v = (255.0 * dim).round().clamp(0.0, 255.0) as u8;
+        return Color::rgba(v, v, v, 255);
+    }
+
+    let (mut r, mut g, mut b) = (0.0f32, 0.0f32, 0.0f32);
+    for ch in &beam.color_channels {
+        let factor = dmx.get(ch.index).copied().unwrap_or(0) as f32 / 255.0;
+        r += ch.r as f32 * factor;
+        g += ch.g as f32 * factor;
+        b += ch.b as f32 * factor;
+    }
+    let clamp = |v: f32| (v * dim).round().clamp(0.0, 255.0) as u8;
+    Color::rgba(clamp(r), clamp(g), clamp(b), 255)
 }
 
 fn usvg_color_to_femto(paint: &usvg::Paint, opacity: f32) -> Option<Color> {

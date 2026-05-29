@@ -47,6 +47,8 @@ pub struct LayoutChannelEntry {
     pub world_y: f32,
     pub resolution: u8,
     pub fine_offsets: [usize; 2],
+    pub range_min: u8,
+    pub range_max: u8,
 }
 
 pub struct LayoutEntry {
@@ -198,6 +200,8 @@ impl EffectEngine {
                     chaser_config: preserved,
                     resolution: ch.resolution,
                     fine_offsets: ch.fine_offsets,
+                    range_min: ch.range_min,
+                    range_max: ch.range_max,
                 });
             }
         }
@@ -562,7 +566,12 @@ impl EffectEngine {
                 continue;
             }
             // All channels (coarse AND fine) simply map their 0-255 float to a byte.
-            self.dmx_buffer[dmx_index] = self.render_buffer[dmx_index].clamp(0.0, 255.0) as u8;
+            // A per-channel range remaps the rendered value into [range_min, range_max]
+            // (affine, not clipped) so effects/movement are rescaled into the limit.
+            let v = self.render_buffer[dmx_index].clamp(0.0, 255.0);
+            let (lo, hi) = (target.range_min as f32, target.range_max as f32);
+            let out = if lo == 0.0 && hi == 255.0 { v } else { lo + (v / 255.0) * (hi - lo) };
+            self.dmx_buffer[dmx_index] = out.clamp(0.0, 255.0) as u8;
         }
     }
 }

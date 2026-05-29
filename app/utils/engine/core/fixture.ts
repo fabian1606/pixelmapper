@@ -146,6 +146,13 @@ export class Fixture {
       : 1.0;
 
 
+    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer
+    // so the fixture is still visible.
+    if (colorChannels.length === 0) {
+      const v = Math.min(255, Math.max(0, Math.round(255 * dimmerMultiplier)));
+      return `rgb(${v}, ${v}, ${v})`;
+    }
+
     let r = 0, g = 0, b = 0;
     for (const ch of colorChannels) {
       if (!ch.colorValue) continue;
@@ -180,7 +187,7 @@ export class Fixture {
       { type: 'RED', addressOffset: 0, role: 'COLOR', colorValue: '#FF0000', defaultValue: 0, chaserConfig: makeChaser(255) },
       { type: 'GREEN', addressOffset: 1, role: 'COLOR', colorValue: '#00FF00', defaultValue: 0, chaserConfig: makeChaser(255) },
       { type: 'BLUE', addressOffset: 2, role: 'COLOR', colorValue: '#0000FF', defaultValue: 0, chaserConfig: makeChaser(255) },
-      { type: 'DIMMER', addressOffset: 3, role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0, chaserConfig: makeChaser(255) },
+      { type: 'DIMMER', addressOffset: 3, role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0, chaserConfig: makeChaser(0) },
     ]);
 
     fixture.oflKey = 'generic/drgb-fader';

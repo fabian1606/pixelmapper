@@ -164,6 +164,7 @@ function handleOverwrite(preset: Preset) {
 }
 
 function quickSaveVariant(basePreset: Preset) {
+  if (basePreset.type === 'overwrite') return;
   const existingVariants = getVariants(basePreset.id || basePreset.basePresetId!);
   const name = `Variant ${existingVariants.length + 1}`;
   const resolvedBase = resolvePreset(basePreset, savedPresets.value);
@@ -190,13 +191,20 @@ function quickSaveVariant(basePreset: Preset) {
 import type { OverwriteTarget, PresetType } from '~/utils/engine/preset-types';
 
 function setPresetType(preset: Preset, type: PresetType, target: OverwriteTarget | undefined = undefined) {
+  // An overwrite preset can't have variants — block the switch if any exist.
+  if (type === 'overwrite' && getVariants(preset.id).length > 0) return;
   history.execute(new UpdatePresetMetadataCommand(
     preset.id,
-    { type: preset.type, overwriteTarget: preset.overwriteTarget ?? null },
-    { type, overwriteTarget: target ?? null },
+    { type: preset.type, overwriteTarget: preset.overwriteTarget ?? null, color: preset.color ?? null },
+    // Switching to overwrite clears any per-preset color override.
+    { type, overwriteTarget: target ?? null, color: type === 'overwrite' ? null : preset.color ?? null },
     () => savedPresets.value,
     (presets) => { savedPresets.value = presets; },
   ));
+}
+
+function canOverwrite(preset: Preset) {
+  return getVariants(preset.id).length === 0;
 }
 
 function getVariantTypeDescription(variant: Preset) {
@@ -510,6 +518,7 @@ defineExpose({
                 <div class="flex items-center gap-2 flex-1 min-w-0 w-full" @dblclick.stop="startRename(preset)">
                   <!-- Color swatch (manual override; defaults to derived color) -->
                   <label
+                    v-if="preset.type !== 'overwrite'"
                     class="relative shrink-0 size-3 rounded-full ring-1 ring-border/40 cursor-pointer overflow-hidden"
                     :style="{ backgroundColor: presetDisplayColor(preset) }"
                     :title="preset.color ? 'Klick: Farbe ändern' : 'Farbe aus Preset abgeleitet — Klick zum Überschreiben'"
@@ -543,10 +552,55 @@ defineExpose({
 
                 <!-- Action buttons -->
                 <div class="flex items-center">
+                  <!-- Preset Type Dropdown -->
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <button
+                        type="button"
+                        class="flex items-center justify-center p-1.5 text-xs hover:opacity-100 opacity-60 transition-opacity text-foreground"
+                        :title="getVariantTypeDescription(preset)"
+                        @click.stop
+                      >
+                        <Zap v-if="preset.type === 'flash'" class="size-3.5 shrink-0 text-yellow-500" />
+                        <template v-else-if="preset.type === 'overwrite'">
+                          <Activity class="size-3.5 shrink-0 text-orange-500" />
+                          <span class="ml-1 text-[9px] uppercase font-bold text-orange-500">{{ preset.overwriteTarget?.substring(0, 3) || 'FX' }}</span>
+                        </template>
+                        <Layers v-else class="size-3.5 shrink-0" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent class="w-40">
+                      <DropdownMenuItem :class="{'text-primary': !preset.type || preset.type === 'normal'}" @click.stop="setPresetType(preset, 'normal')">
+                        <Layers class="mr-3 size-4 opacity-70" /> Normal
+                      </DropdownMenuItem>
+                      <DropdownMenuItem :class="{'text-primary': preset.type === 'flash'}" @click.stop="setPresetType(preset, 'flash')">
+                        <Zap class="mr-3 size-4 opacity-70" /> Flash
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger :class="{'text-primary': preset.type === 'overwrite', 'opacity-40 pointer-events-none': !canOverwrite(preset)}">
+                          <Activity class="mr-3 size-4 opacity-70" /> Overwrite
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuPortal>
+                          <DropdownMenuSubContent class="w-32">
+                            <DropdownMenuItem :class="{'text-primary': preset.type === 'overwrite' && preset.overwriteTarget === 'strobe'}" @click.stop="setPresetType(preset, 'overwrite', 'strobe')">
+                              Strobe
+                            </DropdownMenuItem>
+                            <DropdownMenuItem :class="{'text-primary': preset.type === 'overwrite' && preset.overwriteTarget === 'blind'}" @click.stop="setPresetType(preset, 'overwrite', 'blind')">
+                              Blind
+                            </DropdownMenuItem>
+                            <DropdownMenuItem :class="{'text-primary': preset.type === 'overwrite' && preset.overwriteTarget === 'blackout'}" @click.stop="setPresetType(preset, 'overwrite', 'blackout')">
+                              Blackout
+                            </DropdownMenuItem>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuPortal>
+                      </DropdownMenuSub>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
                   <!-- Create Variant button -->
                   <button
                     type="button"
-                    v-if="activeBaseId === preset.id && hasUnsaved"
+                    v-if="activeBaseId === preset.id && hasUnsaved && preset.type !== 'overwrite'"
                     class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity text-foreground"
                     @click.stop="quickSaveVariant(preset)"
                     title="Create Variant from current changes"
@@ -636,6 +690,7 @@ defineExpose({
                     
                     <div class="flex items-center gap-2 flex-1 min-w-0 w-full pl-5" @dblclick.stop="startRename(variant)">
                         <label
+                          v-if="variant.type !== 'overwrite'"
                           class="relative shrink-0 size-3 rounded-full ring-1 ring-border/40 cursor-pointer overflow-hidden"
                           :style="{ backgroundColor: presetDisplayColor(variant) }"
                           :title="variant.color ? 'Klick: Farbe ändern' : 'Farbe aus Preset abgeleitet — Klick zum Überschreiben'"

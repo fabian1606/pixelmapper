@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import type { ChannelSection, ChannelEntry } from './composables/use-channel-sections';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
+import { useEngineStore } from '~/stores/engine-store';
 import { type SnapshotMap } from './commands/set-channel-values-command';
 import { rgbToHsv, hsvToRgb, parseHexColor, colorDistance } from '~/utils/engine/color-math';
 import type { OflCapability, OflWheel, OflWheelSlot } from '~/utils/ofl/types';
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 }>();
 
 const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
+const engineStore = useEngineStore();
 
 // ─── Extract Relevant Channels ─────────────────────────────────────────────
 
@@ -225,6 +227,10 @@ function updateColorFromEvent(e: MouseEvent | TouchEvent) {
       padStepValues(fd.wheelCh, bestVal);
     }
   }
+
+  // Live-dispatch during the wheel drag so DMX connectors (e.g. ArtNet) follow
+  // the color in real-time, not only on release.
+  engineStore.markChannelsDirty();
 }
 
 function startWheelDrag(e: MouseEvent | TouchEvent) {

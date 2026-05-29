@@ -1,5 +1,6 @@
 import { SerialConnector } from './serial-connector';
 import { WebSocketConnector } from './websocket-connector';
+import { ArtNetConnector } from './artnet-connector';
 import type { BaseConnector } from './base-connector';
 
 export interface ConnectorRegistryEntry {
@@ -22,8 +23,13 @@ export const OUTPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [
     icon: 'Wifi',
     create: (id) => new WebSocketConnector(id),
   },
+  {
+    type: 'artnet',
+    label: 'ArtNet (lokale Bridge)',
+    icon: 'Network',
+    create: (id) => new ArtNetConnector(id),
+  },
   // Future entries — add class + one line here:
-  // { type: 'artnet',  label: 'ArtNet',   icon: 'Network', create: (id) => new ArtNetConnector(id) },
   // { type: 'dmx-usb', label: 'DMX USB',  icon: 'Plug',    create: (id) => new DmxUsbConnector(id) },
 ];
 
@@ -34,6 +40,7 @@ export const INPUT_CONNECTOR_REGISTRY: ConnectorRegistryEntry[] = [];
 export function fromConfig(type: string, id: string, config: Record<string, unknown>): BaseConnector | null {
   if (type === 'websocket') return WebSocketConnector.fromConfig(id, config);
   if (type === 'serial')    return SerialConnector.fromConfig(id, config);
+  if (type === 'artnet')    return ArtNetConnector.fromConfig(id, config);
   return null;
 }
 
@@ -60,6 +67,13 @@ export function applyConfig(c: BaseConnector, config: Record<string, unknown>): 
     }
   } else if (c instanceof SerialConnector) {
     if ('baudRate' in config) c.baudRate = Number(config.baudRate ?? 921600);
+  } else if (c instanceof ArtNetConnector) {
+    if ('bridgeUrl'  in config) c.bridgeUrl.value  = String(config.bridgeUrl ?? '');
+    if ('targetIp'   in config) c.targetIp.value   = String(config.targetIp ?? '');
+    if ('artnetPort' in config) c.artnetPort.value = Number(config.artnetPort ?? 6454);
+    if ('label'      in config) c.label.value      = String(config.label ?? '');
+    if ('outputCount' in config) c.setOutputCount(Number(config.outputCount ?? 1));
+    c.syncConfig();
   }
   if ('outputMapping' in config && Array.isArray(config.outputMapping)) {
     c.outputMapping.value = (config.outputMapping as number[]).slice();

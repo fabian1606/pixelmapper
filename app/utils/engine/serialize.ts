@@ -21,6 +21,8 @@ export interface SerializedChannel {
   colorValue: string
   oflChannelName?: string
   defaultValue: number
+  rangeMin?: number
+  rangeMax?: number
   beamId?: string
   chaserConfig: any
 }
@@ -101,6 +103,8 @@ function serializeChannel(ch: Channel): SerializedChannel {
     colorValue: ch.colorValue,
     oflChannelName: ch.oflChannelName,
     defaultValue: ch.defaultValue,
+    rangeMin: ch.rangeMin,
+    rangeMax: ch.rangeMax,
     beamId: ch.beamId,
     chaserConfig: JSON.parse(JSON.stringify(ch.chaserConfig)),
   }
@@ -184,6 +188,8 @@ function deserializeChannel(data: SerializedChannel): Channel {
     colorValue: data.colorValue,
     oflChannelName: data.oflChannelName,
     defaultValue: data.defaultValue,
+    rangeMin: data.rangeMin ?? 0,
+    rangeMax: data.rangeMax ?? 255,
     beamId: data.beamId,
     chaserConfig: reactive(JSON.parse(JSON.stringify(data.chaserConfig))),
   }
@@ -261,7 +267,8 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
-    globalBases: { ...snapshot.globalBases },
+    // Dimmers always start off; ignore any persisted DIMMER base from older projects.
+    globalBases: { ...snapshot.globalBases, DIMMER: 0 },
     activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
     selectedPresetId: snapshot.selectedPresetId ?? null,

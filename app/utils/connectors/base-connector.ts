@@ -88,10 +88,12 @@ export abstract class BaseConnector {
   abstract disconnect(): Promise<void>;
 
   /**
-   * Called once per frame (post-render) by the connections store.
-   * Must be non-blocking — fire-and-forget async writes only.
+   * Called once per frame (post-render) by the connections store, once per
+   * active output. `universe` is the universe number the buffer belongs to
+   * (1-based, derived from `outputMapping`). Must be non-blocking —
+   * fire-and-forget async writes only.
    */
-  abstract sendFrame(dmxBuffer: Uint8Array): void;
+  abstract sendFrame(dmxBuffer: Uint8Array, universe?: number): void;
 
   /** Optional: called when engine state changes (BPM, binary packets, time).
    *  Implement this instead of sendFrame for connectors that run their own renderer. */

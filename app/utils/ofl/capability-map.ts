@@ -64,7 +64,9 @@ export function mapOflCapabilityToChannel(
 
   switch (capability.type) {
     case 'Intensity':
-      return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: defaultValue ?? 255 };
+      // Dimmers always start fully off so cleared fixtures stay dark; the operator
+      // raises intensity manually. Ignore the OFL default (often 100%).
+      return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0 };
 
     case 'ColorIntensity': {
       const color = capability.color;
@@ -189,7 +191,7 @@ function heuristicFallbackMap(channelName: string, defaultValue: number): Mapped
   const name = channelName.toLowerCase();
 
   if (name.includes('shutter') || name.includes('strobe')) return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
-  if (name.includes('dimmer') || name.includes('intensity')) return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue };
+  if (name.includes('dimmer') || name.includes('intensity')) return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0 };
   if (name.includes('pan')) return { type: 'PAN', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('tilt')) return { type: 'TILT', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('zoom')) return { type: 'ZOOM', role: 'NONE', colorValue: '#888888', defaultValue };

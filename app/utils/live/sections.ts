@@ -30,7 +30,8 @@ export function resolveSectionSource(source: SectionSource | string, ctx: Sectio
   switch (normalized) {
     case 'all-presets':
       // Top-level presets only — variants are surfaced via 'preset-variants'.
-      return ctx.savedPresets.filter(p => !p.basePresetId).map(preset => ({ preset }));
+      // Overwrite presets are excluded; they replace a global function button.
+      return ctx.savedPresets.filter(p => !p.basePresetId && p.type !== 'overwrite').map(preset => ({ preset }));
     case 'preset-variants': {
       if (!ctx.selectedPresetId) return [];
       // Walk up to the root preset of the currently selected one so a variant

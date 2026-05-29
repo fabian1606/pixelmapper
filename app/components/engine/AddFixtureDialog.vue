@@ -210,6 +210,22 @@ async function selectRecentFixture(recent: RecentFixture) {
   await handleSelect({ key: recent.key, name: recent.name, manufacturer: recent.manufacturer } as FixtureSummary);
 }
 
+function customKey(stored: StoredCustomFixture): string {
+  return `custom/${stored.id}`;
+}
+
+function selectCustomFixture(stored: StoredCustomFixture) {
+  selectedSummary.value = {
+    key: customKey(stored),
+    name: stored.name,
+    manufacturer: '',
+  } as FixtureSummary;
+  fullFixtureData.value = stored.ofl;
+  loadingDetails.value = false;
+  config.value.modeIndex = '0';
+  autoAssignFreeAddress();
+}
+
 function handleAdd() {
   if (!fullFixtureData.value || !selectedSummary.value) return;
 
@@ -241,7 +257,9 @@ function handleAdd() {
     currentLocalAddress += channelCount;
   }
 
-  saveRecentFixture(selectedSummary.value);
+  if (!selectedSummary.value.key.startsWith('custom/')) {
+    saveRecentFixture(selectedSummary.value);
+  }
   emit('add', fixtures);
   emit('update:open', false);
   resetState();
@@ -365,10 +383,13 @@ watch(() => props.open, (isOpen) => {
                 <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">My Custom Fixtures</h3>
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <div
+                <button
                   v-for="custom in customFixtures"
                   :key="custom.id"
-                  class="flex items-center gap-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/50 hover:border-primary/30 transition-all px-4 py-3 group"
+                  type="button"
+                  class="flex items-center gap-3 rounded-lg border bg-muted/20 hover:bg-muted/50 transition-all px-4 py-3 text-left group"
+                  :class="selectedSummary?.key === customKey(custom) ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30'"
+                  @click="selectCustomFixture(custom)"
                 >
                   <div class="size-7 rounded bg-primary/10 flex items-center justify-center shrink-0">
                     <Pencil class="size-3.5 text-primary" />
@@ -397,7 +418,7 @@ watch(() => props.open, (isOpen) => {
                       <Trash2 class="size-3" />
                     </Button>
                   </div>
-                </div>
+                </button>
               </div>
             </div>
           </div>
