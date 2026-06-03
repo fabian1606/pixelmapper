@@ -10,6 +10,8 @@ export interface SectionResolveContext {
   slotCount?: number;
   /** For 'color-variants' sections, the section's stored static color list. */
   storedColorVariants?: SectionColorEntry[];
+  /** For 'selected-presets' sections, the section's ordered preset-ID list. */
+  selectedPresetIds?: string[];
 }
 
 /** One resolved slot: which preset it binds to, plus an optional color override + label. */
@@ -32,6 +34,17 @@ export function resolveSectionSource(source: SectionSource | string, ctx: Sectio
       // Top-level presets only — variants are surfaced via 'preset-variants'.
       // Overwrite presets are excluded; they replace a global function button.
       return ctx.savedPresets.filter(p => !p.basePresetId && p.type !== 'overwrite').map(preset => ({ preset }));
+    case 'selected-presets': {
+      // User-curated ordered list. Resolve each ID to a preset, dropping any
+      // that no longer exist. Order is preserved as the user arranged it.
+      const byId = new Map(ctx.savedPresets.map(p => [p.id, p]));
+      const slots: ResolvedSlot[] = [];
+      for (const id of ctx.selectedPresetIds ?? []) {
+        const preset = byId.get(id);
+        if (preset) slots.push({ preset });
+      }
+      return slots;
+    }
     case 'preset-variants': {
       if (!ctx.selectedPresetId) return [];
       // Walk up to the root preset of the currently selected one so a variant

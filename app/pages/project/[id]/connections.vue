@@ -13,12 +13,13 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { OUTPUT_CONNECTOR_REGISTRY, INPUT_CONNECTOR_REGISTRY } from '~/utils/connectors/registry';
 import { SerialConnector } from '~/utils/connectors/serial-connector';
-import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
+import { WebSocketConnector, type FixtureSlot } from '~/utils/connectors/websocket-connector';
 import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
+import { EspNowBridgeConnector } from '~/utils/connectors/espnow-bridge-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
 import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
 import { SetStripShapeCommand, type StripShapeSnapshot } from '~/components/engine/commands/set-strip-shape-command';
-import { regenerateStripPointsForShape } from '~/utils/engine/neopixel-strip-factory';
+import { regenerateStripPointsForShape, logicalPixelCount } from '~/utils/engine/neopixel-strip-factory';
 import type { StripShapeType } from '~/utils/engine/core/fixture';
 import {
   AddConnectorCommand,
@@ -26,8 +27,6 @@ import {
   UpdateConnectorConfigCommand,
 } from '~/components/engine/commands/connector-commands';
 import EspWebFlasher from '~/components/connectors/EspWebFlasher.vue';
-import { Fixture } from '~/utils/engine/core/fixture';
-import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
 
 // ID of the connector currently being configured via the USB wizard.
 // null = wizard closed. Single wizard instance, target picked per click.
@@ -97,7 +96,7 @@ const statusColor: Record<string, string> = {
   error: 'text-red-400',
 };
 
-function addConnector(type: 'websocket' | 'serial' | 'artnet') {
+function addConnector(type: 'websocket' | 'serial' | 'artnet' | 'espnow-bridge') {
   const entry = OUTPUT_CONNECTOR_REGISTRY.find(e => e.type === type);
   if (!entry) return;
   const id = crypto.randomUUID();
@@ -111,7 +110,7 @@ function addConnector(type: 'websocket' | 'serial' | 'artnet') {
 function removeConnector(connector: BaseConnector) {
   history.execute(new RemoveConnectorCommand(
     connector.id,
-    connector.meta.type as 'websocket' | 'serial' | 'artnet',
+    connector.meta.type as 'websocket' | 'serial' | 'artnet' | 'espnow-bridge',
     connector.getConfig(),
   ));
 }
@@ -161,45 +160,17 @@ function asArtNet(c: BaseConnector): ArtNetConnector | null {
   return c instanceof ArtNetConnector ? c : null;
 }
 
+function asEspNowBridge(c: BaseConnector): EspNowBridgeConnector | null {
+  return c instanceof EspNowBridgeConnector ? c : null;
+}
+
 /** All LED-strip fixtures in the project, available for binding to a WebSocketConnector. */
 const stripFixtures = computed(() =>
   engineStore.flatFixtures.filter(f => f.stripConfig)
 );
 
-/** Non-strip fixtures usable as ESP-NOW broadcast source (single RGB / DRGB-Fader). */
-const broadcastFixtures = computed(() =>
-  engineStore.flatFixtures.filter(f => !f.stripConfig)
-);
-
-/** Create a DRGB-Fader fixture and bind it as the connector's ESP-NOW broadcast source. */
-function createAndBindBroadcastFixture(connector: WebSocketConnector) {
-  const existing = engineStore.flatFixtures;
-  let nextId = 1000;
-  let maxAddr = 0;
-  for (const f of existing) {
-    // Strip fixtures occupy DMX addresses too — must not collide. Strip
-    // channel count = logicalPixels * channelsPerPixel; approximate via
-    // ceil(ledCount/groupSize) * 3 (firmware v1 = WS2812B/RGB only).
-    const span = f.stripConfig
-      ? Math.ceil(Math.max(1, f.stripConfig.ledCount) / Math.max(1, f.stripConfig.groupSize)) * 3
-      : f.channels.length;
-    const end = f.startAddress + span - 1;
-    if (end > maxAddr) maxAddr = end;
-    const m = /^ofl-(\d+)$/.exec(String(f.id));
-    if (m) {
-      const n = parseInt(m[1]!, 10);
-      if (Number.isFinite(n) && n >= nextId) nextId = n + 1;
-    }
-  }
-  const fixture = Fixture.createRGBFixture(`ofl-${nextId}`);
-  fixture.name = `${connector.label.value || 'ESP'} Audience`;
-  fixture.startAddress = maxAddr + 1;
-  fixture.fixturePosition = { x: 0.5, y: 0.5 };
-  fixture.fixtureSize = { x: 1, y: 1 };
-  history.execute(new AddFixturesCommand(engineStore.sceneNodes, [fixture]));
-  patchConnector(connector, { espNowFixtureId: String(fixture.id) });
-  engineStore.flushEngineOutput();
-}
+/** All fixtures, available as ESP-NOW bridge broadcast source. */
+const allFixtures = computed(() => engineStore.flatFixtures);
 
 function fixtureFor(connector: WebSocketConnector) {
   const id = connector.fixtureId;
@@ -225,12 +196,72 @@ function updateSlotPin(connector: WebSocketConnector, slotIndex: number, pin: nu
   const slots = connector.fixtureSlots.value.slice();
   if (slots[slotIndex]) {
     slots[slotIndex] = { ...slots[slotIndex]!, pin };
+    // Bei gemeinsamem Pin: Offset automatisch auf die Summe der LEDs der
+    // vorherigen Slots an diesem Pin vorschlagen (editierbar). Übersprungen,
+    // sobald der User den Offset bereits manuell gesetzt hat (>0).
+    if (pin != null && !slots[slotIndex]!.ledOffset) {
+      slots[slotIndex] = { ...slots[slotIndex]!, ledOffset: computeSuggestedOffset(slots, slotIndex, pin) };
+    }
   }
   patchConnector(connector, { fixtureSlots: slots });
 }
 
+function updateSlotOffset(connector: WebSocketConnector, slotIndex: number, offset: number | null) {
+  const slots = connector.fixtureSlots.value.slice();
+  if (slots[slotIndex]) {
+    slots[slotIndex] = { ...slots[slotIndex]!, ledOffset: Math.max(0, Math.round(offset ?? 0)) };
+  }
+  patchConnector(connector, { fixtureSlots: slots });
+}
+
+/** LED-Anzahl der Fixture eines Slots (0, falls nicht aufgelöst). */
+function slotLedCount(connector: WebSocketConnector, slotIndex: number): number {
+  return fixtureForSlot(connector, slotIndex)?.stripConfig?.ledCount ?? 0;
+}
+
+/**
+ * Vorgeschlagener Start-LED-Offset für einen Slot: Summe der LED-Anzahl aller
+ * vorherigen Slots, die denselben Pin verwenden (= sie liegen vor diesem Strip
+ * auf der gemeinsamen Datenleitung).
+ */
+function computeSuggestedOffset(slots: FixtureSlot[], slotIndex: number, pin: number): number {
+  let sum = 0;
+  for (let i = 0; i < slotIndex; i++) {
+    if (slots[i]?.pin === pin) {
+      const fx = engineStore.flatFixtures.find(f => String(f.id) === String(slots[i]!.fixtureId));
+      sum += fx?.stripConfig?.ledCount ?? 0;
+    }
+  }
+  return sum;
+}
+
+/** Anzahl Slots am Connector, die diesen Pin teilen. */
+function slotsSharingPin(connector: WebSocketConnector, pin: number | null): number {
+  if (pin == null) return 0;
+  return connector.fixtureSlots.value.filter(s => s.pin === pin).length;
+}
+
+/**
+ * Überlappungs-Warnung: true, wenn dieser Slot mit einem anderen Slot am selben
+ * Pin überlappt (LED-Bereiche überschneiden sich).
+ */
+function slotOverlaps(connector: WebSocketConnector, slotIndex: number): boolean {
+  const slots = connector.fixtureSlots.value;
+  const slot = slots[slotIndex];
+  if (!slot || slot.pin == null) return false;
+  const offset = slot.ledOffset ?? 0;
+  const end = offset + slotLedCount(connector, slotIndex);
+  for (let i = 0; i < slots.length; i++) {
+    if (i === slotIndex || slots[i]?.pin !== slot.pin) continue;
+    const otherOffset = slots[i]!.ledOffset ?? 0;
+    const otherEnd = otherOffset + slotLedCount(connector, i);
+    if (offset < otherEnd && otherOffset < end) return true;
+  }
+  return false;
+}
+
 function addSlot(connector: WebSocketConnector) {
-  const slots = [...connector.fixtureSlots.value, { fixtureId: '', pin: null }];
+  const slots = [...connector.fixtureSlots.value, { fixtureId: '', pin: null, ledOffset: 0 }];
   patchConnector(connector, { fixtureSlots: slots });
 }
 
@@ -248,6 +279,33 @@ function commitStripPatchForSlot(connector: WebSocketConnector, slotIndex: numbe
   if (after.ledCount === before.ledCount && after.groupSize === before.groupSize && after.ledsPerMeter === before.ledsPerMeter && after.chipType === before.chipType) return;
   history.execute(new UpdateStripConfigCommand(engineStore.flatFixtures, f.id, before, after));
   engineStore.flushEngineOutput();
+}
+
+// Sum of logical pixels (= ceil(ledCount/groupSize)) across all strip slots of a
+// connector. This is the real driver of ESP32 RAM usage — each logical pixel
+// becomes ~3 render targets in the engine. Heavy pixel counts (esp. with Bezier
+// SpeedCurve effects) can exhaust the ESP32-S3 heap and crash it.
+const WARN_PIXEL_THRESHOLD = 600;
+const HARD_PIXEL_THRESHOLD = 1000;
+
+function connectorLogicalPixels(connector: WebSocketConnector): number {
+  let total = 0;
+  const slots = connector.fixtureSlots.value;
+  for (let i = 0; i < slots.length; i++) {
+    const f = fixtureForSlot(connector, i);
+    if (f?.stripConfig) {
+      total += logicalPixelCount(f.stripConfig.ledCount, f.stripConfig.groupSize);
+    }
+  }
+  return total;
+}
+
+/** 'none' | 'warn' | 'hard' depending on total logical pixels. */
+function connectorPixelSeverity(connector: WebSocketConnector): 'none' | 'warn' | 'hard' {
+  const n = connectorLogicalPixels(connector);
+  if (n > HARD_PIXEL_THRESHOLD) return 'hard';
+  if (n > WARN_PIXEL_THRESHOLD) return 'warn';
+  return 'none';
 }
 
 function commitStripShapeForSlot(connector: WebSocketConnector, slotIndex: number, newShape: StripShapeType) {
@@ -407,6 +465,13 @@ function assignedCount(connector: BaseConnector): number {
       >
         <Plus :size="12" />
         ArtNet (lokale Bridge)
+      </button>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 transition-colors"
+        @click="addConnector('espnow-bridge')"
+      >
+        <Plus :size="12" />
+        ESP-NOW USB-Bridge
       </button>
     </div>
 
@@ -702,7 +767,37 @@ function assignedCount(connector: BaseConnector): number {
                 @change="updateSlotPin(asWebSocket(connector)!, slotIndex, ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : null)"
               />
             </label>
+            <!-- Start-LED-Offset: nur relevant, wenn mehrere Strips denselben Pin teilen -->
+            <label
+              v-if="slotsSharingPin(asWebSocket(connector)!, slot.pin) > 1"
+              class="text-xs text-muted-foreground w-16 shrink-0"
+              title="Start-LED dieses Strips auf der gemeinsamen Datenleitung"
+            >
+              ab LED
+              <input
+                type="number"
+                min="0" step="1"
+                class="mt-1 w-full rounded border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                :class="slotOverlaps(asWebSocket(connector)!, slotIndex) ? 'border-red-400 text-red-400' : 'border-border'"
+                :value="slot.ledOffset ?? 0"
+                @change="updateSlotOffset(asWebSocket(connector)!, slotIndex, ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : 0)"
+              />
+            </label>
           </div>
+
+          <!-- Hinweis: geteilte Datenleitung -->
+          <p
+            v-if="slot.pin != null && slotsSharingPin(asWebSocket(connector)!, slot.pin) > 1"
+            class="text-[10px]"
+            :class="slotOverlaps(asWebSocket(connector)!, slotIndex) ? 'text-red-400' : 'text-muted-foreground'"
+          >
+            <template v-if="slotOverlaps(asWebSocket(connector)!, slotIndex)">
+              ⚠ LED-Bereich überlappt mit einem anderen Streifen an Pin {{ slot.pin }}.
+            </template>
+            <template v-else>
+              Geteilte Datenleitung (Pin {{ slot.pin }}): Streifen ab LED {{ slot.ledOffset ?? 0 }}–{{ (slot.ledOffset ?? 0) + slotLedCount(asWebSocket(connector)!, slotIndex) }}.
+            </template>
+          </p>
 
           <!-- Strip parameter editor for this slot -->
           <template v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)">
@@ -716,6 +811,15 @@ function assignedCount(connector: BaseConnector): number {
                   :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.ledCount ?? 0"
                   @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { ledCount: Number(($event.target as HTMLInputElement).value) })"
                 />
+                <span
+                  v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig"
+                  class="mt-0.5 block text-[10px] text-muted-foreground/70"
+                >
+                  {{ logicalPixelCount(
+                    fixtureForSlot(asWebSocket(connector)!, slotIndex)!.stripConfig!.ledCount,
+                    fixtureForSlot(asWebSocket(connector)!, slotIndex)!.stripConfig!.groupSize
+                  ) }} log. Pixel
+                </span>
               </label>
               <label class="text-xs text-muted-foreground">
                 Gruppe
@@ -785,45 +889,24 @@ function assignedCount(connector: BaseConnector): number {
           Streifen hinzufügen
         </button>
 
-        <!-- ESP-NOW Audience-Broadcast Fixture -->
-        <div class="flex flex-col gap-1 pt-2 mt-1 border-t border-border/30">
-          <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
-            <input
-              type="checkbox"
-              :checked="asWebSocket(connector)!.espNowEnabled.value"
-              @change="patchConnector(connector, { espNowEnabled: ($event.target as HTMLInputElement).checked })"
-            />
-            <span>Audience Broadcast (ESP-NOW) aktiv</span>
-          </label>
-          <div class="flex gap-1.5 items-end">
-            <label class="text-xs text-muted-foreground flex-1 min-w-0">
-              Broadcast-Fixture
-              <select
-                class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                :value="asWebSocket(connector)!.espNowFixtureId.value != null ? String(asWebSocket(connector)!.espNowFixtureId.value) : ''"
-                @change="patchConnector(connector, { espNowFixtureId: ($event.target as HTMLSelectElement).value || null })"
-              >
-                <option value="">— aus —</option>
-                <option
-                  v-for="f in broadcastFixtures"
-                  :key="String(f.id)"
-                  :value="String(f.id)"
-                >
-                  {{ f.name || `Fixture ${f.id}` }}
-                </option>
-              </select>
-            </label>
-            <button
-              class="px-2 py-1 rounded text-xs border border-border bg-background hover:bg-accent transition-colors whitespace-nowrap"
-              title="Neue DRGB-Fader-Fixture erzeugen und binden"
-              @click="createAndBindBroadcastFixture(asWebSocket(connector)!)"
-            >
-              <Plus :size="10" class="inline" /> Neu
-            </button>
-          </div>
-          <p class="text-[10px] text-muted-foreground/80 leading-snug">
-            Sendet die Farbe dieser Fixture als 4-Byte ColorCommand per ESP-NOW Broadcast — Publikum-ESPs ohne WLAN können so mitleuchten.
-          </p>
+        <!-- LED count / RAM warning -->
+        <div
+          v-if="connectorPixelSeverity(asWebSocket(connector)!) !== 'none'"
+          class="mt-1 rounded border px-2 py-1.5 text-xs leading-relaxed"
+          :class="connectorPixelSeverity(asWebSocket(connector)!) === 'hard'
+            ? 'border-orange-500/40 bg-orange-500/10 text-orange-300'
+            : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300'"
+        >
+          <span class="font-medium">{{ connectorLogicalPixels(asWebSocket(connector)!) }} logische Pixel</span>
+          <template v-if="connectorPixelSeverity(asWebSocket(connector)!) === 'hard'">
+            — sehr hoch. Der ESP32 kann hier (v.a. mit Bezier/SpeedCurve-Effekten)
+            instabil werden oder abstürzen. Reduziere die LED-Anzahl oder erhöhe die
+            Gruppengröße. Über LAN/Ethernet ist mehr möglich als über WLAN.
+          </template>
+          <template v-else>
+            — am Limit. Über WLAN können hier Aussetzer auftreten; erhöhe die
+            Gruppengröße, falls der ESP abstürzt.
+          </template>
         </div>
 
         <div class="flex items-center gap-3 flex-wrap mt-0.5">
@@ -911,6 +994,77 @@ function assignedCount(connector: BaseConnector): number {
         <p class="text-[10px] text-muted-foreground/80 leading-snug">
           Die ArtNet-Bridge muss lokal laufen (z. B. <span class="font-mono">bun run artnet-bridge</span>) und leitet Pakete an die obige Ziel-IP weiter.
         </p>
+
+        <!-- Bridge log output -->
+        <div
+          v-if="asArtNet(connector)!.logs.length"
+          class="mt-1 rounded border border-border/50 bg-muted/20 overflow-y-auto max-h-28 px-2 py-1.5 flex flex-col gap-0.5"
+        >
+          <div
+            v-for="(line, i) in asArtNet(connector)!.logs.slice().reverse()"
+            :key="i"
+            class="text-[10px] font-mono leading-tight"
+            :class="line.text.includes('failed') || line.text.includes('error') || line.text.includes('Error')
+              ? 'text-red-400'
+              : 'text-muted-foreground'"
+          >
+            {{ line.text }}
+          </div>
+        </div>
+      </div>
+
+      <!-- EspNowBridgeConnector settings: zugewiesene Fixture + Empfänger-ID -->
+      <div
+        v-if="asEspNowBridge(connector)"
+        class="flex flex-col gap-1.5 px-1"
+      >
+        <label class="text-xs text-muted-foreground">
+          Label
+          <input
+            type="text"
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="z. B. Publikum-Bridge"
+            :value="asEspNowBridge(connector)!.label.value"
+            @change="patchConnector(connector, { label: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+        <label class="text-xs text-muted-foreground">
+          Scheinwerfer (Farbquelle)
+          <select
+            class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+            :value="asEspNowBridge(connector)!.fixtureId.value != null ? String(asEspNowBridge(connector)!.fixtureId.value) : ''"
+            @change="patchConnector(connector, { fixtureId: ($event.target as HTMLSelectElement).value || null })"
+          >
+            <option value="">— keiner —</option>
+            <option
+              v-for="f in allFixtures"
+              :key="String(f.id)"
+              :value="String(f.id)"
+            >
+              {{ f.name || `Fixture ${f.id}` }}
+            </option>
+          </select>
+        </label>
+        <p class="text-[10px] text-muted-foreground/80 leading-snug">
+          Sendet R/G/B + Dimmer der zugewiesenen Fixture als 4-Byte ColorCommand per ESP-NOW Broadcast (FF:FF:FF:FF:FF:FF). Publikum-ESPs ohne WLAN leuchten so mit.
+        </p>
+
+        <!-- Bridge log output -->
+        <div
+          v-if="asEspNowBridge(connector)!.logs.length"
+          class="mt-1 rounded border border-border/50 bg-muted/20 overflow-y-auto max-h-28 px-2 py-1.5 flex flex-col gap-0.5"
+        >
+          <div
+            v-for="(line, i) in asEspNowBridge(connector)!.logs.slice().reverse()"
+            :key="i"
+            class="text-[10px] font-mono leading-tight"
+            :class="line.text.includes('failed') || line.text.includes('error')
+              ? 'text-red-400'
+              : 'text-muted-foreground'"
+          >
+            {{ line.text }}
+          </div>
+        </div>
       </div>
 
       <!-- Expandable outputs section -->

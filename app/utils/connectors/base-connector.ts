@@ -24,6 +24,10 @@ export interface EngineConnectorState {
   layoutPacket: Uint8Array;
   channelsPacket: Uint8Array;
   effectsPacket: Uint8Array;
+  /** The current mixed output DMX buffer (all universes, flat, post-override).
+   *  Indexed by absolute DMX address: dmxBuffer[fixture.startAddress - 1 + ch.addressOffset].
+   *  Used by connectors that read rendered channel values (e.g. EspNowBridgeConnector). */
+  dmxBuffer: Uint8Array;
   /** Live references used by connectors that build their own scoped packets
    *  (e.g. WebSocketConnector with a per-fixture scope). */
   fixtures: Fixture[];

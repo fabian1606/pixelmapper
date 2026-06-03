@@ -9,8 +9,6 @@
 // WiFi is also pulled in for Ethernet builds so we can host an unassociated
 // STA + ESP-NOW alongside the wired transport.
 #include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -26,12 +24,16 @@
 #endif
 
 // Multi-strip support: split the global LED buffer into up to MAX_SLOTS
-// equal-sized segments. Each slot drives its own GPIO pin via its own FastLED
-// controller. Total = MAX_SLOTS * MAX_LEDS_PER_SLOT, must fit within
+// equal-sized segments. One FastLED controller per *unique* GPIO pin — several
+// logical slots may share a pin (one physical chained strip split into multiple
+// fixtures), distinguished by their ledOffset. The per-pin segment size is
+// MAX_LEDS_PER_PIN; total = MAX_SLOTS * MAX_LEDS_PER_PIN, must fit within
 // MAX_LEDS_HARD_CAP. Pins are persisted in NVS — changes require a reboot
 // (FastLED templates lock pins at compile time, no clean de-registration).
 #define MAX_SLOTS          4
-#define MAX_LEDS_PER_SLOT  (MAX_LEDS_HARD_CAP / MAX_SLOTS)
+#define MAX_LEDS_PER_PIN   (MAX_LEDS_HARD_CAP / MAX_SLOTS)
+// Backward-compat alias (single-slot legacy path).
+#define MAX_LEDS_PER_SLOT  MAX_LEDS_PER_PIN
 
 // ── Protocol ─────────────────────────────────────────────────────────────────
 #define MAGIC0            0xAA
@@ -40,9 +42,6 @@
 #define TYPE_TIMESYNC     0x13
 #define TYPE_STRIP_CONFIG 0x19
 #define TYPE_STRIP_SLOTS  0x1A
-#define TYPE_ESPNOW_SLOT   0x1B
-#define TYPE_ESPNOW_ENABLE 0x1C
-
 // ── NVS-backed config ────────────────────────────────────────────────────────
 static Preferences prefs;
 #ifndef USE_ETHERNET
@@ -51,22 +50,6 @@ static String      wifiPass;
 #endif
 static uint8_t     dataPin     = 21;
 static String      hostname;
-static bool        espNowEnabled = false;  // NVS-persisted "espnow_en"
-static bool        espNowReady   = false;  // set true after esp_now_init + peer add
-struct EspNowSlot {
-    bool     enabled;
-    uint16_t dmxStart;
-    uint8_t  rIdx, gIdx, bIdx, dimIdx;
-};
-static EspNowSlot  espNowSlot = { false, 0, 0, 1, 2, 3 };
-static uint32_t    lastEspNowSendMs = 0;
-static const uint32_t ESPNOW_SEND_PERIOD_MS = 33;  // ~30 Hz
-static const uint8_t  ESPNOW_BROADCAST_ADDR[6] = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF };
-struct __attribute__((packed)) EspNowColorCommand {
-    uint8_t r, g, b, brightness;
-};
-static void espNowStart();
-static void espNowStop();
 
 // ── LED buffer + runtime state ───────────────────────────────────────────────
 // FastLED needs a compile-time pin. We pre-allocate a fixed buffer at the hard
@@ -78,7 +61,9 @@ struct StripSlot {
     uint8_t  pin;          // GPIO pin driving this strip
     uint16_t ledCount;     // physical LED count
     uint8_t  groupSize;    // physical LEDs per logical pixel
-    uint16_t bufferOffset; // offset into leds[]
+    uint16_t bufferOffset; // absolute offset into leds[] = pinBase + ledOffset
+    uint16_t pinBase;      // base offset of this slot's pin-controller in leds[]
+    uint16_t ledOffset;    // start-LED of this strip on its (shared) pin
 };
 
 static StripSlot slots[MAX_SLOTS];
@@ -179,7 +164,6 @@ static void printBootInfo(const char* mode) {
     Serial.printf("[info] ssid=%s\n", wifiSsid.c_str());
 #endif
     Serial.printf("[info] pin=%u\n",  (unsigned)dataPin);
-    Serial.printf("[info] espnow=%u\n", espNowEnabled ? 1u : 0u);
     Serial.printf("[info] mode=%s\n", mode);
 }
 
@@ -190,16 +174,21 @@ static RxState  rxState    = WAIT_MAGIC1;
 static uint8_t  rxType     = 0;
 static uint16_t rxExpected = 0;
 static uint16_t rxPos      = 0;
-// Sized for layout packets up to ~1024 logical pixels × ~16 bytes/channel ×
-// up to 4 channels/pixel, plus a generous fudge factor. Bumped from 8192
-// after audience-fixture + multi-slot setups overflowed.
-static uint8_t  rxBuf[24576];
+// Layout packets are 18 bytes/channel (~54 bytes per RGB logical pixel). The
+// protocol length field is a u16, so a single packet can carry up to 65535
+// bytes — enough for ~1200 RGB logical pixels. We size rxBuf to that hard
+// ceiling so large strips don't get silently dropped ("packet too large").
+// Bumped from 24576; lives in internal DRAM (PSRAM init destabilises the ETH
+// boot path via the IPC task, so we keep these static).
+static constexpr size_t RX_BUF_SIZE = 65536;
+static uint8_t  rxBuf[RX_BUF_SIZE];
 
 // ── WS → main-loop byte ring buffer ──────────────────────────────────────────
 // WebSocket events fire on the AsyncTCP task, but the engine FFI is not
 // thread-safe. We copy raw bytes into this ring from the event callback and
 // drain it from the main loop so engine_dispatch / engine_render only ever
-// run on one task.
+// run on one task. The main loop drains every iteration (~1 ms), so the ring
+// only needs to absorb one AsyncTCP burst — 32 KB is ample.
 static constexpr size_t  RX_RING_SIZE = 32768;
 static uint8_t           rxRing[RX_RING_SIZE];
 static volatile uint32_t rxRingHead = 0;
@@ -247,6 +236,13 @@ static void handleStripConfig() {
 // Payload: [count: u8] then per slot: [pin: u8, chip: u8, ledCount: u16,
 // groupSize: u16, ledsPerMeter: u16] = 8 bytes/slot.
 //
+// NOTE: ledOffset (start-LED on a shared pin for daisy-chained fixtures) is
+// stored in StripSlot but NOT yet decoded from the wire — the JS encoder
+// (binary-encoder.ts) keeps the packet at 8 bytes until the firmware is
+// recompiled with the full 10-byte protocol. Once recompiled:
+//   - bump back to `count * 10` and decode `newLedOffset` from `p + 8`
+//   - uncomment `w.u16(s.ledOffset ?? 0)` in binary-encoder.ts
+//
 // If the pin set differs from what's currently registered, persist to NVS and
 // restart — FastLED can't cleanly switch pins at runtime. Otherwise just
 // update ledCount/groupSize live.
@@ -272,12 +268,14 @@ static void handleStripSlots() {
         // p[1] = chipType (unused, always WS2812B in firmware v1)
         newLedCount[i]  = readU16LE(p + 2);
         newGroupSize[i] = readU16LE(p + 4);
+        // p[6..7] = ledsPerMeter (unused on device)
         if (newGroupSize[i] == 0) newGroupSize[i] = 1;
-        if (newLedCount[i] > MAX_LEDS_PER_SLOT) newLedCount[i] = MAX_LEDS_PER_SLOT;
+        if (newLedCount[i] > MAX_LEDS_PER_PIN) newLedCount[i] = MAX_LEDS_PER_PIN;
     }
 
     // Compare pin set with the currently registered one. If different, persist
     // the new layout to NVS and reboot — FastLED templates are compile-time.
+    // Duplicate pins (shared data line) are allowed and compared positionally.
     bool pinSetChanged = (count != slotCount);
     if (!pinSetChanged) {
         for (uint8_t i = 0; i < count; i++) {
@@ -294,19 +292,22 @@ static void handleStripSlots() {
         return; // unreachable
     }
 
-    // Same pins — live-update sizes / groupSize
+    // Same pins — live-update sizes / groupSize. bufferOffset stays at the
+    // boot-assigned pinBase (ledOffset = 0 until the 10-byte protocol is active).
     for (uint8_t i = 0; i < count; i++) {
-        uint16_t oldCount = slots[i].ledCount;
-        if (newLedCount[i] != oldCount) {
-            for (uint16_t k = newLedCount[i]; k < oldCount; k++) {
-                uint16_t idx = slots[i].bufferOffset + k;
+        uint16_t oldOffset = slots[i].bufferOffset;
+        uint16_t oldEnd    = oldOffset + slots[i].ledCount;
+        slots[i].ledCount     = newLedCount[i];
+        slots[i].bufferOffset = slots[i].pinBase; // ledOffset = 0 (not yet in wire protocol)
+        // Clear any LEDs the old range covered but the new one doesn't.
+        for (uint16_t idx = oldOffset; idx < oldEnd; idx++) {
+            if (idx < slots[i].bufferOffset || idx >= slots[i].bufferOffset + slots[i].ledCount) {
                 if (idx < MAX_LEDS_HARD_CAP) leds[idx] = CRGB::Black;
             }
-            slots[i].ledCount = newLedCount[i];
         }
         slots[i].groupSize = (uint8_t)min<uint16_t>(newGroupSize[i], 255);
-        sendLogf("[strip] slot=%u pin=%u count=%u group=%u",
-                 i, slots[i].pin, slots[i].ledCount, slots[i].groupSize);
+        sendLogf("[strip] slot=%u pin=%u count=%u group=%u base=%u",
+                 i, slots[i].pin, slots[i].ledCount, slots[i].groupSize, slots[i].pinBase);
     }
 }
 
@@ -326,34 +327,6 @@ static void dispatch() {
         handleStripConfig();
     } else if (rxType == TYPE_STRIP_SLOTS) {
         handleStripSlots();
-    } else if (rxType == TYPE_ESPNOW_ENABLE) {
-        if (rxPos >= 1) {
-            bool wanted = rxBuf[0] != 0;
-            if (wanted != espNowEnabled) {
-                espNowEnabled = wanted;
-                prefs.putBool("espnow_en", espNowEnabled);
-                sendLogf("[espnow] enable=%u (persisted)", wanted ? 1u : 0u);
-            }
-            if (wanted) espNowStart(); else espNowStop();
-        } else {
-            sendLogf("[rx] espnow_enable too short: %u", rxPos);
-        }
-    } else if (rxType == TYPE_ESPNOW_SLOT) {
-        if (rxPos >= 7) {
-            espNowSlot.enabled  = rxBuf[0] != 0;
-            espNowSlot.dmxStart = readU16LE(rxBuf + 1);
-            espNowSlot.rIdx     = rxBuf[3];
-            espNowSlot.gIdx     = rxBuf[4];
-            espNowSlot.bIdx     = rxBuf[5];
-            espNowSlot.dimIdx   = rxBuf[6];
-            sendLogf("[espnow] slot %s start=%u idx=%u/%u/%u dim=%u",
-                     espNowSlot.enabled ? "on" : "off",
-                     (unsigned)espNowSlot.dmxStart,
-                     (unsigned)espNowSlot.rIdx, (unsigned)espNowSlot.gIdx,
-                     (unsigned)espNowSlot.bIdx, (unsigned)espNowSlot.dimIdx);
-        } else {
-            sendLogf("[rx] espnow_slot too short: %u", rxPos);
-        }
     } else {
         int32_t r = engine_dispatch(engine, rxType, rxBuf, rxPos);
         if (r < 0) sendLogf("[rx] type=0x%02X len=%u result=%d", rxType, rxPos, r);
@@ -369,7 +342,7 @@ static void processByte(uint8_t b) {
         case WAIT_LEN_HI:
             rxExpected |= ((uint16_t)b << 8);
             if (rxExpected == 0)               { dispatch(); rxState = WAIT_MAGIC1; }
-            else if (rxExpected > sizeof(rxBuf)) {
+            else if (rxExpected > RX_BUF_SIZE) {
                 sendLogf("[rx] packet too large: %u — dropping", rxExpected);
                 rxState = WAIT_MAGIC1;
             } else { rxPos = 0; rxState = COLLECT; }
@@ -404,8 +377,6 @@ static bool handleConfigLine(const String& line) {
         prefs.putString("wifi_ssid", wifiSsid);
         prefs.putString("wifi_pass", wifiPass);
 #endif
-        // espnow_en is persisted live via TYPE_ESPNOW_ENABLE from the browser,
-        // so the serial `commit` only touches wifi/pin.
         prefs.putUChar("data_pin",  dataPin);
         Serial.println("[config] ok — restarting");
         Serial.flush();
@@ -455,62 +426,6 @@ static void runConfigMode() {
     }
 }
 
-// ── ESP-NOW lifecycle ────────────────────────────────────────────────────────
-// Two transports, two channel strategies:
-//   • Ethernet build → WiFi is otherwise unused. STA stays disconnected; the
-//     radio sits on ch1 by default — same as the bare-bones receiver sketch.
-//   • WiFi build     → Radio is locked to the router's channel. Receivers on
-//     ch1 will NOT hear our broadcasts unless the router is also on ch1.
-static void espNowStart() {
-    if (espNowReady) return;
-#ifdef USE_ETHERNET
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(50);
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-#endif
-    if (esp_now_init() != ESP_OK) {
-        Serial.println("[espnow] init failed");
-        return;
-    }
-    uint8_t primary; wifi_second_chan_t second;
-    esp_wifi_get_channel(&primary, &second);
-
-    esp_now_peer_info_t peer = {};
-    memcpy(peer.peer_addr, ESPNOW_BROADCAST_ADDR, 6);
-    peer.channel = 0;
-    peer.ifidx   = WIFI_IF_STA;
-    peer.encrypt = false;
-    if (esp_now_add_peer(&peer) != ESP_OK) {
-        Serial.println("[espnow] add_peer failed");
-        esp_now_deinit();
-        return;
-    }
-    espNowReady = true;
-    Serial.printf("[espnow] ready ch=%u  mac=%s\n",
-                  (unsigned)primary, WiFi.macAddress().c_str());
-    esp_now_register_send_cb([](const wifi_tx_info_t* /*info*/, esp_now_send_status_t status) {
-        static uint32_t okCount = 0, failCount = 0;
-        static uint32_t lastReport = 0;
-        if (status == ESP_NOW_SEND_SUCCESS) okCount++; else failCount++;
-        uint32_t now = millis();
-        if (now - lastReport > 5000) {
-            lastReport = now;
-            Serial.printf("[espnow] tx ok=%lu fail=%lu (last status=%d)\n",
-                          (unsigned long)okCount, (unsigned long)failCount, (int)status);
-        }
-    });
-}
-
-static void espNowStop() {
-    if (!espNowReady) return;
-    esp_now_unregister_send_cb();
-    esp_now_del_peer(ESPNOW_BROADCAST_ADDR);
-    esp_now_deinit();
-    espNowReady = false;
-    Serial.println("[espnow] stopped");
-}
-
 // ── RUN_MODE WebSocket events ────────────────────────────────────────────────
 static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                       AwsEventType type, void* arg, uint8_t* data, size_t len) {
@@ -534,28 +449,52 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 }
 
 static void runRunMode() {
-    // Register FastLED controllers for every NVS-persisted slot pin. Each slot
-    // gets a contiguous MAX_LEDS_PER_SLOT segment of the global leds[] buffer.
-    // Pins can only change via a reboot (FastLED templates lock pins at
-    // compile time); TYPE_STRIP_SLOTS triggers a save + restart when the pin
-    // set differs.
+    // Register one FastLED controller per *unique* NVS-persisted slot pin, each
+    // covering a contiguous MAX_LEDS_PER_PIN segment of the global leds[] buffer.
+    // Multiple logical slots may share a pin (physical chained strip split into
+    // several fixtures); they all point into the same pin segment at their
+    // pinBase + ledOffset. Pins can only change via a reboot (FastLED templates
+    // lock pins at compile time); TYPE_STRIP_SLOTS triggers a save + restart
+    // when the pin set differs.
     uint8_t pins[MAX_SLOTS] = {0};
     uint8_t count = loadSlotPinsFromNVS(pins);
     slotCount = 0;
+
+    // Map each pin to a base offset, registering a controller the first time a
+    // pin is seen. Later slots on the same pin reuse the existing base.
+    uint8_t  uniquePins[MAX_SLOTS]  = {0};
+    uint16_t uniqueBase[MAX_SLOTS]  = {0};
+    uint8_t  uniqueCount            = 0;
+
     for (uint8_t i = 0; i < count; i++) {
-        uint16_t offset = (uint16_t)i * MAX_LEDS_PER_SLOT;
-        if (registerStripPin(pins[i], leds + offset, MAX_LEDS_PER_SLOT)) {
-            slots[slotCount].pin          = pins[i];
-            slots[slotCount].ledCount     = 0;
-            slots[slotCount].groupSize    = 1;
-            slots[slotCount].bufferOffset = offset;
-            slotCount++;
-            Serial.printf("[strip] slot=%u FastLED ready on pin %u (offset=%u)\n",
-                          i, pins[i], offset);
-        } else {
-            Serial.printf("[strip] WARNING: pin %u not in supported set — slot %u disabled\n",
-                          pins[i], i);
+        // Find existing base for this pin.
+        int found = -1;
+        for (uint8_t u = 0; u < uniqueCount; u++) {
+            if (uniquePins[u] == pins[i]) { found = u; break; }
         }
+        uint16_t base;
+        if (found >= 0) {
+            base = uniqueBase[found];
+        } else {
+            base = (uint16_t)uniqueCount * MAX_LEDS_PER_PIN;
+            if (!registerStripPin(pins[i], leds + base, MAX_LEDS_PER_PIN)) {
+                Serial.printf("[strip] WARNING: pin %u not in supported set — slot %u disabled\n",
+                              pins[i], i);
+                continue;
+            }
+            uniquePins[uniqueCount] = pins[i];
+            uniqueBase[uniqueCount] = base;
+            uniqueCount++;
+            Serial.printf("[strip] pin %u FastLED ready (base=%u)\n", pins[i], base);
+        }
+        slots[slotCount].pin          = pins[i];
+        slots[slotCount].ledCount     = 0;
+        slots[slotCount].groupSize    = 1;
+        slots[slotCount].pinBase      = base;
+        slots[slotCount].ledOffset    = 0;
+        slots[slotCount].bufferOffset = base;
+        slotCount++;
+        Serial.printf("[strip] slot=%u on pin %u (base=%u)\n", slotCount - 1, pins[i], base);
     }
     stripReady = (slotCount > 0);
     if (stripReady) {
@@ -615,10 +554,6 @@ static void runRunMode() {
     Serial.printf("[boot] WiFi ok ip=%s\n", WiFi.localIP().toString().c_str());
     WiFi.setSleep(false);  // disable modem sleep — eliminates ~200ms wake-up latency
 #endif
-
-    // ESP-NOW is brought up live (also reachable via TYPE_ESPNOW_ENABLE at
-    // runtime). On boot we call it once if the persisted flag is set.
-    if (espNowEnabled) espNowStart();
 
     if (MDNS.begin(hostname.c_str())) {
         MDNS.addService("pixelmapper", "tcp", 80);
@@ -704,27 +639,6 @@ static void runRunMode() {
                 }
                 if (anyActive) FastLED.show();
             }
-
-            // ESP-NOW broadcast: read 4 DMX bytes from the configured slot and
-            // send them as a ColorCommand to FF:FF:FF:FF:FF:FF. Throttled to
-            // ~30 Hz so the WiFi stack stays responsive.
-            if (espNowReady && espNowSlot.enabled && now - lastEspNowSendMs >= ESPNOW_SEND_PERIOD_MS) {
-                lastEspNowSendMs = now;
-                const uint8_t* dmx = engine_get_dmx_buffer(engine);
-                EspNowColorCommand cmd = {
-                    dmx[espNowSlot.dmxStart + espNowSlot.rIdx],
-                    dmx[espNowSlot.dmxStart + espNowSlot.gIdx],
-                    dmx[espNowSlot.dmxStart + espNowSlot.bIdx],
-                    dmx[espNowSlot.dmxStart + espNowSlot.dimIdx],
-                };
-                esp_err_t r = esp_now_send(ESPNOW_BROADCAST_ADDR, (const uint8_t*)&cmd, sizeof(cmd));
-                static uint32_t lastColorLog = 0;
-                if (now - lastColorLog > 2000) {
-                    lastColorLog = now;
-                    Serial.printf("[espnow] tx rgb=(%u,%u,%u) b=%u  send_rc=%d\n",
-                                  cmd.r, cmd.g, cmd.b, cmd.brightness, (int)r);
-                }
-            }
         }
 
         // Re-broadcast [info] every 2 s so the browser wizard can detect this
@@ -771,7 +685,6 @@ void setup() {
     wifiPass = prefs.getString("wifi_pass", "");
 #endif
     dataPin  = prefs.getUChar("data_pin", 48);
-    espNowEnabled = prefs.getBool("espnow_en", false);
     hostname = String(MDNS_HOSTNAME_PREFIX) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
 
 #ifdef USE_ETHERNET

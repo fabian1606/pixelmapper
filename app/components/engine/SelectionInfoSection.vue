@@ -152,9 +152,13 @@ function updateDmx() {
   if (newGlobalAddress === firstFixture.value.startAddress) return;
   if (newGlobalAddress < 1 || newGlobalAddress > 16384) return;
 
-  // Reject if the fixture would extend beyond the 512-channel boundary of its universe
-  const localStart = ((newGlobalAddress - 1) % 512) + 1;
-  if (localStart + firstFixture.value.channels.length - 1 > 512) return;
+  // Reject if a regular (non-strip) fixture would extend beyond the 512-channel
+  // universe boundary. Strip fixtures are rebased to address 1 by the scoped
+  // encoder before being sent to the ESP32, so they are exempt from this check.
+  if (!firstFixture.value.stripConfig) {
+    const localStart = ((newGlobalAddress - 1) % 512) + 1;
+    if (localStart + firstFixture.value.channels.length - 1 > 512) return;
+  }
 
   history.execute(new UpdateDmxCommand(
     firstFixture.value,

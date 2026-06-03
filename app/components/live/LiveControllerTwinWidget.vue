@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { LiveWidget, LiveMapping } from '~/utils/live/types';
+import type { LiveWidget } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
@@ -11,9 +11,9 @@ import { registerTwinState } from '~/composables/live-ops/twin-state-hub';
 import { SetSectionMembersCommand } from '~/components/engine/commands/live-widget-commands';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { findBoundPreset, sectionPress, sectionRelease } from '~/composables/live-ops/use-section-binding';
+import { applyMapping, isFlashMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { memberKey, findSectionFor } from '~/utils/live/sections';
-import { setActivePreset } from '~/components/engine/composables/preset-activation';
 import type { ControlInputEvent, ControllerControl } from '~/utils/controllers/types';
 
 const props = defineProps<{
@@ -53,134 +53,12 @@ function getChild(id: string) {
   return props.widget.controllerChildren?.find(c => c.controlId === id);
 }
 
-// Per-control base values for virtual dimmer (no DIMMER channel).
-// Key: `${controlId}:${fixtureId}:${channelIndex}`
-const dimmerBaseValues = new Map<string, number>();
-// Tracks the last mapping target per controlId to detect mapping changes.
-const dimmerLastTarget = new Map<string, string>();
+// Per-instance virtual-dimmer base-value tracking (shared dispatcher, namespaced by controlId).
+const dimmerState = createDimmerState();
 
-function clearDimmerBase(controlId: string) {
-  for (const key of [...dimmerBaseValues.keys()]) {
-    if (key.startsWith(`${controlId}:`)) dimmerBaseValues.delete(key);
-  }
-}
-
-function getFixturesForDimmerGroup(mapping: LiveMapping): any[] {
-  if (mapping.fixtureId != null && !mapping.groupId) {
-    const f = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-    return f ? [f] : [];
-  }
-
-  if (mapping.groupId) {
-    const findGroup = (nodes: any[]): any => {
-      for (const node of nodes) {
-        if (String(node.id) === String(mapping.groupId)) return node;
-        if (node.children?.length) {
-          const found = findGroup(node.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-    const group = findGroup(engineStore.sceneNodes);
-    if (group?.getAllFixtures) return group.getAllFixtures();
-  }
-
-  return [];
-}
-
-function applyDimmerGroup(mapping: LiveMapping, value: number, active: boolean, controlId: string) {
-  const fixtures = getFixturesForDimmerGroup(mapping);
-  const v = value !== undefined ? value : (active ? 1 : 0);
-
-  // Clear base values if the mapping target has changed
-  const targetKey = `${mapping.groupId ?? ''}:${mapping.fixtureId ?? ''}`;
-  if (dimmerLastTarget.get(controlId) !== targetKey) {
-    clearDimmerBase(controlId);
-    dimmerLastTarget.set(controlId, targetKey);
-  }
-
-  for (const fixture of fixtures) {
-    const dimmerChannels = fixture.channels.filter((ch: any) => ch.role === 'DIMMER');
-    if (dimmerChannels.length > 0) {
-      for (const ch of dimmerChannels) {
-        ch.chaserConfig.stepValues = [Math.round(v * 255)];
-      }
-    } else {
-      for (let i = 0; i < fixture.channels.length; i++) {
-        const ch = fixture.channels[i];
-        if (ch.role !== 'COLOR') continue;
-        const key = `${controlId}:${fixture.id}:${i}`;
-        if (!dimmerBaseValues.has(key)) {
-          dimmerBaseValues.set(key, ch.chaserConfig.stepValues[0] ?? 255);
-        }
-        const base = dimmerBaseValues.get(key)!;
-        ch.chaserConfig.stepValues = [Math.round(v * base)];
-      }
-    }
-  }
-  engineStore.triggerCanvasSync?.();
-}
-
-// ── Mapping dispatch ────────────────────────────────────────────────────────
-function applyMapping(mapping: LiveMapping, active: boolean, value?: number, controlId?: string) {
-  if (mapping.type === 'preset' && mapping.presetId && active) {
-    setActivePreset(mapping.presetId);
-  } else if (mapping.type === 'channel') {
-    const dmxValue = value !== undefined ? Math.round(value * 255) : (active ? 255 : 0);
-    if (mapping.groupId && mapping.channelType) {
-      const fixtures = getFixturesForDimmerGroup(mapping);
-      for (const fixture of fixtures) {
-        for (const ch of fixture.channels) {
-          if (ch.type === mapping.channelType) {
-            ch.chaserConfig.stepValues = [dmxValue];
-          }
-        }
-      }
-      engineStore.triggerCanvasSync?.();
-    } else if (mapping.fixtureId != null && mapping.channelOffset != null) {
-      const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-      const ch = fixture?.channels[mapping.channelOffset];
-      if (ch) {
-        ch.chaserConfig.stepValues = [dmxValue];
-        engineStore.triggerCanvasSync?.();
-      }
-    }
-  } else if (mapping.type === 'dimmer-group') {
-    applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, controlId ?? '');
-  } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null && value !== undefined) {
-    const effect = engineStore.activeEffects.find((e: any) => e.id === mapping.effectId);
-    if (effect) {
-      const key = mapping.paramKey;
-      if (key === 'strength') {
-        effect.strength = value;
-      } else if (key === 'speed') {
-        if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
-      } else if (key === 'fanning') {
-        effect.fanning = value;
-      } else if (key.startsWith('waveformParams.')) {
-        const paramName = key.split('.')[1];
-        if (!effect.waveformParams) effect.waveformParams = { param: 0.5, start: 0, end: 1 };
-        if (paramName === 'param') effect.waveformParams.param = value;
-        else if (paramName === 'start') effect.waveformParams.start = value;
-        else if (paramName === 'end') effect.waveformParams.end = value;
-      }
-      engineStore.triggerCanvasSync?.();
-    }
-  } else if (mapping.type === 'page-switch' && mapping.targetPageId && active) {
-    store.setActivePage(mapping.targetPageId);
-  } else if (mapping.type === 'global-function' && mapping.globalFunction) {
-    const key = `${props.widget.id}::${controlId ?? ''}`;
-    if (active) {
-      engineStore.pressOverwrite(key, mapping.globalFunction, mapping.globalFunctionConfig ?? {});
-      queueMicrotask(() => liveBus.dispatch('overwrite.press', {
-        key, type: mapping.globalFunction!, config: mapping.globalFunctionConfig ?? {},
-      }));
-    } else {
-      engineStore.releaseOverwrite(key);
-      queueMicrotask(() => liveBus.dispatch('overwrite.release', { key }));
-    }
-  }
+/** Build the shared mapping context for a control. */
+function mappingCtx(controlId: string, value?: number) {
+  return { key: `${props.widget.id}::${controlId}`, value, controlId, dimmerState };
 }
 
 // ── SVG element registry (populated after v-html mounts) ───────────────────
@@ -248,13 +126,8 @@ function isFlashControl(id: string): boolean {
     if (bound.preset.type === 'flash') return true;
   }
   const child = getChild(id);
-  if (child?.mapping.type === 'preset' && child.mapping.presetId) {
-    const p = engineStore.savedPresets.find((sp: any) => sp.id === child.mapping.presetId);
-    if (p?.type === 'flash') return true;
-  }
-  // Global functions are always hold-to-active (flash behavior)
-  if (child?.mapping.type === 'global-function') return true;
-  return false;
+  // Child mapping flash/overwrite/global-function detection (shared with canvas buttons).
+  return child ? isFlashMapping(child.mapping) : false;
 }
 
 function boundColorFor(id: string): string | null {
@@ -670,7 +543,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ctrl.id });
     if (!sectionHandled) {
       const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, true, undefined, ctrl.id);
+      if (child) applyMapping(child.mapping, true, mappingCtx(ctrl.id));
     }
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ctrl.id,
@@ -685,7 +558,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ctrl.id });
     if (!sectionHandled) {
       const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, false, undefined, ctrl.id);
+      if (child) applyMapping(child.mapping, false, mappingCtx(ctrl.id));
     }
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ctrl.id,
@@ -795,7 +668,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     setFaderValue(ctrl.id, v);
     applyKnob(ctrl.id);
     const child = getChild(ctrl.id);
-    if (child) applyMapping(child.mapping, true, v);
+    if (child) applyMapping(child.mapping, true, mappingCtx(ctrl.id, v));
     dispatchSlide(v);
   };
   const onUpDoc = (e: PointerEvent) => {
@@ -815,7 +688,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     setFaderValue(ctrl.id, v);
     applyKnob(ctrl.id);
     const child = getChild(ctrl.id);
-    if (child) applyMapping(child.mapping, true, v);
+    if (child) applyMapping(child.mapping, true, mappingCtx(ctrl.id, v));
     dispatchSlide(v);
     document.addEventListener('pointermove',   onMoveDoc);
     document.addEventListener('pointerup',     onUpDoc);
@@ -962,7 +835,7 @@ function attachDriver() {
       const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ev.controlId });
       if (!sectionHandled) {
         const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, true, undefined, ev.controlId);
+        if (child) applyMapping(child.mapping, true, mappingCtx(ev.controlId));
       }
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, true);
@@ -971,14 +844,14 @@ function attachDriver() {
       const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ev.controlId });
       if (!sectionHandled) {
         const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, false, undefined, ev.controlId);
+        if (child) applyMapping(child.mapping, false, mappingCtx(ev.controlId));
       }
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, false);
     } else if (ev.type === 'value' && ev.value !== undefined) {
       setFaderValue(ev.controlId, ev.value);
       const child = getChild(ev.controlId);
-      if (child) applyMapping(child.mapping, true, ev.value);
+      if (child) applyMapping(child.mapping, true, mappingCtx(ev.controlId, ev.value));
       liveBus.dispatch('widget.slide', {
         pageId: props.pageId, widgetId: props.widget.id, controlId: ev.controlId, value: ev.value,
       });

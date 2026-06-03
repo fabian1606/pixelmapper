@@ -43,6 +43,7 @@ export function findBoundPreset(
     selectedPresetId,
     slotCount: membership.total,
     storedColorVariants: membership.section.colorVariants,
+    selectedPresetIds: membership.section.selectedPresetIds,
   });
   const slot = slots[membership.index];
   if (!slot) return null;

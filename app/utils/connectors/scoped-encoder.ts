@@ -19,14 +19,13 @@ export interface ScopedPackets {
   channelsPacket:  Uint8Array;
   effectsPacket:   Uint8Array;
   stripSlotsPacket?: Uint8Array;
-  /** When an extraFixture (ESP-NOW broadcast) was included, this describes
-   *  where the firmware should read its R/G/B/Dimmer bytes in the DMX buffer. */
-  espNowLayout?: { dmxStart: number; rIdx: number; gIdx: number; bIdx: number; dimIdx: number };
 }
 
 export interface FixtureSlotInput {
   fixture: Fixture;
   pin: number | null;
+  /** Start-LED-Index dieses Strips auf dem (ggf. geteilten) Pin. Default 0. */
+  ledOffset?: number;
 }
 
 function effectTargetsFixture(effect: Effect, fixtureId: string | number): boolean {
@@ -75,7 +74,6 @@ export function buildMultiScopedPackets(
   slots: FixtureSlotInput[],
   allEffects: Effect[],
   blendMode: BlendMode,
-  extraFixture: Fixture | null = null,
 ): ScopedPackets {
   // Rebase each fixture so its DMX indices follow on from the previous slot.
   let nextStart = 1;
@@ -92,40 +90,10 @@ export function buildMultiScopedPackets(
     return rebased;
   });
 
-  // Append the ESP-NOW broadcast fixture (non-strip) after the strip slots.
-  // It participates in layout/channels/effects so the engine renders it, but
-  // it is NOT added to stripSlotsPacket — no GPIO, no LED strip.
-  let scopedExtra: Fixture | null = null;
-  let espNowLayout: ScopedPackets['espNowLayout'] | undefined;
-  if (extraFixture) {
-    const span = extraFixture.channels.reduce(
-      (max, ch) => Math.max(max, ch.addressOffset + 1), 0,
-    );
-    scopedExtra = Object.assign(
-      Object.create(Object.getPrototypeOf(extraFixture)),
-      extraFixture,
-      { startAddress: nextStart },
-    );
-    const dmxStart = nextStart - 1; // 0-based
-    const findOffset = (type: string) =>
-      extraFixture.channels.find(c => c.type === type)?.addressOffset ?? 0;
-    espNowLayout = {
-      dmxStart,
-      rIdx:   findOffset('RED'),
-      gIdx:   findOffset('GREEN'),
-      bIdx:   findOffset('BLUE'),
-      dimIdx: findOffset('DIMMER'),
-    };
-    nextStart += span;
-  }
+  const allScopedFixtures = scopedFixtures;
 
-  const allScopedFixtures = scopedExtra ? [...scopedFixtures, scopedExtra] : scopedFixtures;
-
-  // Effects that target at least one fixture in this scope (slots OR extra).
-  const sourceFixtureIds = [
-    ...slots.map(s => s.fixture.id),
-    ...(extraFixture ? [extraFixture.id] : []),
-  ];
+  // Effects that target at least one fixture in this scope.
+  const sourceFixtureIds = slots.map(s => s.fixture.id);
   const scopedEffects: Effect[] = allEffects
     .filter(fx => sourceFixtureIds.some(id => effectTargetsFixture(fx, id)))
     .map(fx => ({
@@ -144,6 +112,7 @@ export function buildMultiScopedPackets(
         ledCount:     sc?.ledCount     ?? 0,
         groupSize:    sc?.groupSize    ?? 1,
         ledsPerMeter: sc?.ledsPerMeter ?? 60,
+        ledOffset:    Math.max(0, Math.round(s.ledOffset ?? 0)),
       };
     }),
   );
@@ -153,7 +122,6 @@ export function buildMultiScopedPackets(
     channelsPacket:  buildChannelsBin(allScopedFixtures),
     effectsPacket:   buildEffectsBin(scopedEffects, allScopedFixtures, blendMode),
     stripSlotsPacket,
-    espNowLayout,
   };
 }
 
@@ -206,34 +174,18 @@ export function multiScopedFingerprint(
   slots: FixtureSlotInput[],
   allEffects: Effect[],
   blendMode: BlendMode,
-  extraFixture: Fixture | null = null,
-): { layout: string; channels: string; effects: string; strip: string; espNow: string } {
+): { layout: string; channels: string; effects: string; strip: string } {
   let strip = '';
   let combined = { layout: '', channels: '', effects: '' };
-  for (const { fixture, pin } of slots) {
+  for (const { fixture, pin, ledOffset } of slots) {
     const fp = scopedFingerprint(fixture, allEffects, blendMode);
     combined.layout   += fp.layout   + '|';
     combined.channels += fp.channels + '|';
     combined.effects   = fp.effects; // blendMode-part same; last one wins, effects accumulate per slot below
-    strip += `${fixture.id}:pin${pin ?? 0}:${fixture.stripConfig?.chipType}:${fixture.stripConfig?.ledCount}:${fixture.stripConfig?.groupSize}:${fixture.stripConfig?.ledsPerMeter}|`;
+    strip += `${fixture.id}:pin${pin ?? 0}:off${ledOffset ?? 0}:${fixture.stripConfig?.chipType}:${fixture.stripConfig?.ledCount}:${fixture.stripConfig?.groupSize}:${fixture.stripConfig?.ledsPerMeter}|`;
   }
-  let espNow = '';
-  if (extraFixture) {
-    const fp = scopedFingerprint(extraFixture, allEffects, blendMode);
-    combined.layout   += fp.layout   + '|';
-    combined.channels += fp.channels + '|';
-    // dmxStart depends on strip channel counts → fold those into the fingerprint
-    let totalStripChannels = 0;
-    for (const { fixture } of slots) {
-      totalStripChannels += fixture.channels.reduce((max, ch) => Math.max(max, ch.addressOffset + 1), 0);
-    }
-    espNow = `${extraFixture.id}:start${totalStripChannels}`;
-  }
-  // Rebuild effects fingerprint across all slots + extra
-  const sourceFixtures = [
-    ...slots.map(s => s.fixture),
-    ...(extraFixture ? [extraFixture] : []),
-  ];
+  // Rebuild effects fingerprint across all slots
+  const sourceFixtures = slots.map(s => s.fixture);
   let effects = blendMode + '|';
   for (const fx of allEffects) {
     if (!sourceFixtures.some(f => effectTargetsFixture(fx, f.id))) continue;
@@ -250,5 +202,5 @@ export function multiScopedFingerprint(
     if (cp) effects += `c:${cp.hueShift}:${cp.saturation}:${cp.hueRange}:${cp.satRange};`;
     effects += '|';
   }
-  return { layout: combined.layout, channels: combined.channels, effects, strip, espNow };
+  return { layout: combined.layout, channels: combined.channels, effects, strip };
 }

@@ -73,6 +73,19 @@ pub struct EffectEngine {
     pub stack_blend_mode: BlendMode,
     /// Accumulated warped time for speed-curve effects (tracked across frames).
     pub warped_time_ms: f32,
+    // Pre-allocated work buffers — avoid per-frame heap allocation on ESP32.
+    displacement_offsets: Vec<(f32, f32)>,
+    effects_generation: u32,
+    // SpeedCurve LUT cache — only rebuilt when effects or BPM change.
+    speed_curve_lut_combined: Vec<f32>,
+    speed_curve_lut_integral: Vec<f32>,
+    speed_curve_cached_bpm: f32,
+    speed_curve_cached_cycle_dur: f32,
+    speed_curve_cached_generation: u32,
+    // ColorEffect per-group work buffers.
+    color_reds: Vec<(usize, f32, f32)>,
+    color_greens: Vec<usize>,
+    color_blues: Vec<usize>,
 }
 
 impl Default for EffectEngine {
@@ -114,6 +127,16 @@ impl EffectEngine {
             effects: Vec::new(),
             stack_blend_mode: BlendMode::Add,
             warped_time_ms: 0.0,
+            displacement_offsets: Vec::new(),
+            effects_generation: 0,
+            speed_curve_lut_combined: vec![1.0f32; 257],
+            speed_curve_lut_integral: vec![0.0f32; 257],
+            speed_curve_cached_bpm: -1.0,
+            speed_curve_cached_cycle_dur: 0.0,
+            speed_curve_cached_generation: u32::MAX,
+            color_reds: Vec::new(),
+            color_greens: Vec::new(),
+            color_blues: Vec::new(),
         }
     }
 
@@ -142,6 +165,7 @@ impl EffectEngine {
             }
         }
         self.effects = new_effects;
+        self.effects_generation = self.effects_generation.wrapping_add(1);
     }
 
     // ── Unified binary dispatch ───────────────────────────────────────────────
@@ -193,7 +217,7 @@ impl EffectEngine {
                     .map(|(_, cfg)| cfg.clone());
                 self.targets.push(RenderTarget {
                     dmx_index: ch.dmx_index,
-                    channel_type: channel_type_name(ch.channel_type_id).to_string(),
+                    channel_type: std::borrow::Cow::Borrowed(channel_type_name(ch.channel_type_id)),
                     group_index: fixture.group_index,
                     world_x: ch.world_x,
                     world_y: ch.world_y,
@@ -256,58 +280,59 @@ impl EffectEngine {
             .any(|e| e.get_config().speed_curve_params.is_some());
 
         let (effective_time_ms, effective_delta_ms) = if has_speed_curve {
-            // Combine all SpeedCurveEffects multiplicatively, then compute warped time.
-            // We evaluate the combined multiplier at the current linear phase and
-            // integrate a tiny step to get the warped absolute time.
             use crate::effects::{sample_curve, warp_phase};
-
-            // Build a combined LUT per 256 samples: f_total(t) = product of all curves' f_i(t).
             const SAMPLES: usize = 256;
-            let mut combined = [1.0f32; SAMPLES + 1];
-            for effect in &self.effects {
-                let config = effect.get_config();
-                if let Some(scp) = &config.speed_curve_params {
-                    let beat_dur = 60000.0 / global_bpm.max(1.0);
-                    let cycle_dur = beat_dur * scp.cycle_beats as f32;
-                    if cycle_dur > 0.0 {
-                        for i in 0..=SAMPLES {
-                            let t = i as f32 / SAMPLES as f32;
-                            combined[i] *= sample_curve(&scp.points, t);
-                        }
-                    }
-                }
-            }
 
-            // Use the first SpeedCurveEffect's cycle duration (they should agree; if not, pick first).
-            let cycle_dur = {
-                let mut dur = 1000.0f32;
+            // Rebuild the combined LUT only when effects or BPM changed.
+            let need_rebuild = self.speed_curve_cached_generation != self.effects_generation
+                || (self.speed_curve_cached_bpm - global_bpm).abs() > 0.01;
+
+            if need_rebuild {
+                for v in self.speed_curve_lut_combined.iter_mut() { *v = 1.0; }
                 for effect in &self.effects {
                     let config = effect.get_config();
                     if let Some(scp) = &config.speed_curve_params {
                         let beat_dur = 60000.0 / global_bpm.max(1.0);
-                        dur = beat_dur * scp.cycle_beats as f32;
-                        break;
+                        let cycle_dur = beat_dur * scp.cycle_beats as f32;
+                        if cycle_dur > 0.0 {
+                            for i in 0..=SAMPLES {
+                                let t = i as f32 / SAMPLES as f32;
+                                self.speed_curve_lut_combined[i] *= sample_curve(&scp.points, t);
+                            }
+                        }
                     }
                 }
-                dur
-            };
-
-            // Build cumulative LUT for the combined curve.
-            let mut lut = [0.0f32; SAMPLES + 1];
-            {
+                // Determine cycle duration from first SpeedCurveEffect.
+                let cycle_dur = {
+                    let mut dur = 1000.0f32;
+                    for effect in &self.effects {
+                        let config = effect.get_config();
+                        if let Some(scp) = &config.speed_curve_params {
+                            let beat_dur = 60000.0 / global_bpm.max(1.0);
+                            dur = beat_dur * scp.cycle_beats as f32;
+                            break;
+                        }
+                    }
+                    dur
+                };
+                self.speed_curve_lut_integral[0] = 0.0;
                 let mut sum = 0.0f32;
-                let mut prev = combined[0];
+                let mut prev = self.speed_curve_lut_combined[0];
                 for i in 1..=SAMPLES {
-                    let curr = combined[i];
+                    let curr = self.speed_curve_lut_combined[i];
                     sum += (prev + curr) * 0.5 / SAMPLES as f32;
-                    lut[i] = sum;
+                    self.speed_curve_lut_integral[i] = sum;
                     prev = curr;
                 }
+                self.speed_curve_cached_bpm = global_bpm;
+                self.speed_curve_cached_cycle_dur = cycle_dur;
+                self.speed_curve_cached_generation = self.effects_generation;
             }
 
+            let cycle_dur = self.speed_curve_cached_cycle_dur;
             let cycles = (time_ms / cycle_dur).floor();
             let phase = ((time_ms % cycle_dur) / cycle_dur).clamp(0.0, 1.0);
-            let warped_phase = warp_phase(&lut, phase);
+            let warped_phase = warp_phase(&self.speed_curve_lut_integral, phase);
             let new_warped = cycles * cycle_dur + warped_phase * cycle_dur;
             let warped_delta = (new_warped - self.warped_time_ms).max(0.0);
             self.warped_time_ms = new_warped;
@@ -394,34 +419,37 @@ impl EffectEngine {
 
         // 3.0 Displacement pre-pass: compute per-target (dx, dy) from all active DisplacementEffects.
         // These offsets perturb the world position seen by all subsequent effects.
-        let displacement_offsets: Vec<(f32, f32)> = self.targets.iter().map(|target| {
+        // Reuse the pre-allocated Vec to avoid heap allocation every frame.
+        self.displacement_offsets.resize(self.targets.len(), (0.0, 0.0));
+        for target_idx in 0..self.targets.len() {
             let mut dx = 0.0f32;
             let mut dy = 0.0f32;
-            for effect in &self.effects {
-                let config = effect.get_config();
-                if config.displacement_params.is_none() { continue; }
-                // Check fixture targeting
-                if let Some(groups) = &config.target_group_indices {
-                    if !groups.contains(&target.group_index) { continue; }
-                }
-                // Check channel targeting
-                if !config.target_channels.is_empty() && !config.target_channels.contains(&target.channel_type) {
-                    continue;
-                }
-                if let Some((ex, ey)) = effect.sample_displacement(target.world_x, target.world_y) {
-                    dx += ex;
-                    dy += ey;
+            {
+                let target = &self.targets[target_idx];
+                for effect in &self.effects {
+                    let config = effect.get_config();
+                    if config.displacement_params.is_none() { continue; }
+                    if let Some(groups) = &config.target_group_indices {
+                        if !groups.contains(&target.group_index) { continue; }
+                    }
+                    if !config.target_channels.is_empty() && !config.target_channels.iter().any(|c| c.as_str() == target.channel_type.as_ref()) {
+                        continue;
+                    }
+                    if let Some((ex, ey)) = effect.sample_displacement(target.world_x, target.world_y) {
+                        dx += ex;
+                        dy += ey;
+                    }
                 }
             }
-            (dx, dy)
-        }).collect();
+            self.displacement_offsets[target_idx] = (dx, dy);
+        }
 
         for (target_idx, target) in self.targets.iter().enumerate() {
             let dmx_index = target.dmx_index;
             if dmx_index >= self.dmx_buffer.len() || target.resolution == 0 {
                 continue;
             }
-            let (disp_x, disp_y) = displacement_offsets[target_idx];
+            let (disp_x, disp_y) = self.displacement_offsets[target_idx];
             let eff_world_x = target.world_x + disp_x;
             let eff_world_y = target.world_y + disp_y;
 
@@ -439,7 +467,7 @@ impl EffectEngine {
                 }
 
                 // Empty target_channels means "all channel types"
-                if !config.target_channels.is_empty() && !config.target_channels.contains(&target.channel_type) {
+                if !config.target_channels.is_empty() && !config.target_channels.iter().any(|c| c.as_str() == target.channel_type.as_ref()) {
                     continue;
                 }
 
@@ -515,24 +543,28 @@ impl EffectEngine {
                 // Multi-pixel fixtures (LED strips, matrices) have many R/G/B
                 // triples per group — pair them by position so EACH pixel gets
                 // its own hue rotation with its own world coords for spatial cycle.
-                let reds: Vec<(usize, f32, f32)> = self.targets.iter()
-                    .filter(|t| t.group_index == group_idx && t.channel_type == "RED")
-                    .map(|t| (t.dmx_index, t.world_x, t.world_y))
-                    .collect();
-                let greens: Vec<usize> = self.targets.iter()
-                    .filter(|t| t.group_index == group_idx && t.channel_type == "GREEN")
-                    .map(|t| t.dmx_index)
-                    .collect();
-                let blues: Vec<usize> = self.targets.iter()
-                    .filter(|t| t.group_index == group_idx && t.channel_type == "BLUE")
-                    .map(|t| t.dmx_index)
-                    .collect();
+                // Reuse pre-allocated Vecs to avoid heap allocation every frame.
+                self.color_reds.clear();
+                self.color_greens.clear();
+                self.color_blues.clear();
+                for i in 0..self.targets.len() {
+                    if self.targets[i].group_index != group_idx { continue; }
+                    let dmx = self.targets[i].dmx_index;
+                    let wx  = self.targets[i].world_x;
+                    let wy  = self.targets[i].world_y;
+                    let is_red   = self.targets[i].channel_type == "RED";
+                    let is_green = !is_red && self.targets[i].channel_type == "GREEN";
+                    let is_blue  = !is_red && !is_green && self.targets[i].channel_type == "BLUE";
+                    if is_red   { self.color_reds.push((dmx, wx, wy)); }
+                    else if is_green { self.color_greens.push(dmx); }
+                    else if is_blue  { self.color_blues.push(dmx); }
+                }
 
-                let pixel_count = reds.len().min(greens.len()).min(blues.len());
+                let pixel_count = self.color_reds.len().min(self.color_greens.len()).min(self.color_blues.len());
                 for p in 0..pixel_count {
-                    let (ri, wx, wy) = reds[p];
-                    let gi = greens[p];
-                    let bi = blues[p];
+                    let (ri, wx, wy) = self.color_reds[p];
+                    let gi = self.color_greens[p];
+                    let bi = self.color_blues[p];
 
                     let r = self.render_buffer[ri] / 255.0;
                     let g = self.render_buffer[gi] / 255.0;

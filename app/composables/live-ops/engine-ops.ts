@@ -8,7 +8,7 @@ registerLiveOp<{ bpm: number }>('engine.bpm', {
   persistent: true,
   apply: ({ bpm }, _userId, ctx) => {
     if (!ctx.engineStore.engine) return;
-    ctx.engineStore.baseBpm.value = bpm;
+    ctx.engineStore.baseBpm = bpm;
   },
 });
 

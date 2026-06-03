@@ -10,7 +10,7 @@ import { fromConfig, applyConfig } from '~/utils/connectors/registry';
 // ConnectorSnapshot baked into ProjectSnapshot remains as a redundant
 // fallback if the tail is empty.
 
-type ConnectorType = 'websocket' | 'serial' | 'artnet';
+type ConnectorType = 'websocket' | 'serial' | 'artnet' | 'espnow-bridge';
 
 // ─── Add ──────────────────────────────────────────────────────────────────────
 

@@ -19,13 +19,14 @@ const TARGETS: Record<string, { dir: string; env: string; label: string }> = {
   ws:      { dir: 'pio-ws', env: 'esp32s3_neopixel',     label: 'ESP32-S3 NeoPixel WiFi (pio-ws)' },
   'ws-eth':{ dir: 'pio-ws', env: 'esp32s3_eth_neopixel', label: 'ESP32-S3 NeoPixel Ethernet (pio-ws)' },
   p4:      { dir: 'pio',    env: 'waveshare_p4_poe',     label: 'ESP32-P4 PoE (pio)' },
+  bridge:  { dir: 'pio-espnow-bridge', env: 'esp32s3_espnow_bridge', label: 'ESP32-S3 ESP-NOW USB-Bridge (pio-espnow-bridge)' },
 };
 
 const args = process.argv.slice(2);
 const target = args[0];
 
 if (!target || !(target in TARGETS)) {
-  console.error('Usage: bun run flash <ws|p4> [--build | --upload | --monitor] [--port <path>] [--clean]');
+  console.error('Usage: bun run flash <ws|ws-eth|p4|bridge> [--build | --upload | --monitor] [--port <path>] [--clean]');
   console.error('Targets:');
   for (const [k, v] of Object.entries(TARGETS)) console.error(`  ${k}  ${v.label}`);
   process.exit(1);

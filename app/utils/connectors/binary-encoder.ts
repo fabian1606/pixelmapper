@@ -18,8 +18,8 @@ export const TYPE_OTA_END       = 0x17;
 export const TYPE_UNIVERSE_MAP  = 0x18;
 export const TYPE_STRIP_CONFIG  = 0x19;
 export const TYPE_STRIP_SLOTS   = 0x1A;
-export const TYPE_ESPNOW_SLOT   = 0x1B;
-export const TYPE_ESPNOW_ENABLE = 0x1C;
+// ESP-NOW USB bridge (separate esp32s3_espnow_bridge firmware):
+export const TYPE_COLOR_CMD     = 0x20; // r,g,b,brightness → ESP-NOW broadcast
 
 // Chip-type IDs sent in TYPE_STRIP_CONFIG / TYPE_STRIP_SLOTS. ESP32-S3 firmware
 // v1 only honours WS2812B (id 0); the field exists for forward-compat.
@@ -152,11 +152,18 @@ export function buildStripConfigPacket(cfg: StripConfigPayload): Uint8Array {
 //
 // Payload:
 //   [slotCount: u8]
-//   per slot:
+//   per slot (8 bytes):
 //     [pin: u8, chipType: u8, ledCount: u16, groupSize: u16, ledsPerMeter: u16]
+//
+// NOTE: ledOffset (start-LED on shared pin) is stored in FixtureSlotInput but
+// NOT yet encoded on the wire — the firmware (main.cpp) needs to be compiled
+// with the working-tree changes (pinBase / ledOffset support, 10 bytes/slot)
+// before that field can be sent. Until then keep the packet at 8 bytes so it
+// stays compatible with the HEAD firmware that expects exactly 8 bytes/slot.
 
 export interface StripSlotPayload extends StripConfigPayload {
-  pin: number; // GPIO pin number
+  pin: number;        // GPIO pin number
+  ledOffset?: number; // Start-LED auf dem Pin (default 0) — not yet encoded
 }
 
 export function buildStripSlotsPacket(slots: StripSlotPayload[]): Uint8Array {
@@ -168,43 +175,26 @@ export function buildStripSlotsPacket(slots: StripSlotPayload[]): Uint8Array {
     w.u16(Math.max(0, Math.min(65535, Math.round(s.ledCount))));
     w.u16(Math.max(1, Math.min(65535, Math.round(s.groupSize))));
     w.u16(Math.max(0, Math.min(65535, Math.round(s.ledsPerMeter))));
+    // ledOffset goes here once the firmware is updated to 10 bytes/slot:
+    // w.u16(Math.max(0, Math.min(65535, Math.round(s.ledOffset ?? 0))));
   }
   return w.toPacket(TYPE_STRIP_SLOTS);
 }
 
-// ── ESP-NOW broadcast slot packet (TYPE_ESPNOW_SLOT 0x1B) ────────────────────
-// Tells the ESP which 4 DMX bytes (R/G/B + Dimmer) to copy into a 4-byte
-// ColorCommand and broadcast via ESP-NOW. Sent on connect and whenever the
-// bound broadcast fixture or its DMX-address changes.
-//
-// Payload: [enabled: u8][dmxStart: u16][rIdx: u8][gIdx: u8][bIdx: u8][dimIdx: u8]
-// All indices are 0-based DMX positions in the scoped DMX buffer. When disabled,
-// firmware suppresses sending without freeing the esp_now peer (cheap toggle).
+// ── ESP-NOW USB bridge packets ────────────────────────────────────────────
+// Sent to the standalone esp32s3_espnow_bridge firmware over USB serial. The
+// bridge re-broadcasts whatever it receives via ESP-NOW to FF:FF:FF:FF:FF:FF,
+// stamping each packet with its persisted receiver-id so multiple bridges can
+// coexist on one channel.
 
-export interface EspNowSlotPayload {
-  enabled:   boolean;
-  dmxStart:  number; // 0-based DMX index where the broadcast fixture's R channel sits
-  rIdx:      number; // offset from dmxStart (always 0 for DRGB-Fader, kept for forward-compat)
-  gIdx:      number;
-  bIdx:      number;
-  dimIdx:    number;
-}
-
-export function buildEspNowEnablePacket(enabled: boolean): Uint8Array {
+/** Color frame: 4 bytes the bridge broadcasts as-is (r,g,b,brightness). */
+export function buildColorCommandPacket(r: number, g: number, b: number, brightness: number): Uint8Array {
   const w = new BufWriter();
-  w.u8(enabled ? 1 : 0);
-  return w.toPacket(TYPE_ESPNOW_ENABLE);
-}
-
-export function buildEspNowSlotPacket(p: EspNowSlotPayload): Uint8Array {
-  const w = new BufWriter();
-  w.u8(p.enabled ? 1 : 0);
-  w.u16(Math.max(0, Math.min(65535, p.dmxStart | 0)));
-  w.u8(p.rIdx & 0xff);
-  w.u8(p.gIdx & 0xff);
-  w.u8(p.bIdx & 0xff);
-  w.u8(p.dimIdx & 0xff);
-  return w.toPacket(TYPE_ESPNOW_SLOT);
+  w.u8(r & 0xff);
+  w.u8(g & 0xff);
+  w.u8(b & 0xff);
+  w.u8(brightness & 0xff);
+  return w.toPacket(TYPE_COLOR_CMD);
 }
 
 // ── Universe map packet (TYPE_UNIVERSE_MAP 0x18) ──────────────────────────────

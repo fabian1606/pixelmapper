@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import { BaseConnector, type ConnectorMeta, type ConnectorStatus, type EngineConnectorState } from './base-connector';
-import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket, buildEspNowSlotPacket, buildEspNowEnablePacket } from './binary-encoder';
+import { buildBpmPacket, buildTimesyncPacket, buildVersionRequestPacket } from './binary-encoder';
 import {
   buildMultiScopedPackets, multiScopedFingerprint,
   type FixtureSlotInput,
@@ -16,6 +16,13 @@ import {
 export interface FixtureSlot {
   fixtureId: string | number;
   pin: number | null;
+  /**
+   * Start-LED-Index dieses logischen Strips auf der gemeinsamen Datenleitung
+   * (dem Pin). Erlaubt, einen physischen Strip in mehrere Fixtures aufzuteilen,
+   * die sich denselben Pin teilen (z.B. erste 500 LEDs = Fixture A, ab LED 500
+   * = Fixture B). Fehlend/undefined = 0.
+   */
+  ledOffset?: number;
 }
 
 export class WebSocketConnector extends BaseConnector {
@@ -30,10 +37,6 @@ export class WebSocketConnector extends BaseConnector {
   label         = ref<string>('');
   firmwareVersion = ref<string | null>(null);
   devicePin     = ref<number | null>(null);
-  /** Optional RGB-Fader fixture broadcast via ESP-NOW from this ESP. */
-  espNowFixtureId = ref<string | number | null>(null);
-  /** Whether ESP-NOW broadcasting is enabled on the device (persisted in NVS). */
-  espNowEnabled   = ref<boolean>(false);
 
   /** Backward-compat: first slot's fixtureId (or null). */
   get fixtureId(): string | number | null {
@@ -55,8 +58,6 @@ export class WebSocketConnector extends BaseConnector {
   private cachedStripFp:    string = '';
   private frameCount = 0;
   private cachedSlotsFp:    string = '';
-  private cachedEspNowFp:    string = '';
-  private cachedEspNowEnFp:  string = '';
   private readonly TIMESYNC_INTERVAL = 1;
 
   constructor(id: string, url = '', fixtureId: string | number | null = null) {
@@ -191,7 +192,7 @@ export class WebSocketConnector extends BaseConnector {
   private resetCaches() {
     this.frameCount = 0;
     this.cachedBpm = -1;
-    this.cachedLayoutFp = this.cachedChannelsFp = this.cachedEffectsFp = this.cachedStripFp = this.cachedSlotsFp = this.cachedEspNowFp = this.cachedEspNowEnFp = '';
+    this.cachedLayoutFp = this.cachedChannelsFp = this.cachedEffectsFp = this.cachedStripFp = this.cachedSlotsFp = '';
     this.firmwareVersion.value = null;
   }
 
@@ -219,38 +220,42 @@ export class WebSocketConnector extends BaseConnector {
     // slot. This ensures the per-slot GPIO pin (configured in the UI) reaches
     // the firmware via TYPE_STRIP_SLOTS — TYPE_STRIP_CONFIG has no pin field
     // and would force the firmware to fall back to its NVS-persisted pin.
-    // Fall back to the firmware-reported pin when the user hasn't set one in
-    // the UI — avoids sending pin=0 (which isn't a valid LED data pin).
+    //
+    // Pin resolution: the device-reported `devicePin` is a sensible fallback
+    // ONLY for a single-slot connector. With multiple slots, falling back to the
+    // same default pin would silently collapse two strips onto one GPIO — the
+    // firmware then registers a single controller and the second fixture's
+    // pixels overwrite the first, so only one physical strip lights. So fall
+    // back to devicePin only for the first slot; every further slot must carry
+    // its own explicit pin, and two slots may never resolve to the same pin
+    // (the firmware can't yet distinguish them — ledOffset isn't on the wire).
     const defaultPin = this.devicePin.value;
     const slotInputs: FixtureSlotInput[] = [];
-    for (const slot of slots) {
+    const seenPins = new Set<number>();
+    slots.forEach((slot, index) => {
       const fixture = state.fixtures.find(f => String(f.id) === String(slot.fixtureId));
-      if (fixture) slotInputs.push({ fixture, pin: slot.pin ?? defaultPin });
-    }
+      if (!fixture) return;
+      const resolvedPin = slot.pin ?? (index === 0 ? defaultPin : null);
+      if (resolvedPin == null) {
+        this.pushLog(`[sync] Streifen ${index + 1} übersprungen — kein GPIO-Pin gesetzt`);
+        return;
+      }
+      if (seenPins.has(resolvedPin)) {
+        this.pushLog(`[sync] Streifen ${index + 1} übersprungen — GPIO ${resolvedPin} schon von einem anderen Streifen belegt`);
+        return;
+      }
+      seenPins.add(resolvedPin);
+      slotInputs.push({ fixture, pin: resolvedPin, ledOffset: slot.ledOffset ?? 0 });
+    });
     if (!slotInputs.length) return;
 
-    // Push espNowEnabled toggle whenever it changes. Independent of the
-    // fixture-bound slot packet — firmware persists this to NVS and lives-
-    // inits / shuts down ESP-NOW accordingly.
-    const enFp = this.espNowEnabled.value ? '1' : '0';
-    if (first || enFp !== this.cachedEspNowEnFp) {
-      this.send(buildEspNowEnablePacket(this.espNowEnabled.value));
-      this.cachedEspNowEnFp = enFp;
-      this.pushLog(`[sync] espnow-enable ${this.espNowEnabled.value ? 'on' : 'off'}`);
-    }
-
-    const extraFixture = this.espNowFixtureId.value != null
-      ? (state.fixtures.find(f => String(f.id) === String(this.espNowFixtureId.value)) ?? null)
-      : null;
-
-    const fp = multiScopedFingerprint(slotInputs, state.effects, state.blendMode, extraFixture);
+    const fp = multiScopedFingerprint(slotInputs, state.effects, state.blendMode);
 
     if (first || fp.strip !== this.cachedStripFp ||
         fp.layout !== this.cachedLayoutFp ||
         fp.channels !== this.cachedChannelsFp ||
-        fp.effects !== this.cachedEffectsFp ||
-        fp.espNow !== this.cachedEspNowFp) {
-      const scoped = buildMultiScopedPackets(slotInputs, state.effects, state.blendMode, extraFixture);
+        fp.effects !== this.cachedEffectsFp) {
+      const scoped = buildMultiScopedPackets(slotInputs, state.effects, state.blendMode);
 
       if (scoped.stripSlotsPacket && (first || fp.strip !== this.cachedStripFp)) {
         this.send(scoped.stripSlotsPacket);
@@ -260,15 +265,6 @@ export class WebSocketConnector extends BaseConnector {
       if (first || fp.layout !== this.cachedLayoutFp)     { this.send(scoped.layoutPacket);   this.cachedLayoutFp   = fp.layout;   this.pushLog(`[sync] layout ${scoped.layoutPacket.length}B`);   }
       if (first || fp.channels !== this.cachedChannelsFp) { this.send(scoped.channelsPacket); this.cachedChannelsFp = fp.channels; this.pushLog(`[sync] channels ${scoped.channelsPacket.length}B`); }
       if (first || fp.effects !== this.cachedEffectsFp)   { this.send(scoped.effectsPacket);  this.cachedEffectsFp  = fp.effects;  this.pushLog(`[sync] effects ${scoped.effectsPacket.length}B`);  }
-      if (first || fp.espNow !== this.cachedEspNowFp) {
-        const layout = scoped.espNowLayout;
-        const pkt = buildEspNowSlotPacket(layout
-          ? { enabled: true,  dmxStart: layout.dmxStart, rIdx: layout.rIdx, gIdx: layout.gIdx, bIdx: layout.bIdx, dimIdx: layout.dimIdx }
-          : { enabled: false, dmxStart: 0, rIdx: 0, gIdx: 1, bIdx: 2, dimIdx: 3 });
-        this.send(pkt);
-        this.cachedEspNowFp = fp.espNow;
-        this.pushLog(`[sync] espnow-slot ${pkt.length}B (${layout ? 'on' : 'off'})`);
-      }
     }
 
     if (first || this.frameCount % this.TIMESYNC_INTERVAL === 0) {
@@ -326,8 +322,6 @@ export class WebSocketConnector extends BaseConnector {
       fixtureSlots:    this.fixtureSlots.value.slice(),
       label:           this.label.value,
       devicePin:       this.devicePin.value,
-      espNowFixtureId: this.espNowFixtureId.value,
-      espNowEnabled:   this.espNowEnabled.value,
       outputMapping:   this.outputMapping.value.slice(),
     };
   }
@@ -336,14 +330,13 @@ export class WebSocketConnector extends BaseConnector {
     const wc = new WebSocketConnector(id, String(config.url ?? ''));
     wc.label.value     = String(config.label ?? '');
     wc.devicePin.value = config.devicePin != null ? Number(config.devicePin) : null;
-    wc.espNowFixtureId.value = (config.espNowFixtureId as string | number | null | undefined) ?? null;
-    wc.espNowEnabled.value   = config.espNowEnabled === true;
 
     if (Array.isArray(config.fixtureSlots) && config.fixtureSlots.length) {
       // New format
       wc.fixtureSlots.value = (config.fixtureSlots as FixtureSlot[]).map(s => ({
         fixtureId: s.fixtureId,
         pin:       s.pin ?? null,
+        ledOffset: s.ledOffset ?? 0,
       }));
     } else if (config.fixtureId != null) {
       // Legacy format: single fixtureId stored directly

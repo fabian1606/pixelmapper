@@ -6,7 +6,18 @@ export interface LiveControllerInstance {
   definitionKey: string
 }
 
-export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'none'
+export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'position-recall' | 'none'
+
+export interface MovingHeadPosition {
+  id: string
+  name: string
+  snapshot: Array<{
+    fixtureId: string | number
+    channelOffset: number
+    channelType: string
+    value: number
+  }>
+}
 
 export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed'
 
@@ -59,6 +70,8 @@ export interface LiveMapping {
   // dimmer-group
   groupId?: string | number
   fixtureIds?: (string | number)[]
+  // position-recall
+  positionId?: string
 }
 
 /**
@@ -92,7 +105,7 @@ export interface LiveWidget {
   groupId?: string
 }
 
-export type SectionSource = 'all-presets' | 'preset-variants' | 'color-variants'
+export type SectionSource = 'all-presets' | 'selected-presets' | 'preset-variants' | 'color-variants'
 export type SectionMode = 'flash' | 'single-select' | 'multi-select'
 
 export interface SectionMember {
@@ -110,6 +123,12 @@ export interface LiveSection {
   source: SectionSource
   mode: SectionMode
   members: SectionMember[]
+  /**
+   * For source === 'selected-presets': an ordered, user-curated list of preset
+   * IDs. Slot order follows this list (filtered to presets that still exist),
+   * mapping onto the section's members by canvas position.
+   */
+  selectedPresetIds?: string[]
   /**
    * For source === 'color-variants': one entry per ordered member slot.
    * Slot 0 is always `null` (mirrors the active preset's natural RGB).

@@ -64,6 +64,16 @@ const circleDiameterM = computed(() => lengthMeters.value / Math.PI);
 
 const groupSizeClamped = computed(() => Math.min(Math.max(1, groupSize.value), ledCount.value));
 
+// Logical pixels drive ESP32 RAM usage (~3 render targets each). High counts —
+// especially with Bezier/SpeedCurve effects — can exhaust the ESP32-S3 heap.
+const WARN_PIXEL_THRESHOLD = 600;
+const HARD_PIXEL_THRESHOLD = 1000;
+const pixelSeverity = computed<'none' | 'warn' | 'hard'>(() => {
+  if (pixelCount.value > HARD_PIXEL_THRESHOLD) return 'hard';
+  if (pixelCount.value > WARN_PIXEL_THRESHOLD) return 'warn';
+  return 'none';
+});
+
 // ─── Submit ───────────────────────────────────────────────────────────────────
 
 function handleAdd() {
@@ -257,6 +267,26 @@ function handleAdd() {
           </p>
         </div>
       </div>
+    </div>
+
+    <!-- ── RAM / pixel-count warning ───────────────────────────────────────── -->
+    <div
+      v-if="pixelSeverity !== 'none'"
+      class="rounded-lg border px-4 py-3 text-xs leading-relaxed"
+      :class="pixelSeverity === 'hard'
+        ? 'border-orange-500/40 bg-orange-500/10 text-orange-300'
+        : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300'"
+    >
+      <span class="font-semibold">{{ pixelCount }} logische Pixel</span>
+      <template v-if="pixelSeverity === 'hard'">
+        — sehr hoch. Der ESP32 kann hier (v.a. mit Bezier/SpeedCurve-Effekten)
+        instabil werden oder abstürzen. Reduziere die LED-Anzahl oder erhöhe die
+        Gruppengröße. Über LAN/Ethernet ist mehr möglich als über WLAN.
+      </template>
+      <template v-else>
+        — am Limit. Über WLAN können Aussetzer auftreten; erhöhe die Gruppengröße,
+        falls der ESP abstürzt.
+      </template>
     </div>
 
     <!-- ── Submit ──────────────────────────────────────────────────────────── -->

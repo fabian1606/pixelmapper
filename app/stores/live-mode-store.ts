@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance } from '~/utils/live/types';
+import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance, MovingHeadPosition } from '~/utils/live/types';
 import { clearFlashStack } from '~/components/engine/composables/preset-activation';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
@@ -31,6 +31,10 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   const activeSectionMembers = ref<Map<string, Set<string>>>(new Map());
   /** Controller instances persisted with the project. Auto-connect on load. */
   const liveControllers = ref<LiveControllerInstance[]>([]);
+  /** Saved moving head positions for live performance recall. */
+  const savedPositions = ref<MovingHeadPosition[]>([]);
+
+  const POSITION_CHANNEL_TYPES = new Set(['PAN', 'PAN_CONTINUOUS', 'TILT', 'TILT_CONTINUOUS', 'PANTILT_SPEED']);
 
   const activePage = computed(() => pages.value.find(p => p.id === activePageId.value) ?? null);
 
@@ -52,6 +56,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     sectionMappingMode.value = null;
     activeSectionMembers.value = new Map();
     liveControllers.value = [];
+    savedPositions.value = [];
   }
 
   function addLiveController(instance: LiveControllerInstance) {
@@ -66,6 +71,40 @@ export const useLiveModeStore = defineStore('live-mode', () => {
 
   function loadLiveControllers(incoming: LiveControllerInstance[]) {
     liveControllers.value = incoming.filter(c => c && typeof c === 'object' && typeof c.id === 'string');
+  }
+
+  function savePosition(name: string, flatFixtures: any[]): string | null {
+    const snapshot: MovingHeadPosition['snapshot'] = [];
+    for (const fixture of flatFixtures) {
+      for (let i = 0; i < fixture.channels.length; i++) {
+        const ch = fixture.channels[i];
+        if (POSITION_CHANNEL_TYPES.has(ch.type)) {
+          snapshot.push({
+            fixtureId: fixture.id,
+            channelOffset: i,
+            channelType: ch.type,
+            value: ch.chaserConfig.stepValues[0] ?? 0,
+          });
+        }
+      }
+    }
+    if (snapshot.length === 0) return null;
+    const position: MovingHeadPosition = { id: crypto.randomUUID(), name, snapshot };
+    savedPositions.value = [...savedPositions.value, position];
+    return position.id;
+  }
+
+  function deletePosition(id: string) {
+    savedPositions.value = savedPositions.value.filter(p => p.id !== id);
+  }
+
+  function updatePositionName(id: string, name: string) {
+    const pos = savedPositions.value.find(p => p.id === id);
+    if (pos) pos.name = name;
+  }
+
+  function loadPositions(incoming: MovingHeadPosition[]) {
+    savedPositions.value = JSON.parse(JSON.stringify(incoming));
   }
 
   function exitIsolation() {
@@ -203,12 +242,17 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     sectionMappingMode,
     activeSectionMembers,
     liveControllers,
+    savedPositions,
     activePage,
     loadPages,
     reset,
     addLiveController,
     removeLiveController,
     loadLiveControllers,
+    savePosition,
+    deletePosition,
+    updatePositionName,
+    loadPositions,
     exitIsolation,
     exitSectionIsolation,
     exitSectionMappingMode,

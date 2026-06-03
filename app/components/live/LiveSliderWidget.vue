@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
-import { useEngineStore } from '~/stores/engine-store';
+import { applyMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -11,7 +11,6 @@ const props = defineProps<{
 }>();
 
 const liveBus = useLiveBusStore();
-const engineStore = useEngineStore();
 
 const value = ref(0); // 0–1
 
@@ -20,120 +19,15 @@ const fillStyle = computed(() => ({
   backgroundColor: props.widget.color ?? '#6366f1',
 }));
 
-// ── Dimmer-group helpers ────────────────────────────────────────────────────
-
-// Base values captured for virtual-dimmer fixtures (no DIMMER channel).
-// Key: `${fixtureId}:${channelIndex}`. Reset whenever the mapping changes.
-const dimmerBaseValues = new Map<string, number>();
-
+// Per-instance virtual-dimmer base-value tracking; reset when the mapping changes.
+const dimmerState = createDimmerState();
 watch(() => props.widget.mapping, () => {
-  dimmerBaseValues.clear();
+  dimmerState.baseValues.clear();
+  dimmerState.lastTarget.clear();
 }, { deep: true });
 
-function getFixturesForDimmerGroup(): any[] {
-  const { mapping } = props.widget;
-
-  if (mapping.fixtureId != null && !mapping.groupId) {
-    const f = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-    return f ? [f] : [];
-  }
-
-  if (mapping.groupId) {
-    const findGroup = (nodes: any[]): any => {
-      for (const node of nodes) {
-        if (String(node.id) === String(mapping.groupId)) return node;
-        if (node.children?.length) {
-          const found = findGroup(node.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-    const group = findGroup(engineStore.sceneNodes);
-    if (group?.getAllFixtures) return group.getAllFixtures();
-  }
-
-  return [];
-}
-
-function applyDimmerGroup(v: number) {
-  const fixtures = getFixturesForDimmerGroup();
-  let didChange = false;
-
-  for (const fixture of fixtures) {
-    const dimmerChannels = fixture.channels.filter((ch: any) => ch.role === 'DIMMER');
-
-    if (dimmerChannels.length > 0) {
-      // Real DIMMER channels → set directly
-      for (const ch of dimmerChannels) {
-        ch.chaserConfig.stepValues = [Math.round(v * 255)];
-      }
-      didChange = true;
-    } else {
-      // Virtual dimmer → scale COLOR channels from captured base values
-      const colorChannels = fixture.channels.filter((ch: any) => ch.role === 'COLOR');
-      for (let i = 0; i < fixture.channels.length; i++) {
-        const ch = fixture.channels[i];
-        if (ch.role !== 'COLOR') continue;
-        const key = `${fixture.id}:${i}`;
-        if (!dimmerBaseValues.has(key)) {
-          dimmerBaseValues.set(key, ch.chaserConfig.stepValues[0] ?? 255);
-        }
-        const base = dimmerBaseValues.get(key)!;
-        ch.chaserConfig.stepValues = [Math.round(v * base)];
-      }
-      if (colorChannels.length > 0) didChange = true;
-    }
-  }
-
-  if (didChange) engineStore.triggerCanvasSync?.();
-}
-
 function applyValue(v: number) {
-  const { mapping } = props.widget;
-
-  if (mapping.type === 'channel') {
-    if (mapping.groupId && mapping.channelType) {
-      // Group channel: set all matching channel types across the group
-      const fixtures = getFixturesForDimmerGroup();
-      for (const fixture of fixtures) {
-        for (const ch of fixture.channels) {
-          if (ch.type === mapping.channelType) {
-            ch.chaserConfig.stepValues = [Math.round(v * 255)];
-          }
-        }
-      }
-      engineStore.triggerCanvasSync?.();
-    } else if (mapping.fixtureId != null && mapping.channelOffset != null) {
-      const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-      const ch = fixture?.channels[mapping.channelOffset];
-      if (ch) {
-        ch.chaserConfig.stepValues = [Math.round(v * 255)];
-        engineStore.triggerCanvasSync?.();
-      }
-    }
-  } else if (mapping.type === 'dimmer-group') {
-    applyDimmerGroup(v);
-  } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null) {
-    const effect = engineStore.activeEffects.find((e: any) => e.id === mapping.effectId);
-    if (effect) {
-      const key = mapping.paramKey;
-      if (key === 'strength') {
-        effect.strength = v;
-      } else if (key === 'speed') {
-        if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + v * 5000));
-      } else if (key === 'fanning') {
-        effect.fanning = v;
-      } else if (key.startsWith('waveformParams.')) {
-        const paramName = key.split('.')[1];
-        if (!effect.waveformParams) effect.waveformParams = { param: 0.5, start: 0, end: 1 };
-        if (paramName === 'param') effect.waveformParams.param = v;
-        else if (paramName === 'start') effect.waveformParams.start = v;
-        else if (paramName === 'end') effect.waveformParams.end = v;
-      }
-      engineStore.triggerCanvasSync?.();
-    }
-  }
+  applyMapping(props.widget.mapping, true, { key: props.widget.id, value: v, dimmerState });
 }
 
 let dragging = false;

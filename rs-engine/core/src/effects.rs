@@ -655,14 +655,17 @@ pub fn build_cumulative(points: &[CurvePoint]) -> [f32; CURVE_LUT_SAMPLES + 1] {
 }
 
 /// Maps linear phase t ∈ [0,1] → warped phase τ(t) ∈ [0,1] via F⁻¹.
-pub fn warp_phase(lut: &[f32; CURVE_LUT_SAMPLES + 1], t: f32) -> f32 {
+pub fn warp_phase(lut: &[f32], t: f32) -> f32 {
+    let n = lut.len();
+    if n < 2 { return t; }
+    let samples = n - 1;
     if t <= 0.0 { return 0.0; }
     if t >= 1.0 { return 1.0; }
-    let total = lut[CURVE_LUT_SAMPLES];
+    let total = lut[samples];
     if total < 1e-9 { return t; }
     let target = t * total;
     let mut lo = 0usize;
-    let mut hi = CURVE_LUT_SAMPLES;
+    let mut hi = samples;
     while lo < hi - 1 {
         let mid = (lo + hi) >> 1;
         if lut[mid] <= target { lo = mid; } else { hi = mid; }
@@ -670,7 +673,7 @@ pub fn warp_phase(lut: &[f32; CURVE_LUT_SAMPLES + 1], t: f32) -> f32 {
     let lut_lo = lut[lo];
     let lut_hi = lut[hi];
     let frac = if lut_hi - lut_lo < 1e-12 { 0.0 } else { (target - lut_lo) / (lut_hi - lut_lo) };
-    ((lo as f32 + frac) / CURVE_LUT_SAMPLES as f32).clamp(0.0, 1.0)
+    ((lo as f32 + frac) / samples as f32).clamp(0.0, 1.0)
 }
 
 // ─── Speed Curve Effect ───────────────────────────────────────────────────────

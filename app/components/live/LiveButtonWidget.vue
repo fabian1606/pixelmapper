@@ -6,7 +6,7 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
 import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
-import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
+import { applyMapping, isFlashMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -55,19 +55,8 @@ const isFlash = computed(() => {
   if (section.membership.value?.section.mode === 'flash') return true;
   // Section bound preset is flash
   if (section.boundPreset.value?.type === 'flash') return true;
-  const { mapping } = props.widget;
-  // Own mapping preset is flash or overwrite
-  if (mapping.type === 'preset' && mapping.presetId) {
-    const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
-    if (preset?.type === 'flash' || preset?.type === 'overwrite') return true;
-  }
-  // Speed buttons can be latch — only flash when behavior === 'hold'
-  if (mapping.type === 'global-function' && mapping.globalFunction === 'speed') {
-    return (mapping.globalFunctionConfig as SpeedConfig | undefined)?.behavior === 'hold';
-  }
-  // Other global functions are hold-to-active (flash behavior)
-  if (mapping.type === 'global-function') return true;
-  return false;
+  // Own mapping flash/overwrite/global-function detection (shared with controller twins).
+  return isFlashMapping(props.widget.mapping);
 });
 
 const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
@@ -77,57 +66,10 @@ const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
 });
 onUnmounted(offTrigger);
 
+const dimmerState = createDimmerState();
+
 function applyOwnMapping(active: boolean) {
-  const { mapping } = props.widget;
-  if (mapping.type === 'preset' && mapping.presetId) {
-    const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
-    if (preset?.type === 'overwrite' && preset.overwriteTarget) {
-      if (active) {
-        engineStore.pressOverwrite(props.widget.id, preset.overwriteTarget, {});
-        queueMicrotask(() => liveBus.dispatch('overwrite.press', {
-          key: props.widget.id,
-          type: preset.overwriteTarget!,
-          config: {},
-        }));
-      } else {
-        engineStore.releaseOverwrite(props.widget.id);
-        queueMicrotask(() => liveBus.dispatch('overwrite.release', { key: props.widget.id }));
-      }
-    } else if (preset?.type === 'flash') {
-      if (active) pressFlashPreset(props.widget.id, mapping.presetId);
-      else releaseFlashPreset(props.widget.id);
-    } else if (active) {
-      setActivePreset(mapping.presetId);
-    }
-  } else if (mapping.type === 'channel' && mapping.fixtureId != null && mapping.channelOffset != null) {
-    const fixture = engineStore.flatFixtures.find((f: any) => f.id === mapping.fixtureId);
-    const ch = fixture?.channels[mapping.channelOffset];
-    if (ch) {
-      ch.stepValues = [active ? 255 : 0];
-      engineStore.triggerCanvasSync?.();
-    }
-  } else if (mapping.type === 'global-function' && mapping.globalFunction === 'speed') {
-    const cfg = (mapping.globalFunctionConfig ?? { multiplier: 1, behavior: 'latch' }) as SpeedConfig;
-    if (active) {
-      engineStore.setSpeedMultiplier(cfg.multiplier);
-      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: cfg.multiplier }));
-    } else if (cfg.behavior === 'hold') {
-      engineStore.setSpeedMultiplier(1);
-      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: 1 }));
-    }
-  } else if (mapping.type === 'global-function' && mapping.globalFunction) {
-    if (active) {
-      engineStore.pressOverwrite(props.widget.id, mapping.globalFunction, mapping.globalFunctionConfig ?? {});
-      queueMicrotask(() => liveBus.dispatch('overwrite.press', {
-        key: props.widget.id,
-        type: mapping.globalFunction!,
-        config: mapping.globalFunctionConfig ?? {},
-      }));
-    } else {
-      engineStore.releaseOverwrite(props.widget.id);
-      queueMicrotask(() => liveBus.dispatch('overwrite.release', { key: props.widget.id }));
-    }
-  }
+  applyMapping(props.widget.mapping, active, { key: props.widget.id, dimmerState });
 }
 
 function onPointerDown(e: PointerEvent) {

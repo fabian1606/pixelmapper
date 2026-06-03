@@ -17,12 +17,15 @@
     "flash:ws": "bun run scripts/flash.ts ws",
     "flash:ws-eth": "bun run scripts/flash.ts ws-eth",
     "flash:p4": "bun run scripts/flash.ts p4",
+    "flash:bridge": "bun run scripts/flash.ts bridge",
     "build:ws": "bun run scripts/flash.ts ws --build",
     "build:ws-eth": "bun run scripts/flash.ts ws-eth --build",
     "build:p4": "bun run scripts/flash.ts p4 --build",
+    "build:bridge": "bun run scripts/flash.ts bridge --build",
     "monitor:ws": "bun run scripts/flash.ts ws --monitor",
     "monitor:ws-eth": "bun run scripts/flash.ts ws-eth --monitor",
-    "monitor:p4": "bun run scripts/flash.ts p4 --monitor"
+    "monitor:p4": "bun run scripts/flash.ts p4 --monitor",
+    "monitor:bridge": "bun run scripts/flash.ts bridge --monitor"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",

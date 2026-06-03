@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum BlendMode {
@@ -51,7 +52,9 @@ pub struct RenderTarget {
     #[serde(rename = "dmxIndex")]
     pub dmx_index: usize,
     #[serde(rename = "channelType")]
-    pub channel_type: String, // Or Enum if we want strict matching
+    // Cow so the ESP32 FFI path (channel_type_name returns &'static str) can store
+    // a zero-alloc Borrowed variant, while the browser serde_json path produces Owned.
+    pub channel_type: Cow<'static, str>, // Or Enum if we want strict matching
     #[serde(rename = "groupIndex")]
     pub group_index: usize, // e.g. Fixture ID for fanning
     #[serde(rename = "worldX")]

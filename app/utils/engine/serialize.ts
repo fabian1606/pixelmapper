@@ -5,7 +5,7 @@ import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
 import type { Effect } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
-import type { LivePage } from '~/utils/live/types'
+import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
 import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command'
 
@@ -88,6 +88,8 @@ export interface ProjectSnapshot {
    * memberKey[]). Restored on reload so lit-up buttons survive a page refresh.
    */
   activeSectionMembers?: Record<string, string[]>
+  /** Saved moving head positions for live performance recall. */
+  savedPositions?: MovingHeadPosition[]
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -158,6 +160,7 @@ export function serializeProject(
   globalBpm: number = 120,
   clockEpoch: number = Date.now(),
   activeSectionMembers: Record<string, string[]> = {},
+  savedPositions: MovingHeadPosition[] = [],
 ): ProjectSnapshot {
   return {
     sceneNodes: sceneNodes.map(serializeNode),
@@ -167,6 +170,7 @@ export function serializeProject(
     activeEffects: JSON.parse(JSON.stringify(activeEffects)),
     livePages: JSON.parse(JSON.stringify(livePages)),
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
+    savedPositions: JSON.parse(JSON.stringify(savedPositions)),
     selectedPresetId,
     connectors: JSON.parse(JSON.stringify(connectors)),
     globalBpm,
@@ -262,6 +266,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   globalBpm: number
   clockEpoch: number
   activeSectionMembers: Record<string, string[]>
+  savedPositions: MovingHeadPosition[]
 } {
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
@@ -275,5 +280,6 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     globalBpm: snapshot.globalBpm ?? 120,
     clockEpoch: snapshot.clockEpoch ?? Date.now(),
     activeSectionMembers: snapshot.activeSectionMembers ?? {},
+    savedPositions: JSON.parse(JSON.stringify(snapshot.savedPositions ?? [])),
   }
 }

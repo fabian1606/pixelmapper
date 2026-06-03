@@ -165,8 +165,12 @@ export const useEngineStore = defineStore('engine', () => {
       // Blackout everything first so an overwrite is a clean slate: only the
       // channels/effects the override preset defines should be lit, everything
       // else goes to zero (not the previously-played preset's look).
+      // Movement channels (PAN/TILT/…) are excluded — overwrites should not
+      // snap moving heads to 0.
+      const MOVEMENT_TYPES = new Set(['PAN', 'PAN_CONTINUOUS', 'TILT', 'TILT_CONTINUOUS', 'PANTILT_SPEED']);
       for (const f of fixtures) {
         for (const ch of f.channels) {
+          if (MOVEMENT_TYPES.has(ch.type)) continue;
           ch.chaserConfig.stepValues = [0];
           ch.chaserConfig.stepsCount = 1;
           ch.chaserConfig.activeEditStep = 0;
@@ -646,6 +650,7 @@ export const useEngineStore = defineStore('engine', () => {
           layoutPacket,
           channelsPacket,
           effectsPacket,
+          dmxBuffer: outputBuffer,
           fixtures: flatFixtures.value,
           effects: activeEffects.value,
           blendMode: engine.stackBlendMode.value,
@@ -758,7 +763,7 @@ export const useEngineStore = defineStore('engine', () => {
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
     const connectionsStore = useConnectionsStore();
     connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers } = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = deserializeProject(snapshot);
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
@@ -786,6 +791,7 @@ export const useEngineStore = defineStore('engine', () => {
       Object.entries(restoredSectionMembers).map(([k, v]) => [k, new Set(v)]),
     );
     liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
+    liveStore.loadPositions(restoredPositions);
     // Reset the worker engine so no stale state from a previous project leaks
     // into the first frames, then dispatch fresh packets.
     engine.reset();
@@ -1022,6 +1028,7 @@ export const useEngineStore = defineStore('engine', () => {
         Object.fromEntries(
           [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
         ),
+        liveStore.savedPositions,
       );
     }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { Play } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
+import { Play, GripVertical, Trash2, MapPin, Plus } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { useControllerStore } from '~/stores/controller-store';
@@ -25,15 +25,9 @@ import {
   type SectionMember,
   type SectionMode,
   type SectionSource,
-  type GlobalFunctionType,
-  type StrobeConfig,
-  type BlindConfig,
-  type SpeedConfig,
-  defaultStrobeConfig,
-  defaultBlindConfig,
-  defaultSpeedConfig,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
+import { resolveSectionSource } from '~/utils/live/sections';
 import { getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
 
 const store = useLiveModeStore();
@@ -112,46 +106,6 @@ function patchWidget(patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'colo
   history.execute(new UpdateWidgetMappingCommand(store.activePageId, w.id, patch));
 }
 
-function setButtonMappingType(type: LiveMapping['type']) {
-  const base: LiveMapping = { type };
-  if (type === 'global-function') {
-    base.globalFunction = 'strobe';
-    base.globalFunctionConfig = defaultStrobeConfig();
-  }
-  patchWidget({ mapping: base });
-}
-
-function setButtonGlobalFunction(fn: GlobalFunctionType) {
-  const w = selectedButton.value;
-  if (!w) return;
-  let config: any = {};
-  if (fn === 'strobe') config = defaultStrobeConfig();
-  else if (fn === 'blind') config = defaultBlindConfig();
-  else if (fn === 'speed') config = defaultSpeedConfig();
-  patchWidget({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
-}
-
-function setButtonSpeedConfig(patch: Partial<SpeedConfig>) {
-  const w = selectedButton.value;
-  if (!w) return;
-  const existing = (w.mapping.globalFunctionConfig ?? {}) as SpeedConfig;
-  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultSpeedConfig(), ...existing, ...patch } } });
-}
-
-function setButtonStrobeConfig(patch: Partial<StrobeConfig>) {
-  const w = selectedButton.value;
-  if (!w) return;
-  const existing = (w.mapping.globalFunctionConfig ?? {}) as StrobeConfig;
-  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultStrobeConfig(), ...existing, ...patch } } });
-}
-
-function setButtonBlindConfig(patch: Partial<BlindConfig>) {
-  const w = selectedButton.value;
-  if (!w) return;
-  const existing = (w.mapping.globalFunctionConfig ?? {}) as BlindConfig;
-  patchWidget({ mapping: { ...w.mapping, globalFunctionConfig: { ...defaultBlindConfig(), ...existing, ...patch } } });
-}
-
 function setButtonLabel(label: string) {
   patchWidget({ label });
 }
@@ -176,92 +130,6 @@ const selectedChild = computed<ControllerChildBinding | null>(() => {
   return twin.controllerChildren?.find(c => c.controlId === ctrl.id) ?? null;
 });
 
-const presets = computed(() => engineStore.savedPresets ?? []);
-
-// ── Dimmer-group helpers ────────────────────────────────────────────────────
-
-const dimmerGroupNodes = computed(() =>
-  (engineStore.sceneNodes as any[]).filter(n => n.children != null),
-);
-
-function dimmerGroupValue(mapping: LiveMapping): string {
-  if (mapping.groupId) return `group:${mapping.groupId}`;
-  if (mapping.fixtureId != null) return `fixture:${mapping.fixtureId}`;
-  return '';
-}
-
-function setDimmerGroupForWidget(raw: string) {
-  if (!raw) {
-    patchWidget({ mapping: { type: 'dimmer-group' } });
-  } else if (raw.startsWith('group:')) {
-    patchWidget({ mapping: { type: 'dimmer-group', groupId: raw.slice(6), fixtureId: undefined } });
-  } else {
-    patchWidget({ mapping: { type: 'dimmer-group', fixtureId: raw.slice(8), groupId: undefined } });
-  }
-}
-
-function setDimmerGroupForChild(raw: string) {
-  if (!raw) {
-    patchChild({ mapping: { type: 'dimmer-group' } });
-  } else if (raw.startsWith('group:')) {
-    patchChild({ mapping: { type: 'dimmer-group', groupId: raw.slice(6), fixtureId: undefined } });
-  } else {
-    patchChild({ mapping: { type: 'dimmer-group', fixtureId: raw.slice(8), groupId: undefined } });
-  }
-}
-
-// ── Channel (DMX) with group support ───────────────────────────────────────
-
-function findGroupFixtures(groupId: string | number): any[] {
-  const findGroup = (nodes: any[]): any => {
-    for (const node of nodes) {
-      if (String(node.id) === String(groupId)) return node;
-      if (node.children?.length) { const f = findGroup(node.children); if (f) return f; }
-    }
-    return null;
-  };
-  const g = findGroup(engineStore.sceneNodes as any[]);
-  return g?.getAllFixtures?.() ?? [];
-}
-
-function channelTypesForGroup(groupId: string | number): string[] {
-  const fixtures = findGroupFixtures(groupId);
-  const seen = new Set<string>();
-  for (const f of fixtures) {
-    for (const ch of f.channels) {
-      if (ch.type) seen.add(ch.type);
-    }
-  }
-  return [...seen].sort();
-}
-
-// shared value helper for channel mapping (group:X or fixture:X)
-function channelTargetValue(mapping: LiveMapping): string {
-  if (mapping.groupId) return `group:${mapping.groupId}`;
-  if (mapping.fixtureId != null) return `fixture:${mapping.fixtureId}`;
-  return '';
-}
-
-function setChannelTargetForWidget(raw: string) {
-  if (!raw) {
-    patchWidget({ mapping: { type: 'channel' } });
-  } else if (raw.startsWith('group:')) {
-    patchWidget({ mapping: { type: 'channel', groupId: raw.slice(6), fixtureId: undefined, channelOffset: undefined } });
-  } else {
-    patchWidget({ mapping: { type: 'channel', fixtureId: raw.slice(8), groupId: undefined, channelType: undefined } });
-  }
-}
-
-function setChannelTargetForChild(raw: string) {
-  if (!raw) {
-    patchChild({ mapping: { type: 'channel' } });
-  } else if (raw.startsWith('group:')) {
-    patchChild({ mapping: { type: 'channel', groupId: raw.slice(6), fixtureId: undefined, channelOffset: undefined } });
-  } else {
-    patchChild({ mapping: { type: 'channel', fixtureId: raw.slice(8), groupId: undefined, channelType: undefined } });
-  }
-}
-
 function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>) {
   const twin = selectedTwin.value;
   const ctrl = selectedControl.value;
@@ -269,47 +137,6 @@ function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'lab
   history.execute(new UpdateControllerChildMappingCommand(
     store.activePageId, twin.id, ctrl.id, patch,
   ));
-}
-
-function setMappingType(type: LiveMapping['type']) {
-  if (type === 'global-function') {
-    patchChild({ mapping: { type, globalFunction: 'strobe', globalFunctionConfig: defaultStrobeConfig() } });
-  } else {
-    patchChild({ mapping: { type } });
-  }
-}
-
-function setMappingPreset(presetId: string) {
-  patchChild({ mapping: { type: 'preset', presetId } });
-}
-
-function setChildGlobalFunction(fn: GlobalFunctionType) {
-  let config: any = {};
-  if (fn === 'strobe') config = defaultStrobeConfig();
-  else if (fn === 'blind') config = defaultBlindConfig();
-  else if (fn === 'speed') config = defaultSpeedConfig();
-  patchChild({ mapping: { type: 'global-function', globalFunction: fn, globalFunctionConfig: config } });
-}
-
-function setChildSpeedConfig(patch: Partial<SpeedConfig>) {
-  const child = selectedChild.value;
-  if (!child) return;
-  const existing = (child.mapping.globalFunctionConfig ?? {}) as SpeedConfig;
-  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultSpeedConfig(), ...existing, ...patch } } });
-}
-
-function setChildStrobeConfig(patch: Partial<StrobeConfig>) {
-  const child = selectedChild.value;
-  if (!child) return;
-  const existing = (child.mapping.globalFunctionConfig ?? {}) as StrobeConfig;
-  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultStrobeConfig(), ...existing, ...patch } } });
-}
-
-function setChildBlindConfig(patch: Partial<BlindConfig>) {
-  const child = selectedChild.value;
-  if (!child) return;
-  const existing = (child.mapping.globalFunctionConfig ?? {}) as BlindConfig;
-  patchChild({ mapping: { ...child.mapping, globalFunctionConfig: { ...defaultBlindConfig(), ...existing, ...patch } } });
 }
 
 function setLabel(label: string) {
@@ -383,9 +210,18 @@ const eligibleAddTargets = computed<LiveSection[]>(() => {
 function defaultModeForSource(source: SectionSource): SectionMode {
   switch (source) {
     case 'all-presets':         return 'single-select';
+    case 'selected-presets':    return 'single-select';
     case 'preset-variants':     return 'single-select';
     case 'color-variants':      return 'single-select';
   }
+}
+
+/** Preset IDs the 'all-presets' source would currently surface, in its order. */
+function allPresetIds(): string[] {
+  return resolveSectionSource('all-presets', {
+    savedPresets: engineStore.savedPresets,
+    selectedPresetId: engineStore.selectedPresetId,
+  }).map(s => s.preset.id);
 }
 
 function createSectionFromSelection() {
@@ -450,7 +286,74 @@ function updateSectionSource(source: SectionSource) {
       : null;
     patch.colorVariants = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
   }
+  // Seed the curated list from the current "all presets" set on first switch,
+  // so the user starts from everything and prunes/reorders from there.
+  if (source === 'selected-presets' && (!sec.selectedPresetIds || sec.selectedPresetIds.length === 0)) {
+    patch.selectedPresetIds = allPresetIds();
+  }
   history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, patch));
+}
+
+// ── Selected-presets list editor ──────────────────────────────────────────
+
+/** Ordered entries for the selected-presets editor (preset may be null if deleted). */
+const selectedPresetEntries = computed(() => {
+  const sec = selectionSection.value;
+  if (!sec || sec.source !== 'selected-presets') return [];
+  const byId = new Map(engineStore.savedPresets.map(p => [p.id, p]));
+  return (sec.selectedPresetIds ?? []).map(id => ({ id, preset: byId.get(id) ?? null }));
+});
+
+/** Top-level presets not yet in the curated list — candidates for the add picker. */
+const addablePresets = computed(() => {
+  const sec = selectionSection.value;
+  if (!sec || sec.source !== 'selected-presets') return [];
+  const have = new Set(sec.selectedPresetIds ?? []);
+  return resolveSectionSource('all-presets', {
+    savedPresets: engineStore.savedPresets,
+    selectedPresetId: engineStore.selectedPresetId,
+  }).map(s => s.preset).filter(p => !have.has(p.id));
+});
+
+function setSelectedPresetIds(ids: string[]) {
+  const sec = selectionSection.value;
+  if (!sec || !store.activePageId) return;
+  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { selectedPresetIds: ids }));
+}
+
+// Drag-to-reorder state for the selected-presets list.
+const dragFromIdx = ref<number | null>(null);
+const dragOverIdx = ref<number | null>(null);
+
+function onSelectedPresetDrop(toIdx: number) {
+  const from = dragFromIdx.value;
+  dragFromIdx.value = null;
+  dragOverIdx.value = null;
+  if (from === null || from === toIdx) return;
+  const sec = selectionSection.value;
+  if (!sec) return;
+  const ids = [...(sec.selectedPresetIds ?? [])];
+  const [moved] = ids.splice(from, 1);
+  if (moved === undefined) return;
+  ids.splice(toIdx, 0, moved);
+  setSelectedPresetIds(ids);
+}
+
+function removeSelectedPreset(index: number) {
+  const sec = selectionSection.value;
+  if (!sec) return;
+  const ids = [...(sec.selectedPresetIds ?? [])];
+  ids.splice(index, 1);
+  setSelectedPresetIds(ids);
+}
+
+function addSelectedPreset(id: string) {
+  const sec = selectionSection.value;
+  if (!sec || !id) return;
+  const ids = [...(sec.selectedPresetIds ?? [])];
+  if (ids.includes(id)) return;
+  ids.push(id);
+  setSelectedPresetIds(ids);
 }
 
 /** Update a single slot's stored color (slot 0 is always preset-natural and not user-editable). */
@@ -515,6 +418,35 @@ function updateSectionName(name: string) {
   history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { name }));
 }
 
+// ── Moving Head Positions (shown under XY-Pad widgets) ──────────────────────
+
+const newPositionName = ref('');
+
+function savePosition() {
+  const name = newPositionName.value.trim() || `Position ${store.savedPositions.length + 1}`;
+  const id = store.savePosition(name, engineStore.flatFixtures);
+  if (id) newPositionName.value = '';
+}
+
+function recallPosition(id: string) {
+  const position = store.savedPositions.find(p => p.id === id);
+  if (!position) return;
+  for (const snap of position.snapshot) {
+    const fixture = (engineStore.flatFixtures as any[]).find(f => f.id === snap.fixtureId);
+    const ch = fixture?.channels[snap.channelOffset];
+    if (ch) ch.chaserConfig.stepValues = [snap.value];
+  }
+  engineStore.triggerCanvasSync?.();
+}
+
+function deletePosition(id: string) {
+  store.deletePosition(id);
+}
+
+function renamePosition(id: string, name: string) {
+  store.updatePositionName(id, name.trim() || 'Position');
+}
+
 function deleteSelectedSection() {
   const sec = selectionSection.value;
   if (!sec || !store.activePageId) return;
@@ -567,10 +499,27 @@ const isInMappingMode = computed(() => {
 });
 
 const SOURCE_LABELS: Record<SectionSource, string> = {
-  'all-presets': 'All Presets',
+  'all-presets': 'Presets',
+  'selected-presets': 'Presets',
   'preset-variants': 'Variants of Active Preset',
   'color-variants': 'Color Variants',
 };
+
+// The "Content" dropdown groups the two preset sources under one entry; a
+// second dropdown then picks between all vs. a hand-picked set.
+type SectionContent = 'presets' | 'preset-variants' | 'color-variants';
+const CONTENT_LABELS: Record<SectionContent, string> = {
+  'presets': 'Presets',
+  'preset-variants': 'Variants of Active Preset',
+  'color-variants': 'Color Variants',
+};
+function contentOf(source: SectionSource): SectionContent {
+  return (source === 'all-presets' || source === 'selected-presets') ? 'presets' : source;
+}
+function updateSectionContent(content: SectionContent) {
+  // Switching into "Presets" defaults to the dynamic all-presets source.
+  updateSectionSource(content === 'presets' ? 'all-presets' : content);
+}
 const MODE_LABELS: Record<SectionMode, string> = {
   'flash': 'Flash (hold = active)',
   'single-select': 'Single-select (one active)',
@@ -644,10 +593,70 @@ const MODE_LABELS: Record<SectionMode, string> = {
             <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Content</span>
             <select
               class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="contentOf(selectionSection.source)"
+              @change="(e) => updateSectionContent((e.target as HTMLSelectElement).value as SectionContent)"
+            >
+              <option v-for="(label, key) in CONTENT_LABELS" :key="key" :value="key">{{ label }}</option>
+            </select>
+          </div>
+
+          <!-- Presets: all vs. a hand-picked, ordered set -->
+          <div v-if="contentOf(selectionSection.source) === 'presets'" class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Presets</span>
+            <select
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
               :value="selectionSection.source"
               @change="(e) => updateSectionSource((e.target as HTMLSelectElement).value as SectionSource)"
             >
-              <option v-for="(label, key) in SOURCE_LABELS" :key="key" :value="key">{{ label }}</option>
+              <option value="all-presets">All presets</option>
+              <option value="selected-presets">Selected presets</option>
+            </select>
+          </div>
+
+          <!-- Selected-presets editor: reorder, remove, add -->
+          <div v-if="selectionSection.source === 'selected-presets'" class="flex flex-col gap-1.5">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Selected presets</span>
+            <div v-if="selectedPresetEntries.length === 0" class="text-[10px] text-muted-foreground/70 leading-snug">
+              No presets selected. Add some below.
+            </div>
+            <div v-else class="flex flex-col gap-1">
+              <div
+                v-for="(entry, i) in selectedPresetEntries"
+                :key="entry.id"
+                class="group/row flex items-center gap-1 text-[11px] rounded"
+                :class="dragOverIdx === i ? 'border-t-2 border-primary' : ''"
+                draggable="true"
+                @dragstart="dragFromIdx = i"
+                @dragover.prevent="dragOverIdx = i"
+                @drop="onSelectedPresetDrop(i)"
+                @dragend="dragFromIdx = null; dragOverIdx = null"
+              >
+                <GripVertical class="size-3 shrink-0 text-muted-foreground/40 cursor-grab active:cursor-grabbing" />
+                <span class="text-muted-foreground/60 w-4 tabular-nums shrink-0">{{ i + 1 }}</span>
+                <span class="flex-1 min-w-0 truncate" :class="{ 'text-destructive italic': !entry.preset }">
+                  {{ entry.preset?.name ?? '(deleted preset)' }}
+                </span>
+                <button
+                  type="button"
+                  class="shrink-0 p-1 rounded hover:bg-destructive/20 text-destructive opacity-0 group-hover/row:opacity-100"
+                  title="Remove from list"
+                  @click="removeSelectedPreset(i)"
+                >
+                  <Trash2 class="size-3" />
+                </button>
+              </div>
+            </div>
+            <select
+              v-if="addablePresets.length > 0"
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              @change="(e) => {
+                const v = (e.target as HTMLSelectElement).value;
+                if (v) addSelectedPreset(v);
+                (e.target as HTMLSelectElement).value = '';
+              }"
+            >
+              <option value="">+ Add preset…</option>
+              <option v-for="p in addablePresets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
             </select>
           </div>
 
@@ -842,249 +851,17 @@ const MODE_LABELS: Record<SectionMode, string> = {
           {{ selectedControl.label ?? selectedControl.id }} · Mapping
         </span>
 
-        <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
+        <MappingEditor
+          v-if="!focusedControlSection"
+          :mapping="selectedChild?.mapping ?? { type: 'none' }"
+          :variant="selectedControl?.type === 'slider' ? 'slider' : 'button'"
+          @patch="(p: { mapping: LiveMapping }) => patchChild(p)"
+        />
+        <div v-else-if="focusedControlSection" class="flex flex-col gap-1">
           <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Type</span>
-          <!-- Slider controls: only fader-relevant options -->
-          <select
-            v-if="!focusedControlSection && selectedControl?.type === 'slider'"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild?.mapping?.type ?? 'none'"
-            @change="(e) => setMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
-          >
-            <option value="none">— none —</option>
-            <option value="channel">Channel (DMX)</option>
-            <option value="dimmer-group">Dimmer Group</option>
-            <option value="effect-param">Effect parameter</option>
-          </select>
-          <!-- Button/other controls: all options -->
-          <select
-            v-else-if="!focusedControlSection"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild?.mapping?.type ?? 'none'"
-            @change="(e) => setMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
-          >
-            <option value="none">— none —</option>
-            <option value="preset">Preset</option>
-            <option value="channel">Channel (DMX)</option>
-            <option value="dimmer-group">Dimmer Group</option>
-            <option value="effect-param">Effect parameter</option>
-            <option value="global-function">Global Function</option>
-            <option value="page-switch">Page switch</option>
-          </select>
-          <div v-else class="w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-muted-foreground">
+          <div class="w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-muted-foreground">
             Section
           </div>
-        </div>
-
-        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'preset'" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Preset</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild.mapping.presetId ?? ''"
-            @change="(e) => setMappingPreset((e.target as HTMLSelectElement).value)"
-          >
-            <option value="">— choose —</option>
-            <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
-          </select>
-        </div>
-
-        <!-- Channel picker (controller-twin) -->
-        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'channel'" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="channelTargetValue(selectedChild.mapping)"
-            @change="(e) => setChannelTargetForChild((e.target as HTMLSelectElement).value)"
-          >
-            <option value="">— choose group or fixture —</option>
-            <optgroup v-if="dimmerGroupNodes.length" label="Groups">
-              <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">{{ node.name }}</option>
-            </optgroup>
-            <optgroup label="Fixtures">
-              <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">{{ f.name }}</option>
-            </optgroup>
-          </select>
-
-          <!-- Group selected → pick channel type -->
-          <template v-if="selectedChild?.mapping.groupId">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel Type</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedChild.mapping.channelType ?? ''"
-              @change="(e) => { if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, channelType: (e.target as HTMLSelectElement).value } }); }"
-            >
-              <option value="">— choose type —</option>
-              <option v-for="t in channelTypesForGroup(selectedChild.mapping.groupId)" :key="t" :value="t">{{ t }}</option>
-            </select>
-          </template>
-
-          <!-- Fixture selected → pick channel index -->
-          <template v-else-if="selectedChild?.mapping.fixtureId != null">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedChild?.mapping.channelOffset ?? ''"
-              @change="(e) => {
-                const channelOffset = Number((e.target as HTMLSelectElement).value);
-                if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, channelOffset } });
-              }"
-            >
-              <option value="">— choose channel —</option>
-              <option v-for="(ch, idx) in engineStore.flatFixtures.find(f => f.id === selectedChild?.mapping.fixtureId)?.channels ?? []" :key="idx" :value="idx">
-                {{ ch.oflChannelName || `Ch ${idx}` }}
-              </option>
-            </select>
-          </template>
-        </div>
-
-        <!-- Dimmer group picker (controller-twin) -->
-        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'dimmer-group'" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="dimmerGroupValue(selectedChild.mapping)"
-            @change="(e) => setDimmerGroupForChild((e.target as HTMLSelectElement).value)"
-          >
-            <option value="">— choose group or fixture —</option>
-            <optgroup v-if="dimmerGroupNodes.length" label="Groups">
-              <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">
-                {{ node.name }}
-              </option>
-            </optgroup>
-            <optgroup label="Fixtures">
-              <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">
-                {{ f.name }}
-              </option>
-            </optgroup>
-          </select>
-        </div>
-
-        <!-- Effect parameter picker (controller-twin) -->
-        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'effect-param'" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Effect</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild.mapping.effectId ?? ''"
-            @change="(e) => patchChild({ mapping: { type: 'effect-param', effectId: (e.target as HTMLSelectElement).value } })"
-          >
-            <option value="">— choose effect —</option>
-            <option v-for="eff in engineStore.activeEffects" :key="eff.id" :value="eff.id">
-              {{ eff.id }}
-            </option>
-          </select>
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Parameter</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild?.mapping.paramKey ?? ''"
-            @change="(e) => { if (selectedChild) patchChild({ mapping: { ...selectedChild.mapping, paramKey: (e.target as HTMLSelectElement).value } }); }"
-          >
-            <option value="">— choose parameter —</option>
-            <option value="strength">Strength</option>
-            <option value="speed">Speed</option>
-            <option value="fanning">Fanning</option>
-            <option value="waveformParams.param">Waveform Param</option>
-            <option value="waveformParams.start">Waveform Start</option>
-            <option value="waveformParams.end">Waveform End</option>
-          </select>
-        </div>
-
-        <!-- Global Function config (controller-twin per-control) -->
-        <div v-if="!focusedControlSection && selectedChild?.mapping?.type === 'global-function'" class="flex flex-col gap-2">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Function</span>
-          <select
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild.mapping.globalFunction ?? 'strobe'"
-            @change="(e) => setChildGlobalFunction((e.target as HTMLSelectElement).value as GlobalFunctionType)"
-          >
-            <option value="strobe">Strobe</option>
-            <option value="blind">Blind (Full White)</option>
-            <option value="blackout">Blackout</option>
-            <option value="speed">Speed</option>
-          </select>
-
-          <template v-if="selectedChild.mapping.globalFunction === 'speed'">
-            <div class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Multiplier</label>
-              <input
-                type="number"
-                min="0"
-                max="16"
-                step="0.25"
-                class="flex-1 bg-background border border-border rounded px-2 py-1"
-                :value="(selectedChild.mapping.globalFunctionConfig as any)?.multiplier ?? 2"
-                @change="(e) => setChildSpeedConfig({ multiplier: Number((e.target as HTMLInputElement).value) })"
-              />
-            </div>
-            <div class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Behavior</label>
-              <select
-                class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-                :value="(selectedChild.mapping.globalFunctionConfig as any)?.behavior ?? 'latch'"
-                @change="(e) => setChildSpeedConfig({ behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
-              >
-                <option value="latch">Latch</option>
-                <option value="hold">Hold</option>
-              </select>
-            </div>
-          </template>
-
-          <template v-if="selectedChild.mapping.globalFunction === 'strobe'">
-            <div class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Beat sync</label>
-              <input
-                type="checkbox"
-                :checked="(selectedChild.mapping.globalFunctionConfig as any)?.beatSync ?? false"
-                @change="(e) => setChildStrobeConfig({ beatSync: (e.target as HTMLInputElement).checked })"
-              />
-            </div>
-            <div v-if="!(selectedChild.mapping.globalFunctionConfig as any)?.beatSync" class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Hz</label>
-              <input
-                type="number"
-                min="0.5"
-                max="25"
-                step="0.5"
-                class="flex-1 bg-background border border-border rounded px-2 py-1"
-                :value="(selectedChild.mapping.globalFunctionConfig as any)?.frequency ?? 8"
-                @change="(e) => setChildStrobeConfig({ frequency: Number((e.target as HTMLInputElement).value) })"
-              />
-            </div>
-            <div v-else class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Division</label>
-              <select
-                class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-                :value="String((selectedChild.mapping.globalFunctionConfig as any)?.beatDivision ?? 8)"
-                @change="(e) => setChildStrobeConfig({ beatDivision: Number((e.target as HTMLSelectElement).value) })"
-              >
-                <option value="1">1 (quarter)</option>
-                <option value="2">2 (8th)</option>
-                <option value="4">4 (16th)</option>
-                <option value="8">8 (32nd)</option>
-                <option value="0.5">½ (half)</option>
-                <option value="0.25">¼ (whole)</option>
-              </select>
-            </div>
-          </template>
-
-          <template v-if="selectedChild.mapping.globalFunction === 'blind'">
-            <div class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Color</label>
-              <input
-                type="color"
-                class="flex-1 h-7 bg-background border border-border rounded"
-                :value="(selectedChild.mapping.globalFunctionConfig as any)?.color ?? '#ffffff'"
-                @change="(e) => setChildBlindConfig({ color: (e.target as HTMLInputElement).value })"
-              />
-            </div>
-            <div class="flex items-center gap-2 text-xs">
-              <label class="text-muted-foreground/70 w-20 shrink-0">Dimmer ramp</label>
-              <input
-                type="checkbox"
-                :checked="(selectedChild.mapping.globalFunctionConfig as any)?.dimmerCurve ?? false"
-                @change="(e) => setChildBlindConfig({ dimmerCurve: (e.target as HTMLInputElement).checked })"
-              />
-            </div>
-          </template>
         </div>
 
         <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
@@ -1139,275 +916,74 @@ const MODE_LABELS: Record<SectionMode, string> = {
           />
         </div>
 
-        <!-- Mapping type (buttons and sliders) -->
-        <div v-if="selectedButton.type === 'button' || selectedButton.type === 'slider'" class="flex flex-col gap-2">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">{{ selectedButton.type === 'button' ? 'Action' : 'Control' }}</span>
-          <!-- Button: all options -->
-          <select
-            v-if="selectedButton.type === 'button'"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedButton.mapping.type"
-            @change="(e) => setButtonMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
-          >
-            <option value="none">None</option>
-            <option value="preset">Preset</option>
-            <option value="channel">Channel (DMX)</option>
-            <option value="dimmer-group">Dimmer Group</option>
-            <option value="effect-param">Effect Parameter</option>
-            <option value="global-function">Global Function</option>
-            <option value="page-switch">Page Switch</option>
-          </select>
-          <!-- Slider: only fader-relevant options -->
-          <select
-            v-else-if="selectedButton.type === 'slider'"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedButton.mapping.type"
-            @change="(e) => setButtonMappingType((e.target as HTMLSelectElement).value as LiveMapping['type'])"
-          >
-            <option value="none">None</option>
-            <option value="channel">Channel (DMX)</option>
-            <option value="dimmer-group">Dimmer Group</option>
-            <option value="effect-param">Effect Parameter</option>
-          </select>
+        <!-- Mapping (buttons and sliders) -->
+        <MappingEditor
+          v-if="selectedButton.type === 'button' || selectedButton.type === 'slider'"
+          :mapping="selectedButton.mapping"
+          :variant="selectedButton.type === 'slider' ? 'slider' : 'button'"
+          @patch="(p: { mapping: LiveMapping }) => patchWidget(p)"
+        />
 
-          <!-- Preset picker -->
-          <div v-if="selectedButton.mapping.type === 'preset'" class="flex flex-col gap-1">
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedButton.mapping.presetId ?? ''"
-              @change="(e) => patchWidget({ mapping: { type: 'preset', presetId: (e.target as HTMLSelectElement).value } })"
-            >
-              <option value="">— choose preset —</option>
-              <option v-for="p in engineStore.savedPresets" :key="p.id" :value="p.id">{{ p.name }}</option>
-            </select>
+        <!-- Moving Head Positions (XY-Pad only) -->
+        <div v-if="selectedButton.type === 'xy-pad'" class="flex flex-col gap-2 pt-4 mt-1 border-t border-border">
+          <div class="flex items-center gap-1.5">
+            <MapPin class="size-3 text-muted-foreground" />
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Positionen</span>
           </div>
 
-          <!-- Global Function config -->
-          <div v-if="selectedButton.mapping.type === 'global-function'" class="flex flex-col gap-2">
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedButton.mapping.globalFunction ?? 'strobe'"
-              @change="(e) => setButtonGlobalFunction((e.target as HTMLSelectElement).value as GlobalFunctionType)"
+          <!-- Save current position -->
+          <div class="flex gap-1.5">
+            <input
+              v-model="newPositionName"
+              type="text"
+              class="flex-1 min-w-0 text-xs bg-background border border-border rounded px-2 py-1.5"
+              placeholder="Name…"
+              @keydown.enter="savePosition"
+            />
+            <button
+              type="button"
+              class="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors whitespace-nowrap"
+              title="Aktuelle Moving-Head-Position speichern"
+              @click="savePosition"
             >
-              <option value="strobe">Strobe</option>
-              <option value="blind">Blind (Full White)</option>
-              <option value="blackout">Blackout</option>
-              <option value="speed">Speed</option>
-            </select>
-
-            <!-- Speed config -->
-            <template v-if="selectedButton.mapping.globalFunction === 'speed'">
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Preset</label>
-                <select
-                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-                  :value="String((selectedButton.mapping.globalFunctionConfig as any)?.multiplier ?? 2)"
-                  @change="(e) => setButtonSpeedConfig({ multiplier: Number((e.target as HTMLSelectElement).value) })"
-                >
-                  <option value="0">Freeze (0×)</option>
-                  <option value="0.25">¼×</option>
-                  <option value="0.5">½×</option>
-                  <option value="1">Reset (1×)</option>
-                  <option value="2">2×</option>
-                  <option value="4">4×</option>
-                </select>
-              </div>
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Multiplier</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="16"
-                  step="0.25"
-                  class="flex-1 bg-background border border-border rounded px-2 py-1"
-                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.multiplier ?? 2"
-                  @change="(e) => setButtonSpeedConfig({ multiplier: Number((e.target as HTMLInputElement).value) })"
-                />
-              </div>
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Behavior</label>
-                <select
-                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.behavior ?? 'latch'"
-                  @change="(e) => setButtonSpeedConfig({ behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
-                >
-                  <option value="latch">Latch (toggle state)</option>
-                  <option value="hold">Hold (momentary)</option>
-                </select>
-              </div>
-            </template>
-
-            <!-- Strobe config -->
-            <template v-if="selectedButton.mapping.globalFunction === 'strobe'">
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Beat sync</label>
-                <input
-                  type="checkbox"
-                  :checked="(selectedButton.mapping.globalFunctionConfig as any)?.beatSync ?? false"
-                  @change="(e) => setButtonStrobeConfig({ beatSync: (e.target as HTMLInputElement).checked })"
-                />
-              </div>
-              <div v-if="!(selectedButton.mapping.globalFunctionConfig as any)?.beatSync" class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Hz</label>
-                <input
-                  type="number"
-                  min="0.5"
-                  max="25"
-                  step="0.5"
-                  class="flex-1 bg-background border border-border rounded px-2 py-1"
-                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.frequency ?? 8"
-                  @change="(e) => setButtonStrobeConfig({ frequency: Number((e.target as HTMLInputElement).value) })"
-                />
-              </div>
-              <div v-else class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Division</label>
-                <select
-                  class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-                  :value="String((selectedButton.mapping.globalFunctionConfig as any)?.beatDivision ?? 8)"
-                  @change="(e) => setButtonStrobeConfig({ beatDivision: Number((e.target as HTMLSelectElement).value) })"
-                >
-                  <option value="1">1 (quarter)</option>
-                  <option value="2">2 (8th)</option>
-                  <option value="4">4 (16th)</option>
-                  <option value="8">8 (32nd)</option>
-                  <option value="0.5">½ (half)</option>
-                  <option value="0.25">¼ (whole)</option>
-                </select>
-              </div>
-            </template>
-
-            <!-- Blind config -->
-            <template v-if="selectedButton.mapping.globalFunction === 'blind'">
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Color</label>
-                <input
-                  type="color"
-                  class="flex-1 h-7 bg-background border border-border rounded"
-                  :value="(selectedButton.mapping.globalFunctionConfig as any)?.color ?? '#ffffff'"
-                  @change="(e) => setButtonBlindConfig({ color: (e.target as HTMLInputElement).value })"
-                />
-              </div>
-              <div class="flex items-center gap-2 text-xs">
-                <label class="text-muted-foreground/70 w-20 shrink-0">Dimmer ramp</label>
-                <input
-                  type="checkbox"
-                  :checked="(selectedButton.mapping.globalFunctionConfig as any)?.dimmerCurve ?? false"
-                  @change="(e) => setButtonBlindConfig({ dimmerCurve: (e.target as HTMLInputElement).checked })"
-                />
-              </div>
-            </template>
+              <Plus class="size-3" />
+              Speichern
+            </button>
           </div>
 
-          <!-- Page switch picker -->
-          <div v-if="selectedButton.mapping.type === 'page-switch'" class="flex flex-col gap-1">
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedButton.mapping.targetPageId ?? ''"
-              @change="(e) => patchWidget({ mapping: { type: 'page-switch', targetPageId: (e.target as HTMLSelectElement).value } })"
-            >
-              <option value="">— choose page —</option>
-              <option v-for="pg in store.pages" :key="pg.id" :value="pg.id">{{ pg.name }}</option>
-            </select>
+          <!-- Saved positions: click to recall -->
+          <div v-if="store.savedPositions.length === 0" class="text-[10px] text-muted-foreground/70 leading-snug">
+            Noch keine Positionen. Richte die Moving Heads aus und speichere die aktuelle Position.
           </div>
-
-          <!-- Channel picker (button + slider) -->
-          <div v-if="selectedButton.mapping.type === 'channel'" class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="channelTargetValue(selectedButton.mapping)"
-              @change="(e) => setChannelTargetForWidget((e.target as HTMLSelectElement).value)"
+          <div v-else class="flex flex-col gap-1">
+            <div
+              v-for="pos in store.savedPositions"
+              :key="pos.id"
+              class="group/pos flex items-center gap-1 rounded hover:bg-accent/50 transition-colors"
             >
-              <option value="">— choose group or fixture —</option>
-              <optgroup v-if="dimmerGroupNodes.length" label="Groups">
-                <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">{{ node.name }}</option>
-              </optgroup>
-              <optgroup label="Fixtures">
-                <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">{{ f.name }}</option>
-              </optgroup>
-            </select>
-
-            <!-- Group selected → pick channel type -->
-            <template v-if="selectedButton.mapping.groupId">
-              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel Type</span>
-              <select
-                class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-                :value="selectedButton.mapping.channelType ?? ''"
-                @change="(e) => { if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, channelType: (e.target as HTMLSelectElement).value } }); }"
+              <button
+                type="button"
+                class="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1.5 text-left text-[11px]"
+                :title="`Position „${pos.name}“ abrufen`"
+                @click="recallPosition(pos.id)"
               >
-                <option value="">— choose type —</option>
-                <option v-for="t in channelTypesForGroup(selectedButton.mapping.groupId)" :key="t" :value="t">{{ t }}</option>
-              </select>
-            </template>
-
-            <!-- Fixture selected → pick channel index -->
-            <template v-else-if="selectedButton.mapping.fixtureId != null">
-              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Channel</span>
-              <select
-                class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-                :value="selectedButton.mapping.channelOffset ?? ''"
-                @change="(e) => {
-                  const channelOffset = Number((e.target as HTMLSelectElement).value);
-                  if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, channelOffset } });
-                }"
+                <MapPin class="size-3 shrink-0 text-muted-foreground/50" />
+                <input
+                  :value="pos.name"
+                  class="flex-1 min-w-0 bg-transparent truncate outline-none cursor-pointer focus:cursor-text focus:ring-1 focus:ring-ring rounded px-0.5"
+                  @click.stop
+                  @change="(e) => renamePosition(pos.id, (e.target as HTMLInputElement).value)"
+                />
+              </button>
+              <button
+                type="button"
+                class="shrink-0 p-1.5 rounded hover:bg-destructive/20 text-destructive opacity-0 group-hover/pos:opacity-100 transition-opacity"
+                title="Position löschen"
+                @click="deletePosition(pos.id)"
               >
-                <option value="">— choose channel —</option>
-                <option v-for="(ch, idx) in engineStore.flatFixtures.find(f => f.id === selectedButton?.mapping.fixtureId)?.channels ?? []" :key="idx" :value="idx">
-                  {{ ch.oflChannelName || `Ch ${idx}` }}
-                </option>
-              </select>
-            </template>
-          </div>
-
-          <!-- Dimmer group picker -->
-          <div v-if="selectedButton.mapping.type === 'dimmer-group'" class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Target</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="dimmerGroupValue(selectedButton.mapping)"
-              @change="(e) => setDimmerGroupForWidget((e.target as HTMLSelectElement).value)"
-            >
-              <option value="">— choose group or fixture —</option>
-              <optgroup v-if="dimmerGroupNodes.length" label="Groups">
-                <option v-for="node in dimmerGroupNodes" :key="node.id" :value="`group:${node.id}`">
-                  {{ node.name }}
-                </option>
-              </optgroup>
-              <optgroup label="Fixtures">
-                <option v-for="f in engineStore.flatFixtures" :key="f.id" :value="`fixture:${f.id}`">
-                  {{ f.name }}
-                </option>
-              </optgroup>
-            </select>
-          </div>
-
-          <!-- Effect parameter picker -->
-          <div v-if="selectedButton.mapping.type === 'effect-param'" class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Effect</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedButton.mapping.effectId ?? ''"
-              @change="(e) => patchWidget({ mapping: { type: 'effect-param', effectId: (e.target as HTMLSelectElement).value } })"
-            >
-              <option value="">— choose effect —</option>
-              <option v-for="eff in engineStore.activeEffects" :key="eff.id" :value="eff.id">
-                {{ eff.id }}
-              </option>
-            </select>
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Parameter</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectedButton.mapping.paramKey ?? ''"
-              @change="(e) => { if (selectedButton) patchWidget({ mapping: { ...selectedButton.mapping, paramKey: (e.target as HTMLSelectElement).value } }); }"
-            >
-              <option value="">— choose parameter —</option>
-              <option value="strength">Strength</option>
-              <option value="speed">Speed</option>
-              <option value="fanning">Fanning</option>
-              <option value="waveformParams.param">Waveform Param</option>
-              <option value="waveformParams.start">Waveform Start</option>
-              <option value="waveformParams.end">Waveform End</option>
-            </select>
+                <Trash2 class="size-3" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
