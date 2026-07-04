@@ -18,11 +18,19 @@ import {
   resolveClickSelection,
   createDoubleClickTracker,
 } from '~/utils/engine/selection-logic';
+import {
+  resolveAlignmentContext,
+  buildAlignmentSession,
+  queryAlignment,
+  bboxCenter,
+  ALIGN_TOLERANCE_PX,
+  type AlignmentSession,
+} from '~/utils/engine/alignment-guides';
 
 const props = defineProps<{ active: boolean }>();
 
 const engineStore = useEngineStore();
-const { selectedIds, layoutRevision, flatFixtures } = storeToRefs(engineStore);
+const { selectedIds, layoutRevision, flatFixtures, sceneNodes } = storeToRefs(engineStore);
 const history = useHistory();
 const liveBus = useLiveBusStore();
 
@@ -141,6 +149,26 @@ function handleBoxSelect(ids: Set<string | number>) {
 let dragPositionsBefore: FixturePositionSnapshot[] | null = null;
 let dragRotationsBefore: FixtureRotationSnapshot[] | null = null;
 
+// ── Alignment guides (shared core with the 2D editor, 3 axes in meters) ───────
+
+/** Per-axis sorted candidate centers, built once per translate drag. */
+let alignSession: AlignmentSession | null = null;
+/** Screen-projected equal-spacing labels, rendered as DOM pills over the canvas. */
+const guideLabels = ref<Array<{ x: number; y: number; text: string }>>([]);
+
+/**
+ * Fixture center in world meters, [x, y-up, z] — same mapping as
+ * fixture-adapter's fixtureWorldPosition, inlined here so this component
+ * keeps three.js out of the initial bundle (the adapter imports Vector3).
+ */
+function fixtureCenterMeters(f: Fixture): number[] {
+  return [
+    (f.fixturePosition.x - 0.5) * STAGE_SIZE_METERS,
+    (f.positionZ || 0) * STAGE_SIZE_METERS,
+    (f.fixturePosition.y - 0.5) * STAGE_SIZE_METERS,
+  ];
+}
+
 function handleDragStart() {
   const ids = effectiveFixtureSelection();
   const targets = flatFixtures.value.filter(f => ids.has(f.id));
@@ -156,6 +184,19 @@ function handleDragStart() {
     tiltX: f.tiltX || 0,
     rollZ: f.rollZ || 0,
   }));
+
+  alignSession = null;
+  if (manager && targets.length > 0) {
+    const candidates = resolveAlignmentContext(sceneNodes.value, selectedIds.value, manager.getVisibleFixtureIds())
+      .map(c => {
+        const points = c.fixtures.map(fixtureCenterMeters);
+        return { id: c.id, center: bboxCenter(points), points };
+      });
+    if (candidates.length > 0) {
+      const memberPoints = targets.map(fixtureCenterMeters);
+      alignSession = buildAlignmentSession(candidates, bboxCenter(memberPoints), memberPoints);
+    }
+  }
 }
 
 const wrapDeg = (v: number) => {
@@ -164,20 +205,47 @@ const wrapDeg = (v: number) => {
   return w;
 };
 
-function handleDragMove(mode: GizmoMode, delta: TransformDelta) {
+function handleDragMove(mode: GizmoMode, delta: TransformDelta): number[] | void {
   if (mode === 'translate' && dragPositionsBefore) {
+    // Per axis: alignment guides win, then the zoom-tiered grid (which no
+    // longer lives on TransformControls — the raw delta arrives here so both
+    // snapping kinds resolve in one place, exactly like the 2D drag branch).
+    const grid = manager?.getTranslateSnapSpacing() ?? null;
+    let applied: number[] = [delta.position.x, delta.position.y, delta.position.z];
+    if (manager && alignSession) {
+      const tol = ALIGN_TOLERANCE_PX * manager.getWorldPerPixel();
+      const res = queryAlignment(alignSession, applied, [tol, tol, tol], [grid, grid, grid]);
+      applied = res.snappedDelta;
+      manager.setAlignmentGuides(res.guides.length > 0 || res.spacing.length > 0 ? res : null);
+      guideLabels.value = res.spacing.flatMap(gap => {
+        const p = manager!.worldToScreen(
+          (gap.from[0]! + gap.to[0]!) / 2,
+          (gap.from[1]! + gap.to[1]!) / 2,
+          (gap.from[2]! + gap.to[2]!) / 2,
+        );
+        return p.visible ? [{ x: p.x, y: p.y, text: `${gap.distance.toFixed(2)} m` }] : [];
+      });
+    } else if (grid !== null) {
+      applied = applied.map(v => Math.round(v / grid) * grid);
+    }
+
     const dragged: Array<{ id: string | number; x: number; y: number; z: number }> = [];
     for (const snap of dragPositionsBefore) {
       const f = flatFixtures.value.find(x => x.id === snap.id);
       if (!f) continue;
       // World meters → normalized stage fractions (x→X, y→Z, height→Y).
-      f.fixturePosition.x = snap.x + delta.position.x / STAGE_SIZE_METERS;
-      f.fixturePosition.y = snap.y + delta.position.z / STAGE_SIZE_METERS;
-      f.positionZ = Math.max(0, (snap.z ?? 0) + delta.position.y / STAGE_SIZE_METERS);
+      f.fixturePosition.x = snap.x + applied[0]! / STAGE_SIZE_METERS;
+      f.fixturePosition.y = snap.y + applied[2]! / STAGE_SIZE_METERS;
+      f.positionZ = Math.max(0, (snap.z ?? 0) + applied[1]! / STAGE_SIZE_METERS);
       dragged.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y, z: f.positionZ });
     }
     if (dragged.length > 0) liveBus.dispatch('fixture.drag', { fixtures: dragged });
-  } else if (mode === 'rotate' && dragRotationsBefore) {
+    // Busts the layout fingerprint → layoutRevision bump → our rebuild watch
+    // updates the 3D meshes; the 2D view stays live in parallel.
+    engineStore.triggerCanvasSync();
+    return applied;
+  }
+  if (mode === 'rotate' && dragRotationsBefore) {
     for (const snap of dragRotationsBefore) {
       const f = flatFixtures.value.find(x => x.id === snap.id);
       if (!f) continue;
@@ -206,6 +274,8 @@ function handleDragEnd(mode: GizmoMode) {
   }
   dragPositionsBefore = null;
   dragRotationsBefore = null;
+  alignSession = null;
+  guideLabels.value = [];
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -326,6 +396,14 @@ watch(selectedIds, () => manager?.setSelection(effectiveFixtureSelection()));
         stroke-dasharray="4 4"
       />
     </svg>
+
+    <!-- Alignment guides: equal-spacing distance labels, tracking the 3D gap midpoints -->
+    <div
+      v-for="(label, i) in guideLabels"
+      :key="`al-${i}`"
+      class="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[11px] font-mono text-white"
+      :style="{ left: `${label.x}px`, top: `${label.y}px`, background: '#ff4d9e' }"
+    >{{ label.text }}</div>
 
     <!-- Gizmo mode toggle — styled like the 2D alignment toolbar, but rendered
          as a toggle group (role="radiogroup") since it's a select, not one-shot actions -->

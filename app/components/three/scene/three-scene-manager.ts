@@ -17,6 +17,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { buildSceneModel, type BodyModel } from './fixture-adapter';
+import { AlignmentGuides3D, type AlignmentGuideData } from './alignment-guides-3d';
 import { PixelCloud } from './pixel-instances';
 import { BeamCones } from './beam-cones';
 import { FixtureBodies } from './fixture-bodies';
@@ -67,8 +68,14 @@ export interface SceneManagerCallbacks {
   /** Committed result of a Ctrl/Cmd-drag box-select. */
   onBoxSelect?: (ids: Set<string | number>, mods: SelectionModifiers) => void;
   onDragStart: () => void;
-  /** Fired continuously during a gizmo drag with the total delta since drag start. */
-  onDragMove: (mode: GizmoMode, delta: TransformDelta) => void;
+  /**
+   * Fired continuously during a gizmo drag with the total delta since drag
+   * start. A translate handler may return the delta it actually applied
+   * ([x, y, z] world meters, e.g. after alignment/grid snapping) — the pivot
+   * is then written back to that position so the gizmo visibly sticks to the
+   * snap instead of following the raw pointer.
+   */
+  onDragMove: (mode: GizmoMode, delta: TransformDelta) => number[] | void;
   onDragEnd: (mode: GizmoMode) => void;
 }
 
@@ -96,6 +103,7 @@ export class ThreeSceneManager {
   private beams: BeamCones;
   private bodies: FixtureBodies;
   private stage: Stage;
+  private alignGuides: AlignmentGuides3D;
 
   private raycaster = new Raycaster();
   private pointerNdc = new Vector2();
@@ -156,6 +164,7 @@ export class ThreeSceneManager {
 
     this.beams = new BeamCones(this.scene);
     this.bodies = new FixtureBodies(this.scene);
+    this.alignGuides = new AlignmentGuides3D(this.scene);
     this.scene.add(this.pixels.points);
     this.scene.add(this.pivot);
     this.pivot.rotation.order = 'YXZ';
@@ -178,6 +187,7 @@ export class ThreeSceneManager {
         this.callbacks.onDragStart();
       } else if (this.dragging) {
         this.dragging = false;
+        this.alignGuides.clear();
         this.callbacks.onDragEnd(this.gizmo.mode as GizmoMode);
         // Snap pivot back onto the (possibly clamped) committed selection.
         this.refreshPivot();
@@ -193,7 +203,16 @@ export class ThreeSceneManager {
         tiltXDeg: (this.pivot.rotation.x - this.dragStartEuler.x) * RAD2DEG,
         rollZDeg: (this.pivot.rotation.z - this.dragStartEuler.z) * RAD2DEG,
       };
-      this.callbacks.onDragMove(this.gizmo.mode as GizmoMode, delta);
+      const applied = this.callbacks.onDragMove(this.gizmo.mode as GizmoMode, delta);
+      // Sticky snapping: park the gizmo on the delta the handler actually
+      // applied (alignment/grid snapped), not the raw pointer position.
+      if (applied && this.gizmo.mode === 'translate') {
+        this.pivot.position.set(
+          this.dragStartPos.x + applied[0]!,
+          this.dragStartPos.y + applied[1]!,
+          this.dragStartPos.z + applied[2]!,
+        );
+      }
     });
 
     canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -221,16 +240,21 @@ export class ThreeSceneManager {
    * Mirrors the 2D canvas's zoom-tiered snap policy: close orbit distance ("near")
    * disables auto-snap (Shift forces it on); far orbit distance auto-snaps, growing
    * from the fine per-axis grid to a coarse 0.5m grid, with Shift inverting (off).
-   * Rotation stays pure Shift-snap, independent of zoom.
+   * Rotation stays pure Shift-snap, independent of zoom. Translation snapping is
+   * NOT delegated to TransformControls: the raw delta must reach onDragMove so the
+   * consumer can resolve alignment guides vs. grid per axis (getTranslateSnapSpacing).
    */
   private applySnapPolicy(): void {
+    this.gizmo.setRotationSnap(this.shiftHeld ? MathUtils.degToRad(ROTATE_SNAP_DEG) : null);
+  }
+
+  /** The zoom-tiered translate grid spacing in meters, or null when snapping is off. */
+  getTranslateSnapSpacing(): number | null {
     const distance = this.camera.position.distanceTo(this.orbit.target);
     const tier: ZoomTier = distance < NEAR_ZOOM_DISTANCE_METERS
       ? 'near'
       : distance > FAR_ZOOM_DISTANCE_METERS ? 'far' : 'mid';
-    const translateSnap = resolveSnapSpacing(tier, this.shiftHeld, TRANSLATE_SNAP_METERS, COARSE_SNAP_METERS);
-    this.gizmo.setTranslationSnap(translateSnap);
-    this.gizmo.setRotationSnap(this.shiftHeld ? MathUtils.degToRad(ROTATE_SNAP_DEG) : null);
+    return resolveSnapSpacing(tier, this.shiftHeld, TRANSLATE_SNAP_METERS, COARSE_SNAP_METERS);
   }
 
   // ── Selection ───────────────────────────────────────────────────────────────
@@ -332,6 +356,40 @@ export class ThreeSceneManager {
   private projectToScreen(pos: Vector3, rect: DOMRect): { x: number; y: number; visible: boolean } {
     const p = pos.clone().project(this.camera);
     return { x: ((p.x + 1) / 2) * rect.width, y: ((1 - p.y) / 2) * rect.height, visible: p.z <= 1 };
+  }
+
+  // ── Alignment guides ────────────────────────────────────────────────────────
+
+  /** Fixture ids whose centers project inside the current canvas viewport. */
+  getVisibleFixtureIds(): Set<string | number> {
+    const rect = this.canvas.getBoundingClientRect();
+    const visible = new Set<string | number>();
+    for (const model of this.bodies.fixtureModels) {
+      const s = this.projectToScreen(model.position, rect);
+      if (s.visible && s.x >= 0 && s.x <= rect.width && s.y >= 0 && s.y <= rect.height) {
+        visible.add(model.fixtureId);
+      }
+    }
+    return visible;
+  }
+
+  /** Projects world meters to canvas CSS-pixels — for DOM overlays (guide distance labels). */
+  worldToScreen(x: number, y: number, z: number): { x: number; y: number; visible: boolean } {
+    return this.projectToScreen(new Vector3(x, y, z), this.canvas.getBoundingClientRect());
+  }
+
+  /**
+   * World meters covered by one CSS pixel at the gizmo pivot's depth — converts
+   * the screen-constant alignment tolerance into meters for the current view.
+   */
+  getWorldPerPixel(): number {
+    const distance = this.camera.position.distanceTo(this.pivot.position);
+    return (2 * distance * Math.tan(MathUtils.degToRad(this.camera.fov / 2))) / this.canvas.clientHeight;
+  }
+
+  /** Draws (or clears, with null) the live alignment guide lines in the scene. */
+  setAlignmentGuides(data: AlignmentGuideData | null): void {
+    this.alignGuides.update(data);
   }
 
   /** Projects every fixture's 3D position to canvas CSS-pixels and picks those near the drawn line — same math as the 2D line-select tool. */
@@ -540,6 +598,7 @@ export class ThreeSceneManager {
     this.pixels.dispose();
     this.beams.dispose();
     this.bodies.dispose();
+    this.alignGuides.dispose();
     this.stage.dispose();
     this.renderer.dispose();
   }

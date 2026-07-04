@@ -24,6 +24,15 @@ import {
   LINE_SELECT_PICKUP_PX,
   CLICK_MOVE_THRESHOLD_PX,
 } from '~/utils/engine/selection-logic';
+import {
+  resolveAlignmentContext,
+  buildAlignmentSession,
+  queryAlignment,
+  bboxCenter,
+  ALIGN_TOLERANCE_PX,
+  type AlignmentSession,
+  type AlignmentResult,
+} from '~/utils/engine/alignment-guides';
 
 export type Interaction =
   | { type: 'idle' }
@@ -97,6 +106,8 @@ export function useSelection(
   getCanvas?: () => CanvasHitTester | null,
   onReshapeStrip?: (before: StripPointsSnapshot, after: StripPointsSnapshot) => void,
   getScale?: () => number,
+  getSceneNodes?: () => SceneNode[],
+  getViewportSize?: () => { width: number; height: number },
 ) {
   const engineStore = useEngineStore();
   const selectedIds = externalSelectedIds ?? ref<Set<string | number>>(new Set());
@@ -129,6 +140,51 @@ export function useSelection(
   let beforeRotationSnapshot: FixtureRotationSnapshot[] = [];
   /** Pre-drag strip-points snapshots, keyed by fixture id — populated alongside `beforeSnapshot` for selected strip fixtures. */
   let beforeStripSnapshots: StripPointsSnapshot[] = [];
+  /** Figma-style alignment guides: per-axis sorted candidate centers, built once per drag. */
+  let alignSession: AlignmentSession | null = null;
+  /** Live guide/spacing data for the SVG overlay — null except while a drag has active matches. */
+  const alignmentGuides = ref<AlignmentResult | null>(null);
+
+  /**
+   * Builds the alignment session for a starting drag: freezes the set of
+   * fixtures visible in the viewport, resolves the Figma context rules, and
+   * sorts the candidate centers per axis. All in world-pixels.
+   */
+  function beginAlignmentSession(
+    effectiveSelectedIds: Set<string | number>,
+    startPositions: Map<string | number, Point>,
+    startStripPoints: Map<string | number, StripPoint[]>,
+  ): void {
+    alignSession = null;
+    const sceneNodes = getSceneNodes?.();
+    const viewport = getViewportSize?.();
+    if (!sceneNodes || !viewport) return;
+    const w = getWidth(); const h = getHeight();
+
+    const topLeft = toWorld(0, 0);
+    const bottomRight = toWorld(viewport.width, viewport.height);
+    const visible = new Set<string | number>();
+    for (const f of getFixtures()) {
+      const wx = f.fixturePosition.x * w, wy = f.fixturePosition.y * h;
+      if (wx >= topLeft.x && wx <= bottomRight.x && wy >= topLeft.y && wy <= bottomRight.y) visible.add(f.id);
+    }
+
+    const candidates = resolveAlignmentContext(sceneNodes, effectiveSelectedIds, visible)
+      .map(c => {
+        const points = c.fixtures.map(f => [f.fixturePosition.x * w, f.fixturePosition.y * h]);
+        return { id: c.id, center: bboxCenter(points), points };
+      });
+    if (candidates.length === 0) return;
+
+    // Selection center = bbox center over everything that moves: fixture
+    // centers plus every strip vertex (strips move by their points).
+    const points: number[][] = [];
+    for (const p of startPositions.values()) points.push([p.x, p.y]);
+    for (const pts of startStripPoints.values()) for (const p of pts) points.push([p.x, p.y]);
+    if (points.length === 0) return;
+
+    alignSession = buildAlignmentSession(candidates, bboxCenter(points), points);
+  }
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
     if (event.button === 2) {
@@ -263,6 +319,7 @@ export function useSelection(
         beforeSnapshot.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
       }
     }
+    beginAlignmentSession(effectiveSelectedIds, startPositions, startStripPoints);
     interaction.value = { type: 'drag', startWorld: world, startPositions, startStripPoints };
   }
 
@@ -377,8 +434,20 @@ export function useSelection(
       // round to the grid independently and the group's relative layout
       // would fall apart. Snapping the shared delta keeps the whole
       // selection moving together, snapped as one.
-      const snappedDx = spacing !== null ? snapWorld(dx, spacing) : dx;
-      const snappedDy = spacing !== null ? snapWorld(dy, spacing) : dy;
+      // Per axis, alignment guides win over the grid: queryAlignment snaps
+      // matched axes to candidate centers / equal spacings and grid-snaps
+      // the rest (gridSpacing param).
+      let snappedDx: number, snappedDy: number;
+      if (alignSession) {
+        const tolerance = ALIGN_TOLERANCE_PX / (getScale?.() ?? 1);
+        const res = queryAlignment(alignSession, [dx, dy], [tolerance, tolerance], [spacing, spacing]);
+        snappedDx = res.snappedDelta[0]!;
+        snappedDy = res.snappedDelta[1]!;
+        alignmentGuides.value = res.guides.length > 0 || res.spacing.length > 0 ? res : null;
+      } else {
+        snappedDx = spacing !== null ? snapWorld(dx, spacing) : dx;
+        snappedDy = spacing !== null ? snapWorld(dy, spacing) : dy;
+      }
       for (const f of getFixtures()) {
         const start = iv.startPositions.get(f.id);
         if (start) {
@@ -534,6 +603,8 @@ export function useSelection(
     }
 
     interaction.value = { type: 'idle' };
+    alignSession = null;
+    alignmentGuides.value = null;
   }
 
   /**
@@ -593,6 +664,7 @@ export function useSelection(
     editingId,
     editingVertex,
     interaction,
+    alignmentGuides,
     onViewportMouseDown,
     onDragStart,
     onRotateStart,

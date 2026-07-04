@@ -37,7 +37,7 @@ interface Emits {
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
-import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
+import { WORLD_WIDTH, WORLD_HEIGHT, STAGE_SIZE_METERS } from '~/utils/engine/constants';
 
 // ─── Responsive Sizing ───────────────────────────────────────────────────────
 const viewportEl = ref<HTMLElement | null>(null);
@@ -95,7 +95,7 @@ const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { defa
 
 const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
 
-const { selectedIds, editingId, editingVertex, interaction, onViewportMouseDown, onMouseMove, onMouseUp, tryDeleteVertexAt, deleteEditingVertex } =
+const { selectedIds, editingId, editingVertex, interaction, alignmentGuides, onViewportMouseDown, onMouseMove, onMouseUp, tryDeleteVertexAt, deleteEditingVertex } =
   useSelection(
     () => props.fixtures,
     () => WORLD_WIDTH,
@@ -113,7 +113,56 @@ const { selectedIds, editingId, editingVertex, interaction, onViewportMouseDown,
       history.execute(new ReshapeStripCommand(props.fixtures, before, after));
     },
     () => camera.scale,
+    () => engineStore.sceneNodes,
+    () => ({ width: editorWidth.value, height: editorHeight.value }),
   );
+
+// ─── Alignment-guide overlay (Figma-style smart guides) ──────────────────────
+const GUIDE_COLOR = '#c2578f';
+/** How far a guide line extends past the outermost matched center, in CSS px. */
+const GUIDE_EXTEND_PX = 8;
+const WORLD_PX_PER_METER = WORLD_WIDTH / STAGE_SIZE_METERS;
+
+const guideOverlay = computed(() => {
+  const res = alignmentGuides.value;
+  if (!res) return null;
+
+  const lines: Array<{ x1: number; y1: number; x2: number; y2: number; dashed: boolean }> = [];
+  const marks: Array<{ x: number; y: number }> = [];
+  for (const g of res.guides) {
+    // draggedPoint (not draggedCenter): for an edge match the line runs along
+    // the group's outermost row, which the dragged center doesn't lie on.
+    const pts = [...g.matchedCenters, g.draggedPoint];
+    // A dot over every involved fixture (group members individually), not just
+    // the aggregate center — so a group's alignment reads as "all these dots
+    // line up on one axis" while the guide line runs through its center.
+    for (const p of g.marks) {
+      const v = worldToViewport(p[0]!, p[1]!);
+      marks.push({ x: v.x, y: v.y });
+    }
+    if (g.axis === 0) {
+      const ys = pts.map(p => p[1]!);
+      const a = worldToViewport(g.value, Math.min(...ys));
+      const b = worldToViewport(g.value, Math.max(...ys));
+      lines.push({ x1: a.x, y1: a.y - GUIDE_EXTEND_PX, x2: b.x, y2: b.y + GUIDE_EXTEND_PX, dashed: g.dashed });
+    } else {
+      const xs = pts.map(p => p[0]!);
+      const a = worldToViewport(Math.min(...xs), g.value);
+      const b = worldToViewport(Math.max(...xs), g.value);
+      lines.push({ x1: a.x - GUIDE_EXTEND_PX, y1: a.y, x2: b.x + GUIDE_EXTEND_PX, y2: b.y, dashed: g.dashed });
+    }
+  }
+
+  const gaps: Array<{ x1: number; y1: number; x2: number; y2: number; lx: number; ly: number; label: string }> = [];
+  for (const gap of res.spacing) {
+    const label = `${(gap.distance / WORLD_PX_PER_METER).toFixed(2)} m`;
+    const a = worldToViewport(gap.from[0]!, gap.from[1]!);
+    const b = worldToViewport(gap.to[0]!, gap.to[1]!);
+    gaps.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, lx: (a.x + b.x) / 2, ly: (a.y + b.y) / 2, label });
+  }
+
+  return { lines, marks, gaps };
+});
 
 // Viewport-space endpoints of the shift line-select tool, for the SVG overlay.
 const lineOverlay = computed(() => {
@@ -360,6 +409,53 @@ function handleMouseUp(e?: MouseEvent) {
       />
       <circle :cx="lineOverlay.x1" :cy="lineOverlay.y1" r="3" fill="var(--primary, #3b82f6)" />
       <circle :cx="lineOverlay.x2" :cy="lineOverlay.y2" r="3" fill="var(--primary, #3b82f6)" />
+    </svg>
+
+    <!-- Alignment guides: center-align lines + equal-spacing labels while dragging -->
+    <svg
+      v-if="guideOverlay"
+      class="absolute inset-0 w-full h-full pointer-events-none"
+    >
+      <line
+        v-for="(l, i) in guideOverlay.lines"
+        :key="`gl-${i}`"
+        :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2"
+        :stroke="GUIDE_COLOR"
+        stroke-width="1"
+        :stroke-dasharray="l.dashed ? '4 4' : undefined"
+      />
+      <circle
+        v-for="(m, i) in guideOverlay.marks"
+        :key="`gm-${i}`"
+        :cx="m.x" :cy="m.y" r="2.5"
+        fill="none"
+        :stroke="GUIDE_COLOR"
+        stroke-width="1"
+      />
+      <g v-for="(gap, i) in guideOverlay.gaps" :key="`gs-${i}`">
+        <line
+          :x1="gap.x1" :y1="gap.y1" :x2="gap.x2" :y2="gap.y2"
+          :stroke="GUIDE_COLOR"
+          stroke-width="1"
+          stroke-dasharray="2 3"
+        />
+        <rect
+          :x="gap.lx - (gap.label.length * 3.4 + 6)"
+          :y="gap.ly - 9"
+          :width="gap.label.length * 6.8 + 12"
+          height="18"
+          rx="4"
+          :fill="GUIDE_COLOR"
+        />
+        <text
+          :x="gap.lx" :y="gap.ly"
+          fill="white"
+          font-size="11"
+          font-family="ui-monospace, monospace"
+          text-anchor="middle"
+          dominant-baseline="central"
+        >{{ gap.label }}</text>
+      </g>
     </svg>
 
     <!-- Collaborator cursors + remote selections -->
