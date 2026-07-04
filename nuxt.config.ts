@@ -55,7 +55,7 @@ export default defineNuxtConfig({
     redirectOptions: {
       login: '/auth/login',
       callback: '/auth/confirm',
-      exclude: ['/auth/*'],
+      exclude: ['/auth/*', '/share/*'],
     },
   },
   colorMode: {

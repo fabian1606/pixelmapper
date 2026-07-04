@@ -62,6 +62,9 @@ const engineStore = useEngineStore();
 
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
 function zoomTo(node: SceneNode) {
+  // Hidden editor (other viewport mode active): centering against a 0×0
+  // viewport would throw the camera permanently off-world.
+  if (editorWidth.value < 50 || editorHeight.value < 50) return;
   let avgPos = { x: 0, y: 0 };
   if (node instanceof FixtureGroup) {
     const gf = node.getAllFixtures();
@@ -77,6 +80,7 @@ function zoomTo(node: SceneNode) {
 }
 
 function zoomToFit() {
+  if (editorWidth.value < 50 || editorHeight.value < 50) return;
   const points = props.fixtures.map(f => ({
     wx: f.fixturePosition.x * WORLD_WIDTH,
     wy: f.fixturePosition.y * WORLD_HEIGHT,
@@ -108,6 +112,7 @@ const { selectedIds, editingId, editingVertex, interaction, onViewportMouseDown,
     (before, after) => {
       history.execute(new ReshapeStripCommand(props.fixtures, before, after));
     },
+    () => camera.scale,
   );
 
 const effectEngine = inject<EffectEngine>('effectEngine');

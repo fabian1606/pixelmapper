@@ -63,8 +63,19 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
 
 defineExpose({ quickSave, overwriteActivePreset, createPresetFromSelection, presetsSidebarRef });
 
+// Selecting a group puts the group's id in selectedIds — not its fixtures'.
+// Walk each fixture's ancestor chain so a selected group (or nested group)
+// contributes its descendant fixtures, matching the 3D viewport's
+// effectiveFixtureSelection() and the multi-fixture case.
 const selectedFixtures = computed(() =>
-  props.fixtures.filter(f => props.selectedIds.has(f.id))
+  props.fixtures.filter((f) => {
+    let node: SceneNode | null = f as unknown as SceneNode;
+    while (node) {
+      if (props.selectedIds.has(node.id)) return true;
+      node = node.parent;
+    }
+    return false;
+  })
 );
 </script>
 

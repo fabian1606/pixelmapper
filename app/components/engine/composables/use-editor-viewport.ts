@@ -18,6 +18,10 @@ export function useEditorViewport(
       resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           const { width, height } = entry.contentRect;
+          // Hidden (v-show'd away) editors report 0×0 — keep the last real
+          // dimensions so camera math (fitAll/centerOn) never runs against a
+          // degenerate viewport, and defer the first fit until truly visible.
+          if (width <= 0 || height <= 0) continue;
           editorWidth.value = width;
           editorHeight.value = height;
 

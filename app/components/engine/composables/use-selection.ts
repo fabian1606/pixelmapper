@@ -6,6 +6,15 @@ import type { SceneNode } from '~/utils/engine/core/group';
 import type { FixtureRotationSnapshot } from '../commands/rotate-fixture-command';
 import type { StripPointsSnapshot } from '../commands/reshape-strip-command';
 import { syncStripBounds, enforceStripLength } from '~/utils/engine/neopixel-strip-factory';
+import { resolveSnapSpacing, type ZoomTier } from '~/utils/engine/snap-policy';
+import {
+  NEAR_ZOOM_SCALE_THRESHOLD,
+  FAR_ZOOM_SCALE_THRESHOLD,
+  COARSE_SNAP_METERS,
+  WORLD_WIDTH,
+  STAGE_SIZE_METERS,
+} from '~/utils/engine/constants';
+import { useEngineStore } from '~/stores/engine-store';
 
 export type Interaction =
   | { type: 'idle' }
@@ -40,9 +49,17 @@ export interface CanvasHitTester {
 }
 
 const DOT_SPACING = 25;
+/** 0.5m coarse snap, converted to world-pixels (world px per meter = WORLD_WIDTH / STAGE_SIZE_METERS). */
+const COARSE_SPACING_WORLD_PX = COARSE_SNAP_METERS * (WORLD_WIDTH / STAGE_SIZE_METERS);
 
-function snapWorld(px: number): number {
-  return Math.round(px / DOT_SPACING) * DOT_SPACING;
+function zoomTierForScale(scale: number): ZoomTier {
+  if (scale >= NEAR_ZOOM_SCALE_THRESHOLD) return 'near';
+  if (scale <= FAR_ZOOM_SCALE_THRESHOLD) return 'far';
+  return 'mid';
+}
+
+function snapWorld(px: number, spacing: number): number {
+  return Math.round(px / spacing) * spacing;
 }
 
 function toNormalized(px: number, max: number): number {
@@ -63,7 +80,9 @@ export function useSelection(
   externalSelectedIds?: import('vue').Ref<Set<string | number>>,
   getCanvas?: () => CanvasHitTester | null,
   onReshapeStrip?: (before: StripPointsSnapshot, after: StripPointsSnapshot) => void,
+  getScale?: () => number,
 ) {
+  const engineStore = useEngineStore();
   const selectedIds = externalSelectedIds ?? ref<Set<string | number>>(new Set());
   const interaction = ref<Interaction>({ type: 'idle' });
   /**
@@ -336,21 +355,32 @@ export function useSelection(
       const dx = world.x - iv.startWorld.x;
       const dy = world.y - iv.startWorld.y;
       const w = getWidth(); const h = getHeight();
+      const tier = zoomTierForScale(getScale?.() ?? 1);
+      const spacing = resolveSnapSpacing(tier, event.shiftKey, DOT_SPACING, COARSE_SPACING_WORLD_PX);
+      // Snap the drag delta itself (once), not each fixture's absolute end
+      // position — otherwise every fixture in a multi-selection/group would
+      // round to the grid independently and the group's relative layout
+      // would fall apart. Snapping the shared delta keeps the whole
+      // selection moving together, snapped as one.
+      const snappedDx = spacing !== null ? snapWorld(dx, spacing) : dx;
+      const snappedDy = spacing !== null ? snapWorld(dy, spacing) : dy;
       for (const f of getFixtures()) {
         const start = iv.startPositions.get(f.id);
         if (start) {
-          f.fixturePosition.x = toNormalized(snapWorld(start.x + dx), w);
-          f.fixturePosition.y = toNormalized(snapWorld(start.y + dy), h);
+          f.fixturePosition.x = toNormalized(start.x + snappedDx, w);
+          f.fixturePosition.y = toNormalized(start.y + snappedDy, h);
         }
         const stripStart = iv.startStripPoints.get(f.id);
         if (stripStart && f.stripConfig) {
-          // Translate every vertex by the snapped world delta and refresh bounds.
-          const sdx = snapWorld(dx);
-          const sdy = snapWorld(dy);
-          f.stripConfig.points = stripStart.map(p => ({ x: p.x + sdx, y: p.y + sdy }));
+          f.stripConfig.points = stripStart.map(p => ({ x: p.x + snappedDx, y: p.y + snappedDy }));
           syncStripBounds(f);
         }
       }
+      // Fixture position fields are plain (non-reactive), mutated directly above
+      // for drag performance — bump layoutRevision so the position panel (and
+      // any other layoutRevision-gated UI) stays live during the drag, exactly
+      // like the 3D gizmo's handleDragMove does via the same call.
+      engineStore.triggerCanvasSync();
     } else if (iv.type === 'rotate') {
       const startAngle = Math.atan2(iv.startWorld.y - iv.centerWorld.y, iv.startWorld.x - iv.centerWorld.x);
       const currAngle  = Math.atan2(world.y - iv.centerWorld.y, world.x - iv.centerWorld.x);
@@ -364,13 +394,14 @@ export function useSelection(
           f.rotation = r;
         }
       }
+      engineStore.triggerCanvasSync();
     } else if (iv.type === 'strip-vertex') {
       const f = getFixtures().find(fx => fx.id === iv.fixtureId);
       if (!f || !f.stripConfig) return;
       const p = f.stripConfig.points[iv.vertexIndex];
       if (!p) return;
-      p.x = event.shiftKey ? snapWorld(world.x) : world.x;
-      p.y = event.shiftKey ? snapWorld(world.y) : world.y;
+      p.x = event.shiftKey ? snapWorld(world.x, DOT_SPACING) : world.x;
+      p.y = event.shiftKey ? snapWorld(world.y, DOT_SPACING) : world.y;
       // For bezier, the renderer trims/extends the curve to target length;
       // no in-place enforcement needed (matches existing behavior). For line,
       // the user drags one endpoint and we snap the OTHER endpoint along the
@@ -380,6 +411,7 @@ export function useSelection(
       } else {
         syncStripBounds(f);
       }
+      engineStore.triggerCanvasSync();
     }
   }
 

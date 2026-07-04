@@ -451,6 +451,7 @@ export function createFixtureFromOfl(
   ext.oflCategories = oflFixture.categories;
   ext.oflShortName = oflFixture.shortName ?? oflFixture.name;
   fixture.definition = oflFixture;
+  fixture.lensDegreesMinMax = oflFixture.physical?.lens?.degreesMinMax;
 
   return fixture;
 }

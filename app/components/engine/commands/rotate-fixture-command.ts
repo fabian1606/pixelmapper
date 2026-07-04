@@ -5,6 +5,9 @@ import { type SerializableCommand, registerCommand } from './serializable-comman
 export interface FixtureRotationSnapshot {
     id: string | number;
     rotation: number;
+    /** Pitch/roll in degrees (3D viewport). Omitted by 2D-only callers. */
+    tiltX?: number;
+    rollZ?: number;
 }
 
 export class RotateFixtureCommand implements SerializableCommand {
@@ -34,6 +37,8 @@ export class RotateFixtureCommand implements SerializableCommand {
             const fixture = this.allFixtures.find(f => f.id === snapshot.id);
             if (fixture) {
                 fixture.rotation = snapshot.rotation;
+                if (snapshot.tiltX !== undefined) fixture.tiltX = snapshot.tiltX;
+                if (snapshot.rollZ !== undefined) fixture.rollZ = snapshot.rollZ;
             }
         }
     }

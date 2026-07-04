@@ -6,6 +6,8 @@ export interface FixturePositionSnapshot {
   id: string | number;
   x: number;
   y: number;
+  /** Height above the floor, normalized like x/y. Omitted by 2D-only callers. */
+  z?: number;
 }
 
 /**
@@ -49,6 +51,7 @@ export class MoveFixtureCommand implements SerializableCommand {
       if (f) {
         f.fixturePosition.x = snap.x;
         f.fixturePosition.y = snap.y;
+        if (snap.z !== undefined) f.positionZ = snap.z;
       }
     }
   }

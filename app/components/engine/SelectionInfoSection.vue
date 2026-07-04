@@ -1,4 +1,3 @@
-```
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -7,9 +6,10 @@ import { MoveFixtureCommand, type FixturePositionSnapshot } from './commands/mov
 import { RotateFixtureCommand, type FixtureRotationSnapshot } from './commands/rotate-fixture-command';
 import { SetModifiersCommand } from './commands/set-modifiers-command';
 import { UpdateDmxCommand } from './commands/update-dmx-command';
-import SelectionPositionInfo from './SelectionPositionInfo.vue';
+import SelectionPositionInfo, { type PositionAxis } from './SelectionPositionInfo.vue';
 import SelectionDmxInfo from './SelectionDmxInfo.vue';
 import { useEngineStore } from '~/stores/engine-store';
+import { storeToRefs } from 'pinia';
 
 const props = defineProps<{
   selectedFixtures: Fixture[];
@@ -18,6 +18,7 @@ const props = defineProps<{
 
 const history = useHistory();
 const engineStore = useEngineStore();
+const { layoutRevision } = storeToRefs(engineStore);
 
 // ─── Selection State ──────────────────────────────────────────────────────────
 
@@ -26,22 +27,51 @@ const hasSelection = computed(() => props.selectedFixtures.length > 0);
 const firstFixture = computed(() => props.selectedFixtures[0] || null);
 
 // ─── Position Logic ───────────────────────────────────────────────────────────
+//
+// Fixture position/rotation fields are plain (non-reactive) — mutated directly
+// during drags for performance (see engine-store.ts's rebuildLayoutAndChannels
+// comment). Reading layoutRevision.value here — bumped every drag frame by
+// triggerCanvasSync() — re-runs these computeds so the panel stays live.
 
 const avgX = computed(() => {
+  void layoutRevision.value;
   if (!hasSelection.value) return 0;
   const sum = props.selectedFixtures.reduce((acc, f) => acc + f.fixturePosition.x, 0);
   return sum / props.selectedFixtures.length;
 });
 
 const avgY = computed(() => {
+  void layoutRevision.value;
   if (!hasSelection.value) return 0;
   const sum = props.selectedFixtures.reduce((acc, f) => acc + f.fixturePosition.y, 0);
   return sum / props.selectedFixtures.length;
 });
 
+const avgZ = computed(() => {
+  void layoutRevision.value;
+  if (!hasSelection.value) return 0;
+  const sum = props.selectedFixtures.reduce((acc, f) => acc + (f.positionZ || 0), 0);
+  return sum / props.selectedFixtures.length;
+});
+
 const avgRotation = computed(() => {
+  void layoutRevision.value;
   if (!hasSelection.value) return 0;
   const sum = props.selectedFixtures.reduce((acc, f) => acc + (f.rotation || 0), 0);
+  return sum / props.selectedFixtures.length;
+});
+
+const avgTiltX = computed(() => {
+  void layoutRevision.value;
+  if (!hasSelection.value) return 0;
+  const sum = props.selectedFixtures.reduce((acc, f) => acc + (f.tiltX || 0), 0);
+  return sum / props.selectedFixtures.length;
+});
+
+const avgRollZ = computed(() => {
+  void layoutRevision.value;
+  if (!hasSelection.value) return 0;
+  const sum = props.selectedFixtures.reduce((acc, f) => acc + (f.rollZ || 0), 0);
   return sum / props.selectedFixtures.length;
 });
 
@@ -50,27 +80,42 @@ let dragSnapshotsBefore: FixturePositionSnapshot[] | null = null;
 let dragRotationSnapshotsBefore: FixtureRotationSnapshot[] | null = null;
 let dragOriginX = 0; // avgX at the start of the interaction (0-1 space)
 let dragOriginY = 0;
+let dragOriginZ = 0;
 let dragOriginR = 0; // avgRotation at the start of the interaction
+let dragOriginTX = 0;
+let dragOriginRZ = 0;
 
-function handleLiveChange(axis: 'x' | 'y' | 'r', value: number) {
-  if (axis === 'r') {
+const isRotationAxis = (axis: PositionAxis) => axis === 'r' || axis === 'tx' || axis === 'rz';
+
+function handleLiveChange(axis: PositionAxis, value: number) {
+  if (isRotationAxis(axis)) {
     if (!dragRotationSnapshotsBefore) {
       dragOriginR = avgRotation.value;
+      dragOriginTX = avgTiltX.value;
+      dragOriginRZ = avgRollZ.value;
       dragRotationSnapshotsBefore = props.selectedFixtures.map(f => ({
         id: f.id,
-        rotation: f.rotation || 0
+        rotation: f.rotation || 0,
+        tiltX: f.tiltX || 0,
+        rollZ: f.rollZ || 0,
       }));
     }
 
-    const deltaR = value - dragOriginR;
+    const origin = axis === 'r' ? dragOriginR : axis === 'tx' ? dragOriginTX : dragOriginRZ;
+    const delta = value - origin;
+    const wrap = (v: number) => {
+      let w = v % 360;
+      if (w < 0) w += 360;
+      return w;
+    };
     for (const snap of dragRotationSnapshotsBefore) {
       const fixture = props.allFixtures.find(f => f.id === snap.id);
-      if (fixture) {
-        let newRot = (snap.rotation + deltaR) % 360;
-        if (newRot < 0) newRot += 360;
-        fixture.rotation = newRot;
-      }
+      if (!fixture) continue;
+      if (axis === 'r') fixture.rotation = wrap(snap.rotation + delta);
+      else if (axis === 'tx') fixture.tiltX = wrap((snap.tiltX ?? 0) + delta);
+      else fixture.rollZ = wrap((snap.rollZ ?? 0) + delta);
     }
+    engineStore.triggerCanvasSync();
     return;
   }
 
@@ -78,41 +123,42 @@ function handleLiveChange(axis: 'x' | 'y' | 'r', value: number) {
     // Capture initial state before any mutations
     dragOriginX = avgX.value;
     dragOriginY = avgY.value;
+    dragOriginZ = avgZ.value;
     dragSnapshotsBefore = props.selectedFixtures.map(f => ({
       id: f.id,
       x: f.fixturePosition.x,
       y: f.fixturePosition.y,
+      z: f.positionZ || 0,
     }));
   }
 
   // Delta is always relative to the original position, never to the mutated live state
-  const rawDeltaX = axis === 'x' ? value - dragOriginX : 0;
-  const rawDeltaY = axis === 'y' ? value - dragOriginY : 0;
+  const origin = axis === 'x' ? dragOriginX : axis === 'y' ? dragOriginY : dragOriginZ;
+  const delta = value - origin;
 
-  const deltaX = rawDeltaX;
-  const deltaY = rawDeltaY;
-
-  // Infinite canvas — no clamping. Apply absolute offsets from the original snapshot positions.
+  // Infinite canvas — no clamping on x/y. Height stays at or above the floor.
   for (const snap of dragSnapshotsBefore) {
     const fixture = props.allFixtures.find(f => f.id === snap.id);
     if (!fixture) continue;
     if (axis === 'x') {
-      fixture.fixturePosition.x = snap.x + deltaX;
+      fixture.fixturePosition.x = snap.x + delta;
+    } else if (axis === 'y') {
+      fixture.fixturePosition.y = snap.y + delta;
     } else {
-      fixture.fixturePosition.y = snap.y + deltaY;
+      fixture.positionZ = Math.max(0, (snap.z ?? 0) + delta);
     }
   }
 
   engineStore.triggerCanvasSync();
 }
 
-function handlePositionChange(axis: 'x' | 'y' | 'r', _value: number) {
-  if (axis === 'r') {
+function handlePositionChange(axis: PositionAxis, _value: number) {
+  if (isRotationAxis(axis)) {
     if (!dragRotationSnapshotsBefore) return;
 
     const snapshotsAfter: FixtureRotationSnapshot[] = props.allFixtures
       .filter(f => dragRotationSnapshotsBefore!.some(s => s.id === f.id))
-      .map(f => ({ id: f.id, rotation: f.rotation || 0 }));
+      .map(f => ({ id: f.id, rotation: f.rotation || 0, tiltX: f.tiltX || 0, rollZ: f.rollZ || 0 }));
 
     history.execute(new RotateFixtureCommand(props.allFixtures, dragRotationSnapshotsBefore, snapshotsAfter));
     dragRotationSnapshotsBefore = null;
@@ -127,7 +173,7 @@ function handlePositionChange(axis: 'x' | 'y' | 'r', _value: number) {
   // State is already mutated by handleLiveChange. Capture the final positions.
   const snapshotsAfter: FixturePositionSnapshot[] = props.allFixtures
     .filter(f => dragSnapshotsBefore!.some(s => s.id === f.id))
-    .map(f => ({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y }));
+    .map(f => ({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y, z: f.positionZ || 0 }));
 
   history.execute(new MoveFixtureCommand(props.allFixtures, dragSnapshotsBefore, snapshotsAfter));
   dragSnapshotsBefore = null;
@@ -193,12 +239,15 @@ function updateDmx() {
     <div class="px-3 py-5 space-y-6">
       
       <!-- Position Section -->
-      <SelectionPositionInfo 
-        :avg-x="avgX" 
-        :avg-y="avgY" 
+      <SelectionPositionInfo
+        :avg-x="avgX"
+        :avg-y="avgY"
+        :avg-z="avgZ"
         :avg-rotation="avgRotation"
+        :avg-tilt-x="avgTiltX"
+        :avg-roll-z="avgRollZ"
         @live-change="handleLiveChange"
-        @change="handlePositionChange" 
+        @change="handlePositionChange"
       />
 
       <!-- Single Selection Details -->

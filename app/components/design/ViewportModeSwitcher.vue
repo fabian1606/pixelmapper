@@ -9,7 +9,7 @@ const modelValue = defineModel<ViewportMode>({ default: '2d' });
 const modes: { id: ViewportMode; label: string; icon: typeof SquareChartGantt; disabled?: boolean }[] = [
   { id: 'raw', label: 'Raw', icon: SquareChartGantt },
   { id: '2d',     label: '2D',     icon: SquareDashedMousePointer },
-  { id: '3d',     label: '3D',     icon: Box, disabled: true },
+  { id: '3d',     label: '3D',     icon: Box },
 ];
 </script>
 

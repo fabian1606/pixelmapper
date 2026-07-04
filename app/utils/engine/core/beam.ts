@@ -10,10 +10,12 @@ export class Beam {
   /** Beam offset relative to the fixture's world position (in normalized 0-1 space). */
   public localX: number;
   public localY: number;
+  public localZ: number;
 
-  constructor(id: string, localX: number = 0, localY: number = 0) {
+  constructor(id: string, localX: number = 0, localY: number = 0, localZ: number = 0) {
     this.id = id;
     this.localX = localX;
     this.localY = localY;
+    this.localZ = localZ;
   }
 }

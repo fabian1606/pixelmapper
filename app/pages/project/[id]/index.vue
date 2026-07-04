@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, nextTick } from 'vue';
+import { ref, shallowRef, computed, nextTick, watch, defineAsyncComponent } from 'vue';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import DeleteConfirmDialog from '~/components/engine/DeleteConfirmDialog.vue';
@@ -39,6 +39,14 @@ const updateSize = () => {
 
 const viewportMode = ref<ViewportMode>('2d')
 const workspaceRef = ref<InstanceType<typeof FixtureWorkspace> | null>(null)
+
+// 3D viewport: code-split (three.js chunk) and created lazily on first switch,
+// then kept alive via v-show so camera state survives mode changes.
+const Viewport3D = defineAsyncComponent(() => import('~/components/three/Viewport3D.vue'))
+const threeDActivated = ref(false)
+watch(viewportMode, (mode) => {
+  if (mode === '3d') threeDActivated.value = true
+}, { immediate: true })
 
 function handleZoomTo(node: SceneNode) {
   workspaceRef.value?.zoomTo(node)
@@ -133,6 +141,10 @@ function handleUpdateFixtureType(newOfl: import('~/utils/ofl/types').OflFixture)
       newFixture.id = old.id
       newFixture.name = old.name
       newFixture.fixturePosition = { ...old.fixturePosition }
+      newFixture.positionZ = old.positionZ
+      newFixture.rotation = old.rotation
+      newFixture.tiltX = old.tiltX
+      newFixture.rollZ = old.rollZ
       newFixture.startAddress = old.startAddress
       return newFixture
     })
@@ -191,12 +203,12 @@ useShortcuts([
           :active="viewportMode === 'raw'"
           class="flex-1 min-w-0"
         />
-        <div
+        <Viewport3D
+          v-if="threeDActivated"
           v-show="viewportMode === '3d'"
-          class="flex-1 flex items-center justify-center text-muted-foreground/40 text-sm"
-        >
-          3D-Ansicht — bald verfügbar
-        </div>
+          :active="viewportMode === '3d'"
+          class="flex-1 min-w-0"
+        />
         <ViewportModeSwitcher v-model="viewportMode" />
         <div class="w-12 shrink-0" />
         <FixturePropertiesSidebar

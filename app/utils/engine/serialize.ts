@@ -31,6 +31,7 @@ export interface SerializedBeam {
   id: string
   localX: number
   localY: number
+  localZ?: number
 }
 
 export interface SerializedFixture {
@@ -41,6 +42,13 @@ export interface SerializedFixture {
   fixturePosition: { x: number; y: number }
   fixtureSize: { x: number; y: number }
   rotation: number
+  /** Height above the floor, normalized like fixturePosition (3D viewport). */
+  positionZ?: number
+  /** Pitch/roll in degrees (Euler YXZ with `rotation` as yaw). */
+  tiltX?: number
+  rollZ?: number
+  /** OFL lens beam angle range in degrees — drives 3D beam cones. */
+  lensDegreesMinMax?: [number, number]
   manufacturer: string
   fixtureType: string
   oflKey?: string
@@ -113,10 +121,10 @@ function serializeChannel(ch: Channel): SerializedChannel {
 }
 
 function serializeBeam(b: Beam): SerializedBeam {
-  return { id: b.id, localX: b.localX, localY: b.localY }
+  return { id: b.id, localX: b.localX, localY: b.localY, localZ: b.localZ }
 }
 
-function serializeFixture(f: Fixture): SerializedFixture {
+export function serializeFixture(f: Fixture): SerializedFixture {
   return {
     _type: 'fixture',
     id: f.id,
@@ -125,6 +133,10 @@ function serializeFixture(f: Fixture): SerializedFixture {
     fixturePosition: { ...f.fixturePosition },
     fixtureSize: { ...f.fixtureSize },
     rotation: f.rotation,
+    positionZ: f.positionZ,
+    tiltX: f.tiltX,
+    rollZ: f.rollZ,
+    lensDegreesMinMax: f.lensDegreesMinMax ? [...f.lensDegreesMinMax] : undefined,
     manufacturer: f.manufacturer,
     fixtureType: f.fixtureType,
     oflKey: f.oflKey,
@@ -134,7 +146,7 @@ function serializeFixture(f: Fixture): SerializedFixture {
   }
 }
 
-function serializeNode(node: SceneNode): SerializedNode {
+export function serializeNode(node: SceneNode): SerializedNode {
   if (node instanceof FixtureGroup) {
     return {
       _type: 'group',
@@ -205,11 +217,15 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.fixturePosition = { ...data.fixturePosition }
   f.fixtureSize = { ...data.fixtureSize }
   f.rotation = data.rotation
+  f.positionZ = data.positionZ ?? 0
+  f.tiltX = data.tiltX ?? 0
+  f.rollZ = data.rollZ ?? 0
+  f.lensDegreesMinMax = data.lensDegreesMinMax ? [...data.lensDegreesMinMax] : undefined
   f.manufacturer = data.manufacturer
   f.fixtureType = data.fixtureType
   f.oflKey = data.oflKey
   f.channels = data.channels.map(deserializeChannel)
-  f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY))
+  f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY, b.localZ ?? 0))
 
   if (data.stripConfig) {
     // Default shapeType for legacy snapshots predating the line/circle support.

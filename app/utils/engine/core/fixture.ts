@@ -82,6 +82,23 @@ export class Fixture {
   fixtureSize: FixtureSize;
   rotation: number = 0; // Degrees (0-360)
 
+  /**
+   * Height above the stage floor, normalized like fixturePosition.x/y
+   * (fraction of WORLD_WIDTH; meters = positionZ * STAGE_SIZE_METERS).
+   * Only consumed by the 3D viewport — the 2D canvas and effects stay planar.
+   */
+  positionZ: number = 0;
+  /** Pitch in degrees about the fixture's local X axis (Euler order YXZ, after yaw). 180 = hung upside-down. */
+  tiltX: number = 0;
+  /** Roll in degrees about the fixture's local Z (pointing) axis. */
+  rollZ: number = 0;
+
+  /**
+   * Beam angle range [min, max] in degrees from the OFL physical lens data.
+   * Persisted (unlike `definition`) so 3D beam cones survive project reloads.
+   */
+  lensDegreesMinMax?: [number, number];
+
   manufacturer: string = '';
   fixtureType: string = '';
 

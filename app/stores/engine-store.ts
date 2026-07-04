@@ -382,6 +382,12 @@ export const useEngineStore = defineStore('engine', () => {
    */
   let commitPendingChanges: () => Promise<void> = async () => {};
   function commitPendingPersistence() { return commitPendingChanges(); }
+  /**
+   * Force an immediate snapshot save (flush persist queue + save-snapshot).
+   * Used by the public patch share so the shared link reflects current state.
+   * No-op until a project is loaded (hooks wired in loadProject).
+   */
+  function saveSnapshotNow() { return triggerSaveSnapshotInternal(); }
 
   // ── Time-triggered snapshot persistence ───────────────────────────────────
   // The snapshot captures all "live" state that has no dedicated Command
@@ -493,7 +499,9 @@ export const useEngineStore = defineStore('engine', () => {
   function rebuildLayoutAndChannels(): void {
     let fp = '';
     for (const f of flatFixtures.value) {
-      fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
+      // positionZ/tiltX/rollZ are 3D-only (the worker layout ignores them) but
+      // are included so layoutRevision doubles as the 3D scene's rebuild signal.
+      fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.positionZ ?? 0};${f.tiltX ?? 0};${f.rollZ ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
       // Strip vertices feed per-pixel layout (binary-encoder.ts arc-length sampling),
       // so any polyline mutation must bust the layout cache even when the AABB
       // happens not to move.
@@ -1177,6 +1185,7 @@ export const useEngineStore = defineStore('engine', () => {
     totalUniverses: reactiveTotalUniverses,
     bufferRevision,
     channelsRevision,
+    layoutRevision,
     overrideMap,
     setOverride,
     clearOverride,
@@ -1194,6 +1203,7 @@ export const useEngineStore = defineStore('engine', () => {
     applyProjectSnapshot,
     getReplayContext,
     commitPendingPersistence,
+    saveSnapshotNow,
     markEngineDirty,
   };
 });

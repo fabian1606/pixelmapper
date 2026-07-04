@@ -2,7 +2,7 @@ import { triggerRef } from 'vue';
 import { registerLiveOp } from '~/stores/live-bus-store';
 
 interface FixtureDragPayload {
-  fixtures: Array<{ id: string | number; x: number; y: number }>;  // normalized 0-1
+  fixtures: Array<{ id: string | number; x: number; y: number; z?: number }>;  // normalized 0-1
 }
 
 registerLiveOp<FixtureDragPayload>('fixture.drag', {
@@ -18,6 +18,7 @@ registerLiveOp<FixtureDragPayload>('fixture.drag', {
       if (target) {
         target.fixturePosition.x = f.x;
         target.fixturePosition.y = f.y;
+        if (f.z !== undefined) target.positionZ = f.z;
         mutated = true;
       }
     }
