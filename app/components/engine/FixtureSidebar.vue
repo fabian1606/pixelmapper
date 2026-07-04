@@ -24,7 +24,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'select', id: string | number, multiple: boolean): void;
+  (e: 'select', id: string | number, mods: { range: boolean; toggle: boolean }): void;
   (e: 'group'): void;
   (e: 'ungroup', group: FixtureGroup): void;
   (e: 'zoomTo', node: SceneNode): void;
@@ -114,7 +114,7 @@ const selectedFixtures = computed(() =>
               :key="node.id"
               :node="node"
               :selected-ids="selectedIds"
-              @select="(id, mult) => emit('select', id, mult)"
+              @select="(id, mods) => emit('select', id, mods)"
               @group="emit('group')"
               @ungroup="g => emit('ungroup', g)"
               @zoom-to="(n: SceneNode) => emit('zoomTo', n)"

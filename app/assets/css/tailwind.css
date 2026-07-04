@@ -128,6 +128,16 @@
     @apply border-border outline-ring/50;
   }
 
+  /* Horizontal two-finger pans on the 2D/3D canvases must never trigger
+     Chrome's swipe-back history navigation. preventDefault on the wheel
+     handlers isn't enough — the browser arms the gesture before the event
+     reaches JS — so overscroll chaining is disabled at the root. Chrome
+     honors this only on the root scroller, hence both html and body. */
+  html,
+  body {
+    overscroll-behavior-x: none;
+  }
+
   body {
     @apply bg-background text-foreground;
   }

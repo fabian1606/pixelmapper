@@ -26,7 +26,9 @@ function cloneWidget(w: LiveWidget): LiveWidget {
  *   Cmd/Ctrl+V         → Paste from clipboard
  *   Cmd/Ctrl+X         → Cut selected widgets
  *   Cmd/Ctrl+D         → Duplicate selected widgets
- *   Cmd/Ctrl+A         → Select all widgets on the active page
+ *   Cmd/Ctrl+A         → Select all within the current selection level
+ *                        (isolated group/section members, or all widgets
+ *                        on the page when at the top level)
  *   Delete / Backspace → Delete selected widgets
  *   Escape             → Clear selection
  */
@@ -120,6 +122,24 @@ export function useLiveShortcuts() {
     if (!store.editMode) return;
     const page = store.activePage;
     if (!page) return;
+    // Respect the current selection level (Figma-style): isolated into a
+    // group/section → select only its members; otherwise select everything.
+    if (store.isolatedGroupId !== null) {
+      const groupId = store.isolatedGroupId;
+      store.selectedWidgetIds = new Set(
+        page.widgets.filter(w => w.groupId === groupId).map(w => w.id)
+      );
+      return;
+    }
+    if (store.isolatedSectionId !== null) {
+      const sec = page.sections?.find(s => s.id === store.isolatedSectionId);
+      if (sec) {
+        store.selectedWidgetIds = new Set(
+          sec.members.filter(m => !m.controlId).map(m => m.widgetId)
+        );
+        return;
+      }
+    }
     store.selectedWidgetIds = new Set(page.widgets.map(w => w.id));
   }
 

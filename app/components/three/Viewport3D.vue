@@ -11,7 +11,13 @@ import { RotateFixtureCommand, type FixtureRotationSnapshot } from '~/components
 import { STAGE_SIZE_METERS } from '~/utils/engine/constants';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SceneNode } from '~/utils/engine/core/group';
-import type { GizmoMode, ThreeSceneManager, TransformDelta } from './scene/three-scene-manager';
+import type { GizmoMode, SelectionModifiers, ThreeSceneManager, TransformDelta } from './scene/three-scene-manager';
+import {
+  isAdditiveModifier,
+  buildAncestorPath,
+  resolveClickSelection,
+  createDoubleClickTracker,
+} from '~/utils/engine/selection-logic';
 
 const props = defineProps<{ active: boolean }>();
 
@@ -50,49 +56,84 @@ const hasFixtureSelection = computed(() => effectiveFixtureSelection().size > 0)
 
 // Click-to-drill state — mirrors the 2D canvas's double-click-to-descend
 // behaviour (use-selection.ts onDragStart): first click on a fixture selects
-// its outermost group, repeated quick clicks step one level deeper.
-let lastClickId: string | number | null = null;
-let lastClickTime = 0;
+// its outermost group, repeated quick clicks step one level deeper. Both
+// canvases share the actual resolution rules via ~/utils/engine/selection-logic
+// so they can't drift apart on what a click/double-click/ctrl-click selects.
+const doubleClickTracker = createDoubleClickTracker();
+// Anchor fixture for Shift range-select — the last fixture clicked without
+// Shift. Mirrors use-selection.ts's `rangeAnchorId` on the 2D canvas.
+let rangeAnchorId: string | number | null = null;
 
-function handleSelect(id: string | number | null, additive: boolean) {
+function handleSelect(id: string | number | null, mods: SelectionModifiers) {
+  const additive = isAdditiveModifier(mods);
   if (id === null) {
     if (!additive) selectedIds.value = new Set();
     return;
   }
 
   const fixture = flatFixtures.value.find(f => f.id === id);
-  let targetId = id;
-
-  if (fixture) {
-    const now = performance.now();
-    const isDoubleClick = lastClickId === fixture.id && now - lastClickTime < 300;
-    lastClickId = fixture.id;
-    lastClickTime = now;
-
-    const path: SceneNode[] = [];
-    let curr: SceneNode | null = fixture as unknown as SceneNode;
-    while (curr) { path.unshift(curr); curr = curr.parent; }
-
-    let targetNode = path[0];
-    const selectedIndex = path.findIndex(n => selectedIds.value.has(n.id));
-    if (selectedIndex !== -1) {
-      if (isDoubleClick && selectedIndex < path.length - 1) {
-        targetNode = path[selectedIndex + 1] as SceneNode;
-        lastClickId = null;
-      } else {
-        targetNode = path[selectedIndex] as SceneNode;
-      }
-    }
-    if (targetNode) targetId = targetNode.id;
+  if (!fixture) {
+    selectedIds.value = new Set([id]);
+    return;
   }
 
-  if (additive) {
-    const next = new Set(selectedIds.value);
-    next.has(targetId) ? next.delete(targetId) : next.add(targetId);
-    selectedIds.value = next;
-  } else {
-    selectedIds.value = new Set([targetId]);
+  rangeAnchorId = fixture.id;
+  const isDoubleClick = doubleClickTracker.check(fixture.id, performance.now());
+  const path = buildAncestorPath(fixture as unknown as SceneNode);
+  const { nextSelected, drilled } = resolveClickSelection(path, selectedIds.value, isDoubleClick, additive);
+  if (drilled) doubleClickTracker.reset();
+  selectedIds.value = nextSelected;
+}
+
+// Shift-CLICK on a fixture → virtual ray from the currently-selected anchor
+// fixture to the clicked fixture; selects every fixture lying on it. Same rule
+// as the 2D canvas (use-selection.ts), just projected through the 3D camera.
+function handleShiftClick(id: string | number | null) {
+  if (id === null || !manager) return;
+  const orderedIds = flatFixtures.value.map(f => f.id);
+  let anchor = rangeAnchorId;
+  if (anchor === null || !orderedIds.includes(anchor)) {
+    anchor = orderedIds.find(fid => selectedIds.value.has(fid)) ?? null;
   }
+  if (anchor === null || anchor === id) {
+    selectedIds.value = new Set([id]);
+    return;
+  }
+  selectedIds.value = manager.selectAlongRay(anchor, id);
+}
+
+// Shift-drag line-select overlay — mirrors FixtureEditor.vue's 2D `lineOverlay`.
+const lineOverlay = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+
+function handleLineDrag(line: { x1: number; y1: number; x2: number; y2: number } | null) {
+  lineOverlay.value = line;
+}
+
+function handleLineSelect(ids: Set<string | number>) {
+  // Matches the 2D canvas's line-select: replaces the selection outright
+  // (no additive variant there either — Shift is the line-select modifier
+  // itself, so there's no separate "Ctrl+Shift-drag" combo to support).
+  selectedIds.value = ids;
+}
+
+// Ctrl/Cmd-drag box-select overlay — mirrors the 2D canvas's marquee tool.
+const boxOverlay = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+
+function handleBoxDrag(box: { x1: number; y1: number; x2: number; y2: number } | null) {
+  boxOverlay.value = box;
+}
+
+function handleBoxSelect(ids: Set<string | number>) {
+  // Matches the 2D canvas's marquee: a hit fixture selects its outermost
+  // group (buildAncestorPath root), not the fixture itself — so grouped
+  // fixtures box-select as whole groups, exactly like in the 2D editor.
+  const hit = new Set<string | number>();
+  for (const f of flatFixtures.value) {
+    if (!ids.has(f.id)) continue;
+    const path = buildAncestorPath(f as unknown as SceneNode);
+    hit.add(path[0]!.id);
+  }
+  selectedIds.value = hit;
 }
 
 // ── Gizmo drags → store mutations + one history command per drag ──────────────
@@ -177,6 +218,11 @@ async function init() {
     getDmx: engineStore.getOutputBuffer,
     getFixtures: () => flatFixtures.value.map(f => toRaw(f)),
     onSelect: handleSelect,
+    onShiftClick: handleShiftClick,
+    onLineDrag: handleLineDrag,
+    onLineSelect: handleLineSelect,
+    onBoxDrag: handleBoxDrag,
+    onBoxSelect: handleBoxSelect,
     onDragStart: handleDragStart,
     onDragMove: handleDragMove,
     onDragEnd: handleDragEnd,
@@ -244,6 +290,42 @@ watch(selectedIds, () => manager?.setSelection(effectiveFixtureSelection()));
 <template>
   <div ref="containerEl" class="relative w-full h-full min-w-0 overflow-hidden bg-black">
     <canvas ref="canvasEl" class="absolute inset-0 w-full h-full block" />
+
+    <!-- Shift line-select tool: the virtual line drawn across fixtures — mirrors FixtureEditor.vue's 2D overlay -->
+    <svg
+      v-if="lineOverlay"
+      class="absolute inset-0 w-full h-full pointer-events-none"
+    >
+      <line
+        :x1="lineOverlay.x1"
+        :y1="lineOverlay.y1"
+        :x2="lineOverlay.x2"
+        :y2="lineOverlay.y2"
+        stroke="var(--primary, #3b82f6)"
+        stroke-width="1.5"
+        stroke-dasharray="4 4"
+      />
+      <circle :cx="lineOverlay.x1" :cy="lineOverlay.y1" r="3" fill="var(--primary, #3b82f6)" />
+      <circle :cx="lineOverlay.x2" :cy="lineOverlay.y2" r="3" fill="var(--primary, #3b82f6)" />
+    </svg>
+
+    <!-- Ctrl/Cmd-drag box-select tool: the rectangle drawn across fixtures — mirrors the 2D canvas's marquee -->
+    <svg
+      v-if="boxOverlay"
+      class="absolute inset-0 w-full h-full pointer-events-none"
+    >
+      <rect
+        :x="Math.min(boxOverlay.x1, boxOverlay.x2)"
+        :y="Math.min(boxOverlay.y1, boxOverlay.y2)"
+        :width="Math.abs(boxOverlay.x2 - boxOverlay.x1)"
+        :height="Math.abs(boxOverlay.y2 - boxOverlay.y1)"
+        fill="var(--primary, #3b82f6)"
+        fill-opacity="0.1"
+        stroke="var(--primary, #3b82f6)"
+        stroke-width="1.5"
+        stroke-dasharray="4 4"
+      />
+    </svg>
 
     <!-- Gizmo mode toggle — styled like the 2D alignment toolbar, but rendered
          as a toggle group (role="radiogroup") since it's a select, not one-shot actions -->

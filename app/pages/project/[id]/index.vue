@@ -67,14 +67,81 @@ function handleOpenPropertiesTab(tab: string, isModifier?: boolean, effectId?: s
   nextTick(() => propertiesSidebarRef.value?.openTab(tab, isModifier, effectId))
 }
 
-function handleSelect(id: string | number, multiple: boolean) {
-  if (multiple) {
+// Anchor for shift-range selection in the sidebar — the last node clicked
+// without shift. Range-select spans from here to the shift-clicked node.
+let selectionAnchor: string | number | null = null
+
+// Flatten the scene tree into the order the rows appear in the sidebar,
+// descending only into expanded groups (collapsed groups contribute just
+// their own row). This linear order defines what "between two nodes" means.
+function flattenVisibleNodes(nodes: SceneNode[]): SceneNode[] {
+  const out: SceneNode[] = []
+  for (const node of nodes) {
+    out.push(node)
+    if (node instanceof FixtureGroup && node.expanded) {
+      out.push(...flattenVisibleNodes(node.children))
+    }
+  }
+  return out
+}
+
+function handleSelect(id: string | number, mods: { range: boolean; toggle: boolean }) {
+  if (mods.range) {
+    const flat = flattenVisibleNodes(sceneNodes.value)
+    // Anchor = the last non-shift click, or — if that's gone/stale — any node
+    // that's currently selected (so shift extends from a selection made
+    // anywhere: canvas, 3D, or a drilled-into group member).
+    let anchor = selectionAnchor
+    if (anchor === null || !flat.some(n => n.id === anchor)) {
+      anchor = flat.find(n => selectedIds.value.has(n.id))?.id ?? null
+    }
+    const a = anchor !== null ? flat.findIndex(n => n.id === anchor) : -1
+    const b = flat.findIndex(n => n.id === id)
+    if (a !== -1 && b !== -1 && a !== b) {
+      const [lo, hi] = a < b ? [a, b] : [b, a]
+      // Shift-range ignores groups entirely — it only ever yields individual
+      // leaf fixtures. Expanded group headers are skipped (their children are
+      // already their own rows in the slice); a collapsed group contributes
+      // all of its leaf fixtures.
+      const ids = flat.slice(lo, hi + 1).flatMap(n =>
+        n instanceof FixtureGroup
+          ? (n.expanded ? [] : n.getAllFixtures().map(f => f.id))
+          : [n.id]
+      )
+      selectedIds.value = new Set(ids)
+      // Keep the anchor so the user can grow/shrink the range with more shift-clicks.
+      return
+    }
+  }
+
+  if (mods.toggle) {
     const next = new Set(selectedIds.value)
     next.has(id) ? next.delete(id) : next.add(id)
     selectedIds.value = next
   } else {
     selectedIds.value = new Set([id])
   }
+  selectionAnchor = id
+}
+
+function handleSelectAll() {
+  // Figma-style: Ctrl+A operates on the current selection level — if the
+  // selection (or its first match) lives inside a group, select that
+  // group's siblings; otherwise select everything at the top level.
+  function findFirstSelected(nodes: SceneNode[]): SceneNode | null {
+    for (const node of nodes) {
+      if (selectedIds.value.has(node.id)) return node
+      if (node instanceof FixtureGroup) {
+        const found = findFirstSelected(node.children)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  const referenceNode = findFirstSelected(sceneNodes.value)
+  const parentGroup = referenceNode?.parent ?? null
+  const siblings = parentGroup ? parentGroup.children : sceneNodes.value
+  selectedIds.value = new Set(siblings.map(n => n.id))
 }
 
 const hasSelectedGroup = computed(() => {
@@ -158,6 +225,7 @@ useShortcuts([
   { key: 'z',         ctrl: true,               label: 'Undo',           handler: () => history.undo() },
   { key: 'z',         ctrl: true, shift: true,  label: 'Redo',           handler: () => history.redo() },
   { key: 'y',         ctrl: true,               label: 'Redo',           handler: () => history.redo() },
+  { key: 'a',         ctrl: true,               label: 'Select All',     handler: handleSelectAll },
   { key: 'g',         ctrl: true,               label: 'Group',          handler: handleGroup },
   { key: 'g',         ctrl: true, shift: true,  label: 'Ungroup',        handler: handleUngroupSelected },
   { key: 'Delete',                              label: 'Delete Selected', handler: handleDeleteSelected },

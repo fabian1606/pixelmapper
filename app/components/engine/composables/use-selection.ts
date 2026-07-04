@@ -15,10 +15,21 @@ import {
   STAGE_SIZE_METERS,
 } from '~/utils/engine/constants';
 import { useEngineStore } from '~/stores/engine-store';
+import {
+  isAdditiveModifier,
+  buildAncestorPath,
+  resolveClickSelection,
+  createDoubleClickTracker,
+  distanceToSegment,
+  LINE_SELECT_PICKUP_PX,
+  CLICK_MOVE_THRESHOLD_PX,
+} from '~/utils/engine/selection-logic';
 
 export type Interaction =
   | { type: 'idle' }
   | { type: 'marquee'; start: Point; end: Point }
+  /** Shift-drag: draws a virtual line; fixtures the line passes near get selected. */
+  | { type: 'line'; start: Point; end: Point }
   | {
       type: 'drag';
       startWorld: Point;
@@ -70,6 +81,11 @@ function clonePoints(pts: StripPoint[]): StripPoint[] {
   return pts.map(p => ({ x: p.x, y: p.y }));
 }
 
+/** Ctrl/Cmd trigger additive/toggle multi-select; Shift is reserved for the line-select tool. */
+function isAdditiveClick(event: MouseEvent): boolean {
+  return isAdditiveModifier(event);
+}
+
 export function useSelection(
   getFixtures: () => Fixture[],
   getWidth: () => number,
@@ -100,8 +116,15 @@ export function useSelection(
    */
   const editingVertex = ref<{ fixtureId: string | number; idx: number } | null>(null);
 
-  let lastClickId: string | number | null = null;
-  let lastClickTime = 0;
+  const doubleClickTracker = createDoubleClickTracker();
+  /**
+   * Anchor fixture for Shift range-select — the last fixture clicked without
+   * Shift. A Shift-click extends the selection from here to the clicked fixture
+   * over the flat fixture order, exactly like a list. Set in `onDragStart`.
+   */
+  let rangeAnchorId: string | number | null = null;
+  /** Fixture under the cursor when a Shift gesture began (range-select target if it's a click, not a drag). */
+  let shiftDownFixtureId: string | number | null = null;
   let beforeSnapshot: FixturePositionSnapshot[] = [];
   let beforeRotationSnapshot: FixtureRotationSnapshot[] = [];
   /** Pre-drag strip-points snapshots, keyed by fixture id — populated alongside `beforeSnapshot` for selected strip fixtures. */
@@ -123,6 +146,19 @@ export function useSelection(
 
     const vx = event.clientX - rect.left;
     const vy = event.clientY - rect.top;
+
+    // Shift → range/line select. Takes priority over fixture/handle hit-tests so
+    // a shift gesture never grabs or drags a fixture. On mouse-up we decide:
+    //   • barely moved → list-style range select (anchor → clicked fixture)
+    //   • dragged      → line-select (fixtures the drawn line crosses)
+    // The fixture under the cursor at press time is the range target.
+    if (event.shiftKey) {
+      const world = toWorld(vx, vy);
+      const hitId = getCanvas?.()?.hitTest(vx, vy);
+      shiftDownFixtureId = hitId ? (getFixtures().find(f => String(f.id) === hitId)?.id ?? null) : null;
+      interaction.value = { type: 'line', start: { ...world }, end: { ...world } };
+      return;
+    }
 
     // Strip handles take priority — only fires for the editing strip (gated
     // in WASM by the editing flag).
@@ -158,7 +194,7 @@ export function useSelection(
     }
 
     const world = toWorld(vx, vy);
-    if (!event.shiftKey) {
+    if (!isAdditiveClick(event)) {
       selectedIds.value = new Set();
       editingId.value = null;
       editingVertex.value = null;
@@ -169,40 +205,17 @@ export function useSelection(
   function onDragStart(event: MouseEvent, fixture: Fixture, rect: DOMRect) {
     const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
 
-    const now = performance.now();
-    const isDoubleClick = (lastClickId === fixture.id && now - lastClickTime < 300);
-    lastClickId = fixture.id;
-    lastClickTime = now;
+    // Remember this fixture as the anchor for the next Shift range-select.
+    rangeAnchorId = fixture.id;
 
-    const path: SceneNode[] = [];
-    let curr: SceneNode | null = fixture as unknown as SceneNode;
-    while (curr) { path.unshift(curr); curr = curr.parent; }
+    const isDoubleClick = doubleClickTracker.check(fixture.id, performance.now());
+    const path = buildAncestorPath(fixture as unknown as SceneNode);
+    const additive = isAdditiveClick(event);
+    const { nextSelected, wasAlreadySelected, drilled } =
+      resolveClickSelection(path, selectedIds.value, isDoubleClick, additive);
+    if (drilled) doubleClickTracker.reset();
 
-    let targetNode = path[0];
-    if (!targetNode) return;
-
-    const selectedIndex = path.findIndex(n => selectedIds.value.has(n.id));
-    if (selectedIndex !== -1) {
-      if (isDoubleClick && selectedIndex < path.length - 1) {
-        targetNode = path[selectedIndex + 1] as SceneNode;
-        lastClickId = null;
-      } else {
-        targetNode = path[selectedIndex] as SceneNode;
-      }
-    }
-    if (!targetNode) return;
-
-    let effectiveSelectedIds: Set<string | number>;
-    const wasAlreadySelected = selectedIds.value.has(targetNode.id);
-    if (event.shiftKey) {
-      const next = new Set(selectedIds.value);
-      next.has(targetNode.id) ? next.delete(targetNode.id) : next.add(targetNode.id);
-      effectiveSelectedIds = next;
-    } else if (!wasAlreadySelected) {
-      effectiveSelectedIds = new Set([targetNode.id]);
-    } else {
-      effectiveSelectedIds = new Set(selectedIds.value);
-    }
+    const effectiveSelectedIds = nextSelected;
     selectedIds.value = effectiveSelectedIds;
 
     // Two-click model for strips: 1st click selects, 2nd click enters edit mode.
@@ -212,7 +225,7 @@ export function useSelection(
       fixture.stripConfig &&
       fixture.stripConfig.shapeType === 'bezier' &&
       wasAlreadySelected &&
-      !event.shiftKey
+      !additive
     ) {
       editingId.value = fixture.id;
     } else if (editingId.value !== null && editingId.value !== fixture.id) {
@@ -351,6 +364,8 @@ export function useSelection(
 
     if (iv.type === 'marquee') {
       interaction.value = { ...iv, end: world };
+    } else if (iv.type === 'line') {
+      interaction.value = { ...iv, end: world };
     } else if (iv.type === 'drag') {
       const dx = world.x - iv.startWorld.x;
       const dy = world.y - iv.startWorld.y;
@@ -426,13 +441,53 @@ export function useSelection(
       for (const f of getFixtures()) {
         const wx = f.fixturePosition.x * w, wy = f.fixturePosition.y * h;
         if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
-          const path: SceneNode[] = [];
-          let curr: SceneNode | null = f as unknown as SceneNode;
-          while (curr) { path.unshift(curr); curr = curr.parent; }
-          if (path[0]) hit.add(path[0].id);
+          const path = buildAncestorPath(f as unknown as SceneNode);
+          hit.add(path[0]!.id);
         }
       }
       selectedIds.value = hit;
+    } else if (iv.type === 'line') {
+      // Two shapes of the same "select fixtures along a segment" gesture:
+      //   • Shift-CLICK on a fixture → ray from the currently-selected anchor
+      //     fixture to the clicked fixture (endpoints are the two fixtures).
+      //   • Shift-DRAG → the freely drawn line (endpoints are the cursor path).
+      // Both then select every fixture whose center lies within the pickup
+      // radius of that segment — individual fixtures, groups ignored.
+      const scale = getScale?.() ?? 1;
+      const w = getWidth(); const h = getHeight();
+      const movedScreen = Math.hypot(iv.end.x - iv.start.x, iv.end.y - iv.start.y) * scale;
+      const isClick = movedScreen <= CLICK_MOVE_THRESHOLD_PX && shiftDownFixtureId !== null;
+
+      let ax = iv.start.x, ay = iv.start.y, bx = iv.end.x, by = iv.end.y;
+      let anchorless = false;
+      if (isClick) {
+        const fixtures = getFixtures();
+        let anchor = rangeAnchorId;
+        if (anchor === null || !fixtures.some(f => f.id === anchor)) {
+          anchor = fixtures.find(f => selectedIds.value.has(f.id))?.id ?? null;
+        }
+        const anchorFix = anchor !== null ? fixtures.find(f => f.id === anchor) : undefined;
+        const targetFix = fixtures.find(f => f.id === shiftDownFixtureId);
+        if (anchorFix && targetFix && anchorFix.id !== targetFix.id) {
+          ax = anchorFix.fixturePosition.x * w; ay = anchorFix.fixturePosition.y * h;
+          bx = targetFix.fixturePosition.x * w; by = targetFix.fixturePosition.y * h;
+        } else {
+          anchorless = true; // nothing to draw a ray from → just select the clicked fixture
+        }
+      }
+
+      if (anchorless) {
+        selectedIds.value = new Set([shiftDownFixtureId!]);
+      } else {
+        const threshold = LINE_SELECT_PICKUP_PX / (scale || 1);
+        const hit = new Set<string | number>();
+        for (const f of getFixtures()) {
+          const fx = f.fixturePosition.x * w, fy = f.fixturePosition.y * h;
+          if (distanceToSegment(fx, fy, ax, ay, bx, by) <= threshold) hit.add(f.id);
+        }
+        selectedIds.value = hit;
+      }
+      shiftDownFixtureId = null;
     } else if (iv.type === 'drag') {
       // Non-strip moves → MoveFixtureCommand.
       if (beforeSnapshot.length > 0 && onDragComplete) {

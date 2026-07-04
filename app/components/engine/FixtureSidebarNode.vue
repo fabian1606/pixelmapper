@@ -14,6 +14,7 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
 import { Trash2 } from 'lucide-vue-next';
+import { isAdditiveModifier } from '~/utils/engine/selection-logic';
 
 const props = defineProps<{
   node: SceneNode;
@@ -21,7 +22,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'select', id: string | number, multiple: boolean): void;
+  (e: 'select', id: string | number, mods: { range: boolean; toggle: boolean }): void;
   (e: 'group'): void;
   (e: 'ungroup', group: FixtureGroup): void;
   (e: 'zoomTo', node: SceneNode): void;
@@ -56,7 +57,9 @@ const editName = ref('');
 const inputEl = ref<HTMLInputElement | null>(null);
 
 function handleSelect(e: MouseEvent) {
-  emit('select', props.node.id, e.shiftKey || e.metaKey || e.ctrlKey);
+  // Shift → range-select between the anchor and this node; Ctrl/Cmd → toggle
+  // (same additive rule the 2D/3D canvases use, via selection-logic).
+  emit('select', props.node.id, { range: e.shiftKey, toggle: isAdditiveModifier(e) });
 }
 
 // Tracks when editing started so we can ignore menu-close blur events
@@ -198,7 +201,7 @@ useShortcuts([
             :key="child.id"
             :node="child"
             :selected-ids="selectedIds"
-            @select="(id, mult) => emit('select', id, mult)"
+            @select="(id, mods) => emit('select', id, mods)"
             @group="emit('group')"
             @ungroup="g => emit('ungroup', g)"
             @zoom-to="(n: SceneNode) => emit('zoomTo', n)"

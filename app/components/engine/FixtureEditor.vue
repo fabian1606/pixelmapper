@@ -115,6 +115,14 @@ const { selectedIds, editingId, editingVertex, interaction, onViewportMouseDown,
     () => camera.scale,
   );
 
+// Viewport-space endpoints of the shift line-select tool, for the SVG overlay.
+const lineOverlay = computed(() => {
+  if (interaction.value.type !== 'line') return null;
+  const a = worldToViewport(interaction.value.start.x, interaction.value.start.y);
+  const b = worldToViewport(interaction.value.end.x, interaction.value.end.y);
+  return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+});
+
 const effectEngine = inject<EffectEngine>('effectEngine');
 const liveBus = useLiveBusStore();
 const { remoteSelections, remoteCameras, followedSessionId } = storeToRefs(liveBus);
@@ -200,6 +208,9 @@ function updateCursor(e: MouseEvent) {
   const t = interaction.value.type;
   if (t === 'drag') { cursor.value = 'grabbing'; return; }
   if (t === 'strip-vertex') { cursor.value = 'grabbing'; return; }
+  if (t === 'line') { cursor.value = 'crosshair'; return; }
+  // Shift held (before/without a drag) previews the line-select tool.
+  if (e.shiftKey) { cursor.value = 'crosshair'; return; }
   if (t === 'rotate') { cursor.value = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'20\' height=\'20\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M10 2 A8 8 0 1 1 2 10\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\'/%3E%3Cpolygon points=\'10,0 7,4 13,4\' fill=\'white\'/%3E%3C/svg%3E") 10 10, alias'; return; }
   const r = rect();
   const vx = e.clientX - r.left;
@@ -332,6 +343,24 @@ function handleMouseUp(e?: MouseEvent) {
       :viewport-width="editorWidth"
       :viewport-height="editorHeight"
     />
+
+    <!-- Shift line-select tool: the virtual line drawn across fixtures -->
+    <svg
+      v-if="lineOverlay"
+      class="absolute inset-0 w-full h-full pointer-events-none"
+    >
+      <line
+        :x1="lineOverlay.x1"
+        :y1="lineOverlay.y1"
+        :x2="lineOverlay.x2"
+        :y2="lineOverlay.y2"
+        stroke="var(--primary, #3b82f6)"
+        stroke-width="1.5"
+        stroke-dasharray="4 4"
+      />
+      <circle :cx="lineOverlay.x1" :cy="lineOverlay.y1" r="3" fill="var(--primary, #3b82f6)" />
+      <circle :cx="lineOverlay.x2" :cy="lineOverlay.y2" r="3" fill="var(--primary, #3b82f6)" />
+    </svg>
 
     <!-- Collaborator cursors + remote selections -->
     <CollaboratorCursors :camera="camera" />

@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { normalizeWheelDelta } from '~/utils/engine/wheel';
 
 export interface Camera {
   x: number;
@@ -45,8 +46,12 @@ export function useCamera() {
     const vx = event.clientX - rect.left;
     const vy = event.clientY - rect.top;
 
+    // Normalized to pixels — Firefox reports mouse-wheel scrolls in lines,
+    // which would make panning near-imperceptible fed in raw.
+    const { dx, dy } = normalizeWheelDelta(event);
+
     if (event.ctrlKey || event.metaKey) {
-      const factor = event.deltaY < 0 ? 1.05 : 0.95;
+      const factor = dy < 0 ? 1.05 : 0.95;
       const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, camera.scale * factor));
 
       // Zoom anchored to the cursor
@@ -54,8 +59,8 @@ export function useCamera() {
       camera.y = vy - (vy - camera.y) * (newScale / camera.scale);
       camera.scale = newScale;
     } else {
-      camera.x -= event.deltaX;
-      camera.y -= event.deltaY;
+      camera.x -= dx;
+      camera.y -= dy;
     }
   }
 
