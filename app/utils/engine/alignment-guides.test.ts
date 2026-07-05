@@ -7,8 +7,12 @@ import {
   queryAlignment,
   bboxCenter,
   collectDraggedFixtureIds,
+  dominantPlaneGap,
+  pinSpacingGap,
   VISIBLE_ALIGN_THRESHOLD,
   type AlignmentCandidate,
+  type GuideLine,
+  type SpacingGap,
 } from './alignment-guides';
 
 /**
@@ -429,5 +433,66 @@ describe('resolveAlignmentContext', () => {
     // Cross-group multi-select: one group member drags along.
     const ctx = resolveAlignmentContext(nodes, new Set(['dragged', 'm0']), visible);
     expect(ctx).toHaveLength(0); // g contains a dragged fixture, hidden is off-screen
+  });
+});
+
+describe('pinSpacingGap — axis-parallel spacing segments (3D)', () => {
+  const guide: GuideLine = {
+    axis: 1, // matched on Y = 2
+    value: 2,
+    matchedCenters: [],
+    marks: [],
+    dashed: false,
+    draggedPoint: [5, 2, 0.5],
+  };
+
+  it('pins both endpoints onto the owning guide line', () => {
+    // Members share Y within tolerance but sit at different heights (axis 2).
+    const gap: SpacingGap = { axis: 0, from: [1, 2.001, 0.9], to: [3, 1.999, 0.1], distance: 2 };
+    const { from, to } = pinSpacingGap(gap, [guide], 0.01);
+    expect(from).toEqual([1, 2, 0.5]);
+    expect(to).toEqual([3, 2, 0.5]);
+  });
+
+  it('never pins to a dashed guide or one on the gap axis, and falls back to `from`', () => {
+    const dashed: GuideLine = { ...guide, dashed: true };
+    const sameAxis: GuideLine = { ...guide, axis: 0, dashed: false };
+    const gap: SpacingGap = { axis: 0, from: [1, 2, 0.9], to: [3, 2.4, 0.1], distance: 2 };
+    const { from, to } = pinSpacingGap(gap, [dashed, sameAxis], 0.01);
+    expect(from).toEqual([1, 2, 0.9]);
+    expect(to).toEqual([3, 2, 0.9]); // still axis-parallel: only axis 0 differs
+  });
+});
+
+describe('dominantPlaneGap — distance to a dominant plane along the drag axis', () => {
+  it('measures to the plane when >1/3 of fixtures share the drag-axis value and the drag left it', () => {
+    // 6 fixtures on plane z=2 (axis 2), spread over x/y; dragged one pulled to z=0.5.
+    const cands = [
+      cand('a', 0, 0, 2), cand('b', 1, 0, 2), cand('c', 2, 0, 2),
+      cand('d', 0, 1, 2), cand('e', 1, 1, 2), cand('f', 2, 1, 2),
+    ];
+    const s = session(cands, [1, 0.5, 2], [[1, 0.5, 2]]);
+    const gap = dominantPlaneGap(s, [1, 0.5, 0.5], 2, 0.01);
+    expect(gap).not.toBeNull();
+    expect(gap!.axis).toBe(2);
+    expect(gap!.distance).toBeCloseTo(1.5, 5);
+    expect(gap!.from).toEqual([1, 0.5, 0.5]);
+    expect(gap!.to).toEqual([1, 0.5, 2]);
+  });
+
+  it('returns null when the dragged point still sits on the plane', () => {
+    const cands = [cand('a', 0, 0, 2), cand('b', 1, 0, 2), cand('c', 2, 0, 2), cand('d', 0, 1, 2)];
+    const s = session(cands, [1, 0.5, 2], [[1, 0.5, 2]]);
+    expect(dominantPlaneGap(s, [1, 0.5, 2], 2, 0.01)).toBeNull();
+  });
+
+  it('returns null when no plane holds more than a third of the fixtures', () => {
+    // Six distinct z values → largest cluster is 1/6, below the threshold.
+    const cands = [
+      cand('a', 0, 0, 0), cand('b', 0, 0, 1), cand('c', 0, 0, 2),
+      cand('d', 0, 0, 3), cand('e', 0, 0, 4), cand('f', 0, 0, 5),
+    ];
+    const s = session(cands, [0, 0, 10], [[0, 0, 10]]);
+    expect(dominantPlaneGap(s, [0, 0, 10], 2, 0.01)).toBeNull();
   });
 });

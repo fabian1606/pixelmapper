@@ -636,3 +636,86 @@ export function queryAlignment(
 
   return { snappedDelta, snappedAxes, draggedCenter, guides, spacing };
 }
+
+/**
+ * Projects a spacing gap onto the guide line it belongs to, so the drawn
+ * segment (and its label) sits exactly ON the rendered guide instead of
+ * cutting between the involved fixtures' true centers — which, with a third
+ * axis, are only guaranteed to agree on the guide axis. Returns axis-parallel
+ * endpoints: gap-axis coords from the gap, everything else from the guide's
+ * dragged point (which by construction lies on the line). Falls back to
+ * pinning against `from` when no owning guide is found.
+ */
+export function pinSpacingGap(
+  gap: SpacingGap,
+  guides: GuideLine[],
+  eps: number,
+): { from: number[]; to: number[] } {
+  const guide = guides.find(
+    g => !g.dashed && g.axis !== gap.axis && Math.abs(gap.from[g.axis]! - g.value) <= eps,
+  );
+  const base = guide ? guide.draggedPoint.slice() : gap.from.slice();
+  const from = base.slice();
+  from[gap.axis] = gap.from[gap.axis]!;
+  const to = base.slice();
+  to[gap.axis] = gap.to[gap.axis]!;
+  return { from, to };
+}
+
+/** Fraction of all fixtures a plane must hold before its distance is force-shown. */
+export const PLANE_DOMINANCE_FRACTION = 1 / 3;
+
+/**
+ * When many fixtures share one value along `axis` — a plane perpendicular to
+ * the drag direction — and the dragged selection has left that plane, returns
+ * the axis-parallel distance from the dragged point down to the plane. This is
+ * what makes "everything sits on one level, pull one fixture off it" show a
+ * measurement even though nothing is aligned on the other axes: the dominant
+ * plane itself is the reference. Returns null when no cluster holds more than
+ * `minFraction` of all context fixtures, or the dragged point still sits on it.
+ *
+ * `tolerance` groups near-equal values into one plane and also defines "still
+ * on the plane" (distance within tolerance → nothing to show).
+ */
+export function dominantPlaneGap(
+  session: AlignmentSession,
+  draggedCenter: number[],
+  axis: number,
+  tolerance: number,
+  minFraction = PLANE_DOMINANCE_FRACTION,
+): SpacingGap | null {
+  const values: number[] = [];
+  for (const cand of session.candidates) {
+    for (const pt of cand.points) values.push(pt[axis]!);
+  }
+  if (values.length === 0) return null;
+  values.sort((a, b) => a - b);
+
+  // Largest cluster of values within `tolerance` of the cluster's start.
+  let bestCount = 0;
+  let bestSum = 0;
+  let i = 0;
+  while (i < values.length) {
+    let j = i;
+    let sum = 0;
+    while (j < values.length && values[j]! - values[i]! <= tolerance) {
+      sum += values[j]!;
+      j++;
+    }
+    if (j - i > bestCount) {
+      bestCount = j - i;
+      bestSum = sum;
+    }
+    i = j;
+  }
+
+  if (bestCount <= values.length * minFraction) return null;
+  const planeValue = bestSum / bestCount;
+  const distance = Math.abs(draggedCenter[axis]! - planeValue);
+  if (distance <= tolerance) return null; // dragged point is still on the plane
+
+  const from = draggedCenter.slice();
+  const to = draggedCenter.slice();
+  to[axis] = planeValue;
+  return { axis, from, to, distance };
+}

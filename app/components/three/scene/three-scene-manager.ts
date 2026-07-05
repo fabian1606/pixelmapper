@@ -387,9 +387,20 @@ export class ThreeSceneManager {
     return (2 * distance * Math.tan(MathUtils.degToRad(this.camera.fov / 2))) / this.canvas.clientHeight;
   }
 
+  /**
+   * Which world axes the grabbed gizmo handle actually moves — [x, y, z].
+   * Falls back to all-active when no handle is grabbed (shouldn't happen
+   * mid-drag, but keeps callers from locking everything).
+   */
+  getActiveDragAxes(): boolean[] {
+    const axis = this.gizmo.axis ?? '';
+    const flags = [axis.includes('X'), axis.includes('Y'), axis.includes('Z')];
+    return flags.some(Boolean) ? flags : [true, true, true];
+  }
+
   /** Draws (or clears, with null) the live alignment guide lines in the scene. */
   setAlignmentGuides(data: AlignmentGuideData | null): void {
-    this.alignGuides.update(data);
+    this.alignGuides.update(data, this.getWorldPerPixel());
   }
 
   /** Projects every fixture's 3D position to canvas CSS-pixels and picks those near the drawn line — same math as the 2D line-select tool. */

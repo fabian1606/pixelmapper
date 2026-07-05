@@ -22,6 +22,8 @@ import {
   resolveAlignmentContext,
   buildAlignmentSession,
   queryAlignment,
+  pinSpacingGap,
+  dominantPlaneGap,
   bboxCenter,
   ALIGN_TOLERANCE_PX,
   type AlignmentSession,
@@ -215,13 +217,35 @@ function handleDragMove(mode: GizmoMode, delta: TransformDelta): number[] | void
     if (manager && alignSession) {
       const tol = ALIGN_TOLERANCE_PX * manager.getWorldPerPixel();
       const res = queryAlignment(alignSession, applied, [tol, tol, tol], [grid, grid, grid]);
-      applied = res.snappedDelta;
-      manager.setAlignmentGuides(res.guides.length > 0 || res.spacing.length > 0 ? res : null);
-      guideLabels.value = res.spacing.flatMap(gap => {
+      // The gizmo drags one axis (or a plane). Locked axes take no snap
+      // nudge; a guide on a locked axis survives only when the selection
+      // already sits exactly on it (its delta is 0 — it's the row line the
+      // drag slides along); distances are shown only along moved axes.
+      const active = manager.getActiveDragAxes();
+      applied = res.snappedDelta.map((v, a) => (active[a] ? v : 0));
+      const draggedCenter = res.draggedCenter.map((v, a) => (active[a] ? v : v - res.snappedDelta[a]!));
+      const guides = res.guides
+        .filter(g => active[g.axis] || Math.abs(res.snappedDelta[g.axis]!) < 1e-6)
+        .map(g => ({ ...g, draggedPoint: draggedCenter.map((v, a) => (a === g.axis ? g.value : v)) }));
+      const spacing = res.spacing.filter(gap => active[gap.axis]);
+      // Pulling a fixture off a densely-populated level: if no neighbor gap
+      // already covers a moved axis, but most fixtures share one value along
+      // it (a plane), show the distance from the dragged point to that plane.
+      for (let a = 0; a < active.length; a++) {
+        if (!active[a] || spacing.some(gap => gap.axis === a)) continue;
+        const planeGap = dominantPlaneGap(alignSession, draggedCenter, a, tol);
+        if (planeGap) spacing.push(planeGap);
+      }
+      manager.setAlignmentGuides(
+        guides.length > 0 || spacing.length > 0 ? { guides, spacing, draggedCenter, activeAxes: active } : null,
+      );
+      guideLabels.value = spacing.flatMap(gap => {
+        // Same pinning as the drawn segments, so labels sit on the guide line.
+        const { from, to } = pinSpacingGap(gap, guides, tol);
         const p = manager!.worldToScreen(
-          (gap.from[0]! + gap.to[0]!) / 2,
-          (gap.from[1]! + gap.to[1]!) / 2,
-          (gap.from[2]! + gap.to[2]!) / 2,
+          (from[0]! + to[0]!) / 2,
+          (from[1]! + to[1]!) / 2,
+          (from[2]! + to[2]!) / 2,
         );
         return p.visible ? [{ x: p.x, y: p.y, text: `${gap.distance.toFixed(2)} m` }] : [];
       });
