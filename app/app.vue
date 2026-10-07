@@ -4,8 +4,12 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import { useWakeLock, useDocumentVisibility } from '@vueuse/core';
 import { watch } from 'vue';
 import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
+import { provideRootScopes } from '~/composables/extensions/provide-root-scopes';
 
 const engineStore = useEngineStore();
+
+// Global extension scopes: project, selection, viewport (ADR §5.2).
+provideRootScopes();
 
 const { isSupported: wakeLockSupported, isActive: wakeLockActive, request: requestWakeLock, release: releaseWakeLock } = useWakeLock();
 const visibility = useDocumentVisibility();
