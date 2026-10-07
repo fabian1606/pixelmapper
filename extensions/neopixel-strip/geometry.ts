@@ -3,10 +3,11 @@
  * spline (each segment is a cubic Bézier with tangents derived from the
  * neighbouring control points).
  *
- * Everything here works in WORLD-PIXEL coordinates — the same space as
- * `StripConfig.points`.
+ * Everything here works in world pixels relative to the fixture origin —
+ * the same space as `StripConfig.points`. Curves are sampled here (inside
+ * the kind's `build`); the core only ever sees the resulting polylines.
  */
-import type { StripPoint, StripShapeType } from './core/fixture';
+import type { StripPoint, StripShapeType } from './config';
 
 // ─── Catmull-Rom → cubic Bézier conversion ────────────────────────────────────
 

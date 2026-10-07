@@ -516,13 +516,9 @@ export const useEngineStore = defineStore('engine', () => {
       // positionZ/tiltX/rollZ are 3D-only (the worker layout ignores them) but
       // are included so layoutRevision doubles as the 3D scene's rebuild signal.
       fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.positionZ ?? 0};${f.tiltX ?? 0};${f.rollZ ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
-      // Strip vertices feed per-pixel layout (binary-encoder.ts arc-length sampling),
-      // so any polyline mutation must bust the layout cache even when the AABB
-      // happens not to move.
-      if (f.stripConfig) {
-        fp += `s${f.stripConfig.shapeType}:${f.stripConfig.lengthMeters}:`;
-        for (const p of f.stripConfig.points) fp += `${p.x},${p.y};`;
-      }
+      // Kind geometry (curves, shapes) moves beams without changing channels
+      // or the AABB, so the config must bust the layout cache too.
+      if (f.kind) fp += `k${JSON.stringify(f.kind.config)};`;
       for (const ch of f.channels) {
         fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};${ch.rangeMin ?? 0};${ch.rangeMax ?? 255};`;
       }

@@ -3,9 +3,8 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
 import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
 import { modifierKey } from '~/utils/engine/modifiers';
-import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
-import { sampleStripCapped, pointAtArcLength, type SampledCurve } from '~/utils/engine/strip-geometry';
-import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
+import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
+import { beamWorldPx } from '~/utils/kinds/kind-host';
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
@@ -131,7 +130,7 @@ export function buildOtaEndPacket(): Uint8Array {
 
 // ── Strip config packet (TYPE_STRIP_CONFIG 0x19) ─────────────────────────────
 // Tells the ESP32-S3 node which LED strip layout to drive. Sent on connect and
-// whenever the bound fixture's stripConfig changes. Firmware v1 only consumes
+// whenever the bound strip fixture's kind config changes. Firmware v1 only consumes
 // ledCount + groupSize; chipType is forward-compat (always 0/WS2812B today).
 
 export interface StripConfigPayload {
@@ -230,67 +229,23 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
   for (let i = 0; i < fixtures.length; i++) {
     const f = fixtures[i]!;
     const groupIndex = i;
-    const rotRad = (f.rotation ?? 0) * (Math.PI / 180);
-    const cosR = Math.cos(rotRad);
-    const sinR = Math.sin(rotRad);
-
-    // NeoPixel strips: pre-sample the curve once (capped to the configured
-    // target length, matching the renderer's sample_strip_curve_capped) so each
-    // beam's per-channel world position can be looked up by arc length —
-    // beam.localX projects along the AABB axis and is meaningless for a polyline.
-    let stripCurve: SampledCurve | null = null;
-    let stripLedCount = 0;
-    let stripGroupSize = 1;
-    let stripBeamIndex: Map<string, number> | null = null;
-    const minStripPoints = f.stripConfig?.shapeType === 'circle' ? 1 : 2;
-    if (f.stripConfig && f.stripConfig.points.length >= minStripPoints && f.beams.length > 0) {
-      const targetLen = f.stripConfig.lengthMeters * PIXELS_PER_METER;
-      stripCurve = sampleStripCapped(f.stripConfig.shapeType, f.stripConfig.points, targetLen, f.stripConfig.clockwise ?? true);
-      stripLedCount = Math.max(1, f.stripConfig.ledCount);
-      stripGroupSize = Math.max(1, f.stripConfig.groupSize);
-      stripBeamIndex = new Map();
-      for (let bi = 0; bi < f.beams.length; bi++) stripBeamIndex.set(f.beams[bi]!.id, bi);
-    }
-
     // Layout v2: fixture id hash (stable per-fixture seeds) …
     w.u16(groupIndex);
     w.u32(fixtureIdHash(f.id));
     w.u16(f.channels.length);
     const headIndex = new Map(f.beams.map((b, bi) => [b.id, bi]));
 
+    const beamById = new Map(f.beams.map(b => [b.id, b]));
     for (const ch of f.channels) {
+      // Channel position = its beam's world position (kind beams via their
+      // offset, classic beams via the rotated local offset), else the origin.
       let worldX = f.fixturePosition.x;
       let worldY = f.fixturePosition.y;
-
-      if (stripCurve && stripBeamIndex && ch.beamId) {
-        // Place each logical pixel at the center of its physical-LED group on
-        // the (already-capped-to-target-length) curve. Matches the renderer's
-        // LED distribution in render.rs (different for circle vs open shapes).
-        const idx = stripBeamIndex.get(ch.beamId);
-        if (idx !== undefined) {
-          const firstLed = idx * stripGroupSize;
-          const lastLed = Math.min(firstLed + stripGroupSize - 1, stripLedCount - 1);
-          const centerLed = (firstLed + lastLed) / 2;
-          const t = f.stripConfig?.shapeType === 'circle'
-            ? (stripLedCount >= 1 ? centerLed / stripLedCount : 0)
-            : (stripLedCount > 1 ? 0.025 + (centerLed / (stripLedCount - 1)) * 0.95 : 0.5);
-          const p = pointAtArcLength(stripCurve, t * stripCurve.totalLength);
-          worldX = p.x / WORLD_WIDTH;
-          worldY = p.y / WORLD_HEIGHT;
-        }
-      } else if (ch.beamId) {
-        // Non-strip: per-beam position with rotation — mirrors engine.ts syncTargets() lines 82-96
-        const beam = f.beams?.find(b => b.id === ch.beamId);
-        if (beam) {
-          const fWidth  = f.fixtureSize.x * FIXTURE_RADIUS * 2;
-          const fHeight = f.fixtureSize.y * FIXTURE_RADIUS * 2;
-          const localPx = beam.localX * fWidth;
-          const localPy = beam.localY * fHeight;
-          const rotPx = localPx * cosR - localPy * sinR;
-          const rotPy = localPx * sinR + localPy * cosR;
-          worldX += rotPx / WORLD_WIDTH;
-          worldY += rotPy / WORLD_HEIGHT;
-        }
+      const beam = ch.beamId ? beamById.get(ch.beamId) : undefined;
+      if (beam) {
+        const p = beamWorldPx(f, beam);
+        worldX = p.x / WORLD_WIDTH;
+        worldY = p.y / WORLD_HEIGHT;
       }
 
       w.u16(f.startAddress - 1 + ch.addressOffset);

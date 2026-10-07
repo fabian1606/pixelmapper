@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getKind } from '~/utils/kinds/kind-host';
 import { computed, ref, watch } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useHistory } from './composables/use-history';
@@ -8,6 +9,7 @@ import { SetModifiersCommand } from './commands/set-modifiers-command';
 import { UpdateDmxCommand } from './commands/update-dmx-command';
 import SelectionPositionInfo, { type PositionAxis } from './SelectionPositionInfo.vue';
 import SelectionDmxInfo from './SelectionDmxInfo.vue';
+import KindConfigSection from './KindConfigSection.vue';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 
@@ -198,10 +200,11 @@ function updateDmx() {
   if (newGlobalAddress === firstFixture.value.startAddress) return;
   if (newGlobalAddress < 1 || newGlobalAddress > 16384) return;
 
-  // Reject if a regular (non-strip) fixture would extend beyond the 512-channel
-  // universe boundary. Strip fixtures are rebased to address 1 by the scoped
-  // encoder before being sent to the ESP32, so they are exempt from this check.
-  if (!firstFixture.value.stripConfig) {
+  // Reject if the fixture would extend beyond the 512-channel universe
+  // boundary — unless its kind declares `spansUniverses` (e.g. pixel strips
+  // fed as one buffer).
+  const kind = firstFixture.value.kind ? getKind(firstFixture.value.kind.id) : undefined;
+  if (!kind?.def.spansUniverses) {
     const localStart = ((newGlobalAddress - 1) % 512) + 1;
     if (localStart + firstFixture.value.channels.length - 1 > 512) return;
   }
@@ -260,6 +263,10 @@ function updateDmx() {
             @change-universe="updateDmx"
             @change-address="updateDmx"
           />
+        </div>
+        <!-- Fixture-kind config (e.g. strip LEDs, chip, shape) -->
+        <div v-if="firstFixture.kind" class="pt-2 border-t border-border/30">
+          <KindConfigSection :fixture="firstFixture" />
         </div>
       </template>
     </div>

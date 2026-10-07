@@ -1,4 +1,4 @@
-import { Fixture, type FixtureKindInstance, type StripConfig } from './core/fixture'
+import { Fixture, type FixtureKindInstance } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
 import { Beam } from './core/beam'
@@ -73,7 +73,6 @@ export interface SerializedFixture {
   oflKey?: string
   channels: SerializedChannel[]
   beams: SerializedBeam[]
-  stripConfig?: StripConfig
   /** Fixture-kind state (config + compiled cache), ADR §5.6. */
   kind?: FixtureKindInstance
   /** Namespaced extension data, ADR §5.8. */
@@ -168,7 +167,6 @@ export function serializeFixture(f: Fixture): SerializedFixture {
     oflKey: f.oflKey,
     channels: f.channels.map(serializeChannel),
     beams: f.beams.map(serializeBeam),
-    stripConfig: f.stripConfig ? { ...f.stripConfig } : undefined,
     kind: f.kind ? cloneJson(f.kind) : undefined,
     extensionData: f.extensionData ? cloneJson(f.extensionData) : undefined,
   }
@@ -281,34 +279,6 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.channels = data.channels.map(deserializeChannel)
   f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY, b.localZ ?? 0))
 
-  if (data.stripConfig) {
-    // Default shapeType for legacy snapshots predating the line/circle support.
-    const sc: StripConfig = {
-      ...data.stripConfig,
-      shapeType: data.stripConfig.shapeType ?? 'bezier',
-      points: [],
-    }
-    // Back-compat: snapshots created before the polyline refactor encode the
-    // strip as fixturePosition + fixtureSize + rotation. Reconstruct two
-    // vertices along the rotated axis so old projects load identically.
-    const minPoints = sc.shapeType === 'circle' ? 1 : 2;
-    if (data.stripConfig.points && data.stripConfig.points.length >= minPoints) {
-      sc.points = data.stripConfig.points.map(p => ({ x: p.x, y: p.y }))
-    } else {
-      const W = 3000, H = 3000 // WORLD_WIDTH/HEIGHT — avoid circular import
-      const cx = data.fixturePosition.x * W
-      const cy = data.fixturePosition.y * H
-      const halfLen = (data.fixtureSize.x ?? 0) * 18 // FIXTURE_RADIUS = 18 world-px per unit
-      const rad = (data.rotation ?? 0) * Math.PI / 180
-      const dx = Math.cos(rad) * halfLen
-      const dy = Math.sin(rad) * halfLen
-      sc.points = [
-        { x: cx - dx, y: cy - dy },
-        { x: cx + dx, y: cy + dy },
-      ]
-    }
-    f.stripConfig = sc
-  }
   if (data.extensionData) f.extensionData = cloneJson(data.extensionData)
   if (data.kind) {
     // Rebuild from config (migrates older config versions); falls back to the

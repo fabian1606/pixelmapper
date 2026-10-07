@@ -1,6 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ModifierInstance, BlendMode } from '~/utils/engine/types';
 import { buildLayoutBin, buildChannelsBin, buildModifiersBin, buildStripSlotsPacket } from './binary-encoder';
+import { stripOf } from './strip-kind';
 import { getManifest } from '~/utils/plugins/plugin-store';
 
 // Builds binary packets scoped to a single fixture — used by the
@@ -108,7 +109,7 @@ export function buildMultiScopedPackets(
 
   const stripSlotsPacket = buildStripSlotsPacket(
     slots.map((s, i) => {
-      const sc = scopedFixtures[i]!.stripConfig;
+      const sc = stripOf(scopedFixtures[i]);
       return {
         pin:          s.pin ?? 0,
         chipType:     sc?.chipType     ?? 'WS2812B',
@@ -138,10 +139,8 @@ export function scopedFingerprint(
   blendMode: BlendMode,
 ): { layout: string; channels: string; effects: string } {
   let layout = `${fixture.id};${fixture.fixturePosition.x};${fixture.fixturePosition.y};${fixture.rotation ?? 0};${fixture.fixtureSize.x};${fixture.fixtureSize.y};`;
-  if (fixture.stripConfig) {
-    layout += `s${fixture.stripConfig.lengthMeters}:${fixture.stripConfig.ledCount}:${fixture.stripConfig.groupSize}:`;
-    for (const p of fixture.stripConfig.points) layout += `${p.x},${p.y};`;
-  }
+  // Kind geometry (e.g. strip curves) changes beam positions.
+  if (fixture.kind) layout += `k${JSON.stringify(fixture.kind.config)};`;
   let channels = '';
   for (const ch of fixture.channels) {
     layout   += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};`;
@@ -174,7 +173,8 @@ export function multiScopedFingerprint(
     combined.layout   += fp.layout   + '|';
     combined.channels += fp.channels + '|';
     combined.effects   = fp.effects; // blendMode-part same; last one wins, effects accumulate per slot below
-    strip += `${fixture.id}:pin${pin ?? 0}:off${ledOffset ?? 0}:${fixture.stripConfig?.chipType}:${fixture.stripConfig?.ledCount}:${fixture.stripConfig?.groupSize}:${fixture.stripConfig?.ledsPerMeter}|`;
+    const sc = stripOf(fixture);
+    strip += `${fixture.id}:pin${pin ?? 0}:off${ledOffset ?? 0}:${sc?.chipType}:${sc?.ledCount}:${sc?.groupSize}:${sc?.ledsPerMeter}|`;
   }
   // Rebuild effects fingerprint across all slots
   const sourceFixtures = slots.map(s => s.fixture);

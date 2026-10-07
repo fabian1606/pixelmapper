@@ -17,10 +17,10 @@ import { WebSocketConnector, type FixtureSlot } from '~/utils/connectors/websock
 import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
 import { EspNowBridgeConnector } from '~/utils/connectors/espnow-bridge-connector';
 import type { BaseConnector } from '~/utils/connectors/base-connector';
-import { UpdateStripConfigCommand, type StripConfigSnapshot } from '~/components/engine/commands/update-strip-config-command';
-import { SetStripShapeCommand, type StripShapeSnapshot } from '~/components/engine/commands/set-strip-shape-command';
-import { regenerateStripPointsForShape, logicalPixelCount } from '~/utils/engine/neopixel-strip-factory';
-import type { StripShapeType } from '~/utils/engine/core/fixture';
+import { SetFixtureKindConfigCommand } from '~/components/engine/commands/set-fixture-kind-config-command';
+import { stripOf, stripPixelCount, type StripKindView } from '~/utils/connectors/strip-kind';
+import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Json } from '@pixelmapper/extension-api';
 import {
   AddConnectorCommand,
   RemoveConnectorCommand,
@@ -166,7 +166,7 @@ function asEspNowBridge(c: BaseConnector): EspNowBridgeConnector | null {
 
 /** All LED-strip fixtures in the project, available for binding to a WebSocketConnector. */
 const stripFixtures = computed(() =>
-  engineStore.flatFixtures.filter(f => f.stripConfig)
+  engineStore.flatFixtures.filter(f => stripOf(f))
 );
 
 /** All fixtures, available as ESP-NOW bridge broadcast source. */
@@ -216,7 +216,7 @@ function updateSlotOffset(connector: WebSocketConnector, slotIndex: number, offs
 
 /** LED-Anzahl der Fixture eines Slots (0, falls nicht aufgelöst). */
 function slotLedCount(connector: WebSocketConnector, slotIndex: number): number {
-  return fixtureForSlot(connector, slotIndex)?.stripConfig?.ledCount ?? 0;
+  return stripOf(fixtureForSlot(connector, slotIndex))?.ledCount ?? 0;
 }
 
 /**
@@ -229,7 +229,7 @@ function computeSuggestedOffset(slots: FixtureSlot[], slotIndex: number, pin: nu
   for (let i = 0; i < slotIndex; i++) {
     if (slots[i]?.pin === pin) {
       const fx = engineStore.flatFixtures.find(f => String(f.id) === String(slots[i]!.fixtureId));
-      sum += fx?.stripConfig?.ledCount ?? 0;
+      sum += stripOf(fx)?.ledCount ?? 0;
     }
   }
   return sum;
@@ -271,14 +271,23 @@ function removeSlot(connector: WebSocketConnector, slotIndex: number) {
   patchConnector(connector, { fixtureSlots: slots });
 }
 
-function commitStripPatchForSlot(connector: WebSocketConnector, slotIndex: number, patch: Partial<StripConfigSnapshot>) {
-  const f = fixtureForSlot(connector, slotIndex);
-  const before = snapshotStrip(f);
-  if (!f || !before) return;
-  const after: StripConfigSnapshot = { ...before, ...patch };
-  if (after.ledCount === before.ledCount && after.groupSize === before.groupSize && after.ledsPerMeter === before.ledsPerMeter && after.chipType === before.chipType) return;
-  history.execute(new UpdateStripConfigCommand(engineStore.flatFixtures, f.id, before, after));
+/**
+ * Merges a patch into a strip fixture's kind config as one undo step
+ * (core SetFixtureKindConfig). A new shape clears the points so the kind
+ * regenerates default geometry.
+ */
+function patchStrip(f: Fixture | null, patch: Partial<StripKindView>) {
+  const current = stripOf(f);
+  if (!f?.kind || !current) return;
+  if ((Object.keys(patch) as (keyof StripKindView)[]).every(k => patch[k] === current[k])) return;
+  const before = f.kind.config as Json;
+  const after = { ...(before as Record<string, Json>), ...patch, ...(patch.shapeType ? { points: [] } : {}) } as Json;
+  history.execute(new SetFixtureKindConfigCommand(engineStore.flatFixtures, f.id, before, after, `Edit ${f.name}`));
   engineStore.flushEngineOutput();
+}
+
+function commitStripPatchForSlot(connector: WebSocketConnector, slotIndex: number, patch: Partial<StripKindView>) {
+  patchStrip(fixtureForSlot(connector, slotIndex), patch);
 }
 
 // Sum of logical pixels (= ceil(ledCount/groupSize)) across all strip slots of a
@@ -293,9 +302,8 @@ function connectorLogicalPixels(connector: WebSocketConnector): number {
   const slots = connector.fixtureSlots.value;
   for (let i = 0; i < slots.length; i++) {
     const f = fixtureForSlot(connector, i);
-    if (f?.stripConfig) {
-      total += logicalPixelCount(f.stripConfig.ledCount, f.stripConfig.groupSize);
-    }
+    const sc = stripOf(f);
+    if (sc) total += stripPixelCount(sc);
   }
   return total;
 }
@@ -308,91 +316,24 @@ function connectorPixelSeverity(connector: WebSocketConnector): 'none' | 'warn' 
   return 'none';
 }
 
-function commitStripShapeForSlot(connector: WebSocketConnector, slotIndex: number, newShape: StripShapeType) {
-  const f = fixtureForSlot(connector, slotIndex);
-  if (!f || !f.stripConfig) return;
-  if (f.stripConfig.shapeType === newShape) return;
-  const before: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
-  regenerateStripPointsForShape(f, newShape);
-  const after: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
-  f.stripConfig.shapeType = before.shapeType;
-  f.stripConfig.points = before.points.map(p => ({ x: p.x, y: p.y }));
-  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
-  engineStore.flushEngineOutput();
+function commitStripShapeForSlot(connector: WebSocketConnector, slotIndex: number, newShape: StripKindView['shapeType']) {
+  patchStrip(fixtureForSlot(connector, slotIndex), { shapeType: newShape });
 }
 
 function commitStripClockwiseForSlot(connector: WebSocketConnector, slotIndex: number, cw: boolean) {
-  const f = fixtureForSlot(connector, slotIndex);
-  if (!f || !f.stripConfig || f.stripConfig.shapeType !== 'circle') return;
-  if ((f.stripConfig.clockwise ?? true) === cw) return;
-  const before: StripShapeSnapshot = { id: f.id, shapeType: f.stripConfig.shapeType, points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })), clockwise: f.stripConfig.clockwise ?? true };
-  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, { ...before, clockwise: cw }));
-  engineStore.flushEngineOutput();
+  patchStrip(fixtureForSlot(connector, slotIndex), { clockwise: cw });
 }
 
-function snapshotStrip(f: ReturnType<typeof fixtureFor>): StripConfigSnapshot | null {
-  if (!f || !f.stripConfig) return null;
-  return {
-    ledCount:     f.stripConfig.ledCount,
-    groupSize:    f.stripConfig.groupSize,
-    ledsPerMeter: f.stripConfig.ledsPerMeter,
-    chipType:     f.stripConfig.chipType,
-  };
-}
-
-function commitStripShape(connector: WebSocketConnector, newShape: StripShapeType) {
-  const f = fixtureFor(connector);
-  if (!f || !f.stripConfig) return;
-  if (f.stripConfig.shapeType === newShape) return;
-
-  const before: StripShapeSnapshot = {
-    id: f.id,
-    shapeType: f.stripConfig.shapeType,
-    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
-    clockwise: f.stripConfig.clockwise ?? true,
-  };
-  regenerateStripPointsForShape(f, newShape);
-  const after: StripShapeSnapshot = {
-    id: f.id,
-    shapeType: f.stripConfig.shapeType,
-    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
-    clockwise: f.stripConfig.clockwise ?? true,
-  };
-  f.stripConfig.shapeType = before.shapeType;
-  f.stripConfig.points = before.points.map(p => ({ x: p.x, y: p.y }));
-
-  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
-  engineStore.flushEngineOutput();
+function commitStripShape(connector: WebSocketConnector, newShape: StripKindView['shapeType']) {
+  patchStrip(fixtureFor(connector), { shapeType: newShape });
 }
 
 function commitStripClockwise(connector: WebSocketConnector, cw: boolean) {
-  const f = fixtureFor(connector);
-  if (!f || !f.stripConfig || f.stripConfig.shapeType !== 'circle') return;
-  if ((f.stripConfig.clockwise ?? true) === cw) return;
-  const before: StripShapeSnapshot = {
-    id: f.id,
-    shapeType: f.stripConfig.shapeType,
-    points: f.stripConfig.points.map(p => ({ x: p.x, y: p.y })),
-    clockwise: f.stripConfig.clockwise ?? true,
-  };
-  const after: StripShapeSnapshot = { ...before, clockwise: cw };
-  history.execute(new SetStripShapeCommand(engineStore.flatFixtures, before, after));
-  engineStore.flushEngineOutput();
+  patchStrip(fixtureFor(connector), { clockwise: cw });
 }
 
-function commitStripPatch(connector: WebSocketConnector, patch: Partial<StripConfigSnapshot>) {
-  const f = fixtureFor(connector);
-  const before = snapshotStrip(f);
-  if (!f || !before) return;
-  const after: StripConfigSnapshot = { ...before, ...patch };
-  if (
-    after.ledCount     === before.ledCount &&
-    after.groupSize    === before.groupSize &&
-    after.ledsPerMeter === before.ledsPerMeter &&
-    after.chipType     === before.chipType
-  ) return;
-  history.execute(new UpdateStripConfigCommand(engineStore.flatFixtures, f.id, before, after));
-  engineStore.flushEngineOutput();
+function commitStripPatch(connector: WebSocketConnector, patch: Partial<StripKindView>) {
+  patchStrip(fixtureFor(connector), patch);
 }
 
 function toggleExpanded(connectorId: string) {
@@ -752,7 +693,7 @@ function assignedCount(connector: BaseConnector): number {
                   :value="String(f.id)"
                 >
                   {{ f.name || `Fixture ${f.id}` }}
-                  ({{ f.stripConfig?.ledCount }} LEDs)
+                  ({{ stripOf(f)?.ledCount }} LEDs)
                 </option>
               </select>
             </label>
@@ -808,17 +749,14 @@ function assignedCount(connector: BaseConnector): number {
                   type="number"
                   min="1" max="2048" step="1"
                   class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.ledCount ?? 0"
+                  :value="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.ledCount ?? 0"
                   @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { ledCount: Number(($event.target as HTMLInputElement).value) })"
                 />
                 <span
-                  v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig"
+                  v-if="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))"
                   class="mt-0.5 block text-[10px] text-muted-foreground/70"
                 >
-                  {{ logicalPixelCount(
-                    fixtureForSlot(asWebSocket(connector)!, slotIndex)!.stripConfig!.ledCount,
-                    fixtureForSlot(asWebSocket(connector)!, slotIndex)!.stripConfig!.groupSize
-                  ) }} log. Pixel
+                  {{ stripPixelCount(stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))!) }} log. Pixel
                 </span>
               </label>
               <label class="text-xs text-muted-foreground">
@@ -827,7 +765,7 @@ function assignedCount(connector: BaseConnector): number {
                   type="number"
                   min="1" max="64" step="1"
                   class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.groupSize ?? 1"
+                  :value="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.groupSize ?? 1"
                   @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { groupSize: Number(($event.target as HTMLInputElement).value) })"
                 />
               </label>
@@ -837,7 +775,7 @@ function assignedCount(connector: BaseConnector): number {
                   type="number"
                   min="1" max="500" step="1"
                   class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                  :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.ledsPerMeter ?? 60"
+                  :value="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.ledsPerMeter ?? 60"
                   @change="commitStripPatchForSlot(asWebSocket(connector)!, slotIndex, { ledsPerMeter: Number(($event.target as HTMLInputElement).value) })"
                 />
               </label>
@@ -846,22 +784,22 @@ function assignedCount(connector: BaseConnector): number {
               Shape
               <select
                 class="mt-1 w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                :value="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.shapeType ?? 'bezier'"
-                @change="commitStripShapeForSlot(asWebSocket(connector)!, slotIndex, ($event.target as HTMLSelectElement).value as StripShapeType)"
+                :value="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.shapeType ?? 'bezier'"
+                @change="commitStripShapeForSlot(asWebSocket(connector)!, slotIndex, ($event.target as HTMLSelectElement).value as StripKindView['shapeType'])"
               >
                 <option value="bezier">Bezier Curve</option>
                 <option value="line">Straight Line</option>
                 <option value="circle">Circle</option>
               </select>
             </label>
-            <template v-if="fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.shapeType === 'circle'">
+            <template v-if="stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.shapeType === 'circle'">
               <label class="text-xs text-muted-foreground">
                 Direction
                 <div class="flex gap-1 mt-1">
                   <button
                     type="button"
                     class="flex-1 rounded border text-xs py-1 transition-colors"
-                    :class="(fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.clockwise ?? true)
+                    :class="(stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.clockwise ?? true)
                       ? 'bg-primary/15 border-primary/40 text-primary'
                       : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
                     @click="commitStripClockwiseForSlot(asWebSocket(connector)!, slotIndex, true)"
@@ -869,7 +807,7 @@ function assignedCount(connector: BaseConnector): number {
                   <button
                     type="button"
                     class="flex-1 rounded border text-xs py-1 transition-colors"
-                    :class="!(fixtureForSlot(asWebSocket(connector)!, slotIndex)?.stripConfig?.clockwise ?? true)
+                    :class="!(stripOf(fixtureForSlot(asWebSocket(connector)!, slotIndex))?.clockwise ?? true)
                       ? 'bg-primary/15 border-primary/40 text-primary'
                       : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/60'"
                     @click="commitStripClockwiseForSlot(asWebSocket(connector)!, slotIndex, false)"

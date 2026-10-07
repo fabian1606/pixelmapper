@@ -79,7 +79,7 @@ for each fixture:
 
 `world_x/world_y` are computed in `buildLayoutBin` with the beam rotation transform (strips: the LED group's center on the sampled curve). The engine groups channels with equal `(group_index, head_index)` into heads and detects their color system (RGB, RGBW, RGBA, CMY) and pan/tilt pairs.
 
-Per fixture 8 bytes, per channel 19 bytes. Example: 20 fixtures × 4 channels = `5 + 2 + 20×8 + 80×19` = **1,687 bytes**.
+Per fixture 8 bytes, per channel 20 bytes. Example: 20 fixtures × 4 channels = `5 + 2 + 20×8 + 80×20` = **1,767 bytes**.
 
 ### TYPE_CHAN_BIN (0x15)
 ```
@@ -163,8 +163,8 @@ At 921,600 baud = **115,200 bytes/sec**:
 
 | Scenario | Packet sizes | Initial sync |
 |----------|-------------|--------------|
-| 20 fixtures, 4ch, 1 step, 5 modifiers | layout ~1,687B + channels ~230B + modifiers ~400B | ~20 ms |
-| 40 fixtures, 4ch, 8 steps (grouped) | layout ~3,367B + channels ~300B + modifiers ~800B | ~39 ms |
-| 40 fixtures, 4ch, 8 steps (all unique) | layout ~3,367B + channels ~9,600B + modifiers ~800B | ~120 ms |
+| 20 fixtures, 4ch, 1 step, 5 modifiers | layout ~1,767B + channels ~230B + modifiers ~400B | ~20 ms |
+| 40 fixtures, 4ch, 8 steps (grouped) | layout ~3,527B + channels ~300B + modifiers ~800B | ~39 ms |
+| 40 fixtures, 4ch, 8 steps (all unique) | layout ~3,527B + channels ~9,600B + modifiers ~800B | ~120 ms |
 
 After the initial sync, only changed packets are sent. Moving a single fixture → only `TYPE_LAYOUT_BIN` + `TYPE_CHAN_BIN` resent. Changing a modifier → only `TYPE_MODIFIERS_BIN` resent.

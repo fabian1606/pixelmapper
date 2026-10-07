@@ -1,0 +1,8 @@
+{
+  "name": "@pixelmapper/ext-neopixel-strip",
+  "version": "1.0.0",
+  "description": "NeoPixel LED strips as a fixture kind (channels, pixel emitters, curve body and handles).",
+  "private": true,
+  "type": "module",
+  "main": "./nuxt.config.ts"
+}
