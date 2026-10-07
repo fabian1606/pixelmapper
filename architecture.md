@@ -32,9 +32,15 @@ pixelmapper/
 │   │   ├── live/                  # Live mode canvas + widgets
 │   │   ├── design/                # Universe inspector, patch table
 │   │   ├── three/                 # 3D viewport + scene builders
+│   │   ├── primitives/            # Layout primitives with auto extension slots (PmPanel, PmPanelSection, …)
+│   │   ├── pm/                    # Core defaults of the replaceable pm.* inputs
+│   │   ├── extension-host/        # ExtensionSlot, Replaceable, ScopeProvider, choice dialog
 │   │   └── ui/                    # shadcn-vue primitives (not replaceable)
+│   ├── composables/extensions/    # provideScope/useScope, useExtensionContext, useReplaceable, useLiveValue, onFrame
+│   ├── plugins/                   # 00.extensions.client.ts — extension host boot
 │   ├── stores/                    # Pinia stores (engine-store = render loop & project state)
 │   └── utils/
+│       ├── extensions/            # registry, slot matching/paths, scope views, replacements, live hub, shared globals
 │       ├── engine/                # Fixture model, worker, serialization, (legacy) TS effect classes
 │       ├── connectors/            # Connectors + binary encoders (→ become extensions)
 │       ├── controllers/           # Controller driver contracts (→ extensions)
@@ -54,6 +60,8 @@ pixelmapper/
 
 - `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
 - `bun run typecheck` — `nuxt typecheck` (vue-tsc).
+- `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
+- `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
 
 ## Documentation Map
@@ -67,7 +75,8 @@ pixelmapper/
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
-- Created during the migration: `architecture/extensions.md`, `architecture/guides/authoring-extensions.md`, `architecture/guides/authoring-content-plugins.md`
+- [Extensions — how the extension host works](architecture/extensions.md) (registry, scopes, slots, `pm.*` replaceables, live values)
+- Created later in the migration: `architecture/guides/authoring-extensions.md`, `architecture/guides/authoring-content-plugins.md`
 
 ## Glossary
 

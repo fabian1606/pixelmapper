@@ -54,7 +54,13 @@ watch(() => history.version.value, () => {
 
 ## Context Menu System
 
-`FixtureContextMenu.vue` is the single shared context menu used by all interactive nodes (canvas nodes, sidebar nodes, group nodes). It accepts capability flags (`canZoom`, `canGroup`, `canUngroup`, `canDelete`) to show/hide items, and renders `DeleteConfirmDialog` on delete requests.
+`GlobalContextMenu.vue` (mounted once in `app.vue`) renders the menu opened via `useGlobalContextMenu().openMenu(event, options, context?)`. The optional `context = { id, scopes }` names the menu for extensions (slot `context-menu/<id>:items`) and carries the opener's scopes, which the menu re-provides to contributed items (see [extensions.md](extensions.md)).
+
+## Layout Primitives
+
+Extensible UI is built from layout primitives in `app/components/primitives/` — `PmPanel`, `PmPanelSection`, `PmToolbar`, `PmMenuGroup`, `PmListItem`. Each takes a stable kebab-case `id`, renders its root as `as` (element or component, attributes fall through) and automatically places extension slots (`<path>:<position>`). Use them for any new panel, section, toolbar, menu or list row so extensions can contribute without extra wiring; see [extensions.md](extensions.md#slots) for positions, manual placement and the current slot ids.
+
+Domain inputs (faders, number fields, color/XY inputs, tap tempo, trigger buttons, …) are rendered through `<Replaceable name="pm.*">` — never import `app/components/pm/*` directly.
 
 ## Sidebar
 
