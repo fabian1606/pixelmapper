@@ -60,6 +60,14 @@ export function freezeView<T>(value: T): T {
   return FREEZE ? deepFreeze(raw) : raw;
 }
 
+/**
+ * Deep copy of JSON data. Unlike `structuredClone` it works on Vue reactive
+ * proxies (mappings, extension data, params live in reactive state).
+ */
+function jsonClone<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
 // ── Global scopes ───────────────────────────────
 
 /** Expands selected node ids into fixture ids (groups → their fixtures). */
@@ -144,8 +152,8 @@ export function fixtureView(fixture: Fixture): FixtureView {
     oflKey: fixture.oflKey,
     channels: fixture.channels.map((_, i) => channelView(fixture, i)),
     beams,
-    kind: extra.kind ? structuredClone(extra.kind) : undefined,
-    extensionData: extra.extensionData ? structuredClone(extra.extensionData) : undefined,
+    kind: extra.kind ? jsonClone(extra.kind) : undefined,
+    extensionData: extra.extensionData ? jsonClone(extra.extensionData) : undefined,
   };
 }
 
@@ -217,7 +225,7 @@ export function modifierView(effect: Effect, blendMode: BlendMode): ModifierInst
     angle: effect.angle ?? 0,
     fanning: effect.fanning,
     reverse: effect.reverse ?? false,
-    params: structuredClone(params) as ModifierInstanceView['params'],
+    params: jsonClone(params) as ModifierInstanceView['params'],
   };
 }
 
@@ -242,8 +250,8 @@ export function liveWidgetView(widget: LiveWidget): LiveWidgetView {
     gridH: widget.gridH,
     label: widget.label,
     color: widget.color,
-    mapping: structuredClone(widget.mapping) as unknown as Record<string, Json>,
-    extensionData: extra.extensionData ? structuredClone(extra.extensionData) : undefined,
+    mapping: jsonClone(widget.mapping) as unknown as Record<string, Json>,
+    extensionData: extra.extensionData ? jsonClone(extra.extensionData) : undefined,
   };
 }
 

@@ -1,31 +1,35 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { MousePointerClick, SlidersHorizontal, Crosshair, Type, Gamepad2, Projector, Palette, Drum } from 'lucide-vue-next';
+import { Gamepad2 } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { AddLiveWidgetCommand } from '~/components/engine/commands/live-widget-commands';
-import { defaultLiveWidget, type LiveWidgetType, type LiveWidget, type ControllerChildBinding } from '~/utils/live/types';
+import { defaultLiveWidget, type LiveWidget, type ControllerChildBinding } from '~/utils/live/types';
+import { listWidgetTypes, type WidgetTypeInfo } from '~/utils/live/widget-registry';
+import { registryVersion } from '~/utils/extensions/registry';
 import { listControllerDefinitions } from '~/utils/controllers/catalog';
 import type { ControllerDefinition } from '~/utils/controllers/types';
 
 const store = useLiveModeStore();
 const history = useHistory();
 
-const WIDGET_TYPES: { type: LiveWidgetType; label: string; icon: typeof MousePointerClick }[] = [
-  { type: 'button', label: 'Button', icon: MousePointerClick },
-  { type: 'slider', label: 'Slider', icon: SlidersHorizontal },
-  { type: 'xy-pad', label: 'XY Pad', icon: Crosshair },
-  { type: 'label', label: 'Label', icon: Type },
-  { type: 'fixture-preview', label: 'Preview', icon: Projector },
-  { type: 'color-wheel', label: 'Color', icon: Palette },
-  { type: 'beat', label: 'Beat', icon: Drum },
-];
+/** Addable widget types (core + installed extensions). */
+const widgetTypes = computed(() => {
+  void registryVersion.value;
+  return listWidgetTypes().filter(t => t.addable);
+});
 
 const controllers = computed<ControllerDefinition[]>(() => listControllerDefinitions());
 
-function addWidget(type: LiveWidgetType) {
+function addWidget(info: WidgetTypeInfo) {
   if (!store.activePageId) return;
-  const widget = defaultLiveWidget(type, 0, 0);
+  const widget = defaultLiveWidget(info.type as LiveWidget['type'], 0, 0, info.defaultSize);
+  // Extension widgets keep their config in namespaced extension data.
+  if (info.extensionId && info.defaultConfig) {
+    (widget as LiveWidget & { extensionData?: Record<string, unknown> }).extensionData = {
+      [info.extensionId]: info.defaultConfig(),
+    };
+  }
   history.execute(new AddLiveWidgetCommand(store.activePageId, widget));
 }
 
@@ -49,11 +53,11 @@ function addControllerTwin(def: ControllerDefinition) {
 <template>
   <div class="w-16 shrink-0 flex flex-col items-center py-3 gap-1 border-r border-border bg-background overflow-y-auto">
     <button
-      v-for="item in WIDGET_TYPES"
+      v-for="item in widgetTypes"
       :key="item.type"
       class="w-full flex flex-col items-center gap-1 py-2 px-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
       :title="item.label"
-      @click="addWidget(item.type)"
+      @click="addWidget(item)"
     >
       <component :is="item.icon" class="size-4 shrink-0" />
       <span class="text-[9px] font-medium leading-none">{{ item.label }}</span>

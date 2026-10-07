@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { LivePage, LiveWidget, ControllerChildBinding, LiveSection, SectionMember, LiveControllerInstance, MovingHeadPosition } from '~/utils/live/types';
+import { normalizePageWidgetTypes } from '~/utils/live/types';
 import { clearFlashStack } from '~/components/engine/composables/preset-activation';
 
 export const useLiveModeStore = defineStore('live-mode', () => {
@@ -39,7 +40,8 @@ export const useLiveModeStore = defineStore('live-mode', () => {
   const activePage = computed(() => pages.value.find(p => p.id === activePageId.value) ?? null);
 
   function loadPages(incoming: LivePage[]) {
-    pages.value = incoming;
+    // Map pre-dedupe widget type names (xy-pad → xy, color-wheel → color).
+    pages.value = incoming.map(normalizePageWidgetTypes);
     activePageId.value = incoming[0]?.id ?? null;
   }
 
