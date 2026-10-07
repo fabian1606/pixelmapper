@@ -76,8 +76,8 @@ Goal: prove the API by extracting UI-only features.
 Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **This phase introduces schema v2 (clean break).**
 
 ### 3A — SDK and toolchain
-- [ ] **P3.1 `@pixelmapper/plugin-sdk`.** AssemblyScript package: `assembly/index.ts` (`Modifier`, `Frame`, `Sample`, `Out`, `Params`, `register`, ABI exports per ADR §6.6), `assembly/math.ts` (`TAU`, `hash01`, `noise1/2/3` — port Perlin/value noise from `rs-engine/core/src/effects.rs` / `app/utils/engine/effects/noise-math.ts`), `assembly/curves.ts` (LUT sampling), `assembly/color.ts` (HSV↔RGB, port from `engine.rs` `rgb_to_hsl`/`hsl_to_rgb`).
-- [ ] **P3.2 `@pixelmapper/plugin-toolchain`.** Isomorphic (Bun + browser), pinned exact `assemblyscript` version:
+- [x] **P3.1 `@pixelmapper/plugin-sdk`.** AssemblyScript package: `assembly/index.ts` (`Modifier`, `Frame`, `Sample`, `Out`, `Params`, `register`, ABI exports per ADR §6.6), `assembly/math.ts` (`TAU`, `hash01`, `noise1/2/3` — port Perlin/value noise from `rs-engine/core/src/effects.rs` / `app/utils/engine/effects/noise-math.ts`), `assembly/curves.ts` (LUT sampling), `assembly/color.ts` (HSV↔RGB, port from `engine.rs` `rgb_to_hsl`/`hsl_to_rgb`).
+- [x] **P3.2 `@pixelmapper/plugin-toolchain`.** Isomorphic (Bun + browser), pinned exact `assemblyscript` version:
   - `compile({ files }) → { wasm, diagnostics }` (flags: `-O3 --importMemory --maximumMemory 256 --runtime incremental`, SDK resolved from an in-memory file map),
   - `instrument(wasm)` — inject `pm.budget()` calls (Binaryen transform or AS transform at compile time; pick the simpler working option and document it),
   - `validateManifest(json)`, `encodeParams(manifest, values) → Float32Array`,
@@ -85,18 +85,18 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
   - `hashPackage(manifest, wasm, uiJs?) → 'sha256:…'` (WebCrypto),
   - `transpileUi(ts) → js` (sucrase) + import check.
   Vitest: compile a fixture plugin, validate passes; fixtures for each rejection reason (infinite loop, NaN, bad import, out-of-range, non-determinism).
-- [ ] **P3.3 Built-in plugins.** + `plugins/waveform` (port all shapes + `WaveformShapeParams` from `waveform-math.ts`/`effects.rs`), `plugins/noise` (white/perlin/step), `plugins/sequencer` (split/checkerboard/sections/scatter/flow), `plugins/color-adjust` (`ColorParams`: hue shift, saturation, … — `signatures: ["rgb"]`, `output: "absolute"`). Each with `manifest.json` incl. `description`. Golden tests: for a fixed sample grid and times, outputs match the current Rust implementation within 1e-3 (generate goldens from the old code **before** deleting it).
-- [ ] **P3.4 Build script.** + `scripts/build-plugins.ts` → `public/plugins/<hash>.wasm|.json`, generated `app/utils/plugins/builtin-index.ts`. Hook into `dev` (watch) and `build`.
+- [x] **P3.3 Built-in plugins.** + `plugins/waveform` (port all shapes + `WaveformShapeParams` from `waveform-math.ts`/`effects.rs`), `plugins/noise` (white/perlin/step), `plugins/sequencer` (split/checkerboard/sections/scatter/flow), `plugins/color-adjust` (`ColorParams`: hue shift, saturation, … — `signatures: ["rgb"]`, `output: "absolute"`). Each with `manifest.json` incl. `description`. Golden tests: for a fixed sample grid and times, outputs match the current Rust implementation within 1e-3 (generate goldens from the old code **before** deleting it).
+- [x] **P3.4 Build script.** + `scripts/build-plugins.ts` → `public/plugins/<hash>.wasm|.json`, generated `app/utils/plugins/builtin-index.ts`. Hook into `dev` (watch) and `build`.
 
 ### 3B — Rust core
-- [ ] **P3.5 Signatures.** + `rs-engine/core/src/signatures.rs` (ADR §6.4) with `cargo test` for RGB, RGBW, CMY, color wheel, pan/tilt 16-bit, range limits.
-- [ ] **P3.6 Phase & beat time.** + `phase.rs` (speed phase + spatial offset, moved out of `effects.rs`), + `beat_clock.rs` (piecewise BPM integral with timestamped BPM changes). Tests incl. BPM change mid-cycle continuity.
-- [ ] **P3.7 Runtime trait + JS runtime.** + `runtime.rs` (`ModifierRuntime`, `FrameCtx`, `Sample`, `RuntimeError`), + `runtime_js.rs` (wasm-bindgen externs). Rewrite `engine.rs` render loop to ADR §6.5. New packet `TYPE_MODIFIERS_BIN` (reuse id `0x16`) in `bin_protocol.rs`: per instance generic fields + plugin index + params f32 block; plugin table separately.
-- [ ] **P3.8 Remove old effects.** Delete `effects.rs` effect structs, `create_effect`, `EffectConfig` `*_params` fields, `SpeedCurve`/`Displacement` code paths (incl. `displacement_offsets`, speed-curve LUTs).
+- [x] **P3.5 Signatures.** + `rs-engine/core/src/signatures.rs` (ADR §6.4) with `cargo test` for RGB, RGBW, CMY, color wheel, pan/tilt 16-bit, range limits.
+- [x] **P3.6 Phase & beat time.** + `phase.rs` (speed phase + spatial offset, moved out of `effects.rs`), + `beat_clock.rs` (piecewise BPM integral with timestamped BPM changes). Tests incl. BPM change mid-cycle continuity.
+- [x] **P3.7 Runtime trait + JS runtime.** + `runtime.rs` (`ModifierRuntime`, `FrameCtx`, `Sample`, `RuntimeError`), + `runtime_js.rs` (wasm-bindgen externs). Rewrite `engine.rs` render loop to ADR §6.5. New packet `TYPE_MODIFIERS_BIN` (reuse id `0x16`) in `bin_protocol.rs`: per instance generic fields + plugin index + params f32 block; plugin table separately.
+- [x] **P3.8 Remove old effects.** Delete `effects.rs` effect structs, `create_effect`, `EffectConfig` `*_params` fields, `SpeedCurve`/`Displacement` code paths (incl. `displacement_offsets`, speed-curve LUTs).
 
 ### 3C — Worker & frontend
-- [ ] **P3.9 Worker bridge.** + `app/utils/plugins/worker-bridge.ts` (module cache, instances with own `Memory`, buffer copy, budget import, error → disable instance + message to main), wire messages `plugin-load`, `plugin-unload`, `modifiers-sync` in `engine-worker.ts`; heartbeat in `tick()`.
-- [ ] **P3.10 Watchdog.** + `app/utils/plugins/watchdog.ts` in the main thread next to the worker owner (`app/utils/engine/engine.ts`): 1 000 ms without heartbeat → terminate, respawn, re-dispatch all packets, suspend non-built-in plugins, toast.
+- [x] **P3.9 Worker bridge.** + `app/utils/plugins/worker-bridge.ts` (module cache, instances with own `Memory`, buffer copy, budget import, error → disable instance + message to main), wire messages `plugin-load`, `plugin-unload`, `modifiers-sync` in `engine-worker.ts`; heartbeat in `tick()`.
+- [x] **P3.10 Watchdog.** + `app/utils/plugins/watchdog.ts` in the main thread next to the worker owner (`app/utils/engine/engine.ts`): 1 000 ms without heartbeat → terminate, respawn, re-dispatch all packets, suspend non-built-in plugins, toast.
 - [x] **P3.11 Modifier model in TS.** `ModifierInstance` type (ADR §6.3) replaces `Effect` in `app/utils/engine/types.ts`; `engine-store.ts` `activeEffects` → `modifiers`; encoder for `TYPE_MODIFIERS_BIN` in `binary-encoder.ts`; rewrite `set-modifiers-command.ts` (`cloneEffectsList` → plain structured clone), `use-chaser-modifiers.ts` (split logic keeps working on generic fields), `preset-*.ts`, `pinned-modifiers-store.ts` (`autoName` → manifest `name` + first enum param label), `live-ops/modifier-ops.ts`.
 - [x] **P3.12 Delete TS effect classes.** Remove `app/utils/engine/effects/` entirely and every `new WaveformEffect()` etc. (e.g. `preset-apply.ts`).
 - [x] **P3.13 Param UI.** + `app/components/plugin-host/ParamForm.vue` (schema → `Replaceable` inputs, `group` sections, scrub coalescing). Replace `WaveformEditor.vue`, `NoiseEditor.vue`, `SequencerEditor.vue`, `ColorEditor.vue` (modifier part) with `ParamForm`; delete `DisplacementEditor.vue`, `SpeedCurveEditor.vue`, `SpeedControl.vue`'s curve parts. Keep generic-field UI (speed, direction, fanning, origin, strength, blend) as one core component `ModifierGenericFields.vue`. Modifier "add" menu lists plugins (built-ins + project/user plugins) instead of hard-coded `add-*-modifier` emits; `switch-modifier-type` switches `plugin`.
@@ -153,7 +153,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 - [x] **P7.1 Authoring guides.** + `architecture/guides/authoring-extensions.md` (task-oriented: "add a control", "add a panel section", "add a fixture kind", "add a connector", with complete small examples and the rules from ADR §5) and finalize `authoring-content-plugins.md`. Both written to be pasted as AI context.
 - [x] **P7.2 Generated API reference.** Script that emits `docs/ai/extension-api.d.ts` and `docs/ai/plugin-sdk.d.ts` (bundled declaration files) + a JSON index of all `pm.*` contracts, scopes, slot ids (collected at runtime from the primitives in a dev build) and param types.
 - [x] **P7.3 Slot id catalog.** Dev-only page `/dev/slots` listing all slot ids currently rendered, with their available scopes (helps humans and agents choose a slot).
-- [ ] **P7.4 Final architecture pass.** Update `architecture.md` overview + file structure; mark ADR 0001 implementation status; remove stale docs (`arcitecture.md` content merged or deleted — ask the owner before deleting).
+- [x] **P7.4 Final architecture pass.** Update `architecture.md` overview + file structure; mark ADR 0001 implementation status; remove stale docs (`arcitecture.md` content merged or deleted — ask the owner before deleting).
 
 ---
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Accepted — implemented (plan P0–P7, see [Implementation status](#implementation-status)) |
 | **Date** | 2026-10-07 |
 | **Deciders** | Fabian Rafreider |
 | **Implementation plan** | [plugin-system-implementation-plan.md](../plugin-system-implementation-plan.md) |
@@ -710,6 +710,21 @@ interface PanelApi {
 - Vitest suites: slot matching, scope inheritance, requires computation, param encoding, signature mapping (Rust `cargo test`), plugin validation harness, migrate functions.
 
 ---
+
+## Implementation status
+
+Implemented on branch `feat/plugin-system` following the [implementation plan](../plugin-system-implementation-plan.md) (all tasks P0–P7 ticked). Deviations are recorded as amendments A1–A19 below.
+
+| Area | State |
+|---|---|
+| Extension host (§5): registry, auto-slots, scopes, `pm.*` replaceables, commands, live values | Done; slot catalog at `/dev/slots`, reference in `docs/ai/` |
+| Content plugins (§6): ABI v1, SDK, toolchain, worker bridge, previews, plugin store, Supabase sharing | Done; four built-ins in `plugins/` |
+| Fixture kinds, `requires` bookkeeping, open gate | Done; first kind: `extensions/neopixel-strip` |
+| Connectors & controllers as extensions (D16–D18) | Done; ArtNet, ESP (serial / strip node / ESP-NOW), AKAI APC Mini mk2 |
+| Distribution (D19): prebuilt bundles, catalog, runtime install, `.pmproject` archives | Done; migration `006_extensions.sql` |
+| Zero-extension guarantee (§10) | Build + smoke test (`bun run check:zero-extensions`, CI workflow `app-checks.yml`) |
+
+Open follow-ups outside this ADR (§9): firmware in `pio*/` must accept streamed frames (`DMX_FRAME 0x21`, `PIXEL_FRAME 0x22`) and the tag-triggered firmware CI is broken until then (A1); Tauri runtime, shaders/visuals, the AI generation loop, signing and a marketplace are not started.
 
 ## Amendments
 
