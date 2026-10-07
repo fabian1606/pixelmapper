@@ -32,6 +32,8 @@ export interface PluginRemote {
   publish(pkg: ContentPluginPackage, visibility: PluginVisibility, projectId?: string | null): Promise<void>;
   /** Readable plugins: own, of a project, or public. */
   list(filter: { mine?: boolean; projectId?: string; public?: boolean }): Promise<RemotePluginInfo[]>;
+  /** Readable plugins with this alias, newest first. */
+  findByAlias(alias: string): Promise<RemotePluginInfo[]>;
 }
 
 /** Bucket object name of a hash's artifact. */
@@ -119,6 +121,12 @@ export function createSupabaseRemote(supabase: SupabaseClient<Database>): Plugin
       if (filter.projectId) add((await supabase.from('content_plugins').select('*').eq('project_id', filter.projectId)).data);
       if (filter.public) add((await supabase.from('content_plugins').select('*').eq('visibility', 'public').order('created_at', { ascending: false }).limit(200)).data);
       return [...out.values()];
+    },
+
+    async findByAlias(alias) {
+      const { data, error } = await supabase.from('content_plugins').select('*').eq('alias', alias).order('created_at', { ascending: false }).limit(20);
+      if (error) throw error;
+      return (data ?? []).map(info);
     },
   };
 }

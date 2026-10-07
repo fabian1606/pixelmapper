@@ -67,6 +67,11 @@ export function configurePluginStore(opts: {
   if (opts.verify) verifySource = opts.verify;
 }
 
+/** The installed remote registry (null offline / signed out). */
+export function getRemote(): PluginRemote | null {
+  return remote;
+}
+
 // ── Synchronous lookups ──────────────────────────
 
 /** Manifest of a known plugin (synchronous). */

@@ -6,7 +6,7 @@
  * manifest schema) and the host-owned generic fields.
  */
 import { computed, ref } from 'vue';
-import { Plus, Trash2, ChevronDown, Star, Code2 } from 'lucide-vue-next';
+import { Plus, Trash2, ChevronDown, Star, Code2, Library } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -18,6 +18,7 @@ import ModifierGenericFields from './ModifierGenericFields.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
 import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
 import NewModifierDialog from '~/components/plugin-host/NewModifierDialog.vue';
+import PluginLibraryDialog from '~/components/plugin-host/PluginLibraryDialog.vue';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
@@ -76,8 +77,9 @@ function paramSchema(modifier: ModifierInstance) {
   return getManifest(modifier.plugin)?.params ?? [];
 }
 
-/** "New from code" dialog. */
+/** "New from code" and plugin library dialogs. */
 const newFromCodeOpen = ref(false);
+const libraryOpen = ref(false);
 
 // ── Drag-to-reorder ───────────────────────────────────────────────────────────
 const dragFromIndex = ref<number | null>(null);
@@ -243,6 +245,9 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
               {{ p.manifest.name }}
             </DropdownMenuItem>
           </PmMenuGroup>
+          <DropdownMenuItem class="gap-2" @click="libraryOpen = true">
+            <Library class="h-4 w-4" /> Browse & import…
+          </DropdownMenuItem>
           <DropdownMenuItem class="gap-2" @click="newFromCodeOpen = true">
             <Code2 class="h-4 w-4" /> New from code…
           </DropdownMenuItem>
@@ -262,5 +267,6 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
       </DropdownMenu>
     </div>
     <NewModifierDialog v-model:open="newFromCodeOpen" @add="hash => emit('add-modifier', hash)" />
+    <PluginLibraryDialog v-if="libraryOpen" v-model:open="libraryOpen" @add="hash => emit('add-modifier', hash)" />
   </PmPanel>
 </template>

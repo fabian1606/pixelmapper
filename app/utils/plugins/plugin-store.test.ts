@@ -40,6 +40,9 @@ function fakeRemote(me: string) {
     publish: vi.fn(async (p, visibility, projectId) => {
       rows.set(p.hash, { pkg: p, ownerId: me, visibility, projectId: projectId ?? null });
     }),
+    findByAlias: async alias => [...rows.values()].filter(r => r.pkg.manifest.alias === alias).map(r => ({
+      hash: r.pkg.hash, manifest: r.pkg.manifest, ownerId: r.ownerId, visibility: r.visibility, projectId: r.projectId, createdAt: null,
+    })),
     list: async () => [...rows.values()].map(r => ({
       hash: r.pkg.hash, manifest: r.pkg.manifest, ownerId: r.ownerId, visibility: r.visibility, projectId: r.projectId, createdAt: null,
     })),
