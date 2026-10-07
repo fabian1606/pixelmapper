@@ -2,6 +2,11 @@ import initWasm, { WasmEngine } from 'rs-engine-core';
 import wasmUrl from 'rs-engine-core/rs_engine_core_bg.wasm?url';
 import initCanvasWasm, { WasmCanvas } from 'rs-engine-canvas';
 import canvasWasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
+import { WorkerPluginBridge } from '~/utils/plugins/worker-bridge';
+
+// Modifier plugins run through this bridge (rs-engine-core's JS runtime).
+const bridge = new WorkerPluginBridge(event => (self as unknown as Worker).postMessage(event));
+bridge.install();
 
 let engine: WasmEngine | null = null;
 let canvas: WasmCanvas | null = null;
@@ -19,7 +24,8 @@ function tick() {
   const elapsed = now - clockEpoch;
   const delta = now - lastTime;
   lastTime = now;
-  engine.set_bpm(bpm);
+  // Tempo changes are recorded on the beat clock at the current clock time.
+  engine.set_bpm_at(bpm, elapsed);
   engine.render(elapsed, delta);
   const view = engine.get_dmx_view();
 
@@ -43,7 +49,7 @@ async function init() {
   // Init both WASM modules in parallel.
   await Promise.all([initWasm(wasmUrl), initCanvasWasm(canvasWasmUrl)]);
   engine = new WasmEngine();
-  engine.set_bpm(bpm);
+  engine.reset_clock(bpm);
   canvas = new WasmCanvas();
   lastTime = Date.now();
   renderHandle = setInterval(tick, 16);
@@ -57,6 +63,12 @@ self.onmessage = (e: MessageEvent) => {
     data?: ArrayBuffer;
     bpm?: number;
     epoch?: number;
+    // plugin messages
+    hash?: string;
+    wasm?: ArrayBuffer;
+    plugins?: string[];
+    packet?: ArrayBuffer;
+    hashes?: string[];
     // canvas messages
     offscreen?: OffscreenCanvas;
     json?: string;
@@ -76,12 +88,40 @@ self.onmessage = (e: MessageEvent) => {
       if (m.bpm !== undefined) bpm = m.bpm;
       break;
     case 'epoch':
-      if (m.epoch !== undefined) { clockEpoch = m.epoch; lastTime = Date.now(); }
+      if (m.epoch !== undefined) {
+        clockEpoch = m.epoch;
+        lastTime = Date.now();
+        // New epoch → the beat clock restarts at the current tempo.
+        engine?.reset_clock(bpm);
+      }
+      break;
+    case 'plugin-load':
+      if (m.hash && m.wasm) {
+        try {
+          bridge.load(m.hash, m.wasm);
+          engine?.retry_disabled();
+        } catch (e) {
+          (self as unknown as Worker).postMessage({ type: 'plugin-error', instance: -1, hash: m.hash, message: String(e), reason: 'trap' });
+        }
+      }
+      break;
+    case 'plugin-unload':
+      if (m.hash) bridge.unload(m.hash);
+      break;
+    case 'plugins-suspend':
+      bridge.setSuspended(m.hashes ?? []);
+      engine?.retry_disabled();
+      break;
+    case 'modifiers-sync':
+      if (engine && m.packet) {
+        bridge.setTable(m.plugins ?? []);
+        engine.dispatch(0x16, new Uint8Array(m.packet));
+      }
       break;
     case 'reset':
       if (renderHandle) { clearInterval(renderHandle); renderHandle = null; }
       engine = new WasmEngine();
-      engine.set_bpm(bpm);
+      engine.reset_clock(bpm);
       lastTime = Date.now();
       renderHandle = setInterval(tick, 16);
       break;

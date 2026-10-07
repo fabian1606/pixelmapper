@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, inject } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch, inject, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Interaction } from './composables/use-selection';
 import type { Camera } from './composables/use-camera';
@@ -203,6 +203,24 @@ onBeforeUnmount(() => {
   }
 });
 
+// After a watchdog respawn the new worker needs a new OffscreenCanvas: the
+// canvas element is re-keyed (template) and transferred again.
+watch(() => effectEngine?.generation.value, async () => {
+  canvasTransferred = false;
+  await nextTick();
+  if (!canvasEl.value || !effectEngine) return;
+  try {
+    canvasEl.value.width = props.viewportWidth;
+    canvasEl.value.height = props.viewportHeight;
+    effectEngine.initCanvas(canvasEl.value.transferControlToOffscreen());
+    canvasTransferred = true;
+    syncState();
+    syncFixtures();
+  } catch (e) {
+    console.error('[FixtureCanvas] re-transfer after respawn failed:', e);
+  }
+});
+
 // ─── Watches ──────────────────────────────────────────────────────────────────────────────────
 watch(() => props.fixtures.length, syncFixtures);
 watch(() => props.selectedIds, syncSelected);
@@ -241,6 +259,7 @@ defineExpose({
     <!-- width/height set imperatively before transferControlToOffscreen() —
          a reactive :width/:height binding would throw after transfer. -->
     <canvas
+      :key="effectEngine?.generation.value ?? 0"
       ref="canvasEl"
       class="absolute inset-0 rounded-none mix-blend-screen"
     />

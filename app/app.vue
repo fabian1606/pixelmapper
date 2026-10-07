@@ -6,6 +6,7 @@ import { watch } from 'vue';
 import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
 import { provideRootScopes } from '~/composables/extensions/provide-root-scopes';
 import ReplacementChoiceDialog from '~/components/extension-host/ReplacementChoiceDialog.vue';
+import ToastStack from '~/components/ToastStack.vue';
 
 const engineStore = useEngineStore();
 
@@ -45,5 +46,6 @@ onBeforeUnmount(() => {
     </NuxtLayout>
     <GlobalContextMenu />
     <ReplacementChoiceDialog />
+    <ToastStack />
   </div>
 </template>

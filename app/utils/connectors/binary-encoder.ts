@@ -208,6 +208,13 @@ export function buildUniverseMapPacket(universes: number[]): Uint8Array {
   return w.toPacket(TYPE_UNIVERSE_MAP);
 }
 
+/** FNV-1a hash of a fixture id (stable seed source for modifiers). */
+export function fixtureIdHash(id: string | number): number {
+  let h = 0x811c9dc5;
+  for (const c of String(id)) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193);
+  return h >>> 0;
+}
+
 // ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────
 // Replicates the beam transform from engine.ts syncTargets() so WASM and ESP32
 // see identical worldX/worldY per channel.
@@ -241,8 +248,11 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       for (let bi = 0; bi < f.beams.length; bi++) stripBeamIndex.set(f.beams[bi]!.id, bi);
     }
 
+    // Layout v2: fixture id hash (stable per-fixture seeds) …
     w.u16(groupIndex);
+    w.u32(fixtureIdHash(f.id));
     w.u16(f.channels.length);
+    const headIndex = new Map(f.beams.map((b, bi) => [b.id, bi]));
 
     for (const ch of f.channels) {
       let worldX = f.fixturePosition.x;
@@ -293,6 +303,8 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       // Per-channel DMX range (remap bounds). Defaults to full 0-255.
       w.u8(ch.rangeMin ?? 0);
       w.u8(ch.rangeMax ?? 255);
+      // … and the head (beam) index of every channel.
+      w.u16(ch.beamId !== undefined ? (headIndex.get(ch.beamId) ?? 0) : 0);
     }
   }
 

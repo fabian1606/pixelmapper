@@ -52,6 +52,8 @@ import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
 import { liveHub } from '~/utils/extensions/live-hub';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
+import { notify } from '~/composables/use-notifications';
+import { isBuiltinHash } from '~/utils/plugins/builtin-index';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -632,6 +634,26 @@ export const useEngineStore = defineStore('engine', () => {
     watch([baseBpm, speedMultiplier], ([base, mult]) => {
       engine.globalBpm.value = base * mult;
     });
+
+    // Plugin runtime events: errors disable the instance in the worker; tell the user.
+    engine.isTrustedPlugin = isBuiltinHash;
+    engine.onPluginEvent = (ev) => {
+      if (ev.type === 'plugin-error') {
+        notify({ variant: 'error', title: 'Modifier stopped', description: ev.message });
+      }
+      else if (import.meta.dev) {
+        console.info(`[plugin ${ev.hash.slice(7, 15)}] ${ev.message}`);
+      }
+    };
+    engine.onRespawn = (suspended) => {
+      notify({
+        variant: 'warning',
+        title: 'Engine restarted',
+        description: suspended.length > 0
+          ? `The render engine stopped responding. ${suspended.length} generated modifier(s) were suspended.`
+          : 'The render engine stopped responding and was restarted.',
+      });
+    };
 
     // Live-value hub (extension API): channel addresses are cached per layout
     // revision so per-frame lookups are O(1).
