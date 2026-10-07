@@ -6,14 +6,15 @@
  * manifest schema) and the host-owned generic fields.
  */
 import { computed, ref } from 'vue';
-import { Plus, Trash2, ChevronDown, Star, Code2, Library } from 'lucide-vue-next';
+import { Plus, Trash2, ChevronDown, Star, Code2, Library, Loader2, AlertTriangle } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import type { ChannelType, ModifierInstance } from '~/utils/engine/types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
-import { getManifest, listPlugins } from '~/utils/plugins/plugin-store';
+import { getManifest, listPlugins, pluginStatus, retryResolve } from '~/utils/plugins/plugin-store';
+import { useEngineStore } from '~/stores/engine-store';
 import ModifierGenericFields from './ModifierGenericFields.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
 import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
@@ -70,6 +71,13 @@ function compatiblePlugins(modifier: ModifierInstance) {
 /** Display name of a plugin hash (falls back to a short hash). */
 function pluginName(hash: string): string {
   return getManifest(hash)?.name ?? `Unknown (${hash.slice(7, 15)})`;
+}
+
+const engineStore = useEngineStore();
+
+/** Retries resolving a plugin that failed; re-encodes the stack on success. */
+async function retry(hash: string) {
+  if (await retryResolve(hash)) engineStore.flushEngineOutput();
 }
 
 /** The params schema of an instance (empty when the plugin is unknown). */
@@ -175,8 +183,17 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
       </div>
 
       <div class="p-3 space-y-4" @click.stop>
+        <!-- Plugin not known here yet (shared project / live collaboration): resolving by hash -->
+        <div v-if="pluginStatus(modifier.plugin).state === 'pending'" class="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 class="h-3.5 w-3.5 animate-spin" /> Loading plugin…
+        </div>
+        <div v-else-if="pluginStatus(modifier.plugin).state === 'error'" class="flex items-start gap-2 text-xs text-destructive">
+          <AlertTriangle class="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span class="flex-1">Plugin unavailable: {{ (pluginStatus(modifier.plugin) as { error: string }).error }}</span>
+          <Button variant="outline" size="sm" class="h-6 text-[11px]" @click="retry(modifier.plugin)">Retry</Button>
+        </div>
         <!-- One-cycle preview (main-thread preview pool) -->
-        <ModifierPreview :modifier="modifier" />
+        <ModifierPreview v-else :modifier="modifier" />
 
         <!-- Target Channels -->
         <div class="space-y-2">

@@ -136,6 +136,24 @@ function fail(hash: string, reason: string): null {
   return null;
 }
 
+/** Forgets a failure and resolves again (UI retry). */
+export function retryResolve(hash: string): Promise<KnownPlugin | null> {
+  if (resolveErrors.value.has(hash)) {
+    const next = new Map(resolveErrors.value);
+    next.delete(hash);
+    resolveErrors.value = next;
+  }
+  return resolve(hash);
+}
+
+/** Resolution state of a hash for UI (reactive via `pluginRevision` / `resolveErrors`). */
+export function pluginStatus(hash: string): { state: 'ready' } | { state: 'pending' } | { state: 'error'; error: string } {
+  void pluginRevision.value;
+  if (plugins.has(hash)) return { state: 'ready' };
+  const error = resolveErrors.value.get(hash);
+  return error ? { state: 'error', error } : { state: 'pending' };
+}
+
 /** Checks a cached/received package: hash over manifest ‖ wasm ‖ ui. */
 async function intact(pkg: ContentPluginPackage): Promise<boolean> {
   return (await hashPackage(pkg.manifest, pkg.wasm, pkg.uiJs)) === pkg.hash;
