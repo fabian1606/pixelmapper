@@ -6,7 +6,7 @@
  * manifest schema) and the host-owned generic fields.
  */
 import { computed, ref } from 'vue';
-import { Plus, Trash2, ChevronDown, Star } from 'lucide-vue-next';
+import { Plus, Trash2, ChevronDown, Star, Code2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -17,6 +17,7 @@ import { getManifest, listPlugins } from '~/utils/plugins/plugin-store';
 import ModifierGenericFields from './ModifierGenericFields.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
 import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
+import NewModifierDialog from '~/components/plugin-host/NewModifierDialog.vue';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
@@ -74,6 +75,9 @@ function pluginName(hash: string): string {
 function paramSchema(modifier: ModifierInstance) {
   return getManifest(modifier.plugin)?.params ?? [];
 }
+
+/** "New from code" dialog. */
+const newFromCodeOpen = ref(false);
 
 // ── Drag-to-reorder ───────────────────────────────────────────────────────────
 const dragFromIndex = ref<number | null>(null);
@@ -239,6 +243,9 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
               {{ p.manifest.name }}
             </DropdownMenuItem>
           </PmMenuGroup>
+          <DropdownMenuItem class="gap-2" @click="newFromCodeOpen = true">
+            <Code2 class="h-4 w-4" /> New from code…
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger class="gap-2">
@@ -254,5 +261,6 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+    <NewModifierDialog v-model:open="newFromCodeOpen" @add="hash => emit('add-modifier', hash)" />
   </PmPanel>
 </template>
