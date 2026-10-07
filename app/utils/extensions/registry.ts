@@ -164,7 +164,24 @@ export function registerExtension(
   const entry: RegisteredExtension = { manifest, source, order: orderCounter++ };
   extensions.set(manifest.id, entry);
   registryVersion.value++;
+  for (const hook of registeredHooks) {
+    try {
+      hook(entry);
+    }
+    catch (err) {
+      console.error(`[extensions] post-registration hook failed for "${manifest.id}":`, err);
+    }
+  }
   return entry;
+}
+
+/** Called after every successful registration (host: commands, activate). */
+const registeredHooks = new Set<(entry: RegisteredExtension) => void>();
+
+/** Adds a post-registration hook; returns a disposer. */
+export function onExtensionRegistered(hook: (entry: RegisteredExtension) => void): () => void {
+  registeredHooks.add(hook);
+  return () => registeredHooks.delete(hook);
 }
 
 /** Removes an extension (tests / dev hot reload). */

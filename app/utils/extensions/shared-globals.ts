@@ -18,6 +18,7 @@ import { useReplaceable } from '~/composables/extensions/use-replaceable';
 import { useLiveValue } from '~/composables/extensions/use-live-value';
 import { onFrame } from '~/composables/extensions/on-frame';
 import { registerExtension as hostRegisterExtension, ExtensionValidationError } from './registry';
+import { installActivation } from './activation';
 
 /** Optional host implementation overrides (tests). */
 type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable'>>;
@@ -38,6 +39,8 @@ function safeRegister(manifest: ExtensionManifest): void {
  * a second call only updates the overrides.
  */
 export function installSharedGlobals(overrides: HostOverrides = {}): void {
+  // Extension commands and activate hooks run on registration.
+  installActivation();
   const host: HostApi = {
     apiVersion: apiModule.API_VERSION,
     useScope,

@@ -112,7 +112,7 @@ Domain inputs have typed contracts (`PmInputContracts` in `replaceables.ts`) and
 
 Every contract has `modelValue` / `update:modelValue`, `scrubStart` / `scrubEnd` (callers bracket a drag into one undo step), `disabled`, `label`, `size`. Resolution (`app/utils/extensions/replacements.ts`): no replacement → default; one → it; several → the user's stored choice (`localStorage['pm.replacements']`), otherwise the default plus a one-time `ReplacementChoiceDialog`.
 
-Call sites today: property sidebar box fader (`pm.fader` `variant="box"`) and value field, live slider (`pm.fader` vertical), live beat (`pm.tapTempo`), live button (`pm.button`), engine number fields (`pm.numberInput`), property sidebar color (`pm.colorInput`) and pan/tilt (`pm.xyInput`), live `color` and `xy` widgets. Curve, select, toggle and angle call sites arrive with the param UI (plan P3.13).
+Call sites: property sidebar box fader (`pm.fader` `variant="box"`) and value field, live slider (`pm.fader` vertical), live beat (`pm.tapTempo`), live button (`pm.button`), engine number fields (`pm.numberInput`), property sidebar color (`pm.colorInput`) and pan/tilt (`pm.xyInput`), live `color` and `xy` widgets, and every param of content plugins and fixture-kind configs through `ParamForm` (`number` → `pm.fader`, `int` → `pm.numberInput`, `bool` → `pm.toggle`, `enum` → `pm.select`, `color` → `pm.colorInput`, `angle` → `pm.angle`, `point` → `pm.xyInput`, `curve` → `pm.curve`; a param's `ui` overrides).
 
 ## Live values
 
@@ -120,11 +120,11 @@ Call sites today: property sidebar box fader (`pm.fader` `variant="box"`) and va
 
 - `useLiveValue(target, { fps })` → throttled `shallowRef`, active only while mounted, the document is visible and the component's root is on screen.
 - `onFrame(cb, { targets })` → raw frame (`timeMs`, `beat`, `dmx`), disposed on unmount. Never drive Vue state at frame rate from it.
-- Targets: `channel` (rendered coarse byte), `universe` (512-byte copy), `beat` (`beatTime`, `bpm`, `phase`); `signature` follows with the modifier runtime (P3.15).
+- Targets: `channel` (rendered coarse byte), `universe` (512-byte copy), `beat` (`beatTime`, `bpm`, `phase`), `signature` (normalized tuple of the fixture's first head after modifiers — `scalar` = dimmer; read back from the engine worker only while subscribed).
 
 ## Live widgets
 
-Live widget types come from `app/utils/live/widget-registry.ts`: the core types (`button` → `pm.button`, `slider` → `pm.fader`, `xy` → `pm.xyInput`, `color` → `pm.colorInput`, `label`, `beat` → `pm.tapTempo`, `fixture-preview`; `controller-twin` until plan P6.4) plus `contributes.liveWidgets` from extensions. Extension widget types are namespaced (`<extensionId>/<name>`), receive no props (read the `liveWidget` scope), keep their configuration in `widget.extensionData[extensionId]` (seeded from `defaultConfig()`), and render a "not installed" placeholder when the extension is missing — without creating a project dependency. Legacy type names `xy-pad`/`color-wheel` are mapped to `xy`/`color` on load.
+Live widget types come from `app/utils/live/widget-registry.ts`: the core types (`button` → `pm.button`, `slider` → `pm.fader`, `xy` → `pm.xyInput`, `color` → `pm.colorInput`, `label`, `beat` → `pm.tapTempo`, `fixture-preview`, and the generic `controller-twin` for any registered controller) plus `contributes.liveWidgets` from extensions. Extension widget types are namespaced (`<extensionId>/<name>`), receive no props (read the `liveWidget` scope), keep their configuration in `widget.extensionData[extensionId]` (seeded from `defaultConfig()`), and render a "not installed" placeholder when the extension is missing — without creating a project dependency. Legacy type names `xy-pad`/`color-wheel` are mapped to `xy`/`color` on load.
 
 ## Reference example: `extensions/color-picker`
 
