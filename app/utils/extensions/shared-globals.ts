@@ -15,9 +15,11 @@ import type { ExtensionManifest, HostApi } from '@pixelmapper/extension-api';
 import { useScope } from '~/composables/extensions/use-scope';
 import { useExtensionContext } from '~/composables/extensions/use-extension-context';
 import { useReplaceable } from '~/composables/extensions/use-replaceable';
+import { useLiveValue } from '~/composables/extensions/use-live-value';
+import { onFrame } from '~/composables/extensions/on-frame';
 import { registerExtension as hostRegisterExtension, ExtensionValidationError } from './registry';
 
-/** Optional host implementations wired in by later subsystems (live values) or tests. */
+/** Optional host implementation overrides (tests). */
 type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable'>>;
 
 /** Registers a manifest, logging (not throwing) validation errors so one bad extension cannot stop boot. */
@@ -31,11 +33,6 @@ function safeRegister(manifest: ExtensionManifest): void {
   }
 }
 
-/** Error thrown by API functions whose host implementation is not installed. */
-function missing(name: string): never {
-  throw new Error(`[extensions] host API "${name}" is not available`);
-}
-
 /**
  * Installs the shared globals and drains queued registrations. Idempotent:
  * a second call only updates the overrides.
@@ -45,8 +42,8 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     apiVersion: apiModule.API_VERSION,
     useScope,
     useExtensionContext,
-    useLiveValue: overrides.useLiveValue ?? (() => missing('useLiveValue')),
-    onFrame: overrides.onFrame ?? (() => missing('onFrame')),
+    useLiveValue: overrides.useLiveValue ?? useLiveValue,
+    onFrame: overrides.onFrame ?? ((cb, opts) => { onFrame(cb, opts); }),
     useReplaceable: overrides.useReplaceable ?? useReplaceable,
     registerExtension: safeRegister,
   };

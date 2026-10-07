@@ -50,6 +50,7 @@ import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
+import { liveHub } from '~/utils/extensions/live-hub';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -628,6 +629,24 @@ export const useEngineStore = defineStore('engine', () => {
       engine.globalBpm.value = base * mult;
     });
 
+    // Live-value hub (extension API): channel addresses are cached per layout
+    // revision so per-frame lookups are O(1).
+    let addressCacheRevision = -1;
+    const addressCache = new Map<string | number, Fixture>();
+    liveHub.configure({
+      resolveChannelAddress(fixtureId, channelIndex) {
+        if (addressCacheRevision !== layoutRevision.value) {
+          addressCache.clear();
+          for (const f of flatFixtures.value) addressCache.set(f.id, f);
+          addressCacheRevision = layoutRevision.value;
+        }
+        const fixture = addressCache.get(fixtureId);
+        const ch = fixture?.channels[channelIndex];
+        return fixture && ch ? fixture.startAddress + ch.addressOffset : null;
+      },
+      beatSource: () => ({ bpm: engine.globalBpm.value, clockEpoch: clockEpoch.value }),
+    });
+
     // Frame-receive handler: called by the worker engine on every rendered frame.
     // Runs off the main-thread render loop — Vue cascade can't block it.
     engine.onFrame = (dmx: Uint8Array, elapsedMs: number) => {
@@ -648,6 +667,8 @@ export const useEngineStore = defineStore('engine', () => {
       }
 
       connectionsStore.sendFrame(outputBuffer);
+      // Extension live values (no-op without subscribers).
+      liveHub.ingest(outputBuffer, elapsedMs);
       try {
         connectionsStore.notifyEngineState({
           bpm: engine.globalBpm.value,
