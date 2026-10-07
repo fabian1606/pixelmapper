@@ -25,4 +25,5 @@ export * from "./core";
 export * from "./math";
 export * from "./curves";
 export * from "./color";
+export * from "./waves";
 export * from "./abi";

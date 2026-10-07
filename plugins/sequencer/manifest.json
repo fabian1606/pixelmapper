@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "kind": "modifier",
+  "alias": "@pixelmapper/sequencer",
+  "name": "Sequencer",
+  "version": "1.0.0",
+  "apiVersion": "^1.0.0",
+  "description": "Switches fixtures on and off in spatial patterns: split (half plane), checkerboard, sections (bands), scatter (random subset per cycle) and flow (moving Perlin boundary). Geometric patterns invert every half cycle. Off fixtures are darkened by the strength.",
+  "signatures": ["scalar"],
+  "output": "bipolar",
+  "params": [
+    { "key": "patternType", "type": "enum", "options": ["split", "checkerboard", "sections", "scatter", "flow"], "optionLabels": ["Split", "Checkerboard", "Sections", "Scatter", "Flow"], "default": "split", "label": "Pattern" },
+    { "key": "origin", "type": "point", "default": { "x": 0.5, "y": 0.5 }, "label": "Origin" },
+    { "key": "angle", "type": "angle", "default": 0, "label": "Angle" },
+    { "key": "scale", "type": "number", "min": 0.01, "max": 1, "default": 0.1, "label": "Cell size" },
+    { "key": "density", "type": "number", "min": 0, "max": 1, "default": 0.5, "label": "Density", "description": "Share of fixtures on (scatter, flow)." },
+    { "key": "densityVariation", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Density variation" },
+    { "key": "invert", "type": "bool", "default": false, "label": "Invert" }
+  ]
+}

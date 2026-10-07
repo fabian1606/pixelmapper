@@ -46,8 +46,8 @@ export function rgbToHsl(r: f32, g: f32, b: f32, out: Vec3): Vec3 {
 /** HSL (h ∈ [0, 1)) → RGB (0–1). */
 export function hslToRgb(h: f32, s: f32, l: f32, out: Vec3): Vec3 {
   if (s < 1e-6) return out.set(l, l, l);
-  const q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-  const p = 2.0 * l - q;
+  const q: f32 = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+  const p: f32 = 2.0 * l - q;
   return out.set(hueToRgb(p, q, h + <f32>(1.0 / 3.0)), hueToRgb(p, q, h), hueToRgb(p, q, h - <f32>(1.0 / 3.0)));
 }
 

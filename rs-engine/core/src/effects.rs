@@ -102,7 +102,7 @@ impl Effect for BaseOscillator {
 }
 
 /// Evaluate a single waveform shape at normalized cycle position t ∈ [0, 1).
-fn evaluate_shape(shape: WaveformShape, t: f32, param: f32) -> f32 {
+pub(crate) fn evaluate_shape(shape: WaveformShape, t: f32, param: f32) -> f32 {
     match shape {
         WaveformShape::Sine => (t * core::f32::consts::TAU).sin(),
         WaveformShape::Square => {
@@ -148,7 +148,7 @@ fn evaluate_shape(shape: WaveformShape, t: f32, param: f32) -> f32 {
 /// Returns shape + offset. May exceed [-1, 1] when offset != 0 — the engine
 /// formula extrapolates linearly and the final byte is clamped to 0..255,
 /// so an offset effectively shifts the wave by `offset * strength` in channel units.
-fn evaluate_phase(config: &EffectConfig, phase: f32) -> f32 {
+pub(crate) fn evaluate_phase(config: &EffectConfig, phase: f32) -> f32 {
     let tau = core::f32::consts::TAU;
     let cycle_t = ((phase / tau) % 1.0 + 1.0) % 1.0;
 

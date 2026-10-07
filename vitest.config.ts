@@ -31,6 +31,7 @@ export default defineConfig({
       'packages/**/*.test.ts',
       'extensions/**/*.test.ts',
       'scripts/**/*.test.ts',
+      'plugins/**/*.test.ts',
     ],
     exclude: ['**/node_modules/**', 'ofl-data/**'],
   },

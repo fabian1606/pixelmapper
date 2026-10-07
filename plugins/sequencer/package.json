@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-sequencer",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (sequencer). Built by scripts/build-plugins.ts.",
+  "private": true
+}

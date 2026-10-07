@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "kind": "modifier",
+  "alias": "@pixelmapper/waveform",
+  "name": "Waveform",
+  "version": "1.0.0",
+  "apiVersion": "^1.0.0",
+  "description": "Periodic waveform (sine, square, triangle, sawtooth, bounce, ramp, smooth) over the modifier phase. The wave peak lands on the base value; strength sets how deep the trough goes. Start/end restrict the active part of each cycle; outside it the value holds at the offset, or at base × floor when the floor is enabled.",
+  "signatures": ["scalar"],
+  "output": "bipolar",
+  "params": [
+    { "key": "shape", "type": "enum", "options": ["sine", "square", "triangle", "sawtooth", "bounce", "ramp", "smooth"], "optionLabels": ["Sine", "Square", "Triangle", "Sawtooth", "Bounce", "Ramp", "Smooth"], "default": "sine", "label": "Shape" },
+    { "key": "param", "type": "number", "min": 0, "max": 1, "default": 0.5, "label": "Shape amount", "description": "Duty cycle (square), peak position (triangle/smooth), direction (sawtooth), bounce count, ramp softness." },
+    { "key": "start", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Start", "group": "Window" },
+    { "key": "end", "type": "number", "min": 0, "max": 1, "default": 1, "label": "End", "group": "Window" },
+    { "key": "offset", "type": "number", "min": -1, "max": 1, "default": 0, "label": "Offset", "description": "Vertical baseline shift of the wave; also the hold value outside start/end." },
+    { "key": "useFloor", "type": "bool", "default": false, "label": "Floor", "group": "Window", "description": "Hold at base × floor outside start/end, independent of strength." },
+    { "key": "floor", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Floor level", "group": "Window" }
+  ]
+}
