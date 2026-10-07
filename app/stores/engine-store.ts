@@ -450,6 +450,9 @@ export const useEngineStore = defineStore('engine', () => {
    * No-op until a project is loaded (hooks wired in loadProject).
    */
   function saveSnapshotNow() { return triggerSaveSnapshotInternal(); }
+  /** Builds the current project snapshot (export); null before a project is loaded. */
+  let snapshotBuilder: (() => import('~/utils/engine/serialize').ProjectSnapshot) | null = null;
+  function currentSnapshot() { return snapshotBuilder?.() ?? null; }
 
   // ── Time-triggered snapshot persistence ───────────────────────────────────
   // The snapshot captures all "live" state that has no dedicated Command
@@ -1195,6 +1198,8 @@ export const useEngineStore = defineStore('engine', () => {
       );
     }
 
+    snapshotBuilder = buildSnapshot;
+
     async function doSaveSnapshot() {
       await flushPersistQueue();
       const snapshot = buildSnapshot();
@@ -1364,6 +1369,7 @@ export const useEngineStore = defineStore('engine', () => {
     getReplayContext,
     commitPendingPersistence,
     saveSnapshotNow,
+    currentSnapshot,
     markEngineDirty,
   };
 });

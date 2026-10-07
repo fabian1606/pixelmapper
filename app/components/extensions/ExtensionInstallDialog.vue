@@ -46,7 +46,7 @@ async function confirm() {
         <DialogTitle>Install {{ listing.displayName }}?</DialogTitle>
         <DialogDescription class="text-xs">
           <span class="font-mono">{{ listing.id }}@{{ listing.version }}</span>
-          · {{ listing.source === 'catalog' ? 'Pixelmapper catalog' : 'Community registry' }}
+          · {{ { catalog: 'Pixelmapper catalog', registry: 'Community registry', cache: 'Imported project file' }[listing.source] }}
         </DialogDescription>
       </DialogHeader>
       <p class="text-sm text-muted-foreground">{{ listing.description }}</p>

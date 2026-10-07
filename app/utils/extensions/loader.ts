@@ -85,9 +85,14 @@ export function extensionsReady(): Promise<LoadResult[]> {
   return ready;
 }
 
-/** All listings from all sources (deduplicated by id@version). */
+/** All listings from all sources and the local cache (deduplicated by id@version). */
 export async function listAvailableExtensions(): Promise<ExtensionListing[]> {
   const out = new Map<string, ExtensionListing>();
+  // Cached bundles (e.g. from an imported project) are installable offline.
+  for (const b of await cache.all().catch(() => [] as CachedBundle[])) {
+    const info = b.info as Partial<Record<'apiVersion' | 'displayName' | 'description', string>>;
+    out.set(`${b.id}@${b.version}`, { id: b.id, version: b.version, apiVersion: info.apiVersion ?? '*', displayName: info.displayName ?? b.id, description: info.description ?? '', source: 'cache' });
+  }
   for (const s of sources) {
     for (const l of await s.list().catch(() => [] as ExtensionListing[])) {
       if (!out.has(`${l.id}@${l.version}`)) out.set(`${l.id}@${l.version}`, l);
@@ -121,6 +126,16 @@ async function obtain(id: string, range: string): Promise<CachedBundle | null> {
     catch { /* try the next source */ }
   }
   return null;
+}
+
+/** A bundle satisfying a range (cache, else sources); null when unavailable. */
+export function getBundle(id: string, range = '*'): Promise<CachedBundle | null> {
+  return obtain(id, range);
+}
+
+/** Stores a bundle in the cache (project import). */
+export function cacheBundle(bundle: CachedBundle): Promise<void> {
+  return cache.put(bundle);
 }
 
 /** Injects a bundle's CSS once. */

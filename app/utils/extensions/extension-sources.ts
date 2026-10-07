@@ -14,7 +14,7 @@ export interface ExtensionListing {
   displayName: string;
   description: string;
   /** Where it was found. */
-  source: 'catalog' | 'registry';
+  source: 'catalog' | 'registry' | 'cache';
 }
 
 /** A downloaded bundle. */

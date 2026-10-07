@@ -9,6 +9,10 @@
         </div>
         <div class="flex items-center gap-3">
           <NuxtLink to="/extensions" class="text-sm text-muted-foreground hover:text-foreground">Extensions</NuxtLink>
+          <label class="text-sm text-muted-foreground hover:text-foreground cursor-pointer">
+            {{ importing ? 'Importing…' : 'Import .pmproject' }}
+            <input type="file" accept=".pmproject,application/zip" class="hidden" :disabled="importing" @change="importProjectFile">
+          </label>
           <Button variant="outline" size="sm" @click="signOut">Sign out</Button>
           <Button size="sm" @click="showCreate = true">New project</Button>
         </div>
@@ -124,6 +128,8 @@
 </template>
 
 <script setup lang="ts">
+import { importArchive } from '~/utils/persistence/project-transfer'
+import { notify } from '~/composables/use-notifications'
 import { ChevronRight, Edit, Trash2 } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -196,6 +202,37 @@ async function createProject() {
 
 function openProject(id: string) {
   router.push(`/project/${id}`)
+}
+
+const importing = ref(false)
+
+/**
+ * Imports a `.pmproject`: verifies its plugins, caches its extension bundles,
+ * creates a project from the snapshot and opens it (missing extensions are
+ * offered for install by the open gate, from the imported bundles).
+ */
+async function importProjectFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importing.value = true
+  try {
+    const imported = await importArchive(new Uint8Array(await file.arrayBuffer()))
+    const failed = Object.keys(imported.pluginErrors).length
+    if (failed) notify({ variant: 'warning', title: 'Some plugins could not be verified', description: `${failed} content plugin(s) were skipped.` })
+    const { data, error } = await supabase.functions.invoke('create-project', { body: { name: imported.name || file.name.replace(/\.pmproject$/, '') } })
+    if (error || !data) throw new Error(error?.message ?? 'Failed to create project')
+    const saved = await supabase.functions.invoke('save-snapshot', { body: { projectId: data.id, snapshot: imported.snapshot, sequenceNumber: 0, label: 'Imported' } })
+    if (saved.error) throw new Error(saved.error.message)
+    router.push(`/project/${data.id}`)
+  }
+  catch (err) {
+    notify({ variant: 'error', title: 'Import failed', description: (err as Error).message })
+  }
+  finally {
+    importing.value = false
+  }
 }
 
 async function signOut() {

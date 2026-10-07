@@ -22,6 +22,8 @@ export interface BundleCache {
   put(bundle: CachedBundle): Promise<void>;
   /** All cached versions of an id. */
   versions(id: string): Promise<string[]>;
+  /** Every cached bundle (listings). */
+  all(): Promise<CachedBundle[]>;
 }
 
 /** In-memory cache. */
@@ -31,6 +33,7 @@ export function createMemoryBundleCache(): BundleCache {
     get: async (id, version) => map.get(`${id}@${version}`) ?? null,
     put: async (b) => { map.set(b.key, b); },
     versions: async id => [...map.values()].filter(b => b.id === id).map(b => b.version),
+    all: async () => [...map.values()],
   };
 }
 
@@ -78,6 +81,10 @@ export function createIdbBundleCache(): BundleCache {
     async versions(id) {
       try { return (await run<CachedBundle[]>('readonly', s => s.getAll())).filter(b => b.id === id).map(b => b.version); }
       catch { return fallback.versions(id); }
+    },
+    async all() {
+      try { return await run<CachedBundle[]>('readonly', s => s.getAll()); }
+      catch { return fallback.all(); }
     },
   };
 }
