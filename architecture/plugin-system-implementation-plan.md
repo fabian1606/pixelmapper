@@ -117,7 +117,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 - [x] **P4.4 Import.** Import by hash/alias/link: download package incl. source, recompile, verify hash (ADR §6.7), cache.
 - [x] **P4.5 Live sync by hash.** Modifier ops already carry `plugin`; on unknown hash the receiver resolves it before applying; pending state shows a spinner on the modifier card.
 - [x] **P4.6 Custom panel iframe.** + `app/components/plugin-host/PluginIframePanel.vue` + bridge runtime (`app/utils/plugins/iframe-runtime.ts`, inlined into `srcdoc`) per ADR §6.9; message schema validation; theme variables; scrub coalescing.
-- [ ] **P4.7 Docs.** Extend the authoring guide with the custom panel API; update `architecture/live-collaboration.md` (hash sync).
+- [x] **P4.7 Docs.** Extend the authoring guide with the custom panel API; update `architecture/live-collaboration.md` (hash sync).
 
 ---
 
