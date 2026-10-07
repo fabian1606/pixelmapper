@@ -1,5 +1,4 @@
-import { BaseControllerDriver } from '~/utils/controllers/base-controller-driver';
-import type { ControlFeedback, ControlInputEvent } from '~/utils/controllers/types';
+import { ControllerDriverBase, type ControlFeedback, type ControlInputEvent } from '@pixelmapper/extension-api';
 
 /**
  * AKAI APC Mini mk2 driver (Web MIDI).
@@ -36,7 +35,7 @@ const SHIFT_NOTE = 122;
 const FADER_CC_BASE = 48;
 const FADER_COUNT = 9;
 
-export class APCMiniMk2Driver extends BaseControllerDriver {
+export class APCMiniMk2Driver extends ControllerDriverBase {
   readonly definitionKey = 'akai-apc-mini-mk2';
 
   private access: MIDIAccess | null = null;
@@ -114,7 +113,7 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
     if (fb.controlId.startsWith('pad-')) {
       const m = /^pad-(\d+)-(\d+)$/.exec(fb.controlId);
       if (!m) return;
-      const note = noteForPad(parseInt(m[1], 10), parseInt(m[2], 10));
+      const note = noteForPad(parseInt(m[1]!, 10), parseInt(m[2]!, 10));
       this.sendPadFeedback(note, fb);
     } else if (fb.controlId.startsWith('track-')) {
       const i = parseInt(fb.controlId.slice('track-'.length), 10);
@@ -132,22 +131,22 @@ export class APCMiniMk2Driver extends BaseControllerDriver {
   private handleMidiMessage(e: MIDIMessageEvent) {
     const data = e.data;
     if (!data || data.length < 2) return;
-    const status = data[0] & 0xf0;
+    const status = data[0]! & 0xf0;
 
     if (status === 0x90) {
       // Note On — velocity 0 means release on some devices
-      const note = data[1];
+      const note = data[1]!;
       const velocity = data[2] ?? 0;
       const ev = this.eventForNote(note, velocity > 0 ? 'press' : 'release', velocity / 127);
       if (ev) this.emitInput(ev);
     } else if (status === 0x80) {
       // Note Off
-      const note = data[1];
+      const note = data[1]!;
       const ev = this.eventForNote(note, 'release', 0);
       if (ev) this.emitInput(ev);
     } else if (status === 0xb0) {
       // Control Change
-      const cc = data[1];
+      const cc = data[1]!;
       const value = data[2] ?? 0;
       const ev = this.eventForCc(cc, value);
       if (ev) this.emitInput(ev);

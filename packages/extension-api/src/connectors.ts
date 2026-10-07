@@ -120,13 +120,14 @@ export interface ControlFeedback {
   state: ControlFeedbackState;
 }
 
-/** Runtime contract of a controller driver (mirrors `BaseControllerDriver`). */
+/** Runtime contract of a controller driver. Extend `ControllerDriverBase`. */
 export interface ControllerDriver {
   readonly id: string;
   readonly definitionKey: string;
   status: Ref<ConnectorStatus>;
   errorMessage: Ref<string | null>;
   deviceLabel: Ref<string | null>;
+  logs: LogLine[];
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   sendFeedback(fb: ControlFeedback): void;
@@ -142,26 +143,30 @@ export interface ControllerControlDef {
   label?: string;
   /** Hit area in SVG viewBox coordinates. */
   rect: { x: number; y: number; w: number; h: number };
-  /** Id of the SVG element representing the control. */
+  /** Id of the SVG element representing the control (sliders: a group with `range…` track and `knob…` child). */
   svgId?: string;
+  /** Default live mapping suggested when a twin is added (core `LiveMapping` shape). */
+  defaultMapping?: Record<string, unknown>;
 }
 
 /** A hardware controller contributed by an extension. */
 export interface ControllerDefinition {
-  /** Unique key. */
+  /** Unique key (kebab-case, vendor-prefixed, e.g. `akai-apc-mini-mk2`). */
   id: string;
   label: string;
   description: string;
   vendor?: string;
   model?: string;
-  /** Auto-detection. */
-  matches(port: MidiPortInfo): boolean;
+  /** Auto-detection by MIDI port (optional). */
+  matches?(port: MidiPortInfo): boolean;
   /** Create a driver instance. */
   createDriver(id: string): ControllerDriver;
-  /** Layout SVG for the controller twin widget. */
+  /** Layout SVG for the controller twin widget (no `<style>` blocks; use a viewBox). */
   layoutSvg?: string;
   /** Layout viewBox size. */
   viewBox?: { w: number; h: number };
+  /** Default footprint of the twin on the live grid. */
+  defaultGridSize?: { w: number; h: number };
   /** Controls on the layout. */
   controls?: ControllerControlDef[];
 }

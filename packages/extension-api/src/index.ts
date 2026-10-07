@@ -17,6 +17,7 @@ export * from './live';
 export * from './kinds';
 export * from './connectors';
 export { ConnectorBase } from './connector-base';
+export { ControllerDriverBase } from './controller-base';
 export * from './commands';
 export * from './manifest';
 export { getHostApi, registerExtension } from './host';

@@ -1,5 +1,8 @@
-import type { ControllerDefinition, ControllerControl } from '~/utils/controllers/types';
-import { driverFactory } from './driver';
+/**
+ * Control layout of the AKAI APC Mini mk2 twin: hit areas measured from
+ * `layout.svg` (viewBox 0 0 433 372) and the SVG ids of each control.
+ */
+import type { ControllerControlDef } from '@pixelmapper/extension-api';
 
 // ── SVG geometry (viewBox 0 0 433 372) ──────────────────────────────────────
 // All values measured from layout.svg paths.
@@ -31,7 +34,7 @@ const SCENE_NOTE_BASE = 112;
 const SHIFT_NOTE      = 122;
 const FADER_CC_BASE   = 48;
 
-const controls: ControllerControl[] = [];
+export const controls: ControllerControlDef[] = [];
 
 // 64 RGB pads (8×8)
 for (let row = 0; row < 8; row++) {
@@ -42,7 +45,7 @@ for (let row = 0; row < 8; row++) {
       type:  'button',
       label: `Pad ${row},${col}`,
       svgId: hexId(note),
-      rect:  { x: PAD_COL_RIGHTS[col] - PAD_W, y: PAD_ROW_TOPS[row], w: PAD_W, h: PAD_H },
+      rect:  { x: PAD_COL_RIGHTS[col]! - PAD_W, y: PAD_ROW_TOPS[row]!, w: PAD_W, h: PAD_H },
     });
   }
 }
@@ -54,7 +57,7 @@ for (let i = 0; i < 8; i++) {
     type:  'button',
     label: `Track ${i + 1}`,
     svgId: hexId(TRACK_NOTE_BASE + i),
-    rect:  { x: TRACK_RIGHTS[i] - TRACK_W, y: TRACK_Y, w: TRACK_W, h: TRACK_H },
+    rect:  { x: TRACK_RIGHTS[i]! - TRACK_W, y: TRACK_Y, w: TRACK_W, h: TRACK_H },
   });
 }
 
@@ -65,7 +68,7 @@ for (let i = 0; i < 8; i++) {
     type:  'button',
     label: `Scene ${i + 1}`,
     svgId: hexId(SCENE_NOTE_BASE + i),
-    rect:  { x: SCENE_RIGHTS[i] - SCENE_W, y: SCENE_YS[i], w: SCENE_W, h: SCENE_H },
+    rect:  { x: SCENE_RIGHTS[i]! - SCENE_W, y: SCENE_YS[i]!, w: SCENE_W, h: SCENE_H },
   });
 }
 
@@ -85,20 +88,9 @@ for (let i = 0; i < 9; i++) {
     type:  'slider',
     label: i < 8 ? `Fader ${i + 1}` : 'Master',
     svgId: faderId(FADER_CC_BASE + i),
-    rect:  { x: FADER_RIGHTS[i] - FADER_W, y: FADER_Y, w: FADER_W, h: FADER_H },
+    rect:  { x: FADER_RIGHTS[i]! - FADER_W, y: FADER_Y, w: FADER_W, h: FADER_H },
   });
 }
 
-const definition: ControllerDefinition = {
-  key:    'akai-apc-mini-mk2',
-  label:  'AKAI APC Mini mk2',
-  vendor: 'AKAI',
-  model:  'APC Mini mk2',
-  svg:    '',
-  viewBox: { w: 433, h: 372 },
-  defaultGridSize: { w: 20, h: 17 },
-  controls,
-  driverFactory,
-};
-
-export default definition;
+/** viewBox of `layout.svg`. */
+export const VIEW_BOX = { w: 433, h: 372 };

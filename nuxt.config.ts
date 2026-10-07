@@ -1,7 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
-import { fileURLToPath } from 'node:url';
 
 /**
  * First-party extensions included as Nuxt layers (ADR §5.9 distribution set,
@@ -15,6 +14,7 @@ const FIRST_PARTY_EXTENSIONS: string[] = [
   // Catalog extensions (ADR §5.9); layers until the runtime loader (P6.5/P6.6) installs them on demand.
   './extensions/neopixel-strip',
   './extensions/connector-esp',
+  './extensions/controller-akai-apc-mini-mk2',
 ];
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 
@@ -29,7 +29,6 @@ export default defineNuxtConfig({
       compilerOptions: {
         types: ['w3c-web-serial'],
       },
-      include: ['../controllers/**/*.ts'],
     },
   },
   devtools: {
@@ -51,11 +50,6 @@ export default defineNuxtConfig({
       //@ts-ignore
       tailwindcss(),
     ],
-    resolve: {
-      alias: {
-        '~controllers': fileURLToPath(new URL('./controllers', import.meta.url)),
-      },
-    },
     build: {
       target: 'esnext', // required for top-level await support
     },
