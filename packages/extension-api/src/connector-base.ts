@@ -5,7 +5,7 @@
  * distribution bundles (where this package is the shared host module) extend
  * the same class. Connectors send rendered output; they never render.
  */
-import { reactive, ref, shallowRef } from 'vue';
+import { reactive, ref, shallowRef, type Ref, type ShallowRef } from 'vue';
 import type { Connector, ConnectorEngineState, ConnectorStatus, LogLine } from './connectors';
 
 /** Maximum log lines kept per connector. */
@@ -15,23 +15,23 @@ export abstract class ConnectorBase implements Connector {
   readonly id: string;
   abstract readonly meta: { readonly type: string; readonly label: string; readonly icon?: string };
 
-  status = ref<ConnectorStatus>('disconnected');
-  errorMessage = ref<string | null>(null);
+  status: Ref<ConnectorStatus> = ref<ConnectorStatus>('disconnected');
+  errorMessage: Ref<string | null> = ref<string | null>(null);
   logs: LogLine[] = reactive([]);
   /** User-visible name of this instance. */
-  label = ref('');
+  label: Ref<string> = ref('');
 
   /**
    * Armed after the first successful connection; a drop then retries until
    * `disconnect()`. Session state only.
    */
-  autoReconnect = ref(false);
+  autoReconnect: Ref<boolean> = ref(false);
 
   /** Number of physical DMX outputs (0 = no direct DMX output, uses `onEngineState`). */
   outputCount = 0;
 
   /** `outputMapping[i]` = universe of output `i` (0 = unassigned). */
-  outputMapping = shallowRef<number[]>([]);
+  outputMapping: ShallowRef<number[]> = shallowRef<number[]>([]);
 
   constructor(id: string) {
     this.id = id;

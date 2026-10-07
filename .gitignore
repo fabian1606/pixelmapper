@@ -37,3 +37,4 @@ rs-engine/target
 # Built content plugins (scripts/build-plugins.ts)
 public/plugins
 public/extensions
+docs/ai/.slots.collected.json

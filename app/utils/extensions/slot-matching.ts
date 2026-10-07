@@ -9,6 +9,7 @@
  * Resolution is memoized per slot id and invalidated whenever the registry
  * changes, so rendering a slot is a map lookup after the first time.
  */
+import { shallowReactive } from 'vue';
 import type { SlotContribution } from '@pixelmapper/extension-api';
 import { getContributions, registryVersion, type OwnedContribution } from './registry';
 
@@ -104,6 +105,20 @@ export function getSlotContributions(slotId: string): OwnedContribution<'slots'>
 
 /** Every slot id rendered so far in this session (dev catalog, plan P7.3). */
 export const renderedSlotIds = new Set<string>();
+
+/**
+ * Slot ids rendered so far with the scope names available there (dev and
+ * tests only). Feeds the `/dev/slots` catalog and `docs/ai/index.json`.
+ */
+export const renderedSlots = shallowReactive(new Map<string, string[]>());
+
+/** Records a rendered slot (merging scope names). */
+export function recordRenderedSlot(id: string, scopeNames: string[]): void {
+  renderedSlotIds.add(id);
+  const prev = renderedSlots.get(id);
+  if (prev && scopeNames.every(n => prev.includes(n))) return;
+  renderedSlots.set(id, [...new Set([...(prev ?? []), ...scopeNames])].sort());
+}
 
 /** Re-export for consumers that only need the contribution type. */
 export type { SlotContribution };

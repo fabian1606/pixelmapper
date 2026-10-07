@@ -12,8 +12,8 @@
  */
 import { computed } from 'vue';
 import type { MenuItemSpec, ScopeSnapshot } from '@pixelmapper/extension-api';
-import { useScopeSnapshot } from '~/composables/extensions/use-scope';
-import { getSlotContributions, renderedSlotIds } from '~/utils/extensions/slot-matching';
+import { useScopeSnapshot, useScopes } from '~/composables/extensions/use-scope';
+import { getSlotContributions, recordRenderedSlot } from '~/utils/extensions/slot-matching';
 import { slotIdOf, useSlotPath } from '~/utils/extensions/slot-path';
 import ExtensionContributionHost from './ExtensionContributionHost.vue';
 
@@ -31,6 +31,8 @@ defineSlots<{
 
 const path = useSlotPath();
 const scopes = useScopeSnapshot();
+/** Names of the scopes available here (no projection). */
+const scopeNames = Object.keys(useScopes());
 
 /** Resolved full slot id. */
 const slotId = computed(() => props.id ?? slotIdOf(path.value, props.position ?? ''));
@@ -42,7 +44,7 @@ const slotId = computed(() => props.id ?? slotIdOf(path.value, props.position ??
  */
 const visible = computed(() => {
   const id = slotId.value;
-  if (import.meta.dev) renderedSlotIds.add(id);
+  if (import.meta.dev) recordRenderedSlot(id, scopeNames);
   const matching = getSlotContributions(id);
   if (matching.length === 0) return matching;
   if (!matching.some(c => c.contribution.when)) return matching;

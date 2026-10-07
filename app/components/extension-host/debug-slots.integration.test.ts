@@ -3,7 +3,9 @@
  * primitives with the dev-only `_debug-slots` extension registered and
  * checks that the expected slot ids are rendered.
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { renderedSlots } from '~/utils/extensions/slot-matching';
 import { defineComponent, h, nextTick } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -12,6 +14,16 @@ import { resetRegistry } from '~/utils/extensions/registry';
 import { installSharedGlobals } from '~/utils/extensions/shared-globals';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { BUILTIN_ALIASES, builtinHash, createModifier } from '~/utils/engine/modifiers';
+
+// ── Slot catalog (plan P7.2) ────────────────────
+// With PM_COLLECT_SLOTS=1 the slots rendered by these mounts (and their
+// scopes) are written for `scripts/generate-ai-docs.ts`.
+afterAll(() => {
+  if (process.env.PM_COLLECT_SLOTS !== '1') return;
+  mkdirSync('docs/ai', { recursive: true });
+  const slots = Object.fromEntries([...renderedSlots.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  writeFileSync('docs/ai/.slots.collected.json', JSON.stringify(slots, null, 2));
+});
 
 // ── Environment stubs ───────────────────────────
 beforeAll(() => {

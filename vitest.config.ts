@@ -15,11 +15,12 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
  */
 export default defineConfig({
   plugins: [vue()],
+  // Nuxt's dev flag (dev-only diagnostics such as the rendered-slot catalog).
+  define: { 'import.meta.dev': 'true' },
   resolve: {
     alias: {
       '~~': r('./'),
       '@@': r('./'),
-      '~controllers': r('./controllers'),
       '~': r('./app'),
       '@': r('./app'),
     },

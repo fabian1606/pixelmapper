@@ -6,7 +6,7 @@
  * Hardware handles (MIDIAccess, MIDIInput, HIDDevice, …) MUST stay plain
  * private fields on subclasses — Vue proxies break native event binding.
  */
-import { reactive, ref } from 'vue';
+import { reactive, ref, type Ref } from 'vue';
 import type { ConnectorStatus, ControlFeedback, ControlInputEvent, ControllerDriver, LogLine } from './connectors';
 
 /** Maximum log lines kept per driver. */
@@ -16,9 +16,9 @@ export abstract class ControllerDriverBase implements ControllerDriver {
   abstract readonly definitionKey: string;
   readonly id: string;
 
-  status = ref<ConnectorStatus>('disconnected');
-  errorMessage = ref<string | null>(null);
-  deviceLabel = ref<string | null>(null);
+  status: Ref<ConnectorStatus> = ref<ConnectorStatus>('disconnected');
+  errorMessage: Ref<string | null> = ref<string | null>(null);
+  deviceLabel: Ref<string | null> = ref<string | null>(null);
   logs: LogLine[] = reactive([]);
 
   private listeners = new Set<(e: ControlInputEvent) => void>();
