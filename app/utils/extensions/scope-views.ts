@@ -133,10 +133,6 @@ export function channelView(fixture: Fixture, index: number): ChannelView {
 export function fixtureView(fixture: Fixture): FixtureView {
   void modelTick.value; // re-project on non-reactive model changes
   const beams: BeamView[] = fixture.beams.map(b => ({ id: b.id, x: b.localX, y: b.localY, z: b.localZ }));
-  const extra = fixture as Fixture & {
-    kind?: { id: string; version: string; config: Json };
-    extensionData?: Record<string, Record<string, Json>>;
-  };
   return {
     id: fixture.id,
     name: fixture.name,
@@ -152,8 +148,8 @@ export function fixtureView(fixture: Fixture): FixtureView {
     oflKey: fixture.oflKey,
     channels: fixture.channels.map((_, i) => channelView(fixture, i)),
     beams,
-    kind: extra.kind ? jsonClone(extra.kind) : undefined,
-    extensionData: extra.extensionData ? jsonClone(extra.extensionData) : undefined,
+    kind: fixture.kind ? { id: fixture.kind.id, version: fixture.kind.version, config: jsonClone(fixture.kind.config) as Json } : undefined,
+    extensionData: fixture.extensionData ? jsonClone(fixture.extensionData) as Record<string, Record<string, Json>> : undefined,
   };
 }
 

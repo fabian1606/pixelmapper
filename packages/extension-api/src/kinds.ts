@@ -40,13 +40,22 @@ export interface ChannelDef {
   beamId?: string;
 }
 
-/** A beam/head. */
+/**
+ * A beam/head. Positions are in world pixels relative to the fixture origin
+ * (`fixture.position`); the core applies the fixture's position and rotation.
+ */
 export interface BeamDef {
   id: string;
-  /** Position; space given by `space`. */
+  /** Center of the beam (relative world pixels). */
   pos: Vec2;
-  /** `'local'` = normalized fixture-local (default), `'world'` = world pixels. */
-  space?: 'local' | 'world';
+  /**
+   * Physical emitters that share this beam's color, e.g. the LEDs of one
+   * pixel group of a strip (relative world pixels). Drawn as dots in 2D/3D.
+   * Default: one emitter at `pos`.
+   */
+  emitters?: Vec2[];
+  /** Dot radius of the emitters in world pixels. Default 4. */
+  emitterRadius?: number;
 }
 
 /** Stroke/fill of a body primitive. Colors SHOULD be theme tokens (CSS vars). */
@@ -57,7 +66,7 @@ export interface BodyStyle {
   opacity?: number;
 }
 
-/** Geometry the core draws for a fixture (world pixels unless noted). */
+/** Geometry the core draws for a fixture (world pixels relative to the fixture origin). */
 export type BodyPrimitive =
   | { type: 'polyline'; points: Vec2[]; closed?: boolean; width: number; style: BodyStyle }
   | { type: 'polygon'; points: Vec2[]; style: BodyStyle }
@@ -65,7 +74,13 @@ export type BodyPrimitive =
   | { type: 'rect'; rect: Rect; radius?: number; style: BodyStyle }
   | { type: 'svg'; markup: string; headElementMap: Record<string, string>; rect: Rect };
 
-/** An editable control point shown in edit mode. */
+/**
+ * An editable control point (relative world pixels).
+ *
+ * `anchor` handles are active whenever the fixture is selected; all other
+ * roles only in edit mode (second click on a selected fixture that has at
+ * least one non-anchor handle).
+ */
 export interface Handle {
   id: string;
   pos: Vec2;
@@ -99,8 +114,14 @@ export interface FixtureKindDefinition<Config = unknown> {
   defaults(): Config;
   /** Pure, synchronous compilation into the canonical model. */
   build(config: Config, ctx: KindBuildContext): KindBuildResult;
-  /** Pure handle-drag reducer. */
+  /**
+   * Pure handle-drag reducer. The core always passes the config from the
+   * start of the drag and the current pointer position (relative world
+   * pixels), so the result must not depend on previous move events.
+   */
   onHandleMove?(config: Config, handleId: string, pos: Vec2, ctx: KindBuildContext): Config;
+  /** Pure reducer for deleting a focused handle (Delete/Backspace); return the config unchanged to refuse. */
+  onHandleDelete?(config: Config, handleId: string, ctx: KindBuildContext): Config;
   /** Upgrade a config persisted with an older `version`. */
   migrate?(config: unknown, fromVersion: string): Config;
   library: {
@@ -111,6 +132,11 @@ export interface FixtureKindDefinition<Config = unknown> {
   };
   /** Whether using this kind adds a project dependency. Default true. */
   requiredWhenUsed?: boolean;
+  /**
+   * Channels may cross DMX universe boundaries (e.g. pixel strips fed as one
+   * buffer). Default false: auto-addressing starts a new universe instead.
+   */
+  spansUniverses?: boolean;
 }
 
 /** Identity helper for typing a fixture kind. */

@@ -33,6 +33,7 @@ import '~/components/engine/commands/connector-commands';
 // Side-effect import — registers the 'SetChannelRange' factory so per-channel
 // range edits replay correctly on project load.
 import '~/components/engine/commands/set-channel-range-command';
+import '~/components/engine/commands/set-fixture-kind-config-command';
 // Side-effect import — registers all live-op handlers (section.setActive,
 // preset-ops, etc.) so getLiveOpConfig() resolves during tail replay even
 // before any live-mode UI component has been mounted.

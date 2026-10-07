@@ -10,6 +10,8 @@ import {
 } from '@/components/ui/accordion';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
+import { listKinds } from '~/utils/kinds/kind-host';
+import { iconByName } from '~/utils/extensions/icons';
 
 const props = defineProps<{
   selectedKey?: string;
@@ -19,7 +21,20 @@ const emit = defineEmits<{
   (e: 'select', item: FixtureSummary): void;
   (e: 'create-custom-fixture'): void;
   (e: 'auto-create-fixture'): void;
+  /** A fixture kind (extension) was chosen. */
+  (e: 'select-kind', kindId: string): void;
 }>();
+
+// ─── Fixture kinds ────────────────────────────────────────────────────────────
+
+/** Registered kinds matching the search / category filter. */
+const visibleKinds = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  const cat = categoryFilter.value;
+  return listKinds().filter(({ def }) =>
+    (!cat || cat === 'All' || def.library.category === cat)
+    && (!q || `${def.label} ${def.description} ${def.library.category}`.toLowerCase().includes(q)));
+});
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +53,7 @@ const isSearching = computed(() => search.value.trim().length > 0 || (categoryFi
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
-const CATEGORIES = [
+const BASE_CATEGORIES = [
   'All',
   'Color Changer',
   'Dimmer',
@@ -47,6 +62,9 @@ const CATEGORIES = [
   'Effect',
   'Pixel Bar',
 ];
+
+/** OFL categories plus the categories of registered kinds. */
+const CATEGORIES = computed(() => [...new Set([...BASE_CATEGORIES, ...listKinds().map(k => k.def.library.category)])]);
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
@@ -204,6 +222,21 @@ function slugId(key: string): string {
 
     <!-- Fixture list -->
     <div class="flex-1 overflow-y-auto min-h-0 bg-background/50">
+      <!-- Generated fixtures (kinds contributed by extensions) -->
+      <div v-if="visibleKinds.length" class="flex flex-col px-1 pt-1 border-b border-border/50 pb-1">
+        <button
+          v-for="k in visibleKinds"
+          :key="k.def.id"
+          class="flex items-center gap-3 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40 group/item"
+          @click="emit('select-kind', k.def.id)"
+        >
+          <component :is="iconByName(k.def.icon)" class="size-4 text-primary shrink-0" />
+          <span class="flex flex-col min-w-0">
+            <span class="text-sm font-medium text-foreground group-hover/item:text-primary transition-colors">{{ k.def.label }}</span>
+            <span class="text-[10px] text-muted-foreground truncate">{{ k.def.library.category }} · {{ k.def.description }}</span>
+          </span>
+        </button>
+      </div>
       
       <!-- SEARCH MODE -->
       <template v-if="isSearching">

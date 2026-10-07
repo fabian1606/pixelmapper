@@ -5,7 +5,7 @@
  * command classes (which hold live model references). Factories whose core
  * support lands in a later plan phase throw a descriptive error.
  */
-import type { ChannelRangeWrite, Command, CoreCommandFactory, FixtureId } from '@pixelmapper/extension-api';
+import type { ChannelRangeWrite, Command, CoreCommandFactory, FixtureId, Json } from '@pixelmapper/extension-api';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useEngineStore } from '~/stores/engine-store';
@@ -18,6 +18,10 @@ import { SetChannelRangeCommand, type RangeSnapshotMap } from '~/components/engi
 import { RenameNodeCommand } from '~/components/engine/commands/rename-command';
 import { MoveFixtureCommand } from '~/components/engine/commands/move-fixture-command';
 import { RotateFixtureCommand } from '~/components/engine/commands/rotate-fixture-command';
+import { SetFixtureKindConfigCommand } from '~/components/engine/commands/set-fixture-kind-config-command';
+import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
+import { createKindFixture, getKind } from '~/utils/kinds/kind-host';
+import { assignIdsAndAddresses } from '~/utils/engine/addressing';
 
 /** Error for factories whose core support is not implemented yet. */
 function notYet(name: string, phase: string): never {
@@ -86,8 +90,22 @@ export function createCoreCommandFactory(): CoreCommandFactory {
     setChannelRange: write => setChannelRanges({ changes: [write] }),
     setChannelRanges,
 
-    setFixtureKindConfig: () => notYet('setFixtureKindConfig', 'P5.1'),
-    addFixture: () => notYet('addFixture', 'P5.1'),
+    setFixtureKindConfig({ fixtureId, config }): Command {
+      const fixture = requireFixture(fixtureId);
+      if (!fixture.kind) throw new Error(`[extension-api] fixture "${String(fixtureId)}" is not a kind fixture`);
+      const store = useEngineStore();
+      return new SetFixtureKindConfigCommand(store.flatFixtures as Fixture[], fixture.id, fixture.kind.config as Json, config);
+    },
+    addFixture({ kind, ofl, position }): Command {
+      // OFL fixtures need an async definition fetch; extensions add them through the library UI.
+      if (!kind) throw new Error(`[extension-api] commands.addFixture needs { kind }${ofl ? ' (OFL keys are added through the fixture library)' : ''}`);
+      const registered = getKind(kind.id);
+      if (!registered) throw new Error(`[extension-api] fixture kind "${kind.id}" is not installed`);
+      const store = useEngineStore();
+      const fixture = createKindFixture(registered.def, { id: 'pending', config: kind.config, position });
+      assignIdsAndAddresses([fixture], store.flatFixtures as Fixture[]);
+      return new AddFixturesCommand(store.sceneNodes as SceneNode[], [fixture]);
+    },
     setExtensionData: () => notYet('setExtensionData', 'P5.5'),
 
     rename({ nodeId, name }): Command {

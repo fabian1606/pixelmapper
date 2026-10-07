@@ -1,4 +1,4 @@
-import { Fixture, type StripConfig } from './core/fixture'
+import { Fixture, type FixtureKindInstance, type StripConfig } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
 import { Beam } from './core/beam'
@@ -8,6 +8,7 @@ import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
 import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
 import { cloneModifiers } from './modifiers'
+import { cloneJson, rebuildKindFixture } from '~/utils/kinds/kind-host'
 
 // ─── Schema version ───────────────────────────────────────────────────────────
 
@@ -73,6 +74,10 @@ export interface SerializedFixture {
   channels: SerializedChannel[]
   beams: SerializedBeam[]
   stripConfig?: StripConfig
+  /** Fixture-kind state (config + compiled cache), ADR §5.6. */
+  kind?: FixtureKindInstance
+  /** Namespaced extension data, ADR §5.8. */
+  extensionData?: Fixture['extensionData']
 }
 
 export interface SerializedGroup {
@@ -164,6 +169,8 @@ export function serializeFixture(f: Fixture): SerializedFixture {
     channels: f.channels.map(serializeChannel),
     beams: f.beams.map(serializeBeam),
     stripConfig: f.stripConfig ? { ...f.stripConfig } : undefined,
+    kind: f.kind ? cloneJson(f.kind) : undefined,
+    extensionData: f.extensionData ? cloneJson(f.extensionData) : undefined,
   }
 }
 
@@ -301,6 +308,13 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
       ]
     }
     f.stripConfig = sc
+  }
+  if (data.extensionData) f.extensionData = cloneJson(data.extensionData)
+  if (data.kind) {
+    // Rebuild from config (migrates older config versions); falls back to the
+    // compiled cache when the kind's extension is not installed.
+    f.kind = cloneJson(data.kind)
+    rebuildKindFixture(f)
   }
   return f
 }

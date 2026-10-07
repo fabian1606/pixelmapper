@@ -12,6 +12,17 @@ export class Beam {
   public localY: number;
   public localZ: number;
 
+  /**
+   * Fixture-kind beams (ADR §5.6): center in world pixels relative to the
+   * fixture origin (rotated with the fixture). When set, it replaces the
+   * normalized `localX/localY` placement.
+   */
+  public offsetPx?: { x: number; y: number };
+  /** Kind beams: physical emitters sharing this beam's color (relative world pixels). */
+  public emitters?: { x: number; y: number }[];
+  /** Kind beams: emitter dot radius in world pixels. */
+  public emitterRadius?: number;
+
   constructor(id: string, localX: number = 0, localY: number = 0, localZ: number = 0) {
     this.id = id;
     this.localX = localX;

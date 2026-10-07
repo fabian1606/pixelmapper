@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,9 @@ import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
 import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
 import CustomFixtureEditorDialog from './custom-fixture-editor/CustomFixtureEditorDialog.vue';
 import NeoPixelStripForm from './NeoPixelStripForm.vue';
+import KindAddForm from './KindAddForm.vue';
+import { listKinds } from '~/utils/kinds/kind-host';
+import { iconByName } from '~/utils/extensions/icons';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -29,8 +32,27 @@ const emit = defineEmits<{
 
 // ─── View State ───────────────────────────────────────────────────────────────
 
-type View = 'landing' | 'library' | 'neopixel';
+type View = 'landing' | 'library' | 'neopixel' | 'kind';
 const view = ref<View>('landing');
+
+// ─── Fixture kinds (extensions) ───────────────────────────────────────────────
+
+/** Registered fixture kinds (shown as source cards and in the library). */
+const kinds = computed(() => listKinds());
+/** Kind whose add form is open. */
+const selectedKindId = ref<string | null>(null);
+
+/** Opens a kind's add form. */
+function openKind(id: string) {
+  selectedKindId.value = id;
+  view.value = 'kind';
+}
+
+/** Adds kind fixtures built by the form. */
+function handleAddKindFixtures(fixtures: Fixture[]) {
+  emit('add', fixtures);
+  emit('update:open', false);
+}
 
 // ─── LocalStorage ─────────────────────────────────────────────────────────────
 
@@ -361,6 +383,22 @@ watch(() => props.open, (isOpen) => {
                   <p class="text-xs text-muted-foreground mt-0.5">Parametric LED strip</p>
                 </div>
               </button>
+
+              <!-- Fixture kinds contributed by extensions -->
+              <button
+                v-for="k in kinds"
+                :key="k.def.id"
+                class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
+                @click="openKind(k.def.id)"
+              >
+                <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                  <component :is="iconByName(k.def.icon)" class="size-5 text-primary" />
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-foreground">{{ k.def.label }}</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ k.def.library.category }}</p>
+                </div>
+              </button>
             </PmMenuGroup>
 
             <!-- Recent Fixtures -->
@@ -461,6 +499,24 @@ watch(() => props.open, (isOpen) => {
           </div>
         </template>
 
+        <!-- ── Fixture Kind View ─────────────────────────────────────────── -->
+        <template v-if="view === 'kind' && selectedKindId">
+          <div class="px-6 py-5 flex items-center gap-3 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-7 text-muted-foreground hover:text-foreground shrink-0"
+              @click="view = 'landing'"
+            >
+              <ChevronLeft class="size-4" />
+            </Button>
+            <DialogTitle class="text-lg font-bold tracking-tight">{{ kinds.find(k => k.def.id === selectedKindId)?.def.label }}</DialogTitle>
+          </div>
+          <div class="flex-1 overflow-y-auto px-6 pb-6">
+            <KindAddForm :kind-id="selectedKindId" @add="handleAddKindFixtures" />
+          </div>
+        </template>
+
         <!-- ── NeoPixel View ─────────────────────────────────────────────── -->
         <template v-else-if="view === 'neopixel'">
           <div class="px-6 py-5 flex items-center gap-3 shrink-0">
@@ -501,6 +557,7 @@ watch(() => props.open, (isOpen) => {
               @select="handleSelect"
               @create-custom-fixture="openCustomEditor"
               @auto-create-fixture="triggerPdfUpload"
+              @select-kind="openKind"
             />
           </div>
 

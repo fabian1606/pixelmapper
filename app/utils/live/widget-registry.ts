@@ -8,11 +8,11 @@
  */
 import { markRaw, type Component } from 'vue';
 import {
-  Crosshair, Drum, MousePointerClick, Palette, Projector, Puzzle, SlidersHorizontal, Type,
-  Gamepad2, Lightbulb, Gauge, Music, Sparkles, Timer,
+  Crosshair, Drum, MousePointerClick, Palette, Projector, SlidersHorizontal, Type, Gamepad2,
 } from 'lucide-vue-next';
 import type { LiveMappingType } from '@pixelmapper/extension-api';
 import { getContributions } from '~/utils/extensions/registry';
+import { iconByName } from '~/utils/extensions/icons';
 import { CORE_WIDGET_SIZES, type CoreLiveWidgetType } from './types';
 import LiveButtonWidget from '~/components/live/LiveButtonWidget.vue';
 import LiveSliderWidget from '~/components/live/LiveSliderWidget.vue';
@@ -52,28 +52,8 @@ const CORE_WIDGETS: Omit<WidgetTypeInfo, 'defaultSize' | 'extensionId'>[] = [
   { type: 'controller-twin', label: 'Controller', icon: Gamepad2, component: LiveControllerTwinWidget, addable: false },
 ];
 
-/** Icons extensions can reference by kebab-case lucide name; others fall back to a puzzle piece. */
-const ICONS: Record<string, Component> = {
-  'mouse-pointer-click': MousePointerClick,
-  'sliders-horizontal': SlidersHorizontal,
-  crosshair: Crosshair,
-  type: Type,
-  projector: Projector,
-  palette: Palette,
-  drum: Drum,
-  'gamepad-2': Gamepad2,
-  lightbulb: Lightbulb,
-  gauge: Gauge,
-  music: Music,
-  sparkles: Sparkles,
-  timer: Timer,
-  puzzle: Puzzle,
-};
-
-/** Resolves a lucide icon name used by an extension. */
-export function iconByName(name: string): Component {
-  return ICONS[name] ?? Puzzle;
-}
+/** Resolves a lucide icon name used by an extension (re-exported for existing callers). */
+export { iconByName } from '~/utils/extensions/icons';
 
 /** All known widget types: core first, then extension widgets by extension id. */
 export function listWidgetTypes(): WidgetTypeInfo[] {
