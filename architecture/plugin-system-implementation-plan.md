@@ -128,7 +128,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 - [x] **P5.3 3D primitives.** Generalize `strip-substrates.ts` → `body-polylines.ts`, `svg-planes.ts` → used for `svg` primitives; `fixture-adapter.ts` builds from `body` without kind branches.
 - [x] **P5.4 `extensions/neopixel-strip`.** Move `neopixel-strip-factory.ts`, `strip-geometry.ts`, `strip-regenerator.ts`, `NeoPixelStripForm.vue`, `reshape-strip-command.ts`, `set-strip-shape-command.ts`, `update-strip-config-command.ts` into the layer; implement `defineFixtureKind` (`build` = channels/beams/polyline body/handles; `onHandleMove`; `migrate`). Commands namespaced `neopixel-strip/*`. Remove `'NeoPixel Strip'` from `OflCategory`/`FIXTURE_CATEGORIES` in `custom-fixture-types.ts` and every `stripConfig` reference in core (`engine-store.ts` fingerprint, `serialize.ts`, `use-selection.ts`, `use-workspace-operations.ts`, `SelectionInfoSection.vue`, `AddFixtureDialog.vue`, encoders).
   *Done when:* `grep -ri "strip" app rs-engine` finds no NeoPixel-specific code outside the extension (generic words excepted); strips work identically with the extension installed.
-- [ ] **P5.5 Requires bookkeeping.** + `app/utils/extensions/requires.ts` (ADR §5.8 rules) + tests; snapshot write when an extension leaves `requires`.
+- [x] **P5.5 Requires bookkeeping.** + `app/utils/extensions/requires.ts` (ADR §5.8 rules) + tests; snapshot write when an extension leaves `requires`.
 - [ ] **P5.6 Docs.** `architecture/core-concepts.md` (canonical model, kinds, primitives); `architecture/extensions.md` (kind example).
 
 ---

@@ -62,7 +62,8 @@ export function useExtensionContext(): ExtensionContext {
   const slotId = inject(SLOT_ID_KEY, null);
   const scopes = useScopes();
   const history = useHistory();
-  factory ??= createCoreCommandFactory();
+  // Per-extension factory so `setExtensionData` defaults to the caller's id.
+  const commands = extensionId ? createCoreCommandFactory(extensionId) : (factory ??= createCoreCommandFactory());
 
   const preview = createOutputPreview();
   if (getCurrentInstance()) onBeforeUnmount(() => preview.clear());
@@ -71,7 +72,7 @@ export function useExtensionContext(): ExtensionContext {
     extensionId,
     slotId,
     scopes,
-    commands: factory,
+    commands,
     getFixture,
     preview,
     run(command: Command) {

@@ -124,6 +124,8 @@ export interface LiveWidget {
   controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
+  /** Namespaced extension data (ADR §5.8): `extensionData[extensionId][key]`. */
+  extensionData?: Record<string, Record<string, unknown>>
 }
 
 export type SectionSource = 'all-presets' | 'selected-presets' | 'preset-variants' | 'color-variants'

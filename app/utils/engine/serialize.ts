@@ -9,6 +9,7 @@ import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
 import { cloneModifiers } from './modifiers'
 import { cloneJson, rebuildKindFixture } from '~/utils/kinds/kind-host'
+import type { ProjectRequirement } from '~/utils/extensions/requires'
 
 // ─── Schema version ───────────────────────────────────────────────────────────
 
@@ -122,6 +123,10 @@ export interface ProjectSnapshot {
   activeSectionMembers?: Record<string, string[]>
   /** Saved moving head positions for live performance recall. */
   savedPositions?: MovingHeadPosition[]
+  /** Extensions the project cannot be opened without (ADR D20). */
+  requires?: ProjectRequirement[]
+  /** Project-level namespaced extension data (ADR §5.8). */
+  extensionData?: Record<string, Record<string, unknown>>
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -199,6 +204,8 @@ export function serializeProject(
   clockEpoch: number = Date.now(),
   activeSectionMembers: Record<string, string[]> = {},
   savedPositions: MovingHeadPosition[] = [],
+  requires: ProjectRequirement[] = [],
+  extensionData: Record<string, Record<string, unknown>> | undefined = undefined,
 ): ProjectSnapshot {
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -215,6 +222,8 @@ export function serializeProject(
     globalBpm,
     clockEpoch,
     activeSectionMembers,
+    requires: requires.map(r => ({ ...r })),
+    extensionData: extensionData ? cloneJson(extensionData) : undefined,
   }
 }
 
@@ -314,6 +323,8 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   clockEpoch: number
   activeSectionMembers: Record<string, string[]>
   savedPositions: MovingHeadPosition[]
+  requires: ProjectRequirement[]
+  extensionData: Record<string, Record<string, unknown>> | undefined
 } {
   if (snapshot?.schemaVersion !== SCHEMA_VERSION) throw new IncompatibleProjectError(snapshot?.schemaVersion)
   return {
@@ -329,5 +340,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
     clockEpoch: snapshot.clockEpoch ?? Date.now(),
     activeSectionMembers: snapshot.activeSectionMembers ?? {},
     savedPositions: JSON.parse(JSON.stringify(snapshot.savedPositions ?? [])),
+    requires: (snapshot.requires ?? []).map(r => ({ ...r })),
+    extensionData: snapshot.extensionData ? cloneJson(snapshot.extensionData) : undefined,
   }
 }

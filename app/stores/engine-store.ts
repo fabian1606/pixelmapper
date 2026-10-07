@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, computed, watch, watchEffect, markRaw, triggerRef } from 'vue';
+import { ref, reactive, shallowRef, computed, watch, watchEffect, markRaw, triggerRef } from 'vue';
 import type { Preset } from '~/utils/engine/preset-types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
@@ -56,6 +56,13 @@ import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
 import { liveHub, type SignatureFrame } from '~/utils/extensions/live-hub';
+import { getExtension } from '~/utils/extensions/registry';
+import { getKind } from '~/utils/kinds/kind-host';
+import {
+  addRequirements, extensionDataOwners, recomputeRequirements, requirementsOfCommand,
+  type ProjectRequirement, type RequiresSources,
+} from '~/utils/extensions/requires';
+import '~/components/engine/commands/set-extension-data-command';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { notify } from '~/composables/use-notifications';
 import { isBuiltinHash } from '~/utils/plugins/builtin-index';
@@ -301,6 +308,51 @@ export const useEngineStore = defineStore('engine', () => {
   // Create a reactive array for effects that the UI can track,
   // and bind it into the engine so the render loop uses it.
   const modifiers = ref<import('~/utils/engine/types').ModifierInstance[]>([]);
+
+  // ── Extensions: project dependencies + project-level data (ADR D20, §5.8) ──
+  /** Extensions the project cannot be opened without. */
+  const requires = ref<ProjectRequirement[]>([]);
+  /** Holder of project-level namespaced extension data. */
+  const projectExtension = reactive<{ extensionData?: Record<string, Record<string, unknown>> }>({});
+
+  /** Host lookups for the requires rules. */
+  const requiresSources: RequiresSources = {
+    extensionVersion: id => getExtension(id)?.manifest.version,
+    kindOwner: (kindId) => {
+      const k = getKind(kindId);
+      return k ? { extensionId: k.extensionId, required: k.def.requiredWhenUsed !== false } : undefined;
+    },
+  };
+
+  /** Recomputes `requires` from the state (snapshot writes); returns removed ids. */
+  function recomputeRequires(): string[] {
+    const liveStore = useLiveModeStore();
+    const { next, removed } = recomputeRequirements(requires.value, {
+      fixtureKinds: flatFixtures.value.map(f => f.kind?.id),
+      extensionDataOwners: extensionDataOwners([
+        projectExtension.extensionData,
+        ...flatFixtures.value.map(f => f.extensionData),
+        ...liveStore.pages.flatMap(p => p.widgets.map(w => w.extensionData)),
+      ]),
+    }, requiresSources);
+    requires.value = next;
+    return removed;
+  }
+
+  /**
+   * Adds the extensions a persisted command depends on. A new requirement
+   * is written to a snapshot right away so clients opening the project see
+   * it before replaying the command (ADR §5.10 gate).
+   */
+  function noteCommandRequirements(commandType: string, payload: object) {
+    const ids = requirementsOfCommand(commandType, payload, requiresSources,
+      id => flatFixtures.value.find(f => f.id === id)?.kind?.id);
+    if (ids.length === 0) return;
+    const next = addRequirements(requires.value, ids, requiresSources);
+    if (next.length === requires.value.length) return;
+    requires.value = next;
+    void triggerSaveSnapshotInternal().catch(err => console.warn('[engine] requires snapshot failed:', err));
+  }
   engine.modifiers = modifiers.value;
 
   const sceneNodes = shallowRef<SceneNode[]>([]);
@@ -867,7 +919,8 @@ export const useEngineStore = defineStore('engine', () => {
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
     const connectionsStore = useConnectionsStore();
     connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, modifiers: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = deserializeProject(snapshot);
+    const restored = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, modifiers: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = restored;
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
@@ -896,6 +949,8 @@ export const useEngineStore = defineStore('engine', () => {
     );
     liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
     liveStore.loadPositions(restoredPositions);
+    requires.value = restored.requires;
+    projectExtension.extensionData = restored.extensionData;
     // Reset the worker engine so no stale state from a previous project leaks
     // into the first frames, then dispatch fresh packets.
     engine.reset();
@@ -1125,6 +1180,10 @@ export const useEngineStore = defineStore('engine', () => {
     // persist queue first (via flushPersistQueue) so lastSeenSequenceNumber
     // matches the state about to be captured.
     function buildSnapshot() {
+      // Extensions no longer used leave `requires` with this snapshot, so the
+      // change log after it contains none of their commands (ADR §5.8).
+      const removed = recomputeRequires();
+      if (removed.length > 0) console.info('[engine] extensions no longer required:', removed.join(', '));
       const pinnedStore = usePinnedModifiersStore();
       const liveStore = useLiveModeStore();
       const connectionsStore = useConnectionsStore();
@@ -1144,6 +1203,8 @@ export const useEngineStore = defineStore('engine', () => {
           [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
         ),
         liveStore.savedPositions,
+        requires.value,
+        projectExtension.extensionData,
       );
     }
 
@@ -1172,6 +1233,7 @@ export const useEngineStore = defineStore('engine', () => {
       markDirty: markEngineDirty,
       walAppend: (entry) => walAppend(entry),
       currentProjectId: () => currentProjectId.value,
+      onPersist: noteCommandRequirements,
     });
 
     // Allow markEngineDirty() to arm its timers and bind the snapshot trigger
@@ -1284,6 +1346,9 @@ export const useEngineStore = defineStore('engine', () => {
     engine,
     modifiers,
     sceneNodes,
+    requires,
+    projectExtension,
+    recomputeRequires,
     selectedIds,
     flatFixtures,
     globalBases,

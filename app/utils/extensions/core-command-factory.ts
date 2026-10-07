@@ -2,8 +2,7 @@
  * Core command factory exposed to extensions as `ctx.commands` (ADR §5.8).
  *
  * Translates the id-based, model-agnostic API arguments into the core's
- * command classes (which hold live model references). Factories whose core
- * support lands in a later plan phase throw a descriptive error.
+ * command classes (which hold live model references).
  */
 import type { ChannelRangeWrite, Command, CoreCommandFactory, FixtureId, Json } from '@pixelmapper/extension-api';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -19,14 +18,10 @@ import { RenameNodeCommand } from '~/components/engine/commands/rename-command';
 import { MoveFixtureCommand } from '~/components/engine/commands/move-fixture-command';
 import { RotateFixtureCommand } from '~/components/engine/commands/rotate-fixture-command';
 import { SetFixtureKindConfigCommand } from '~/components/engine/commands/set-fixture-kind-config-command';
+import { SetExtensionDataCommand, readExtensionData } from '~/components/engine/commands/set-extension-data-command';
 import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
 import { createKindFixture, getKind } from '~/utils/kinds/kind-host';
 import { assignIdsAndAddresses } from '~/utils/engine/addressing';
-
-/** Error for factories whose core support is not implemented yet. */
-function notYet(name: string, phase: string): never {
-  throw new Error(`[extension-api] commands.${name} is not available yet (arrives with plan ${phase}).`);
-}
 
 /** Finds a fixture or throws a readable error. */
 function requireFixture(id: FixtureId): Fixture {
@@ -68,8 +63,11 @@ function setChannelRanges({ changes, description }: { changes: ChannelRangeWrite
   return new SetChannelRangeCommand(snapshots, description);
 }
 
-/** Creates the factory. Stateless; safe to share. */
-export function createCoreCommandFactory(): CoreCommandFactory {
+/**
+ * Creates the factory. `callerExtensionId` (the extension whose context
+ * holds the factory) is the default writer of `setExtensionData`.
+ */
+export function createCoreCommandFactory(callerExtensionId?: string): CoreCommandFactory {
   return {
     setChannelValues({ fixtureId, values, description }): Command {
       const fixture = requireFixture(fixtureId);
@@ -106,7 +104,16 @@ export function createCoreCommandFactory(): CoreCommandFactory {
       assignIdsAndAddresses([fixture], store.flatFixtures as Fixture[]);
       return new AddFixturesCommand(store.sceneNodes as SceneNode[], [fixture]);
     },
-    setExtensionData: () => notYet('setExtensionData', 'P5.5'),
+    setExtensionData({ owner, ownerId, extensionId, key, value }): Command {
+      const ext = extensionId ?? callerExtensionId;
+      if (!ext) throw new Error('[extension-api] commands.setExtensionData needs an extensionId outside an extension context');
+      if (owner !== 'project' && ownerId === undefined) throw new Error(`[extension-api] setExtensionData on a ${owner} needs ownerId`);
+      return new SetExtensionDataCommand({
+        owner, ownerId, extensionId: ext, key,
+        before: readExtensionData(owner, ownerId, ext, key),
+        after: value,
+      });
+    },
 
     rename({ nodeId, name }): Command {
       const node = findNode(useEngineStore().sceneNodes, nodeId);
