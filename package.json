@@ -8,13 +8,13 @@
     "plugins/*"
   ],
   "scripts": {
-    "build": "nuxt build",
-    "dev": "concurrently -n nuxt,canvas,core,artnet -c cyan,yellow,green,magenta \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\"",
+    "build": "bun run build:plugins && nuxt build",
+    "dev": "concurrently -n nuxt,canvas,core,artnet,plugins -c cyan,yellow,green,magenta,blue \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\" \"bun run scripts/build-plugins.ts --watch\"",
     "artnet-bridge": "bun run tools/artnet-bridge/index.ts",
-    "dev:nuxt": "nuxt dev",
+    "dev:nuxt": "bun run build:plugins && nuxt dev",
     "dev:wasm:canvas": "cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'",
     "dev:wasm:core": "cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'",
-    "generate": "nuxt generate",
+    "generate": "bun run build:plugins && nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare && ./scripts/setup-ofl.sh",
     "release": "bun run scripts/release.ts",
@@ -35,7 +35,8 @@
     "test:watch": "vitest",
     "typecheck": "nuxt typecheck",
     "lint": "eslint extensions",
-    "check:extensions": "bun run scripts/check-extensions.ts"
+    "check:extensions": "bun run scripts/check-extensions.ts",
+    "build:plugins": "bun run scripts/build-plugins.ts"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",

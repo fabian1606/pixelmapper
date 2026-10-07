@@ -33,3 +33,6 @@ pio/include/version.h
 
 # Rust build output
 rs-engine/target
+
+# Built content plugins (scripts/build-plugins.ts)
+public/plugins
