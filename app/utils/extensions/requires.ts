@@ -129,3 +129,46 @@ export function extensionDataOwners(maps: Iterable<Record<string, Record<string,
   }
   return out;
 }
+
+// ── Open gate (ADR §5.10) ────────────────────────
+
+/** A requirement the installed extensions do not satisfy. */
+export interface MissingRequirement {
+  id: string;
+  /** Required range. */
+  version: string;
+  /** Installed version when present but incompatible. */
+  installed?: string;
+}
+
+/**
+ * Requirements of a project about to open: the snapshot's `requires` plus
+ * owners of namespaced commands in the change-log tail (`ext/name`) — a
+ * missing extension's commands cannot be resolved via the registry, so the
+ * prefix itself is the extension id.
+ */
+export function requirementsToOpen(snapshotRequires: readonly ProjectRequirement[], tailCommandTypes: readonly string[]): ProjectRequirement[] {
+  const out = [...snapshotRequires];
+  for (const type of tailCommandTypes) {
+    const i = type.indexOf('/');
+    if (i <= 0) continue;
+    const id = type.slice(0, i);
+    if (!out.some(r => r.id === id)) out.push({ id, version: '*' });
+  }
+  return out;
+}
+
+/** Requirements not satisfied by the registered extensions. */
+export function missingRequirements(
+  required: readonly ProjectRequirement[],
+  installedVersion: (id: string) => string | undefined,
+  satisfies: (version: string, range: string) => boolean,
+): MissingRequirement[] {
+  const out: MissingRequirement[] = [];
+  for (const r of required) {
+    const v = installedVersion(r.id);
+    if (!v) out.push({ id: r.id, version: r.version });
+    else if (!satisfies(v, r.version)) out.push({ id: r.id, version: r.version, installed: v });
+  }
+  return out;
+}

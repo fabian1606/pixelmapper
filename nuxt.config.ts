@@ -3,24 +3,30 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
 /**
- * First-party extensions included as Nuxt layers (ADR §5.9 distribution set,
- * amended by A12: color-picker, pan-tilt, connector-artnet). The dev-only `_debug-slots`
- * extension labels every slot; enable it with PM_DEBUG_SLOTS=1 in dev.
+ * First-party extensions included as Nuxt layers: the distribution set
+ * (ADR §5.9 as amended by A12: color-picker, pan-tilt, connector-artnet).
+ * Catalog extensions are bundled by `scripts/build-extensions.ts` and
+ * installed on demand at runtime (Extensions page); in dev they are also
+ * layered for HMR unless PM_CATALOG_LAYERS=0. The dev-only `_debug-slots`
+ * extension labels every slot (PM_DEBUG_SLOTS=1).
  */
 const FIRST_PARTY_EXTENSIONS: string[] = [
   './extensions/color-picker',
   './extensions/pan-tilt',
   './extensions/connector-artnet',
-  // Catalog extensions (ADR §5.9); layers until the runtime loader (P6.5/P6.6) installs them on demand.
+];
+const CATALOG_EXTENSIONS: string[] = [
   './extensions/neopixel-strip',
   './extensions/connector-esp',
   './extensions/controller-akai-apc-mini-mk2',
 ];
+const CATALOG_AS_LAYERS = process.env.NODE_ENV !== 'production' && process.env.PM_CATALOG_LAYERS !== '0';
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 
 export default defineNuxtConfig({
   extends: [
     ...FIRST_PARTY_EXTENSIONS,
+    ...(CATALOG_AS_LAYERS ? CATALOG_EXTENSIONS : []),
     ...(DEBUG_SLOTS ? ['./extensions/_debug-slots'] : []),
   ],
 

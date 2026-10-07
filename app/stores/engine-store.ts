@@ -57,9 +57,10 @@ import { getExtension } from '~/utils/extensions/registry';
 import { extensionsReady } from '~/utils/extensions/loader';
 import { getKind } from '~/utils/kinds/kind-host';
 import {
-  addRequirements, extensionDataOwners, recomputeRequirements, requirementsOfCommand,
-  type ProjectRequirement, type RequiresSources,
+  addRequirements, extensionDataOwners, missingRequirements, recomputeRequirements, requirementsOfCommand, requirementsToOpen,
+  type MissingRequirement, type ProjectRequirement, type RequiresSources,
 } from '~/utils/extensions/requires';
+import semver from 'semver';
 import '~/components/engine/commands/set-extension-data-command';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { notify } from '~/composables/use-notifications';
@@ -881,7 +882,9 @@ export const useEngineStore = defineStore('engine', () => {
 
   const currentProjectId = ref<string | null>(null);
   const projectLoading = ref(false);
-  const projectError = ref<'unauthorized' | 'error' | 'incompatible' | null>(null);
+  const projectError = ref<'unauthorized' | 'error' | 'incompatible' | 'missing-extensions' | null>(null);
+  /** Extensions a project needs but this client lacks (ADR §5.10 gate). */
+  const missingExtensions = ref<MissingRequirement[]>([]);
 
   // Register SetModifiers replay here to avoid circular imports
   registerCommand('SetModifiers', (payload, _ctx) => {
@@ -1018,6 +1021,22 @@ export const useEngineStore = defineStore('engine', () => {
         projectError.value = 'error';
       }
       return;
+    }
+
+    // Gate (ADR §5.10): a project whose required extensions are missing or
+    // incompatible is not opened; the layout offers install/update instead.
+    {
+      const required = requirementsToOpen(
+        data.snapshot?.requires ?? [],
+        (data.tail ?? []).map((c: { command_type: string }) => c.command_type),
+      );
+      const missing = missingRequirements(required, id => getExtension(id)?.manifest.version, (v, r) => semver.satisfies(v, r));
+      missingExtensions.value = missing;
+      if (missing.length > 0) {
+        projectError.value = 'missing-extensions';
+        projectLoading.value = false;
+        return;
+      }
     }
 
     // Clear default fixtures so the project starts from a clean slate
@@ -1339,6 +1358,7 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId,
     projectLoading,
     projectError,
+    missingExtensions,
     loadProject,
     applyProjectSnapshot,
     getReplayContext,

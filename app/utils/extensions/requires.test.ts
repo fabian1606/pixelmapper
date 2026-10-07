@@ -75,3 +75,24 @@ describe('SetExtensionData', () => {
     expect(store.projectExtension.extensionData).toBeUndefined();
   });
 });
+
+describe('open gate (ADR §5.10)', () => {
+  it('adds owners of namespaced tail commands to the snapshot requirements', async () => {
+    const { requirementsToOpen } = await import('./requires');
+    expect(requirementsToOpen([{ id: 'strips', version: '^1.4' }], ['MoveFixture', 'strips/x', 'notes/set'])).toEqual([
+      { id: 'strips', version: '^1.4' },
+      { id: 'notes', version: '*' },
+    ]);
+  });
+
+  it('reports missing and incompatible extensions', async () => {
+    const { missingRequirements } = await import('./requires');
+    const semver = (await import('semver')).default;
+    const installed: Record<string, string> = { strips: '1.2.0', notes: '0.3.1' };
+    expect(missingRequirements(
+      [{ id: 'strips', version: '^1.4' }, { id: 'notes', version: '^0.3' }, { id: 'pads', version: '*' }],
+      id => installed[id],
+      (v, r) => semver.satisfies(v, r),
+    )).toEqual([{ id: 'strips', version: '^1.4', installed: '1.2.0' }, { id: 'pads', version: '*' }]);
+  });
+});

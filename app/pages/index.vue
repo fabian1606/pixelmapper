@@ -8,6 +8,7 @@
           <p class="text-muted-foreground text-sm mt-1">{{ user?.email }}</p>
         </div>
         <div class="flex items-center gap-3">
+          <NuxtLink to="/extensions" class="text-sm text-muted-foreground hover:text-foreground">Extensions</NuxtLink>
           <Button variant="outline" size="sm" @click="signOut">Sign out</Button>
           <Button size="sm" @click="showCreate = true">New project</Button>
         </div>
