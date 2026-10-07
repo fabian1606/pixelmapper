@@ -32,7 +32,8 @@
     "monitor:p4": "bun run scripts/flash.ts p4 --monitor",
     "monitor:bridge": "bun run scripts/flash.ts bridge --monitor",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "nuxt typecheck"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",
@@ -74,7 +75,8 @@
     "typescript": "^5.9.3",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.5.0",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "vue-tsc": "^3.3.12"
   },
   "version": "0.1.27"
 }
