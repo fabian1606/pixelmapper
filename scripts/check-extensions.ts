@@ -28,7 +28,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
     if (entry.name === 'node_modules' || entry.name === 'dist') continue;
     const p = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...await sourceFiles(p));
-    else if (/\.(ts|vue)$/.test(entry.name)) out.push(p);
+    else if (/\.(ts|vue)$/.test(entry.name) && !entry.name.endsWith('.test.ts')) out.push(p);
   }
   return out;
 }

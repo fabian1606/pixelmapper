@@ -92,10 +92,17 @@ export interface NumberInputEmits extends CommonInputEmits<number> {
 
 // ── pm.colorInput ───────────────────────────────
 
+/** A preset color offered by `pm.colorInput` (e.g. a color-wheel slot). */
+export interface ColorSwatch {
+  color: RgbColor;
+  /** Name shown as tooltip, e.g. `'Deep Red'`. */
+  label?: string;
+}
+
 /** Props of `pm.colorInput`: linear RGB color, components 0–1. */
 export interface ColorInputProps extends CommonInputProps<RgbColor> {
-  /** Optional preset swatches. */
-  swatches?: RgbColor[];
+  /** Optional preset swatches; picking one emits its color as one edit. */
+  swatches?: ColorSwatch[];
 }
 /** Emits of `pm.colorInput`. */
 export type ColorInputEmits = CommonInputEmits<RgbColor>;

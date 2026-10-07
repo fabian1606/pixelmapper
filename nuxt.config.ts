@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
  * Filled as extensions are extracted (plan P2+). The dev-only `_debug-slots`
  * extension labels every slot; enable it with PM_DEBUG_SLOTS=1 in dev.
  */
-const FIRST_PARTY_EXTENSIONS: string[] = [];
+const FIRST_PARTY_EXTENSIONS: string[] = [
+  './extensions/color-picker',
+];
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 
 export default defineNuxtConfig({

@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import type { ChannelSection } from './composables/use-channel-sections';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import FixturePropertyControl from './FixturePropertyControl.vue';
-import FixtureColorPicker from './FixtureColorPicker.vue';
+import FixtureColorControl from './FixtureColorControl.vue';
 import FixturePanTiltPad from './FixturePanTiltPad.vue';
 import FixtureMovementRange from './FixtureMovementRange.vue';
 import ChannelLimitsDialog from './ChannelLimitsDialog.vue';
@@ -30,7 +30,7 @@ const limitsDialog = ref<InstanceType<typeof ChannelLimitsDialog> | null>(null);
   </div>
   <div v-else class="space-y-5">
     <div class="space-y-4">
-      <FixtureColorPicker
+      <FixtureColorControl
         :channel-sections="channelSections"
         :active-step="activeStep"
         @before-change="handleBeforeChange"

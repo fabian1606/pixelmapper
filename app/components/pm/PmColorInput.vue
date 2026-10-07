@@ -5,7 +5,7 @@
  * The color-picker extension replaces this with a full picker.
  */
 import { computed, ref, watch } from 'vue';
-import type { ColorInputEmits, ColorInputProps, RgbColor } from '@pixelmapper/extension-api';
+import type { ColorInputEmits, ColorInputProps, ColorSwatch, RgbColor } from '@pixelmapper/extension-api';
 import { useReplaceable } from '~/composables/extensions/use-replaceable';
 
 const props = withDefaults(defineProps<ColorInputProps>(), { disabled: false, size: 'md' });
@@ -32,6 +32,16 @@ watch(hex, (h) => { hexText.value = h; });
 
 function setChannel(key: keyof RgbColor, v: number) {
   emit('update:modelValue', { ...props.modelValue, [key]: v });
+}
+
+/** CSS color of a swatch. */
+const swatchCss = (s: ColorSwatch) => `rgb(${s.color.r * 255}, ${s.color.g * 255}, ${s.color.b * 255})`;
+
+/** Picks a swatch as one undo step. */
+function pickSwatch(s: ColorSwatch) {
+  emit('scrubStart');
+  emit('update:modelValue', { ...s.color });
+  emit('scrubEnd');
 }
 
 /** Parses `#rrggbb` / `rrggbb` / `#rgb` and commits as one undo step. */
@@ -66,6 +76,18 @@ function commitHex() {
       @scrub-start="emit('scrubStart')"
       @scrub-end="emit('scrubEnd')"
     />
+    <div v-if="swatches?.length" class="grid grid-cols-8 gap-1.5 pt-1">
+      <button
+        v-for="(sw, i) in swatches"
+        :key="i"
+        type="button"
+        class="size-6 rounded border border-border hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-ring"
+        :style="{ backgroundColor: swatchCss(sw) }"
+        :title="sw.label"
+        :aria-label="sw.label ?? 'Swatch'"
+        @click="pickSwatch(sw)"
+      />
+    </div>
     <div class="flex items-center gap-2">
       <span class="size-6 rounded border border-border shrink-0" :style="{ backgroundColor: hex }" />
       <input
