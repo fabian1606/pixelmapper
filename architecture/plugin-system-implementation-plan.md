@@ -17,13 +17,13 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 ## Phase 0 — Tooling foundation
 
-- [ ] **P0.1 Bun workspaces.** Add `"workspaces": ["packages/*", "extensions/*", "plugins/*"]` to root `package.json`. Create empty packages `packages/extension-api`, `packages/extension-build`, `packages/plugin-sdk`, `packages/plugin-toolchain` (each with `package.json` named `@pixelmapper/<name>`, `tsconfig.json`, `src/index.ts`).
+- [x] **P0.1 Bun workspaces.** Add `"workspaces": ["packages/*", "extensions/*", "plugins/*"]` to root `package.json`. Create empty packages `packages/extension-api`, `packages/extension-build`, `packages/plugin-sdk`, `packages/plugin-toolchain` (each with `package.json` named `@pixelmapper/<name>`, `tsconfig.json`, `src/index.ts`).
   *Done when:* `bun install` succeeds; `import {} from '@pixelmapper/extension-api'` resolves in `app/`.
-- [ ] **P0.2 Vitest.** Add `vitest` + `@vue/test-utils` + `happy-dom`; `vitest.config.ts` with Nuxt aliases (`~`, `@`); script `"test": "vitest run"`. Existing `alignment-guides.test.ts` and `photometry.test.ts` must run green.
-- [ ] **P0.3 Typecheck script.** `"typecheck": "nuxt typecheck"` (add `vue-tsc` if needed). Fix nothing else yet; record the baseline error count in the commit message.
-- [ ] **P0.4 Remove ESP32 FFI.** Delete `rs-engine/ffi/`, remove it from `rs-engine/Cargo.toml` workspace members, remove FFI mentions from `AGENTS.md` commands. Leave `pio*/` untouched.
+- [x] **P0.2 Vitest.** Add `vitest` + `@vue/test-utils` + `happy-dom`; `vitest.config.ts` with Nuxt aliases (`~`, `@`); script `"test": "vitest run"`. Existing `alignment-guides.test.ts` and `photometry.test.ts` must run green.
+- [x] **P0.3 Typecheck script.** `"typecheck": "nuxt typecheck"` (add `vue-tsc` if needed). Fix nothing else yet; record the baseline error count in the commit message.
+- [x] **P0.4 Remove ESP32 FFI.** Delete `rs-engine/ffi/`, remove it from `rs-engine/Cargo.toml` workspace members, remove FFI mentions from `AGENTS.md` commands. Leave `pio*/` untouched.
   *Done when:* `cargo build` and `cargo test` in `rs-engine/` succeed.
-- [ ] **P0.5 Docs.** In `architecture.md` mark the ESP32 rendering target as removed (already done by the ADR rewrite; verify).
+- [x] **P0.5 Docs.** In `architecture.md` mark the ESP32 rendering target as removed (already done by the ADR rewrite; verify).
 
 ---
 
