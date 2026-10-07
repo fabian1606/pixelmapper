@@ -185,3 +185,55 @@ export default defineNuxtPlugin(() => registerExtension(manifest));
 Add `./extensions/dmx-badge` to `FIRST_PARTY_EXTENSIONS` in `nuxt.config.ts` (with an empty `nuxt.config.ts` and a `package.json` in the folder) and run `bun run check:extensions`.
 
 The dev-only `extensions/_debug-slots` is a complete working example (slot components and a menu item).
+
+## Fixture kind example
+
+A kind compiles a config into channels, beams, body primitives and handles (concepts: [core-concepts.md](core-concepts.md#fixture-kinds-adr-56)). A minimal LED ring with draggable radius:
+
+```ts
+// extensions/led-ring/extension.ts
+import { defineExtension, defineFixtureKind, type Json } from '@pixelmapper/extension-api';
+
+interface RingConfig { pixels: number; radius: number }
+
+const ring = defineFixtureKind<Json>({
+  id: 'led-ring',
+  version: '1.0.0',
+  label: 'LED ring',
+  icon: 'circle',
+  description: 'A ring of RGB pixels; drag the handle to change the radius.',
+  configSchema: [{ key: 'pixels', type: 'int', min: 3, max: 120, default: 12, label: 'Pixels' }],
+  defaults: () => ({ pixels: 12, radius: 60 }),
+  build(raw) {
+    const { pixels, radius } = raw as unknown as RingConfig;
+    const pos = (i: number) => ({ x: Math.cos((i / pixels) * Math.PI * 2) * radius, y: Math.sin((i / pixels) * Math.PI * 2) * radius });
+    return {
+      channels: Array.from({ length: pixels * 3 }, (_, i) => ({
+        type: (['RED', 'GREEN', 'BLUE'] as const)[i % 3]!, role: 'COLOR' as const, addressOffset: i,
+        colorValue: ['#FF0000', '#00FF00', '#0000FF'][i % 3]!, defaultValue: 0, beamId: `p${Math.floor(i / 3)}`,
+      })),
+      beams: Array.from({ length: pixels }, (_, i) => ({ id: `p${i}`, pos: pos(i), emitterRadius: 5 })),
+      body: [{ type: 'circle', center: { x: 0, y: 0 }, radius, style: { stroke: 'var(--border)' } }],
+      handles: [{ id: 'radius', pos: { x: radius, y: 0 }, role: 'anchor' }],
+      bounds: { x: -radius, y: -radius, w: radius * 2, h: radius * 2 },
+    };
+  },
+  // Pure: called with the drag-start config on every pointer move.
+  onHandleMove: (raw, _id, p) => ({ ...(raw as object), radius: Math.max(20, Math.hypot(p.x, p.y)) }) as Json,
+  library: { category: 'Pixel Bar' },
+});
+
+export default defineExtension({
+  id: 'led-ring', version: '1.0.0', apiVersion: '^1.0.0',
+  displayName: 'LED ring', description: 'Circular pixel rings as a fixture kind.',
+  contributes: { fixtureKinds: [ring] },
+});
+```
+
+The kind appears as a card in **Add Fixture** and in the library under its category; the default add form and the selection-panel editor are generated from `configSchema` (provide `library.addForm` for a custom form: prop `modelValue`, emits `update:modelValue` and `add(config, count)`). Edits are core `SetFixtureKindConfig` commands; using the kind adds the extension to the project's `requires` (unless `requiredWhenUsed: false`). The full first-party example is `extensions/neopixel-strip`.
+
+## Extension data and project requirements
+
+Extensions persist small JSON state with `ctx.run(ctx.commands.setExtensionData({ owner: 'fixture' | 'project' | 'liveWidget', ownerId, key, value }))`; it is stored at `owner.extensionData[extensionId][key]` and undone like any command.
+
+`project.requires` (`app/utils/extensions/requires.ts`) is maintained automatically: executing an extension's namespaced command or editing/adding fixtures of its kinds adds the extension (and writes a snapshot right away); every snapshot write recomputes the list from the state — an extension stays while a fixture uses one of its required kinds or any `extensionData[id]` exists.
