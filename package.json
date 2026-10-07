@@ -37,7 +37,8 @@
     "lint": "eslint extensions",
     "check:extensions": "bun run scripts/check-extensions.ts",
     "build:plugins": "bun run scripts/build-plugins.ts",
-    "build:extensions": "bun run scripts/build-extensions.ts"
+    "build:extensions": "bun run scripts/build-extensions.ts",
+    "check:zero-extensions": "bun run scripts/check-zero-extensions.ts"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",

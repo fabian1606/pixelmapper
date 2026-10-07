@@ -1,0 +1,51 @@
+# App checks for the extension/content-plugin architecture (ADR 0001):
+# typecheck, lint, extension rules, unit tests, Rust tests and the
+# zero-extension build + smoke test (ADR D17, plan P6.9).
+name: App checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build engine WASM packages
+        run: |
+          (cd rs-engine/core && wasm-pack build --target web --out-dir pkg)
+          (cd rs-engine/canvas && wasm-pack build --target web --out-dir pkg)
+
+      - name: Install dependencies
+        run: bun install
+        env:
+          # setup-ofl.sh needs no network in CI; skip optional OFL download failures.
+          CI: 'true'
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: rs-engine
+
+      - name: Build content plugins and extension catalog
+        run: bun run build:plugins && bun run build:extensions
+
+      - name: Lint and extension rules
+        run: bun run lint && bun run check:extensions
+
+      - name: Unit tests
+        run: bun run test
+
+      - name: Zero-extension build + smoke test
+        run: bun run check:zero-extensions
