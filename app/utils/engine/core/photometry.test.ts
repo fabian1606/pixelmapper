@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { Fixture } from './fixture';
 import { Beam } from './beam';
 import type { Channel } from './channel';
