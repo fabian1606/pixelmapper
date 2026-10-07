@@ -1,7 +1,18 @@
 /**
- * @pixelmapper/plugin-toolchain
+ * @pixelmapper/plugin-toolchain — compile, instrument, validate and hash
+ * content plugins (ADR §6, D25). Isomorphic: Bun, browser, Tauri.
  *
- * Isomorphic compiler, instrumentation, validation and hashing for content plugins.
- * See architecture/adr/0001-extension-and-content-plugin-system.md.
+ * Light subpath exports for the app: `./params`, `./manifest`, `./hash`,
+ * `./runtime`, `./types`. The root export pulls in the AssemblyScript
+ * compiler; load it lazily (e.g. `await import(...)`) in UI code.
  */
-export {};
+export * from './types';
+export * from './params';
+export * from './manifest';
+export * from './hash';
+export * from './runtime';
+export * from './ui';
+export { compile, ASC_VERSION, COMPILE_FLAGS, type CompileResult, type Diagnostic } from './compile';
+export { instrument, type InstrumentResult } from './instrument';
+export { validate, type ValidateOptions, type ValidationReport } from './validate';
+export { buildPackage, verifyPackage, TOOLCHAIN_ID, TOOLCHAIN_VERSION, type BuildResult } from './build';

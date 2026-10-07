@@ -41,6 +41,7 @@
     "@nuxtjs/supabase": "^2.0.6",
     "@pinia/nuxt": "^0.11.3",
     "@pixelmapper/extension-api": "workspace:*",
+    "@pixelmapper/plugin-toolchain": "workspace:*",
     "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
