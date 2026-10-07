@@ -15,6 +15,8 @@ import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -295,9 +297,19 @@ watch(() => props.open, (isOpen) => {
             <DialogTitle class="text-lg font-bold tracking-tight">Add Fixture</DialogTitle>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-6 pb-6 flex flex-col gap-8">
+          <!-- Extension slots: add-fixture:*, add-fixture/sources:items -->
+          <PmPanel id="add-fixture" class="flex-1 overflow-y-auto px-6 pb-6 flex flex-col gap-8">
             <!-- 4 Action Cards -->
-            <div class="grid grid-cols-4 gap-3">
+            <PmMenuGroup id="sources" class="grid grid-cols-4 gap-3">
+              <template #item="{ item, run, disabled }">
+                <button
+                  class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
+                  :disabled="disabled"
+                  @click="run"
+                >
+                  <p class="text-sm font-semibold text-foreground">{{ item.label }}</p>
+                </button>
+              </template>
               <button
                 class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
                 @click="view = 'library'"
@@ -349,7 +361,7 @@ watch(() => props.open, (isOpen) => {
                   <p class="text-xs text-muted-foreground mt-0.5">Parametric LED strip</p>
                 </div>
               </button>
-            </div>
+            </PmMenuGroup>
 
             <!-- Recent Fixtures -->
             <div v-if="recentFixtures.length > 0">
@@ -421,7 +433,7 @@ watch(() => props.open, (isOpen) => {
                 </button>
               </div>
             </div>
-          </div>
+          </PmPanel>
 
           <!-- Config Footer (same style as library view) -->
           <div

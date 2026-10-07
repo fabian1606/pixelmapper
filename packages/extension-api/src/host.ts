@@ -8,7 +8,7 @@
  * `pinia` and this package to the same globals.
  */
 import type { Component, ComputedRef, MaybeRef, ShallowRef } from 'vue';
-import type { ExtensionContext } from './manifest';
+import type { ExtensionContext, ExtensionManifest } from './manifest';
 import type { LiveFrame, LiveTarget, LiveValueOf, LiveValueOptions, OnFrameOptions } from './live';
 import type { PmInputName } from './replaceables';
 import type { ScopeName, ScopeRef } from './scopes';
@@ -25,6 +25,8 @@ export interface HostApi {
   ): Readonly<ShallowRef<LiveValueOf<T> | undefined>>;
   onFrame(cb: (frame: LiveFrame) => void, opts?: OnFrameOptions): void;
   useReplaceable(name: PmInputName): ComputedRef<Component>;
+  /** Validates and registers an extension manifest. */
+  registerExtension(manifest: ExtensionManifest): void;
 }
 
 /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */
@@ -40,6 +42,24 @@ export interface SharedGlobals {
 declare global {
   // eslint-disable-next-line no-var
   var __PIXELMAPPER_SHARED__: SharedGlobals | undefined;
+  /** Manifests registered before the host was ready; drained by the host at boot. */
+  // eslint-disable-next-line no-var
+  var __PIXELMAPPER_PENDING__: ExtensionManifest[] | undefined;
+}
+
+/**
+ * Registers an extension with the host. Called by an extension layer's
+ * `plugins/register.ts` (or by the loader for distribution bundles). If the
+ * host is not initialized yet, the manifest is queued and registered at boot,
+ * so plugin execution order does not matter.
+ */
+export function registerExtension(manifest: ExtensionManifest): void {
+  const api = globalThis.__PIXELMAPPER_SHARED__?.api;
+  if (api) {
+    api.registerExtension(manifest);
+    return;
+  }
+  (globalThis.__PIXELMAPPER_PENDING__ ??= []).push(manifest);
 }
 
 /**

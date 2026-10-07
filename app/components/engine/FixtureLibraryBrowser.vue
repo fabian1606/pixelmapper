@@ -8,6 +8,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
 const props = defineProps<{
   selectedKey?: string;
@@ -126,10 +128,16 @@ onMounted(fetchManufacturers);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
+/** Kebab-case slug for stable primitive ids (e.g. manufacturer keys). */
+function slugId(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-background overflow-hidden font-sans">
+  <!-- Extension slots: library:*, library/categories:items, library/<manufacturer>:items -->
+  <PmPanel id="library" class="flex flex-col h-full bg-background overflow-hidden font-sans">
     <!-- Search & Filters -->
     <div class="p-4 bg-muted/20">
       <div class="flex gap-2 items-center">
@@ -163,7 +171,16 @@ onMounted(fetchManufacturers);
       </div>
       
       <!-- Category filter pills -->
-      <div class="flex gap-1.5 flex-wrap mt-3">
+      <PmMenuGroup id="categories" class="flex gap-1.5 flex-wrap mt-3">
+        <template #item="{ item, run, disabled }">
+          <button
+            class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors bg-muted text-muted-foreground hover:bg-accent hover:text-foreground border border-transparent hover:border-border"
+            :disabled="disabled"
+            @click="run"
+          >
+            {{ item.label }}
+          </button>
+        </template>
         <button
           v-for="cat in CATEGORIES"
           :key="cat"
@@ -175,7 +192,7 @@ onMounted(fetchManufacturers);
         >
           {{ cat }}
         </button>
-      </div>
+      </PmMenuGroup>
     </div>
 
     <!-- Result Message / Count -->
@@ -235,7 +252,16 @@ onMounted(fetchManufacturers);
               <div v-if="fixtureCache[mf.key]?.loading && fixtureCache[mf.key]?.items.length === 0" class="flex items-center justify-center py-4">
                  <Loader2 class="size-4 animate-spin text-primary opacity-50" />
               </div>
-              <div v-else class="flex flex-col px-1">
+              <PmMenuGroup v-else :id="slugId(mf.key)" class="flex flex-col px-1">
+                <template #item="{ item: menuItem, run, disabled }">
+                  <button
+                    class="flex flex-col gap-1 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40"
+                    :disabled="disabled"
+                    @click="run"
+                  >
+                    <span class="text-sm font-medium text-muted-foreground/90">{{ menuItem.label }}</span>
+                  </button>
+                </template>
                 <button
                   v-for="item in fixtureCache[mf.key]?.items"
                   :key="item.key"
@@ -249,12 +275,12 @@ onMounted(fetchManufacturers);
                     <span class="text-sm font-medium text-muted-foreground/90 group-hover/item:text-primary transition-colors">{{ item.name }}</span>
                   </div>
                 </button>
-              </div>
+              </PmMenuGroup>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
       </template>
 
     </div>
-  </div>
+  </PmPanel>
 </template>

@@ -17,7 +17,7 @@ import { outletProps } from './slot-outlets';
 const props = withDefaults(defineProps<{
   /** Stable kebab-case id; becomes a slot path segment. */
   id: string;
-  /** Root element/component. */
+  /** Root element/component; `'fragment'` renders no root (inside existing menu content). */
   as?: string | Component;
   /** Positions the caller places itself. */
   manual?: 'items'[];
@@ -36,7 +36,15 @@ const outlets = outletProps(['items'] as const);
 </script>
 
 <template>
-  <component :is="as" :data-pm-menu-group="id">
+  <template v-if="as === 'fragment'">
+    <slot v-bind="outlets" />
+    <ExtensionSlot v-if="!manual.includes('items')" position="items">
+      <template v-if="$slots.item" #menu-item="p">
+        <slot name="item" v-bind="p" />
+      </template>
+    </ExtensionSlot>
+  </template>
+  <component :is="as" v-else :data-pm-menu-group="id">
     <slot v-bind="outlets" />
     <ExtensionSlot v-if="!manual.includes('items')" position="items">
       <template v-if="$slots.item" #menu-item="p">

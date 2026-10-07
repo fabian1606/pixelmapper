@@ -18,5 +18,5 @@ export * from './kinds';
 export * from './connectors';
 export * from './commands';
 export * from './manifest';
-export { getHostApi } from './host';
+export { getHostApi, registerExtension } from './host';
 export type { HostApi, SharedGlobals } from './host';

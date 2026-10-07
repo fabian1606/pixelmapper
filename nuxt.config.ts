@@ -3,7 +3,20 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * First-party extensions included as Nuxt layers (ADR §5.9 distribution set).
+ * Filled as extensions are extracted (plan P2+). The dev-only `_debug-slots`
+ * extension labels every slot; enable it with PM_DEBUG_SLOTS=1 in dev.
+ */
+const FIRST_PARTY_EXTENSIONS: string[] = [];
+const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
+
 export default defineNuxtConfig({
+  extends: [
+    ...FIRST_PARTY_EXTENSIONS,
+    ...(DEBUG_SLOTS ? ['./extensions/_debug-slots'] : []),
+  ],
+
   typescript: {
     tsConfig: {
       compilerOptions: {

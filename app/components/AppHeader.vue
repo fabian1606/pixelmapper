@@ -5,6 +5,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
+import PmToolbar from '~/components/primitives/PmToolbar.vue';
 
 const engineStore = useEngineStore();
 const { projectLoading } = storeToRefs(engineStore);
@@ -54,7 +55,8 @@ const tabs = computed(() => projectId.value ? [
 </script>
 
 <template>
-  <header class="relative flex items-center h-14 bg-sidebar border-b border-sidebar-border px-4 gap-2 shrink-0">
+  <!-- Extension slots: header:start|end -->
+  <PmToolbar id="header" as="header" class="relative flex items-center h-14 bg-sidebar border-b border-sidebar-border px-4 gap-2 shrink-0">
     <nav class="flex items-center gap-2">
       <NuxtLink
         to="/"
@@ -97,7 +99,7 @@ const tabs = computed(() => projectId.value ? [
       v-if="projectLoading"
       class="absolute bottom-0 left-0 h-0.5 bg-primary animate-loading-bar"
     />
-  </header>
+  </PmToolbar>
 </template>
 
 <style scoped>

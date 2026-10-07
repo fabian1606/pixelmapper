@@ -16,6 +16,10 @@ import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/
 import { Trash2, Lightbulb } from 'lucide-vue-next';
 import { isAdditiveModifier } from '~/utils/engine/selection-logic';
 import { createHighlightCommand } from '~/components/engine/commands/highlight-fixture-command';
+import PmListItem from '~/components/primitives/PmListItem.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { fixtureView } from '~/utils/extensions/scope-views';
+import { useScopeSnapshot } from '~/composables/extensions/use-scope';
 
 const props = defineProps<{
   node: SceneNode;
@@ -35,6 +39,12 @@ const history = useHistory();
 
 const isGroup = computed(() => props.node instanceof FixtureGroup);
 const isSelected = computed(() => props.selectedIds.has(props.node.id));
+
+// Extension scope: fixture rows expose their fixture; group rows shadow any
+// outer fixture scope with `undefined`.
+const fixtureScope = provideScope('fixture', () => (isGroup.value ? undefined : fixtureView(props.node as Fixture)));
+/** Scopes captured when opening the context menu (slot `context-menu/fixture|group:items`). */
+const scopeSnapshot = useScopeSnapshot({ fixture: fixtureScope });
 
 const isExpanded = ref(isGroup.value ? (props.node as FixtureGroup).expanded : false);
 
@@ -159,7 +169,7 @@ function onContextMenu(e: MouseEvent) {
     action: () => emit('delete', props.node),
   });
 
-  openMenu(e, options);
+  openMenu(e, options, { id: isGroup.value ? 'group' : 'fixture', scopes: scopeSnapshot.value });
 }
 
 // F2 triggers rename only when this node is the single selection
@@ -170,7 +180,7 @@ useShortcuts([
 
 <template>
   <!-- ─── Fixture (leaf) node ─────────────────────────────────────────────── -->
-  <SidebarMenuItem v-if="!isGroup">
+  <PmListItem v-if="!isGroup" id="fixture" :as="SidebarMenuItem" :manual="['badges', 'actions']" v-slot="{ Badges, Actions }">
     <SidebarMenuButton :is-active="isSelected" @click="handleSelect" @contextmenu.prevent="onContextMenu">
       <Spotlight class="w-4 h-4 mr-2" @dblclick.stop="emit('zoomTo', node)" />
       <input
@@ -184,12 +194,13 @@ useShortcuts([
         @click.stop
       />
       <span v-else @dblclick="startEditing">{{ node.name }}</span>
+      <span class="ml-auto flex items-center gap-1 empty:hidden"><component :is="Badges" /><component :is="Actions" /></span>
     </SidebarMenuButton>
-  </SidebarMenuItem>
+  </PmListItem>
 
   <!-- ─── Group (collapsible) node ─────────────────────────────────────────── -->
   <Collapsible v-else v-model:open="isExpanded" as-child>
-    <SidebarMenuItem>
+    <PmListItem id="group" :as="SidebarMenuItem" :manual="['badges', 'actions']" v-slot="{ Badges, Actions }">
       <SidebarMenuButton :is-active="isSelected" @click="handleSelect" @contextmenu.prevent="onContextMenu">
         <CollapsibleTrigger as-child>
           <button class="mr-1 hover:bg-accent rounded p-0.5" @click.stop @dblclick.stop="emit('zoomTo', node)">
@@ -208,6 +219,7 @@ useShortcuts([
           @click.stop
         />
         <span v-else @dblclick="startEditing">{{ node.name }}</span>
+        <span class="ml-auto flex items-center gap-1 empty:hidden"><component :is="Badges" /><component :is="Actions" /></span>
       </SidebarMenuButton>
 
       <CollapsibleContent>
@@ -227,6 +239,6 @@ useShortcuts([
           />
         </SidebarMenuSub>
       </CollapsibleContent>
-    </SidebarMenuItem>
+    </PmListItem>
   </Collapsible>
 </template>

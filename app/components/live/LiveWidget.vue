@@ -15,6 +15,8 @@ import LiveControllerTwinWidget from './LiveControllerTwinWidget.vue';
 import LiveFixturePreviewWidget from './LiveFixturePreviewWidget.vue';
 import LiveColorWheelWidget from './LiveColorWheelWidget.vue';
 import LiveBeatWidget from './LiveBeatWidget.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { liveWidgetView } from '~/utils/extensions/scope-views';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -27,6 +29,9 @@ const props = defineProps<{
 const store = useLiveModeStore();
 const engineStore = useEngineStore();
 const history = useHistory();
+
+// Extension scope: this live widget.
+provideScope('liveWidget', () => liveWidgetView(props.widget));
 
 const isSelected = computed(() => store.selectedWidgetIds.has(props.widget.id));
 // Resize handles only when exactly this one widget is selected (no multi-resize).

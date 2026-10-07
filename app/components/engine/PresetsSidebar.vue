@@ -189,6 +189,11 @@ function quickSaveVariant(basePreset: Preset) {
 }
 
 import type { OverwriteTarget, PresetType } from '~/utils/engine/preset-types';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmListItem from '~/components/primitives/PmListItem.vue';
+import ScopeProvider from '~/components/extension-host/ScopeProvider.vue';
+import { useScopeSnapshot } from '~/composables/extensions/use-scope';
+import { presetView } from '~/utils/extensions/scope-views';
 
 function setPresetType(preset: Preset, type: PresetType, target: OverwriteTarget | undefined = undefined) {
   // An overwrite preset can't have variants — block the switch if any exist.
@@ -390,6 +395,9 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
 
 const { openMenu } = useGlobalContextMenu();
 
+/** Scopes captured when opening a preset context menu (slot `context-menu/preset:items`). */
+const scopeSnapshot = useScopeSnapshot();
+
 function onPresetContextMenu(e: MouseEvent, preset: Preset) {
   const isSelected = selectedPresetId.value === preset.id;
   const options: ContextMenuItemOption[] = [
@@ -413,7 +421,7 @@ function onPresetContextMenu(e: MouseEvent, preset: Preset) {
     },
   ];
 
-  openMenu(e, options);
+  openMenu(e, options, { id: 'preset', scopes: { ...scopeSnapshot.value, preset: presetView(preset) } });
 }
 
 defineExpose({
@@ -430,7 +438,8 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden">
+  <!-- Extension slots: presets:before|after, presets/preset:badges|actions (header is rendered by FixtureSidebar) -->
+  <PmPanel id="presets" :manual="['header']" class="flex flex-col h-full overflow-hidden">
       <!-- ─── Unsaved Changes Section ──────────────────────────────────────── -->
       <div class="border-b border-border shrink-0">
         <!-- Unsaved Changes header -->
@@ -502,9 +511,12 @@ defineExpose({
         </div>
 
         <Accordion v-else v-model="openPreset" type="single" collapsible class="px-1.5 py-1.5 space-y-0.5">
-          <AccordionItem
-            v-for="preset in basePresets"
-            :key="preset.id"
+          <ScopeProvider v-for="preset in basePresets" :key="preset.id" name="preset" :get="() => presetView(preset)">
+          <PmListItem
+            id="preset"
+            :as="AccordionItem"
+            :manual="['badges', 'actions']"
+            v-slot="{ Badges, Actions }"
             :value="preset.id"
             class="rounded-md overflow-hidden !border-b border border-border/50 bg-background/20"
           >
@@ -548,10 +560,12 @@ defineExpose({
                   <template v-else>
                     <span class="flex-1 text-left truncate">{{ preset.name }}</span>
                   </template>
+                  <component :is="Badges" />
                 </div>
 
                 <!-- Action buttons -->
                 <div class="flex items-center">
+                  <component :is="Actions" />
                   <!-- Preset Type Dropdown -->
                   <DropdownMenu>
                     <DropdownMenuTrigger as-child>
@@ -788,7 +802,8 @@ defineExpose({
 
               </div>
             </AccordionContent>
-          </AccordionItem>
+          </PmListItem>
+          </ScopeProvider>
         </Accordion>
 
         <!-- Save as Preset button (always after the list) -->
@@ -805,5 +820,5 @@ defineExpose({
           </Button>
         </div>
       </div>
-    </div>
+    </PmPanel>
 </template>

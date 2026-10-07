@@ -15,6 +15,8 @@ import {
   SidebarHeader,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import ExtensionSlot from '~/components/extension-host/ExtensionSlot.vue';
 
 const props = defineProps<{
   nodes: SceneNode[];
@@ -92,6 +94,9 @@ const selectedFixtures = computed(() =>
           {{ activeTab === 'fixtures' ? 'Fixtures' : 'Changes' }}
         </span>
 
+        <div class="flex items-center gap-1">
+        <!-- Panel header extension slot (scene:header / presets:header) -->
+        <ExtensionSlot :id="activeTab === 'fixtures' ? 'scene:header' : 'presets:header'" />
         <!-- Add Fixture button (only visible on fixtures tab) -->
         <Button
           v-if="activeTab === 'fixtures'"
@@ -103,11 +108,12 @@ const selectedFixtures = computed(() =>
         >
           <Plus class="size-4" />
         </Button>
+        </div>
       </SidebarHeader>
 
       <SidebarContent class="p-0 bg-sidebar overflow-y-auto">
         <!-- Fixtures tab: scene tree -->
-        <SidebarGroup v-show="activeTab === 'fixtures'" class="p-2">
+        <PmPanel id="scene" :as="SidebarGroup" :manual="['header']" v-show="activeTab === 'fixtures'" class="p-2">
           <SidebarMenu v-if="nodes.length > 0">
             <FixtureSidebarNode
               v-for="node in nodes"
@@ -126,7 +132,7 @@ const selectedFixtures = computed(() =>
             <Lightbulb class="size-8" />
             <p class="text-[10px] uppercase font-medium">No fixtures in scene</p>
           </div>
-        </SidebarGroup>
+        </PmPanel>
 
         <!-- Presets tab -->
         <div v-show="activeTab === 'presets'" class="h-full overflow-hidden">

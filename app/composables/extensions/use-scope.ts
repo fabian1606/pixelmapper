@@ -33,10 +33,15 @@ export function useScopes(): { readonly [K in ScopeName]?: ScopeRef<K> } {
 
 /**
  * Reactive snapshot of all visible scopes (unwrapped values). Used to
- * evaluate slot `when` predicates.
+ * evaluate slot `when` predicates and to capture scopes for menus.
+ *
+ * A component cannot inject what it provides itself, so pass the refs it
+ * provided (`own`) to include them.
  */
-export function useScopeSnapshot(): ComputedRef<ScopeSnapshot> {
-  const scopes = useScopes();
+export function useScopeSnapshot(
+  own: { readonly [K in ScopeName]?: ScopeRef<K> } = {},
+): ComputedRef<ScopeSnapshot> {
+  const scopes = { ...useScopes(), ...own };
   return computed(() => {
     const snap: Record<string, unknown> = {};
     for (const [name, ref] of Object.entries(scopes)) {

@@ -23,6 +23,12 @@ import SequencerEditor from './SequencerEditor.vue';
 import ColorEditor from './ColorEditor.vue';
 import DisplacementEditor from './DisplacementEditor.vue';
 import SpeedCurveEditor from './SpeedCurveEditor.vue';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmListItem from '~/components/primitives/PmListItem.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
+import ScopeProvider from '~/components/extension-host/ScopeProvider.vue';
+import { modifierView } from '~/utils/extensions/scope-views';
+import { useEngineStore } from '~/stores/engine-store';
 
 const props = defineProps<{
   activeModifiers: Effect[];
@@ -55,6 +61,14 @@ const emit = defineEmits<{
   (e: 'dropdown-open-change', open: boolean): void;
   (e: 'reorder-modifiers', fromIndex: number, toIndex: number): void;
 }>();
+
+// ── Extension scope ──────────────────────────────────────────────────────────
+const engineStore = useEngineStore();
+
+/** Projects a modifier card's effect into the `modifier` scope view. */
+function modifierScope(modifier: Effect) {
+  return modifierView(modifier, engineStore.engine.stackBlendMode.value);
+}
 
 // ── Drag-to-reorder ───────────────────────────────────────────────────────────
 const dragFromIndex = ref<number | null>(null);
@@ -155,7 +169,7 @@ function modifierTypeName(modifier: Effect): string {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <PmPanel id="modifiers" class="space-y-4">
     <div v-if="activeModifiers.length === 0" class="py-10 px-4 text-center flex flex-col items-center gap-2">
       <span class="text-sm text-foreground font-semibold">No Modifiers</span>
       <span class="text-xs text-muted-foreground leading-relaxed max-w-[220px]">
@@ -163,9 +177,16 @@ function modifierTypeName(modifier: Effect): string {
       </span>
     </div>
 
-    <div
+    <ScopeProvider
       v-for="(modifier, i) in activeModifiers"
       :key="modifier.id"
+      name="modifier"
+      :get="() => modifierScope(modifier)"
+    >
+    <PmListItem
+      id="modifier"
+      :manual="['badges', 'actions']"
+      v-slot="{ Badges, Actions }"
       data-modifier-card
       class="border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col cursor-pointer transition-colors"
       :class="[
@@ -206,6 +227,8 @@ function modifierTypeName(modifier: Effect): string {
             </SelectContent>
           </Select>
         </div>
+        <!-- Extension slots: modifiers/modifier:badges|actions -->
+        <div class="ml-auto flex items-center gap-1 empty:hidden" @mousedown.stop><component :is="Badges" /><component :is="Actions" /></div>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-yellow-400" @click.stop="emit('pin-modifier', modifier)">
           <Star class="h-4 w-4" :class="pinnedEffectIds.has(modifier.id) ? 'fill-yellow-400 text-yellow-400' : ''" />
         </Button>
@@ -366,7 +389,8 @@ function modifierTypeName(modifier: Effect): string {
         </div>
 
       </div>
-    </div>
+    </PmListItem>
+    </ScopeProvider>
 
     <!-- Add Modifier dropdown -->
     <div class="flex justify-center pt-2">
@@ -380,6 +404,11 @@ function modifierTypeName(modifier: Effect): string {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
+          <!-- Extension slot: modifiers/add:items -->
+          <PmMenuGroup id="add" as="fragment">
+            <template #item="{ item, run, disabled }">
+              <DropdownMenuItem :disabled="disabled" @click="run">{{ item.label }}</DropdownMenuItem>
+            </template>
           <DropdownMenuItem @click="emit('add-modifier')">Waveform</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-noise-modifier')">Noise</DropdownMenuItem>
           <DropdownMenuItem @click="emit('add-sequencer-modifier')">Sequencer</DropdownMenuItem>
@@ -390,6 +419,7 @@ function modifierTypeName(modifier: Effect): string {
           <DropdownMenuItem v-if="canAddSpeedCurve" class="text-orange-400 gap-2" @click="emit('add-speed-curve-modifier')">
             <Activity class="h-4 w-4" /> Speed Curve
           </DropdownMenuItem>
+          </PmMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger class="gap-2">
@@ -405,5 +435,5 @@ function modifierTypeName(modifier: Effect): string {
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  </div>
+  </PmPanel>
 </template>

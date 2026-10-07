@@ -15,6 +15,10 @@ import { type SnapshotMap } from './commands/set-channel-values-command';
 import FixturePropertyControlBox from './FixturePropertyControlBox.vue';
 import FixturePropertyControlDropdown from './FixturePropertyControlDropdown.vue';
 import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import PmListItem from '~/components/primitives/PmListItem.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { channelView, signatureTargetFor } from '~/utils/extensions/scope-views';
+import { useScopeSnapshot } from '~/composables/extensions/use-scope';
 
 const props = defineProps<{
   type: ChannelType;
@@ -61,6 +65,22 @@ const representativeChannel = computed(() => {
   }
 
   return bestMatch;
+});
+
+// ─── Extension scopes: channel + signature of the representative channel ─────
+const representativeRef = computed(() => {
+  const ch = representativeChannel.value;
+  if (!ch) return null;
+  const fixture = props.fixtures.find(f => f.channels.includes(ch));
+  return fixture ? { fixture, index: fixture.channels.indexOf(ch) } : null;
+});
+const channelScope = provideScope('channel', () => {
+  const r = representativeRef.value;
+  return r ? channelView(r.fixture, r.index) : undefined;
+});
+const signatureScope = provideScope('signature', () => {
+  const r = representativeRef.value;
+  return r ? signatureTargetFor(r.fixture, r.index) : undefined;
 });
 
 const rawValue = ref(representativeChannel.value?.chaserConfig.stepValues[props.activeStep] ?? 0);
@@ -195,6 +215,8 @@ onUnmounted(() => {
 
 // ─── Context menu (channel settings) ───────────────────────────────────────────
 const { openMenu } = useGlobalContextMenu();
+/** Scopes captured when opening the context menu (slot `context-menu/channel:items`). */
+const scopeSnapshot = useScopeSnapshot({ channel: channelScope, signature: signatureScope });
 
 function onBoxContextMenu(e: MouseEvent) {
   openMenu(e, [
@@ -207,7 +229,7 @@ function onBoxContextMenu(e: MouseEvent) {
         fixtures: props.fixtures,
       }),
     },
-  ]);
+  ], { id: 'channel', scopes: scopeSnapshot.value });
 }
 
 // ─── Dropdown lock (prevent sidebar auto-close) ────────────────────────────────
@@ -218,7 +240,7 @@ function onDropdownOpenChange(open: boolean) {
 </script>
 
 <template>
-  <div class="flex items-center gap-3 w-full py-2">
+  <PmListItem id="channel" :manual="['badges', 'actions']" class="flex items-center gap-3 w-full py-2" v-slot="{ Badges, Actions }">
     <!-- Visual Value Box -->
     <FixturePropertyControlBox
       :type="type"
@@ -252,6 +274,10 @@ function onDropdownOpenChange(open: boolean) {
       />
     </div>
 
+    <!-- Extension slots: properties/<category>/channel:badges|actions -->
+    <component :is="Badges" />
+    <component :is="Actions" />
+
     <div class="flex-shrink-0 w-16">
       <DraggableNumberInput
         :model-value="rawValue"
@@ -260,7 +286,7 @@ function onDropdownOpenChange(open: boolean) {
         @update:model-value="handleValueChange"
       />
     </div>
-  </div>
+  </PmListItem>
 </template>
 
 

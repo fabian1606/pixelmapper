@@ -35,12 +35,19 @@ const scopes = useScopeSnapshot();
 /** Resolved full slot id. */
 const slotId = computed(() => props.id ?? slotIdOf(path.value, props.position ?? ''));
 
-/** Visible contributions: matching the slot and passing `when`. */
+/**
+ * Visible contributions: matching the slot and passing `when`. Scopes are
+ * only read (projected) when a matching contribution has a `when`, so empty
+ * slots cost a map lookup.
+ */
 const visible = computed(() => {
   const id = slotId.value;
   if (import.meta.dev) renderedSlotIds.add(id);
+  const matching = getSlotContributions(id);
+  if (matching.length === 0) return matching;
+  if (!matching.some(c => c.contribution.when)) return matching;
   const snap = scopes.value;
-  return getSlotContributions(id).filter((c) => {
+  return matching.filter((c) => {
     const when = c.contribution.when;
     if (!when) return true;
     try {
