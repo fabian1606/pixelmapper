@@ -13,7 +13,7 @@ import { useHistory } from './composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { MoveFixtureCommand } from './commands/move-fixture-command';
 import { RotateFixtureCommand } from './commands/rotate-fixture-command';
-import { ReshapeStripCommand } from './commands/reshape-strip-command';
+import { SetFixtureKindConfigCommand } from './commands/set-fixture-kind-config-command';
 import { inject } from 'vue';
 import type { EffectEngine } from '~/utils/engine/engine';
 import { useLiveBusStore } from '~/stores/live-bus-store';
@@ -97,7 +97,7 @@ const selectedIdsModel = defineModel<Set<string | number>>('selectedIds', { defa
 
 const fixtureCanvas = ref<InstanceType<typeof FixtureCanvas> | null>(null);
 
-const { selectedIds, editingId, editingVertex, interaction, alignmentGuides, onViewportMouseDown, onMouseMove, onMouseUp, tryDeleteVertexAt, deleteEditingVertex } =
+const { selectedIds, editingId, focusedHandle, interaction, alignmentGuides, onViewportMouseDown, onMouseMove, onMouseUp, tryDeleteHandleAt, deleteFocusedHandle } =
   useSelection(
     () => props.fixtures,
     () => WORLD_WIDTH,
@@ -111,8 +111,8 @@ const { selectedIds, editingId, editingVertex, interaction, alignmentGuides, onV
     },
     selectedIdsModel,
     () => fixtureCanvas.value,
-    (before, after) => {
-      history.execute(new ReshapeStripCommand(props.fixtures, before, after));
+    (fixture, before, after, description) => {
+      history.execute(new SetFixtureKindConfigCommand(props.fixtures, fixture.id, before, after, description));
     },
     () => camera.scale,
     () => engineStore.sceneNodes,
@@ -258,7 +258,7 @@ const cursor = ref('default');
 function updateCursor(e: MouseEvent) {
   const t = interaction.value.type;
   if (t === 'drag') { cursor.value = 'grabbing'; return; }
-  if (t === 'strip-vertex') { cursor.value = 'grabbing'; return; }
+  if (t === 'kind-handle') { cursor.value = 'grabbing'; return; }
   if (t === 'line') { cursor.value = 'crosshair'; return; }
   // Shift held (before/without a drag) previews the line-select tool.
   if (e.shiftKey) { cursor.value = 'crosshair'; return; }
@@ -266,9 +266,10 @@ function updateCursor(e: MouseEvent) {
   const r = rect();
   const vx = e.clientX - r.left;
   const vy = e.clientY - r.top;
-  const handleHit = fixtureCanvas.value?.hitTestStripEndpoint?.(vx, vy);
+  const handleHit = fixtureCanvas.value?.hitTestHandle?.(vx, vy);
   if (handleHit) {
-    cursor.value = handleHit.split(':')[1] === 'mid' ? 'copy' : 'grab';
+    const role = props.fixtures.find(f => String(f.id) === handleHit.fixtureId)?.kind?.compiled?.handles.find(h => h.id === handleHit.handleId)?.role;
+    cursor.value = role === 'midpoint' ? 'copy' : 'grab';
   } else if (fixtureCanvas.value?.hitTestRotationZone(vx, vy)) {
     cursor.value = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'20\' height=\'20\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M10 2 A8 8 0 1 1 2 10\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\'/%3E%3Cpolygon points=\'10,0 7,4 13,4\' fill=\'white\'/%3E%3C/svg%3E") 10 10, alias';
   } else if (fixtureCanvas.value?.hitTest(vx, vy)) {
@@ -290,21 +291,21 @@ function handleMouseDown(e: MouseEvent) {
 }
 
 /**
- * Right-click / ctrl-click on a strip vertex deletes it (when the strip has
- * > 2 vertices). Using the `contextmenu` event rather than `mousedown` button=2
+ * Right-click / ctrl-click on a kind handle deletes it (when the kind's
+ * `onHandleDelete` allows it). Using the `contextmenu` event rather than `mousedown` button=2
  * keeps this working on macOS where ctrl-click fires contextmenu without a
  * matching button=2 mousedown.
  */
 function handleContextMenu(e: MouseEvent) {
   e.preventDefault();
   const r = rect();
-  if (tryDeleteVertexAt(e.clientX - r.left, e.clientY - r.top)) {
+  if (tryDeleteHandleAt(e.clientX - r.left, e.clientY - r.top)) {
     fixtureCanvas.value?.sync();
   }
 }
 
 /**
- * Keyboard delete for the focused strip vertex.
+ * Keyboard delete for the focused kind handle.
  *
  * Registered in the CAPTURE phase so it fires before the page-level
  * `useShortcuts` Delete-handler (which would otherwise delete the whole
@@ -321,8 +322,8 @@ function handleKeyDown(e: KeyboardEvent) {
     target.tagName === 'TEXTAREA' ||
     target.isContentEditable
   )) return;
-  if (!editingVertex.value) return;
-  if (deleteEditingVertex()) {
+  if (!focusedHandle.value) return;
+  if (deleteFocusedHandle()) {
     e.preventDefault();
     e.stopImmediatePropagation();
     fixtureCanvas.value?.sync();
@@ -338,7 +339,7 @@ onBeforeUnmount(() => {
 function handleMouseMove(e: MouseEvent) {
   onMouseMove(e, rect());
   const t = interaction.value.type;
-  if (t === 'drag' || t === 'rotate' || t === 'strip-vertex') fixtureCanvas.value?.sync();
+  if (t === 'drag' || t === 'rotate' || t === 'kind-handle') fixtureCanvas.value?.sync();
   updateCursor(e);
 
   // Broadcast cursor position (bus throttles via rAF internally)
@@ -386,7 +387,7 @@ function handleMouseUp(e?: MouseEvent) {
       :fixtures="fixtures"
       :selected-ids="selectedIds"
       :editing-id="editingId"
-      :editing-vertex="editingVertex"
+      :focused-handle="focusedHandle"
       :interaction="interaction"
       :camera="camera"
       :world-width="WORLD_WIDTH"
