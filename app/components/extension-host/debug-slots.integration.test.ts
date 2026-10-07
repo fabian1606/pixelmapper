@@ -59,7 +59,7 @@ describe('P1.6 debug-slots labels', () => {
     const FixtureSidebar = (await import('~/components/engine/FixtureSidebar.vue')).default;
     const fixture = makeFixture('a');
     const w = mount(() => h(SidebarProvider, () => h(FixtureSidebar, {
-      nodes: [fixture], selectedIds: new Set(), fixtures: [fixture], effects: [],
+      nodes: [fixture], selectedIds: new Set<string | number>(), fixtures: [fixture], effects: [],
     })), { global, attachTo: document.body });
     await flushPromises();
     const ids = slotIds(w.html());
@@ -99,7 +99,7 @@ describe('P1.6 debug-slots labels', () => {
     const w = mount(ChaserModifiersList, {
       props: {
         activeModifiers: [effect], activeModifier: null, availableChannelTypes: ['DIMMER'],
-        pinnedModifiers: [], pinnedEffectIds: new Set(), canAddDisplacement: false, canAddSpeedCurve: false,
+        pinnedModifiers: [], pinnedEffectIds: new Set<string>(), canAddDisplacement: false, canAddSpeedCurve: false,
       },
       global,
     });

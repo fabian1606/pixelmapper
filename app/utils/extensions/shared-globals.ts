@@ -14,9 +14,10 @@ import * as apiModule from '@pixelmapper/extension-api';
 import type { ExtensionManifest, HostApi } from '@pixelmapper/extension-api';
 import { useScope } from '~/composables/extensions/use-scope';
 import { useExtensionContext } from '~/composables/extensions/use-extension-context';
+import { useReplaceable } from '~/composables/extensions/use-replaceable';
 import { registerExtension as hostRegisterExtension, ExtensionValidationError } from './registry';
 
-/** Optional host implementations wired in by later subsystems (live values, replaceables). */
+/** Optional host implementations wired in by later subsystems (live values) or tests. */
 type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable'>>;
 
 /** Registers a manifest, logging (not throwing) validation errors so one bad extension cannot stop boot. */
@@ -46,7 +47,7 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     useExtensionContext,
     useLiveValue: overrides.useLiveValue ?? (() => missing('useLiveValue')),
     onFrame: overrides.onFrame ?? (() => missing('onFrame')),
-    useReplaceable: overrides.useReplaceable ?? (() => missing('useReplaceable')),
+    useReplaceable: overrides.useReplaceable ?? useReplaceable,
     registerExtension: safeRegister,
   };
 

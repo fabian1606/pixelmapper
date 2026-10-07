@@ -5,6 +5,7 @@ import { useWakeLock, useDocumentVisibility } from '@vueuse/core';
 import { watch } from 'vue';
 import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
 import { provideRootScopes } from '~/composables/extensions/provide-root-scopes';
+import ReplacementChoiceDialog from '~/components/extension-host/ReplacementChoiceDialog.vue';
 
 const engineStore = useEngineStore();
 
@@ -43,5 +44,6 @@ onBeforeUnmount(() => {
       <NuxtPage />
     </NuxtLayout>
     <GlobalContextMenu />
+    <ReplacementChoiceDialog />
   </div>
 </template>

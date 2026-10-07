@@ -4,7 +4,7 @@ export type PositionAxis = 'x' | 'y' | 'z' | 'r' | 'tx' | 'rz';
 
 <script setup lang="ts">
 import { STAGE_SIZE_METERS } from '~/utils/engine/constants';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import { Label } from '@/components/ui/label';
 
 const props = defineProps<{
@@ -32,49 +32,49 @@ const fromMeters = (val: number) => val / STAGE_SIZE_METERS;
   <div class="space-y-2">
     <Label class="text-[9px] uppercase tracking-wider font-bold text-muted-foreground/60">Position (Meters)</Label>
     <div class="grid grid-cols-3 gap-3">
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="X"
         :step="0.01"
         :model-value="toMeters(avgX)"
         @update:model-value="(val: number) => emit('live-change', 'x', fromMeters(val))"
-        @change="(val: number) => emit('change', 'x', fromMeters(val))"
+        @commit="(val: number) => emit('change', 'x', fromMeters(val))"
       />
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="Y"
         :step="0.01"
         :model-value="toMeters(avgY)"
         @update:model-value="(val: number) => emit('live-change', 'y', fromMeters(val))"
-        @change="(val: number) => emit('change', 'y', fromMeters(val))"
+        @commit="(val: number) => emit('change', 'y', fromMeters(val))"
       />
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="Z"
         :step="0.01"
         :model-value="toMeters(avgZ)"
         @update:model-value="(val: number) => emit('live-change', 'z', fromMeters(val))"
-        @change="(val: number) => emit('change', 'z', fromMeters(val))"
+        @commit="(val: number) => emit('change', 'z', fromMeters(val))"
       />
     </div>
     <div class="grid grid-cols-3 gap-3">
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="Rot"
         :step="1"
         :model-value="avgRotation"
         @update:model-value="(val: number) => emit('live-change', 'r', val)"
-        @change="(val: number) => emit('change', 'r', val)"
+        @commit="(val: number) => emit('change', 'r', val)"
       />
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="Tilt"
         :step="1"
         :model-value="avgTiltX"
         @update:model-value="(val: number) => emit('live-change', 'tx', val)"
-        @change="(val: number) => emit('change', 'tx', val)"
+        @commit="(val: number) => emit('change', 'tx', val)"
       />
-      <DraggableNumberInput
+      <Replaceable name="pm.numberInput"
         label="Roll"
         :step="1"
         :model-value="avgRollZ"
         @update:model-value="(val: number) => emit('live-change', 'rz', val)"
-        @change="(val: number) => emit('change', 'rz', val)"
+        @commit="(val: number) => emit('change', 'rz', val)"
       />
     </div>
   </div>

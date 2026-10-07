@@ -10,7 +10,7 @@ const ctx = useExtensionContext();
 
 /** Names of the scopes visible here (with a value). */
 const scopeNames = computed(() =>
-  Object.entries(ctx.scopes)
+  Object.entries(ctx.scopes as Record<string, { value: unknown } | undefined>)
     .filter(([, ref]) => ref?.value !== undefined)
     .map(([name]) => name)
     .join(', '),

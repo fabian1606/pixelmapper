@@ -55,8 +55,20 @@ export interface FaderProps extends CommonInputProps<number> {
   orientation?: 'horizontal' | 'vertical';
   /** Show the numeric value. Default true. */
   showValue?: boolean;
-  /** Display unit appended to the value. */
+  /** Display unit appended to the value; `'%'` shows the normalized value as percent. */
   unit?: string;
+  /**
+   * Presentation hint. `'track'` (default): a linear fill slider.
+   * `'box'`: a compact square swatch dragged horizontally (property sidebar).
+   * Replacements MAY ignore presentation hints.
+   */
+  variant?: 'track' | 'box';
+  /** Presentation hint: icon component shown inside the fader (box variant). */
+  icon?: Component;
+  /** Presentation hint: static CSS background (e.g. a color-wheel slot color or gradient). */
+  fill?: string;
+  /** Presentation hint: CSS color of the inner ring (box variant). */
+  ringColor?: string;
 }
 /** Emits of `pm.fader`. */
 export type FaderEmits = CommonInputEmits<number>;
@@ -73,7 +85,10 @@ export interface NumberInputProps extends CommonInputProps<number> {
   unit?: string;
 }
 /** Emits of `pm.numberInput`. */
-export type NumberInputEmits = CommonInputEmits<number>;
+export interface NumberInputEmits extends CommonInputEmits<number> {
+  /** Emitted once an edit is committed (drag end, Enter, blur) with the final value. */
+  commit: [value: number];
+}
 
 // ── pm.colorInput ───────────────────────────────
 
@@ -145,6 +160,8 @@ export type AngleEmits = CommonInputEmits<number>;
 export interface TapTempoProps extends CommonInputProps<number> {
   /** Current beat phase 0–1 for the visual pulse (optional). */
   phase?: number;
+  /** Accent/background color (CSS color). */
+  color?: string;
 }
 /** Emits of `pm.tapTempo`. */
 export interface TapTempoEmits extends CommonInputEmits<number> {

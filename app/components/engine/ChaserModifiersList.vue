@@ -8,7 +8,7 @@ import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
 import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
 import { Plus, Trash2, ChevronDown, Star, Waves, Activity } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -357,13 +357,13 @@ function modifierTypeName(modifier: Effect): string {
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div v-if="!isNoiseModifier(modifier) && !isSequencerModifier(modifier) && !isColorModifier(modifier)" class="space-y-1.5">
               <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Strength</Label>
-              <DraggableNumberInput
+              <Replaceable name="pm.numberInput"
                 :model-value="modifier.strength"
                 @update:model-value="(v: number) => emit('update-modifier', modifier, 'strength', v)"
                 unit="%"
                 :min="0"
                 :max="100"
-                @change="emit('handle-modifier-drag-end', 'Update Modifier Strength')"
+                @commit="emit('handle-modifier-drag-end', 'Update Modifier Strength')"
               />
             </div>
             <div class="space-y-1.5 flex flex-col justify-start">

@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -48,8 +49,9 @@ onUnmounted(() => {
   if (tapResetTimer) clearTimeout(tapResetTimer);
 });
 
-// Tap tempo
-const tapTimes = ref<number[]>([]);
+// Tap tempo: pm.tapTempo derives the BPM; the first tap of the series anchors
+// the clock epoch so all clients stay phase-aligned.
+const tapTimes: number[] = [];
 let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 function applyBpm(newBpm: number, epochMs?: number) {
@@ -62,43 +64,29 @@ function applyBpm(newBpm: number, epochMs?: number) {
   if (epochMs !== undefined) liveBus.dispatch('engine.clock', { epochMs: epoch });
 }
 
+/** Records tap times (same 2.5 s reset / 8-tap window as the input). */
 function onTap() {
-  if (props.editMode) return;
-  const now = Date.now();
   if (tapResetTimer) clearTimeout(tapResetTimer);
-  tapResetTimer = setTimeout(() => { tapTimes.value = []; }, 2500);
-
-  tapTimes.value = [...tapTimes.value, now].slice(-8);
-
-  if (tapTimes.value.length >= 2) {
-    const diffs: number[] = [];
-    for (let i = 1; i < tapTimes.value.length; i++) {
-      diffs.push(tapTimes.value[i] - tapTimes.value[i - 1]);
-    }
-    applyBpm(60000 / (diffs.reduce((a, b) => a + b, 0) / diffs.length), tapTimes.value[0]);
-  }
+  tapResetTimer = setTimeout(() => { tapTimes.length = 0; }, 2500);
+  tapTimes.push(Date.now());
+  if (tapTimes.length > 8) tapTimes.shift();
 }
 
-const tapCount = computed(() => tapTimes.value.length);
+/** New tempo from the tap input. */
+function onBpm(newBpm: number) {
+  applyBpm(newBpm, tapTimes[0]);
+}
 </script>
 
 <template>
-  <button
-    class="w-full h-full rounded flex flex-col items-center justify-center gap-1 select-none transition-all"
-    :class="editMode ? 'pointer-events-none' : 'cursor-pointer active:scale-95'"
-    :style="{ backgroundColor: displayColor }"
-    @pointerdown="onTap"
-  >
-    <span
-      class="rounded-full transition-all duration-75"
-      :class="beatActive ? 'w-4 h-4 opacity-100' : 'w-3 h-3 opacity-40'"
-      :style="{ backgroundColor: beatActive ? '#fff' : '#fff' }"
-    />
-    <span class="text-white font-mono font-bold leading-none" style="font-size: clamp(10px, 2cqi, 22px)">
-      {{ bpm }}
-    </span>
-    <span class="text-white/40 font-mono leading-none" style="font-size: clamp(7px, 1.2cqi, 11px)">
-      {{ tapCount >= 2 ? `tap (${tapCount})` : 'BPM' }}
-    </span>
-  </button>
+  <!-- pm.tapTempo; edit mode disables pointer interaction -->
+  <Replaceable
+    name="pm.tapTempo"
+    :model-value="bpm"
+    :phase="beatActive ? 0 : 0.5"
+    :color="displayColor"
+    :class="editMode && 'pointer-events-none'"
+    @tap="onTap"
+    @update:model-value="onBpm"
+  />
 </template>

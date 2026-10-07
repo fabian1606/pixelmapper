@@ -708,3 +708,18 @@ interface PanelApi {
 - `scripts/check-extensions.ts` (CI + `bun run check:extensions`): unique ids, namespaced command types, no duplicate replacements among first-party extensions, `apiVersion` compatibility.
 - `scripts/build-plugins.ts` fails the build if any built-in plugin fails validation.
 - Vitest suites: slot matching, scope inheritance, requires computation, param encoding, signature mapping (Rust `cargo test`), plugin validation harness, migrate functions.
+
+---
+
+## Amendments
+
+Deviations found while implementing the plan. Each names the plan task.
+
+- **A1 (P0.4) — native cargo builds.** `rs-engine/canvas` only compiles for `wasm32` (WebGL via femtovg). The workspace sets `default-members = ["core"]` so `cargo build` / `cargo test` in `rs-engine/` work natively; canvas is built with `wasm-pack`. Removing `rs-engine/ffi` also breaks the tag-triggered firmware CI (`pio/` still links it) until the firmware accepts streamed frames (§8).
+- **A2 (P1.3) — extra core command.** `CoreCommandFactory` additionally exposes `setChannelRange({ fixtureId, channelIndex, min, max })` (needed by the pan-tilt movement range, plan P2.2). `setFixtureKindConfig`, `addFixture` and `setExtensionData` throw "not available yet" until plan P5.
+- **A3 (P1.3) — legacy modifier ids.** Until the modifier rebuild (P3), `ModifierInstanceView.plugin` is `'builtin:<type>'` (`waveform`, `noise`, `sequencer`, `color-adjust`, `displacement`, `speed-curve`) and `strength` is normalized from the legacy 0–100 %.
+- **A4 (P1.6) — context menus.** The global context menu renders at the app root, so openers pass `{ id, scopes }` to `openMenu`; the menu re-provides the opener's non-global scopes and renders `PmMenuGroup` → slot `context-menu/<id>:items` (`fixture`, `group`, `channel`, `preset`).
+- **A5 (P1.6) — primitive placement.** Primitives auto-place their slots; callers with custom markup list positions in a `manual` prop and render the slot-prop outlets (`Actions`, `Badges`, …) themselves. `PmPanelSection` renders `before`/`after` as siblings of its root unless placed manually (the properties sidebar places them inside its scroll area). `PmMenuGroup as="fragment"` renders no root element.
+- **A6 (P1.6/P1.9) — registration order.** `registerExtension` is also exported from the API package. Calls made before the host installed its shared globals are queued in `globalThis.__PIXELMAPPER_PENDING__` and drained at boot, so layer plugin order does not matter.
+- **A7 (P1.7) — contract additions.** `FaderProps` gains optional presentation hints (`variant: 'track' | 'box'`, `icon`, `fill`, `ringColor`) so the property-sidebar box and the live slider share `pm.fader`; replacements MAY ignore them. `NumberInputEmits` gains `commit: [value]` (final value on drag end / Enter / blur). `TapTempoProps` gains `color`.
+- **A8 (P1.7) — raw DMX faders stay core-internal.** The universe inspector's `DmxChannelFader` writes the DOM directly every frame for many channels; it is a diagnostic view, not a domain input, and is not routed through `pm.fader`.

@@ -12,9 +12,8 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelCapabilities } from './composables/use-channel-capabilities';
 import { type SnapshotMap } from './commands/set-channel-values-command';
-import FixturePropertyControlBox from './FixturePropertyControlBox.vue';
 import FixturePropertyControlDropdown from './FixturePropertyControlDropdown.vue';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { channelView, signatureTargetFor } from '~/utils/extensions/scope-views';
@@ -108,12 +107,8 @@ const {
   activeCapabilityLabel
 } = useChannelCapabilities(representativeChannel, rawValue, props.type);
 
-// ─── Drag to change value ─────────────────────────────────────────────────────
+// ─── Drag to change value (scrub of the pm.fader box) ────────────────────────
 const isDragging   = ref(false);
-const dragStartX   = ref(0);
-const dragStartVal = ref(0);
-
-
 
 const { captureSnapshots, commitSnapshots } = useChannelValueHistory();
 const engineStore = useEngineStore();
@@ -174,44 +169,45 @@ function handleValueChange(newVal: number) {
   }
 }
 
-function startDrag(e: MouseEvent) {
-  if (e.button !== 0) return;
-  e.preventDefault();
+/** Fader scrub started: snapshot once so the whole drag is one undo step. */
+function onScrubStart() {
   isDragging.value = true;
-  dragStartX.value = e.clientX;
-  dragStartVal.value = rawValue.value;
-
-  // Snapshot before drag starts
   currentDragSnapshots = captureSnapshots(props.fixtures);
-
-  window.addEventListener('mousemove', onDrag);
-  window.addEventListener('mouseup', stopDrag);
 }
 
-function onDrag(e: MouseEvent) {
+/** Fader scrub ended: commit the drag to history. */
+function onScrubEnd() {
   if (!isDragging.value) return;
-  const delta = ((e.clientX - dragStartX.value) / 150) * 255;
-  handleValueChange(dragStartVal.value + delta);
-}
-
-function stopDrag(e: MouseEvent) {
-  if (!isDragging.value) return;
-  onDrag(e);
   isDragging.value = false;
-  window.removeEventListener('mousemove', onDrag);
-  window.removeEventListener('mouseup', stopDrag);
-
-  // Commit history
   if (currentDragSnapshots) {
     commitSnapshots(currentDragSnapshots, `Drag ${channelLabel.value}`);
     currentDragSnapshots = null;
   }
 }
 
-onUnmounted(() => {
-  window.removeEventListener('mousemove', onDrag);
-  window.removeEventListener('mouseup', stopDrag);
+onUnmounted(onScrubEnd);
+
+// ─── Box presentation hints for pm.fader ─────────────────────────────────────
+/** Fill color (opacity follows the value) for color/dimmer channels. */
+const boxColor = computed(() => {
+  if (props.type === 'COLOR_WHEEL') return undefined;
+  if (role.value === 'COLOR') return colorValue.value;
+  if (role.value === 'DIMMER') return '#ffffff';
+  return undefined;
 });
+/** Static fill for color wheels: the active slot color, else a hue gradient. */
+const boxFill = computed(() => {
+  if (props.type !== 'COLOR_WHEEL') return undefined;
+  return activeSlotColor.value ?? 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)';
+});
+/** Inner ring color by role. */
+const boxRing = computed(() => {
+  if (role.value === 'COLOR') return `${colorValue.value}80`;
+  if (role.value === 'DIMMER') return 'rgba(255,255,255,0.3)';
+  return undefined;
+});
+/** Icon only for non-color channels and color wheels. */
+const boxIcon = computed(() => (props.type === 'COLOR_WHEEL' || role.value === 'NONE' ? channelIcon.value : undefined));
 
 // ─── Context menu (channel settings) ───────────────────────────────────────────
 const { openMenu } = useGlobalContextMenu();
@@ -241,17 +237,23 @@ function onDropdownOpenChange(open: boolean) {
 
 <template>
   <PmListItem id="channel" :manual="['badges', 'actions']" class="flex items-center gap-3 w-full py-2" v-slot="{ Badges, Actions }">
-    <!-- Visual Value Box -->
-    <FixturePropertyControlBox
-      :type="type"
-      :role="role"
-      :colorValue="colorValue"
-      :rawValue="rawValue"
-      :channelIcon="channelIcon"
-      :activeSlotColor="activeSlotColor"
-      :isDragging="isDragging"
-      @dragstart="startDrag"
-      @contextmenu="onBoxContextMenu"
+    <!-- Visual value box = pm.fader (box presentation) -->
+    <Replaceable
+      name="pm.fader"
+      variant="box"
+      :model-value="rawValue"
+      :min="0"
+      :max="255"
+      :step="1"
+      :label="channelLabel"
+      :color="boxColor"
+      :fill="boxFill"
+      :ring-color="boxRing"
+      :icon="boxIcon"
+      @update:model-value="handleValueChange"
+      @scrub-start="onScrubStart"
+      @scrub-end="onScrubEnd"
+      @contextmenu.prevent="onBoxContextMenu"
     />
 
     <!-- Labels -->
@@ -279,7 +281,8 @@ function onDropdownOpenChange(open: boolean) {
     <component :is="Actions" />
 
     <div class="flex-shrink-0 w-16">
-      <DraggableNumberInput
+      <Replaceable
+        name="pm.numberInput"
         :model-value="rawValue"
         :min="0"
         :max="255"

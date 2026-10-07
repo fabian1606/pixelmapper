@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Fixture } from '~/utils/engine/core/fixture';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import { Label } from '@/components/ui/label';
 import { useVModel } from '@vueuse/core';
 
@@ -30,18 +30,18 @@ const localAddress = useVModel(props, 'localAddress', emit);
       </span>
     </div>
     <div class="grid grid-cols-2 gap-3">
-      <DraggableNumberInput 
+      <Replaceable name="pm.numberInput" 
         label="U" 
         :min="1"
         v-model="universe"
-        @change="(val) => emit('changeUniverse', val)"
+        @commit="(val: number) => emit('changeUniverse', val)"
       />
-      <DraggableNumberInput 
+      <Replaceable name="pm.numberInput" 
         label="A" 
         :min="1" 
         :max="512"
         v-model="localAddress"
-        @change="(val) => emit('changeAddress', val)"
+        @commit="(val: number) => emit('changeAddress', val)"
       />
     </div>
   </div>

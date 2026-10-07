@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { Timer, Activity, Infinity as InfinityIcon, ChevronDown, FastForward } from 'lucide-vue-next';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import type { SpeedConfig, SpeedMode } from '~/utils/engine/types';
 
 const props = defineProps<{
@@ -95,7 +95,8 @@ const ActiveIcon = computed(() => {
       </button>
 
       <div class="flex-1 h-8" v-if="modelValue.mode === 'time'">
-        <DraggableNumberInput
+        <Replaceable
+        name="pm.numberInput"
           :model-value="modelValue.timeMs"
           unit="ms"
           :min="0"
