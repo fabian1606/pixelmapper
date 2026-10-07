@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      content_plugins: {
+        Row: {
+          alias: string
+          created_at: string | null
+          hash: string
+          kind: string
+          manifest: Json
+          name: string
+          owner_id: string
+          project_id: string | null
+          source: Json
+          toolchain: string
+          version: string
+          visibility: string
+        }
+        Insert: {
+          alias: string
+          created_at?: string | null
+          hash: string
+          kind: string
+          manifest: Json
+          name: string
+          owner_id?: string
+          project_id?: string | null
+          source: Json
+          toolchain: string
+          version: string
+          visibility?: string
+        }
+        Update: {
+          alias?: string
+          created_at?: string | null
+          hash?: string
+          kind?: string
+          manifest?: Json
+          name?: string
+          owner_id?: string
+          project_id?: string | null
+          source?: Json
+          toolchain?: string
+          version?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_plugins_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plugins_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
