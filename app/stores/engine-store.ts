@@ -54,6 +54,7 @@ import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
 import { liveHub, type SignatureFrame } from '~/utils/extensions/live-hub';
 import { getExtension } from '~/utils/extensions/registry';
+import { extensionsReady } from '~/utils/extensions/loader';
 import { getKind } from '~/utils/kinds/kind-host';
 import {
   addRequirements, extensionDataOwners, recomputeRequirements, requirementsOfCommand,
@@ -946,6 +947,9 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
+    // Installed extension bundles must be registered before fixtures (kinds)
+    // are deserialized and `requires` is checked (ADR §5.9 boot order).
+    await extensionsReady();
 
     // Reset snapshot timer state in case a previous project was loaded.
     if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
