@@ -103,7 +103,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 - [x] **P3.14 Previews.** + `app/utils/plugins/preview-pool.ts`; modifier card previews and canvas preview overlays (previous `getPreviewCSS`) use it.
 - [x] **P3.15 Live value `signature` target.** Extend live hub: worker sends requested signature tuples.
 - [x] **P3.16 Schema v2.** `serialize.ts`: `schemaVersion: 2`, `modifiers`, reject v1 with message (ADR D24); presets likewise.
-- [ ] **P3.17 Docs.** Rewrite `architecture/engine.md` (pipeline, signatures, runtime, ABI) and `architecture/binary-protocol.md` (`TYPE_MODIFIERS_BIN`, removed packets); + `architecture/guides/authoring-content-plugins.md` (SDK, manifest, params, examples, validation rules — written so it can be handed to an AI as context).
+- [x] **P3.17 Docs.** Rewrite `architecture/engine.md` (pipeline, signatures, runtime, ABI) and `architecture/binary-protocol.md` (`TYPE_MODIFIERS_BIN`, removed packets); + `architecture/guides/authoring-content-plugins.md` (SDK, manifest, params, examples, validation rules — written so it can be handed to an AI as context).
 
 *Phase done when:* all four built-ins render identically (goldens) in the app; live collaboration of modifier edits works between two browsers; killing a plugin with an infinite loop (dev test plugin) triggers budget trap, not a hang.
 

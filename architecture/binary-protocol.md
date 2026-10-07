@@ -2,7 +2,9 @@
 
 ## Overview
 
-All communication between the browser engine-store and its targets (WASM engine, ESP32) uses a single compact binary format. The TypeScript encoder (`binary-encoder.ts`) is the single source of truth — it produces packets that are consumed identically by both the WASM `dispatch_bin` and the ESP32 `engine_dispatch`.
+All configuration from the engine-store to the render engine uses one compact binary format. The TypeScript encoder (`app/utils/connectors/binary-encoder.ts`) is the single source of truth; the parsers live in `rs-engine/core/src/bin_protocol.rs`.
+
+> **Plugin-system change (plan P3):** `TYPE_FX_BIN` was replaced by `TYPE_MODIFIERS_BIN` (same id 0x16) and the layout packet moved to v2. The ESP32 firmware still parses the old formats, so on-device rendering is broken until plan P6.2 (the ESP becomes a pure output device per ADR 0001); DMX output streamed from the browser is unaffected.
 
 ## Frame Format
 
@@ -25,9 +27,11 @@ The ESP32 strips the header via a state-machine parser (`processByte` in `main.c
 |----------|-------|-------------|
 | `TYPE_BPM` | `0x10` | Global BPM (f32 LE) |
 | `TYPE_TIMESYNC` | `0x13` | Clock alignment for ESP32 (f32 LE, elapsed ms) |
-| `TYPE_LAYOUT_BIN` | `0x14` | Fixture positions + channel metadata |
+| `TYPE_LAYOUT_BIN` | `0x14` | Fixtures, channels, heads (v2) |
 | `TYPE_CHAN_BIN` | `0x15` | Chaser configurations per DMX channel |
-| `TYPE_FX_BIN` | `0x16` | Effect parameters |
+| `TYPE_MODIFIERS_BIN` | `0x16` | Modifier instances (content plugins) |
+
+Removed: `TYPE_FX_BIN` (0x16, legacy effects). The worker additionally receives plugin modules (`plugin-load`) and, next to each modifiers packet, the plugin table (index → content hash); these are worker messages, not framed packets.
 
 ## Send Policy
 
@@ -53,23 +57,29 @@ Total: 4 bytes payload.
 ```
 ESP32-only. Used for clock alignment via exponential smoothing: `offset = offset * 0.85 + newOffset * 0.15`.
 
-### TYPE_LAYOUT_BIN (0x14)
+### TYPE_LAYOUT_BIN (0x14, v2)
 ```
 [fixture_count: u16 LE]
 for each fixture:
-  [group_index: u16 LE]
-  [channel_count: u8]
+  [group_index: u16 LE]     // position in the flat fixture list
+  [id_hash: u32 LE]         // FNV-1a of the fixture id (stable seeds)
+  [channel_count: u16 LE]
   for each channel:
     [dmx_index: u16 LE]     // 0-based absolute DMX address
     [channel_type_id: u8]   // see channel type table below
     [world_x: f32 LE]       // normalized 0–1 world position
     [world_y: f32 LE]
+    [resolution: u8]        // 0 = fine byte of another channel, 1 = 8 bit, 2 = 16 bit
+    [fine0: u16 LE]         // dmx index of the fine byte (0xFFFF = none)
+    [fine1: u16 LE]         // reserved (24 bit), 0xFFFF
+    [range_min: u8]         // output remap range
+    [range_max: u8]
+    [head_index: u16 LE]    // beam index within the fixture (rgb / panTilt heads)
 ```
 
-`world_x/world_y` are computed in `buildLayoutBin` with the full beam rotation transform (mirrors the old `syncTargets` logic): for channels with a `beamId`, the beam's local offset is rotated by the fixture's rotation angle and added to the fixture's world position.
+`world_x/world_y` are computed in `buildLayoutBin` with the beam rotation transform (strips: the LED group's center on the sampled curve). The engine groups channels with equal `(group_index, head_index)` into heads and detects their color system (RGB, RGBW, RGBA, CMY) and pan/tilt pairs.
 
-Per-fixture overhead: 3 bytes. Per-channel overhead: 11 bytes.
-Example: 20 fixtures × 4 channels = `5 + 2 + 20×3 + 80×11` = **947 bytes**.
+Per fixture 8 bytes, per channel 19 bytes. Example: 20 fixtures × 4 channels = `5 + 2 + 20×8 + 80×19` = **1,687 bytes**.
 
 ### TYPE_CHAN_BIN (0x15)
 ```
@@ -100,31 +110,35 @@ for each entry:
 
 Channels with identical `chaserConfig` objects are grouped into a single entry by `buildChannelsBin`. This is critical for packet size: if all 80 channels have the same value (common case), the packet contains just **1 entry** regardless of fixture count.
 
-### TYPE_FX_BIN (0x16)
+### TYPE_MODIFIERS_BIN (0x16)
 ```
-[effect_count: u8]
-for each effect:
-  [ch_type_count: u8]
-  [channel_type_id: u8] × ch_type_count   // 0 = all channel types
-  [bitmask: u8] × ceil(fixture_count / 8) // fixture targeting (see below)
-  [direction: u8]        // 0=None, 1=Linear, 2=Radial, 3=Symmetrical
+[version: u8]              // 1
+[count: u16 LE]
+for each instance:
+  [key: u32 LE]            // FNV-1a of the instance id (runtime instance id, seeds)
+  [plugin_index: u16 LE]   // index into the plugin table sent with the packet
+  [signature: u8]          // 0 = scalar, 1 = rgb, 2 = panTilt
+  [output: u8]             // 0 = bipolar, 1 = absolute (from the manifest)
+  [blend: u8]              // 0 add, 1 override, 2 multiply, 3 max, 4 min
+  [strength: f32 LE]       // 0–1
+  [speed: SpeedConfig]
+  [direction: u8]          // 0 None, 1 Linear, 2 Radial, 3 Symmetrical, 4 Angular
   [origin_x: f32 LE]
   [origin_y: f32 LE]
-  [angle: f32 LE]
-  [strength: f32 LE]
-  [reverse: u8]          // 0 or 1
+  [angle: f32 LE]          // radians
   [fanning: f32 LE]
-  [effect_type: u8]      // 0=Sine
-  [speed: SpeedConfig]
+  [reverse: u8]
+  [type_count: u8]
+  [channel_type_id: u8] × type_count     // scalar targets (empty = all; rgb/panTilt: none)
+  [mask_bytes: u16 LE]                   // 0 = all fixtures
+  [mask: u8] × mask_bytes                // bit i → fixture with group_index i
+  [param_count: u16 LE]
+  [param: f32 LE] × param_count          // manifest params, encoded in schema order
 ```
 
-**Fixture bitmask**: bit `i` set → fixture with `group_index = i` is targeted. The bitmask length is `ceil(fixture_count / 8)` — both encoder and parser derive this from the fixture count known after the last layout sync. No explicit length field is needed.
+Instances whose plugin manifest is unknown to the client are skipped until the plugin resolves. Params are encoded by `encodeParams` (`@pixelmapper/plugin-toolchain/params`): number/int/bool/enum(index)/angle 1 slot, point 2, color 3, curve 128 (LUT). Fixed size per instance: 49 bytes + types + mask + 4 × params.
 
-If all bits are set (or the bitmask is all zero before layout sync), the parser sets `target_group_indices = None`, which the engine treats as "all fixtures".
-
-Example sizes at 40 fixtures (bitmask = 5 bytes):
-- 20 effects, all targeting all fixtures → `5 + 1 + 20 × (1+0 + 5 + 1+4+4+4+4+1+4+1+13)` = **~820 bytes**
-- 20 effects, "all except fixture 5" → same 5-byte bitmask, single bit cleared → **same size**
+Example: 10 waveform instances (7 param slots, 1 type, all fixtures) = `5 + 3 + 10 × (49 + 1 + 28)` = **788 bytes**.
 
 ## Channel Type IDs
 
@@ -141,7 +155,7 @@ SOUND_SENSITIVITY=37  ROTATION=38  SPEED=39  TIME=40
 FOG=41  MAINTENANCE=42  GENERIC=43  CUSTOM=44
 ```
 
-These IDs are defined in both `CHANNEL_TYPE_ID` (TypeScript, `binary-encoder.ts`) and `channel_type_name()` (Rust, `engine.rs`). They must stay in sync.
+These IDs are defined in both `CHANNEL_TYPE_ID` (TypeScript, `binary-encoder.ts`) and `channel_type_name()` (Rust, `engine.rs`). They must stay in sync; the per-channel-type seed (`Sample.channelSeed`) is the FNV-1a of the name.
 
 ## Bandwidth Analysis
 
@@ -149,8 +163,8 @@ At 921,600 baud = **115,200 bytes/sec**:
 
 | Scenario | Packet sizes | Initial sync |
 |----------|-------------|--------------|
-| 20 fixtures, 4ch, 1 step, 5 effects | layout ~947B + channels ~230B + effects ~220B | ~15 ms |
-| 40 fixtures, 4ch, 8 steps (grouped) | layout ~1,887B + channels ~300B + effects ~450B | ~23 ms |
-| 40 fixtures, 4ch, 8 steps (all unique) | layout ~1,887B + channels ~9,600B + effects ~450B | ~103 ms |
+| 20 fixtures, 4ch, 1 step, 5 modifiers | layout ~1,687B + channels ~230B + modifiers ~400B | ~20 ms |
+| 40 fixtures, 4ch, 8 steps (grouped) | layout ~3,367B + channels ~300B + modifiers ~800B | ~39 ms |
+| 40 fixtures, 4ch, 8 steps (all unique) | layout ~3,367B + channels ~9,600B + modifiers ~800B | ~120 ms |
 
-After the initial sync, only changed packets are sent. Moving a single fixture → only `TYPE_LAYOUT_BIN` + `TYPE_CHAN_BIN` resent. Changing an effect → only `TYPE_FX_BIN` resent.
+After the initial sync, only changed packets are sent. Moving a single fixture → only `TYPE_LAYOUT_BIN` + `TYPE_CHAN_BIN` resent. Changing a modifier → only `TYPE_MODIFIERS_BIN` resent.

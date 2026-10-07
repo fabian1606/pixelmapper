@@ -28,20 +28,22 @@ pixelmapper/
 │   └── src/{graph,server,state,model}.ts, nodes/
 ├── app/                           # Nuxt 4 / Vue 3 frontend (the core)
 │   ├── components/
-│   │   ├── engine/                # Workspace, sidebars, property controls, modifier editors, commands
+│   │   ├── engine/                # Workspace, sidebars, property controls, modifier cards (ParamForm via plugin-host/), commands
 │   │   ├── live/                  # Live mode canvas + widgets
 │   │   ├── design/                # Universe inspector, patch table
 │   │   ├── three/                 # 3D viewport + scene builders
 │   │   ├── primitives/            # Layout primitives with auto extension slots (PmPanel, PmPanelSection, …)
 │   │   ├── pm/                    # Core defaults of the replaceable pm.* inputs
 │   │   ├── extension-host/        # ExtensionSlot, Replaceable, ScopeProvider, choice dialog
+│   │   ├── plugin-host/           # ParamForm (param schema → pm.* inputs), modifier previews
 │   │   └── ui/                    # shadcn-vue primitives (not replaceable)
 │   ├── composables/extensions/    # provideScope/useScope, useExtensionContext, useReplaceable, useLiveValue, onFrame
 │   ├── plugins/                   # 00.extensions.client.ts — extension host boot
 │   ├── stores/                    # Pinia stores (engine-store = render loop & project state)
 │   └── utils/
 │       ├── extensions/            # registry, slot matching/paths, scope views, replacements, live hub, shared globals
-│       ├── engine/                # Fixture model, worker, serialization, (legacy) TS effect classes
+│       ├── engine/                # Fixture model, worker, serialization, modifier instances
+│       ├── plugins/               # plugin store, built-in index (generated), worker bridge, watchdog, preview pool
 │       ├── connectors/            # Connectors + binary encoders (→ become extensions)
 │       ├── controllers/           # Controller driver contracts (→ extensions)
 │       └── ofl/                   # Open Fixture Library import
@@ -50,7 +52,7 @@ pixelmapper/
 ├── plugins/                       # Built-in content plugins (AssemblyScript; Bun workspace)
 ├── packages/                      # Bun workspaces: extension-api, extension-build, plugin-sdk, plugin-toolchain
 ├── rs-engine/
-│   ├── core/                      # Engine, render loop, binary protocol, effects (→ signatures + ModifierRuntime)
+│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
 │   └── canvas/                    # 2D renderer (WASM only; `cargo build`/`test` default to core)
 ├── supabase/migrations/           # Database schema
 └── pio*/                          # ESP32 firmware (out of scope for the plugin migration)
@@ -68,21 +70,22 @@ pixelmapper/
 
 - **Decisions:** [ADR 0001 — Extension & Content-Plugin System](architecture/adr/0001-extension-and-content-plugin-system.md)
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
-- [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
-- [Binary Protocol](architecture/binary-protocol.md)
+- [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1, previews
+- [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN`
+- [Authoring content plugins](architecture/guides/authoring-content-plugins.md) — SDK, manifest, params, validation (AI-ready)
 - [Core Concepts: Fixtures, Channels, Beams](architecture/core-concepts.md)
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
 - [Extensions — how the extension host works](architecture/extensions.md) (registry, scopes, slots, `pm.*` replaceables, live values)
-- Created later in the migration: `architecture/guides/authoring-extensions.md`, `architecture/guides/authoring-content-plugins.md`
+- Created later in the migration: `architecture/guides/authoring-extensions.md`
 
 ## Glossary
 
 | Term | Meaning |
 |---|---|
-| **Modifier** | A content plugin that changes channel values over time/space (called `Effect` in pre-migration code). |
+| **Modifier** | A content plugin that changes channel values over time/space (`ModifierInstance` in code; formerly `Effect`). |
 | **Signature** | The typed value tuple a modifier reads/writes: `scalar`, `rgb`, `panTilt`. Mapped to DMX channels by the core. |
 | **Extension** | Trusted, installable feature package (Nuxt layer / ES bundle). |
 | **Content plugin** | Sandboxed AssemblyScript/WASM package identified by content hash. |
@@ -159,7 +162,7 @@ To aid in the creation of fixtures, an Express-based AI backend service powered 
 The Universe Panel (`UniversePanel.vue`) provides direct, low-level access to the DMX buffer.
 - **Banner Grouping**: Fixtures appear as cohesive units with a single header.
 - **Fader Components**: `DmxChannelFader.vue` enables per-channel manipulation with horizontal icon previews, capability selection (popover), and precise numeric entry.
-- **Overrides**: All manual adjustments create high-priority overrides in the `engineStore`, bypassing effects until cleared.
+- **Overrides**: All manual adjustments create high-priority overrides in the `engineStore`, bypassing modifiers until cleared.
 - **High-Frequency Performance**: To ensure 60fps even with 512+ reactive DMX values, the Grid and Faders use a "Bypass Reactivity" pattern. Instead of Vue template interpolation (which triggers expensive virtual DOM patches), values are pushed directly to cached DOM nodes via `requestAnimationFrame` using the `bufferRevision` reactive trigger only for the initial scheduling.
 - **Dual View Modes**:
     - **Grid View**: A visual, bit-packed representation of the universe helpful for identifying overlaps and gaps.
