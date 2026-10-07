@@ -13,10 +13,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import type { ChannelType, ModifierInstance } from '~/utils/engine/types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
-import { getManifest, listPlugins, pluginStatus, retryResolve } from '~/utils/plugins/plugin-store';
+import { getManifest, getPackage, listPlugins, pluginStatus, retryResolve } from '~/utils/plugins/plugin-store';
 import { useEngineStore } from '~/stores/engine-store';
 import ModifierGenericFields from './ModifierGenericFields.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
+import PluginIframePanel from '~/components/plugin-host/PluginIframePanel.vue';
 import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
 import NewModifierDialog from '~/components/plugin-host/NewModifierDialog.vue';
 import PluginLibraryDialog from '~/components/plugin-host/PluginLibraryDialog.vue';
@@ -78,6 +79,14 @@ const engineStore = useEngineStore();
 /** Retries resolving a plugin that failed; re-encodes the stack on success. */
 async function retry(hash: string) {
   if (await retryResolve(hash)) engineStore.flushEngineOutput();
+}
+
+/** Custom panel of an instance's plugin, if it ships one. */
+function panelOf(modifier: ModifierInstance) {
+  const manifest = getManifest(modifier.plugin);
+  const uiJs = getPackage(modifier.plugin)?.uiJs;
+  if (!manifest?.ui || !uiJs) return null;
+  return { manifest, uiJs, placement: manifest.ui.placement ?? 'below-params' };
 }
 
 /** The params schema of an instance (empty when the plugin is unknown). */
@@ -217,12 +226,25 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
           </div>
         </div>
 
-        <!-- Plugin params (schema-driven) -->
-        <div v-if="paramSchema(modifier).length" class="pt-3 border-t border-border/40">
+        <!-- Plugin params (schema-driven) and optional custom panel (ui.placement) -->
+        <div v-if="paramSchema(modifier).length || panelOf(modifier)" class="pt-3 border-t border-border/40 flex flex-col gap-3">
+          <PluginIframePanel
+            v-if="panelOf(modifier) && panelOf(modifier)!.placement === 'above-params'"
+            :modifier="modifier" :manifest="panelOf(modifier)!.manifest" :ui-js="panelOf(modifier)!.uiJs"
+            @update:params="v => emit('update-modifier', modifier, 'params', v)"
+            @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
+          />
           <ParamForm
+            v-if="paramSchema(modifier).length && panelOf(modifier)?.placement !== 'replace-params'"
             :schema="paramSchema(modifier)"
             :model-value="modifier.params"
             @update:model-value="v => emit('update-modifier', modifier, 'params', v)"
+            @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
+          />
+          <PluginIframePanel
+            v-if="panelOf(modifier) && panelOf(modifier)!.placement !== 'above-params'"
+            :modifier="modifier" :manifest="panelOf(modifier)!.manifest" :ui-js="panelOf(modifier)!.uiJs"
+            @update:params="v => emit('update-modifier', modifier, 'params', v)"
             @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
           />
         </div>
