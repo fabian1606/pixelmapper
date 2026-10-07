@@ -1,13 +1,39 @@
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
+// ── Engine types ─────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+use serde::{Deserialize, Serialize};
+
+/// How a modifier output is combined with the current value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BlendMode {
-    #[default] Add,
+    #[default]
+    Add,
     Override,
     Multiply,
     Max,
     Min,
+}
+
+impl BlendMode {
+    /// Wire id → blend mode (unknown → add).
+    pub fn from_id(id: u8) -> Self {
+        match id {
+            1 => BlendMode::Override,
+            2 => BlendMode::Multiply,
+            3 => BlendMode::Max,
+            4 => BlendMode::Min,
+            _ => BlendMode::Add,
+        }
+    }
+}
+
+/// How a plugin's output is interpreted (manifest `output`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OutputMode {
+    /// Modulation in [−1, 1] (±2 with offsets), mapped by strength.
+    #[default]
+    Bipolar,
+    /// Target value in [0, 1], mixed by blend mode with strength as amount.
+    Absolute,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,7 +46,8 @@ pub enum SpeedMode {
     Infinite,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// Speed of a chaser step or modifier cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SpeedConfig {
     pub mode: SpeedMode,
     #[serde(rename = "timeMs")]
@@ -31,6 +58,7 @@ pub struct SpeedConfig {
     pub beat_offset: f32,
 }
 
+/// Programmed steps of one channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaserConfig {
     #[serde(rename = "stepValues")]
@@ -47,36 +75,38 @@ pub struct ChaserConfig {
     pub fade_duration: SpeedConfig,
 }
 
+/// One DMX channel slot known to the engine (from the layout packet).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderTarget {
     #[serde(rename = "dmxIndex")]
     pub dmx_index: usize,
-    #[serde(rename = "channelType")]
-    // Cow so the ESP32 FFI path (channel_type_name returns &'static str) can store
-    // a zero-alloc Borrowed variant, while the browser serde_json path produces Owned.
-    pub channel_type: Cow<'static, str>, // Or Enum if we want strict matching
+    /// Binary channel type id (see `engine::channel_type_name`).
+    #[serde(rename = "channelTypeId")]
+    pub channel_type_id: u8,
+    /// Fixture index in the layout.
     #[serde(rename = "groupIndex")]
-    pub group_index: usize, // e.g. Fixture ID for fanning
+    pub group_index: usize,
+    /// Head (beam) index within the fixture.
+    #[serde(rename = "headIndex")]
+    pub head_index: usize,
     #[serde(rename = "worldX")]
     pub world_x: f32,
     #[serde(rename = "worldY")]
     pub world_y: f32,
     #[serde(rename = "chaserConfig")]
     pub chaser_config: Option<ChaserConfig>,
-    #[serde(default = "default_resolution")]
+    /// 0 = fine byte of another channel, 1–3 = coarse channel resolution.
     pub resolution: u8,
-    #[serde(rename = "fineOffsets", default)]
+    /// Absolute DMX indices of fine/ultra-fine bytes (0xFFFF = none).
+    #[serde(rename = "fineOffsets")]
     pub fine_offsets: [usize; 2],
-    #[serde(rename = "rangeMin", default)]
+    #[serde(rename = "rangeMin")]
     pub range_min: u8,
-    #[serde(rename = "rangeMax", default = "default_range_max")]
+    #[serde(rename = "rangeMax")]
     pub range_max: u8,
 }
 
-fn default_resolution() -> u8 { 1 }
-fn default_range_max() -> u8 { 255 }
-
-
+/// Spatial phase distribution (fanning direction) of a modifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectDirection {
     #[serde(rename = "NONE")]
@@ -91,265 +121,15 @@ pub enum EffectDirection {
     Angular,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WaveformShape {
-    #[serde(rename = "sine")]
-    Sine,
-    #[serde(rename = "square")]
-    Square,
-    #[serde(rename = "triangle")]
-    Triangle,
-    #[serde(rename = "sawtooth")]
-    Sawtooth,
-    #[serde(rename = "bounce")]
-    Bounce,
-    #[serde(rename = "ramp")]
-    Ramp,
-    #[serde(rename = "smooth")]
-    Smooth,
-}
-
-impl Default for WaveformShape {
-    fn default() -> Self { WaveformShape::Sine }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct WaveformShapeParams {
-    /// Normalized 0–1 shape parameter. Meaning depends on shape.
-    pub param: f32,
-    /// Where in the cycle the waveform starts (0–1).
-    pub start: f32,
-    /// Where in the cycle the waveform ends (0–1).
-    pub end: f32,
-    /// Vertical baseline of the wave in [-1, 1]. 0 = centered on base channel value.
-    /// Also acts as the hold value in the inactive (pre-start / post-end) zones.
-    pub offset: f32,
-    /// Explicit floor level for the inactive zone as a fraction of base (0..1),
-    /// applied AFTER strength — so floor=0 always yields black in inactive zones
-    /// regardless of strength. Sentinel < 0 (default -1) disables this and falls
-    /// back to the legacy offset-based hold behavior.
-    #[serde(default = "default_floor")]
-    pub floor: f32,
-}
-
-fn default_floor() -> f32 { -1.0 }
-
-impl Default for WaveformShapeParams {
-    fn default() -> Self { WaveformShapeParams { param: 0.5, start: 0.0, end: 1.0, offset: 0.0, floor: -1.0 } }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum NoiseType {
-    #[default]
-    White,
-    Perlin,
-    Step,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum ChannelMode {
-    #[default]
-    Linked,
-    Independent,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct NoiseParams {
-    #[serde(rename = "noiseType", default)]
-    pub noise_type: NoiseType,
-    #[serde(default = "noise_scale_default")]
-    pub scale: f32,
-    #[serde(rename = "channelMode", default)]
-    pub channel_mode: ChannelMode,
-    #[serde(rename = "colorVariation", default)]
-    pub color_variation: f32,
-    #[serde(default)]
-    pub fade: f32,
-    #[serde(default)]
-    pub threshold: f32,
-}
-
-fn noise_scale_default() -> f32 { 1.0 }
-
-impl Default for NoiseParams {
-    fn default() -> Self { NoiseParams { noise_type: NoiseType::White, scale: 1.0, channel_mode: ChannelMode::Linked, color_variation: 0.0, fade: 0.0, threshold: 0.0 } }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum SequencerPatternType {
-    #[default]
-    Split,
-    Checkerboard,
-    Sections,
-    Scatter,
-    Flow,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct SequencerParams {
-    #[serde(rename = "patternType", default)]
-    pub pattern_type: SequencerPatternType,
-    #[serde(rename = "originX", default = "half")]
-    pub origin_x: f32,
-    #[serde(rename = "originY", default = "half")]
-    pub origin_y: f32,
-    #[serde(default)]
-    pub angle: f32,
-    #[serde(default = "default_seq_scale")]
-    pub scale: f32,
-    #[serde(default = "default_seq_count")]
-    pub count: u8,
-    #[serde(default = "half")]
-    pub density: f32,
-    #[serde(rename = "densityVariation", default)]
-    pub density_variation: f32,
-    #[serde(default)]
-    pub invert: bool,
-}
-
-fn half() -> f32 { 0.5 }
-fn default_seq_scale() -> f32 { 0.1 }
-fn default_seq_count() -> u8 { 4 }
-
-impl Default for SequencerParams {
-    fn default() -> Self {
-        SequencerParams {
-            pattern_type: SequencerPatternType::Split,
-            origin_x: 0.5,
-            origin_y: 0.5,
-            angle: 0.0,
-            scale: 0.1,
-            count: 4,
-            density: 0.5,
-            density_variation: 0.0,
-            invert: false,
+impl EffectDirection {
+    /// Wire id → direction (unknown → none).
+    pub fn from_id(id: u8) -> Self {
+        match id {
+            1 => EffectDirection::Linear,
+            2 => EffectDirection::Radial,
+            3 => EffectDirection::Symmetrical,
+            4 => EffectDirection::Angular,
+            _ => EffectDirection::None,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ColorParams {
-    /// Hue rotation in degrees (-180 to +180). 0 = no change.
-    #[serde(rename = "hueShift", default)]
-    pub hue_shift: f32,
-    /// Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid.
-    #[serde(default = "one_f32")]
-    pub saturation: f32,
-    /// Hue cycle range in degrees (0..180). Waveform oscillates hue_shift ± hue_range.
-    #[serde(rename = "hueRange", default)]
-    pub hue_range: f32,
-    /// Saturation cycle range (0..1). Waveform oscillates saturation ± sat_range.
-    #[serde(rename = "satRange", default)]
-    pub sat_range: f32,
-}
-
-fn one_f32() -> f32 { 1.0 }
-
-impl Default for ColorParams {
-    fn default() -> Self { ColorParams { hue_shift: 0.0, saturation: 1.0, hue_range: 0.0, sat_range: 0.0 } }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum DisplacementPatternType {
-    #[default]
-    Perlin,
-    White,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DisplacementParams {
-    #[serde(rename = "patternType", default)]
-    pub pattern_type: DisplacementPatternType,
-    #[serde(rename = "amountX", default = "displacement_amount_default")]
-    pub amount_x: f32,
-    #[serde(rename = "amountY", default = "displacement_amount_default")]
-    pub amount_y: f32,
-    #[serde(default = "displacement_scale_default")]
-    pub scale: f32,
-    #[serde(default)]
-    pub seed: u32,
-}
-
-fn displacement_amount_default() -> f32 { 0.1 }
-fn displacement_scale_default() -> f32 { 2.0 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CurvePoint {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpeedCurveParams {
-    pub points: Vec<CurvePoint>,
-    #[serde(rename = "maxMultiplier", default = "speed_curve_max_mult_default")]
-    pub max_multiplier: f32,
-    #[serde(rename = "cycleBeats", default = "one_u8")]
-    pub cycle_beats: u8,
-}
-
-fn speed_curve_max_mult_default() -> f32 { 4.0 }
-fn one_u8() -> u8 { 1 }
-
-impl Default for SpeedCurveParams {
-    fn default() -> Self {
-        SpeedCurveParams {
-            points: vec![
-                CurvePoint { x: 0.0, y: 1.0 },
-                CurvePoint { x: 1.0, y: 1.0 },
-            ],
-            max_multiplier: 4.0,
-            cycle_beats: 1,
-        }
-    }
-}
-
-impl Default for DisplacementParams {
-    fn default() -> Self {
-        DisplacementParams {
-            pattern_type: DisplacementPatternType::Perlin,
-            amount_x: 0.1,
-            amount_y: 0.1,
-            scale: 2.0,
-            seed: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffectConfig {
-    #[serde(rename = "targetChannels")]
-    pub target_channels: Vec<String>,
-    #[serde(rename = "targetGroupIndices")]
-    pub target_group_indices: Option<Vec<usize>>, // None = all
-    pub direction: EffectDirection,
-    #[serde(rename = "originX")]
-    pub origin_x: f32,
-    #[serde(rename = "originY")]
-    pub origin_y: f32,
-    pub angle: f32,
-    pub strength: f32,
-    pub reverse: bool,
-    pub fanning: f32,
-    pub speed: SpeedConfig,
-    #[serde(rename = "waveformShape", default)]
-    pub waveform_shape: WaveformShape,
-    #[serde(rename = "waveformParams", default)]
-    pub waveform_params: WaveformShapeParams,
-    #[serde(rename = "noiseParams", default)]
-    pub noise_params: Option<NoiseParams>,
-    #[serde(rename = "sequencerParams", default)]
-    pub sequencer_params: Option<SequencerParams>,
-    #[serde(rename = "colorParams", default)]
-    pub color_params: Option<ColorParams>,
-    #[serde(rename = "displacementParams", default)]
-    pub displacement_params: Option<DisplacementParams>,
-    #[serde(rename = "speedCurveParams", default)]
-    pub speed_curve_params: Option<SpeedCurveParams>,
-    #[serde(rename = "effectType", default)]
-    pub effect_type: String,
 }
