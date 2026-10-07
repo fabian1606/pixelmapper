@@ -6,6 +6,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
+import ModifierFieldOverlay from '~/components/plugin-host/ModifierFieldOverlay.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
 import { useHistory } from './composables/use-history';
@@ -461,6 +462,20 @@ function handleMouseUp(e?: MouseEvent) {
 
     <!-- Collaborator cursors + remote selections -->
     <CollaboratorCursors :camera="camera" />
+
+    <!-- Active modifier field preview while dragging spatial handles (preview pool) -->
+    <div
+      v-if="isSpatialDragging && activeModifier"
+      class="absolute left-0 top-0 pointer-events-none"
+      :style="{
+        width: `${WORLD_WIDTH}px`,
+        height: `${WORLD_HEIGHT}px`,
+        transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`,
+        transformOrigin: '0 0',
+      }"
+    >
+      <ModifierFieldOverlay :modifier="activeModifier" :bpm="effectEngine?.globalBpm.value ?? 120" />
+    </div>
 
     <FixtureEditorSpatialControls
       v-if="activeModifier && (activeModifier.fanning !== 0 || !!activeModifier.params?.origin)"

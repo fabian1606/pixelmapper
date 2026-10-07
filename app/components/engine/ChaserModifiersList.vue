@@ -16,6 +16,7 @@ import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import { getManifest, listPlugins } from '~/utils/plugins/plugin-store';
 import ModifierGenericFields from './ModifierGenericFields.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
+import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
@@ -168,6 +169,9 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
       </div>
 
       <div class="p-3 space-y-4" @click.stop>
+        <!-- One-cycle preview (main-thread preview pool) -->
+        <ModifierPreview :modifier="modifier" />
+
         <!-- Target Channels -->
         <div class="space-y-2">
           <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>

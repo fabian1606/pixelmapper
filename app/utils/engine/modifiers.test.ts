@@ -48,7 +48,7 @@ describe('buildModifiersBin', () => {
     expect(packet[2]).toBe(TYPE_MODIFIERS_BIN);
     // Payload: version 1, count 2.
     expect(packet[5]).toBe(1);
-    expect(packet[6] | (packet[7]! << 8)).toBe(2);
+    expect(packet[6]! | (packet[7]! << 8)).toBe(2);
   });
 
   it('skips instances whose manifest is unknown', () => {
