@@ -361,13 +361,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rs-engine-ffi"
-version = "0.1.0"
-dependencies = [
- "rs-engine-core",
-]
-
-[[package]]
 name = "rstar"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -40,13 +40,21 @@ pixelmapper/
 │       ├── controllers/           # Controller driver contracts (→ extensions)
 │       └── ofl/                   # Open Fixture Library import
 ├── controllers/                   # Hardware controller drivers (→ extensions/controller-*)
+├── extensions/                    # First-party extensions (Nuxt layers; Bun workspace)
+├── plugins/                       # Built-in content plugins (AssemblyScript; Bun workspace)
+├── packages/                      # Bun workspaces: extension-api, extension-build, plugin-sdk, plugin-toolchain
 ├── rs-engine/
 │   ├── core/                      # Engine, render loop, binary protocol, effects (→ signatures + ModifierRuntime)
-│   ├── canvas/                    # 2D renderer (WASM)
-│   └── ffi/                       # ESP32 C FFI (to be removed, see plan P0.4)
+│   └── canvas/                    # 2D renderer (WASM only; `cargo build`/`test` default to core)
 ├── supabase/migrations/           # Database schema
 └── pio*/                          # ESP32 firmware (out of scope for the plugin migration)
 ```
+
+## Tooling
+
+- `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
+- `bun run typecheck` — `nuxt typecheck` (vue-tsc).
+- `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
 
 ## Documentation Map
 

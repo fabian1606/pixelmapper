@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "core",
-    "canvas",
-    "ffi"
+    "canvas"
 ]
+# `canvas` only compiles for wasm32 (WebGL via femtovg); it is built with
+# wasm-pack. Plain `cargo build` / `cargo test` therefore target `core` only.
+default-members = ["core"]
 resolver = "2"

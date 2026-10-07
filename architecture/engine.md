@@ -2,11 +2,11 @@
 
 ## Why Rust + WebAssembly?
 
-All DMX calculation logic runs in Rust — compiled to either WASM (browser) or a native static library (ESP32). The reasons:
+All DMX calculation logic runs in Rust, compiled to WASM for the browser (later natively for Tauri). The ESP32 is a pure output device and no longer runs the engine (ADR 0001). The reasons:
 
 1. **Performance**: The engine iterates over all targets, chasers, and effects every frame. In Rust/WASM this runs without GC pauses or JS engine overhead.
 2. **Zero-copy DMX access**: The `dmx_buffer: [u8; 512]` lives directly in WASM memory. The browser reads it via `js_sys::Uint8Array::view()` without copying — a direct pointer into the WASM heap.
-3. **Code sharing**: Browser and ESP32 use the same Rust crate (`rs-engine-core`). Same logic, identical output — no porting effort, no divergence.
+3. **Code sharing**: The browser and the planned Tauri app use the same Rust crate (`rs-engine-core`). Same logic, identical output.
 
 ## rs-engine-core
 
@@ -60,20 +60,6 @@ impl WasmEngine {
 ```
 
 `get_dmx_view()` returns a direct `Uint8Array` view into `dmx_buffer` — no memcopy, no allocation. Valid as long as no `dispatch` call causes WASM memory to grow (re-fetch afterwards, as done in `engine.ts`).
-
-### FFI Layer (`rs-engine-ffi`)
-
-Thin `extern "C"` wrappers over `dispatch_bin` for ESP32/PlatformIO:
-
-```c
-// engine_ffi.h
-EffectEngine*  engine_new();
-void           engine_free(EffectEngine* ptr);
-int32_t        engine_dispatch(EffectEngine* ptr, uint8_t packet_type,
-                               const uint8_t* data, uint32_t len);
-void           engine_render(EffectEngine* ptr, float time_ms, float delta_ms);
-const uint8_t* engine_get_dmx_buffer(EffectEngine* ptr);
-```
 
 ## engine-store.ts — The Render Loop
 
