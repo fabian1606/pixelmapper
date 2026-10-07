@@ -1,4 +1,4 @@
-import type { ChannelType, SpeedConfig, EffectDirection, WaveformShape, WaveformShapeParams, NoiseParams, SequencerParams, ColorParams, DisplacementParams, SpeedCurveParams } from './types';
+import type { ChannelType, ModifierInstance } from './types';
 
 /**
  * High-level category grouping for a preset entry.
@@ -18,35 +18,6 @@ export interface PresetChannelSnapshot {
 }
 
 /**
- * A serialized snapshot of one Effect (modifier) as it was at save time.
- * Enough data to recreate it via WaveformEffect or any future effect class.
- */
-export interface PresetModifierSnapshot {
-  /** Unique ID of this effect instance to allow stacking */
-  id: string;
-  /** Effect class name, e.g. "WaveformEffect" – used to reconstruct the correct subclass */
-  effectType: string;
-  targetChannels: ChannelType[];
-  /** Fixture IDs this modifier was scoped to */
-  targetFixtureIds: (string | number)[];
-  strength: number;
-  fanning: number;
-  speed: SpeedConfig;
-  direction?: EffectDirection;
-  reverse?: boolean;
-  originX?: number;
-  originY?: number;
-  angle?: number;
-  waveformShape?: WaveformShape;
-  waveformParams?: WaveformShapeParams;
-  noiseParams?: NoiseParams;
-  sequencerParams?: SequencerParams;
-  colorParams?: ColorParams;
-  displacementParams?: DisplacementParams;
-  speedCurveParams?: SpeedCurveParams;
-}
-
-/**
  * A group of fixtures (by ID and name) that share the same effect/category within a preset.
  * E.g., all fixtures that have RED/GREEN/BLUE channels programmed are grouped as "color".
  */
@@ -60,7 +31,7 @@ export interface PresetCategory {
   /** The channel snapshots for all affected channels of these fixtures */
   channels: PresetChannelSnapshot[];
   /** Effect/modifier snapshots that apply to these fixtures (may be empty) */
-  modifiers: PresetModifierSnapshot[];
+  modifiers: ModifierInstance[];
   /** True if this category entry represents a modifier change rather than a channel value change */
   isModifier?: boolean;
 }

@@ -38,7 +38,7 @@ const history = useHistory();
 
 const hasUnsavedChanges = computed(() => {
   history.version.value; // Force reactivity hook based on undo/redo command execution
-  return getUnsavedChanges(flatFixtures.value, engine.effects, sceneNodes.value).length > 0;
+  return getUnsavedChanges(flatFixtures.value, engine.modifiers, sceneNodes.value).length > 0;
 });
 
 const hasSelectedGroup = computed(() => {

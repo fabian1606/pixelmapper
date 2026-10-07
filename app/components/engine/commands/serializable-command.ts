@@ -1,7 +1,7 @@
 import type { Command } from '../composables/use-history'
 import type { SceneNode } from '~/utils/engine/core/group'
 import type { Fixture } from '~/utils/engine/core/fixture'
-import type { Effect } from '~/utils/engine/types'
+import type { ModifierInstance } from '~/utils/engine/types'
 import type { Preset } from '~/utils/engine/preset-types'
 
 /**
@@ -25,7 +25,7 @@ export function isSerializable(cmd: Command): cmd is SerializableCommand {
 export interface ReplayContext {
   sceneNodes: SceneNode[]
   flatFixtures: Fixture[]
-  activeEffects: Effect[]
+  modifiers: ModifierInstance[]
   savedPresets: Preset[]
   setSavedPresets: (p: Preset[]) => void
   getSelectedPresetId: () => string | null

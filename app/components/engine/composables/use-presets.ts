@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Preset } from '~/utils/engine/preset-types';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { extractCategories } from './preset-diff';
 import { resolvePreset } from './preset-resolve';
@@ -40,12 +40,12 @@ export function usePresets() {
     return raw ? resolvePreset(raw, savedPresets.value) : null;
   }
 
-  function getUnsavedChanges(fixtures: Fixture[], effects: Effect[] = [], nodes?: SceneNode[]) {
+  function getUnsavedChanges(fixtures: Fixture[], effects: ModifierInstance[] = [], nodes?: SceneNode[]) {
     return extractCategories(fixtures, effects, getActivePresetResolved(), nodes);
   }
 
 
-  function savePreset(name: string, fixtures: Fixture[], effects: Effect[], nodes?: SceneNode[]): Preset {
+  function savePreset(name: string, fixtures: Fixture[], effects: ModifierInstance[], nodes?: SceneNode[]): Preset {
     const id = `preset-${Date.now()}-${nextPresetIndex++}`;
     const preset: Preset = {
       id,
@@ -58,7 +58,7 @@ export function usePresets() {
     return preset;
   }
 
-  function overwritePreset(id: string, fixtures: Fixture[], effects: Effect[], nodes?: SceneNode[]): Preset | null {
+  function overwritePreset(id: string, fixtures: Fixture[], effects: ModifierInstance[], nodes?: SceneNode[]): Preset | null {
     const preset = savedPresets.value.find((p) => p.id === id);
     if (!preset) return null;
     preset.categories = extractCategories(fixtures, effects, null, nodes);

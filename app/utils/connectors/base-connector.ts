@@ -1,6 +1,6 @@
 import { reactive, ref, shallowRef } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect, BlendMode } from '~/utils/engine/types';
+import type { ModifierInstance, BlendMode } from '~/utils/engine/types';
 
 export type ConnectorStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -23,6 +23,7 @@ export interface EngineConnectorState {
   effectsRevision: number;
   layoutPacket: Uint8Array;
   channelsPacket: Uint8Array;
+  /** TYPE_MODIFIERS_BIN packet (framed). */
   effectsPacket: Uint8Array;
   /** The current mixed output DMX buffer (all universes, flat, post-override).
    *  Indexed by absolute DMX address: dmxBuffer[fixture.startAddress - 1 + ch.addressOffset].
@@ -31,7 +32,7 @@ export interface EngineConnectorState {
   /** Live references used by connectors that build their own scoped packets
    *  (e.g. WebSocketConnector with a per-fixture scope). */
   fixtures: Fixture[];
-  effects: Effect[];
+  modifiers: ModifierInstance[];
   blendMode: BlendMode;
 }
 

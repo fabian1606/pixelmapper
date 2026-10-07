@@ -11,7 +11,7 @@ import debugSlots from '~~/extensions/_debug-slots/extension';
 import { resetRegistry } from '~/utils/extensions/registry';
 import { installSharedGlobals } from '~/utils/extensions/shared-globals';
 import { Fixture } from '~/utils/engine/core/fixture';
-import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
+import { BUILTIN_ALIASES, builtinHash, createModifier } from '~/utils/engine/modifiers';
 
 // ── Environment stubs ───────────────────────────
 beforeAll(() => {
@@ -95,11 +95,11 @@ describe('P1.6 debug-slots labels', () => {
 
   it('modifier list: modifier rows', async () => {
     const ChaserModifiersList = (await import('~/components/engine/ChaserModifiersList.vue')).default;
-    const effect = new WaveformEffect();
+    const effect = createModifier(builtinHash(BUILTIN_ALIASES.waveform), { targetChannels: ['DIMMER'] });
     const w = mount(ChaserModifiersList, {
       props: {
         activeModifiers: [effect], activeModifier: null, availableChannelTypes: ['DIMMER'],
-        pinnedModifiers: [], pinnedEffectIds: new Set<string>(), canAddDisplacement: false, canAddSpeedCurve: false,
+        pinnedModifiers: [], pinnedEffectIds: new Set<string>(),
       },
       global,
     });

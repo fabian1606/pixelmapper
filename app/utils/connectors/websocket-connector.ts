@@ -249,13 +249,13 @@ export class WebSocketConnector extends BaseConnector {
     });
     if (!slotInputs.length) return;
 
-    const fp = multiScopedFingerprint(slotInputs, state.effects, state.blendMode);
+    const fp = multiScopedFingerprint(slotInputs, state.modifiers, state.blendMode);
 
     if (first || fp.strip !== this.cachedStripFp ||
         fp.layout !== this.cachedLayoutFp ||
         fp.channels !== this.cachedChannelsFp ||
         fp.effects !== this.cachedEffectsFp) {
-      const scoped = buildMultiScopedPackets(slotInputs, state.effects, state.blendMode);
+      const scoped = buildMultiScopedPackets(slotInputs, state.modifiers, state.blendMode);
 
       if (scoped.stripSlotsPacket && (first || fp.strip !== this.cachedStripFp)) {
         this.send(scoped.stripSlotsPacket);

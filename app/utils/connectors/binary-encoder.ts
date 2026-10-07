@@ -1,5 +1,8 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
+import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
+import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
+import { modifierKey } from '~/utils/engine/modifiers';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
 import { sampleStripCapped, pointAtArcLength, type SampledCurve } from '~/utils/engine/strip-geometry';
 import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
@@ -11,7 +14,8 @@ export const TYPE_VERSION_REQ   = 0x11;
 export const TYPE_TIMESYNC      = 0x13;
 export const TYPE_LAYOUT_BIN    = 0x14;
 export const TYPE_CHAN_BIN      = 0x15;
-export const TYPE_FX_BIN        = 0x16;
+/** Modifier instances (replaces the former TYPE_FX_BIN, same id). */
+export const TYPE_MODIFIERS_BIN = 0x16;
 export const TYPE_OTA_BEGIN     = 0x15;
 export const TYPE_OTA_CHUNK     = 0x16;
 export const TYPE_OTA_END       = 0x17;
@@ -351,141 +355,87 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
   return w.toPacket(TYPE_CHAN_BIN);
 }
 
-// ── Effects packet (TYPE_FX_BIN 0x16) ────────────────────────────────────────
+// ── Modifiers packet (TYPE_MODIFIERS_BIN 0x16) ──────────────────────────────
+// Payload (see rs-engine/core/src/bin_protocol.rs):
+//   u8 version(1); u16 count; per instance:
+//   u32 key; u16 pluginIndex; u8 signature; u8 output; u8 blend; f32 strength;
+//   speed; u8 direction; f32 originX; f32 originY; f32 angle; f32 fanning;
+//   u8 reverse; u8 nTypes; u8[] types; u16 maskBytes (0 = all); u8[] mask;
+//   u16 nParams; f32[] params.
+// The plugin table (index → hash) travels next to the packet (worker message).
 
 const BLEND_MODE_ID: Record<string, number> = { add: 0, override: 1, multiply: 2, max: 3, min: 4 };
+const SIGNATURE_ID: Record<string, number> = { scalar: 0, rgb: 1, panTilt: 2 };
 
-export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBlendMode: import('~/utils/engine/types').BlendMode = 'add'): Uint8Array {
-  // Bitmask size derived from fixture count — both sides compute the same value
-  // after layout sync. Bit i = fixture with group_index i is targeted.
-  const fixtureCount = fixtures.length;
-  const bitmaskBytes = Math.ceil(fixtureCount / 8);
+/** Result of `buildModifiersBin`. */
+export interface ModifiersPacket {
+  /** Framed packet (strip the 5-byte header before dispatching to the engine). */
+  packet: Uint8Array;
+  /** Plugin table: index → content hash. */
+  plugins: string[];
+}
 
+/**
+ * Encodes modifier instances. Instances whose plugin manifest is unknown are
+ * skipped (they are included again once the plugin is known).
+ */
+export function buildModifiersBin(
+  modifiers: readonly ModifierInstance[],
+  fixtures: readonly Fixture[],
+  getManifest: (hash: string) => ContentPluginManifest | undefined,
+): ModifiersPacket {
   const idToIndex = new Map<string | number, number>();
   fixtures.forEach((f, i) => idToIndex.set(f.id, i));
+  const maskBytes = Math.ceil(fixtures.length / 8);
+
+  const plugins: string[] = [];
+  const encodable = modifiers.filter(m => getManifest(m.plugin));
 
   const w = new BufWriter();
-  w.u8(BLEND_MODE_ID[stackBlendMode] ?? 0);
-  w.u8(effects.length);
+  w.u8(1);
+  w.u16(encodable.length);
+  for (const m of encodable) {
+    const manifest = getManifest(m.plugin)!;
+    let pluginIndex = plugins.indexOf(m.plugin);
+    if (pluginIndex < 0) pluginIndex = plugins.push(m.plugin) - 1;
 
-  for (const effect of effects) {
-    // Channel types: count=0 means all channel types
-    const targetChannels: string[] = effect.targetChannels ?? [];
-    w.u8(targetChannels.length);
-    for (const ct of targetChannels) w.u8(CHANNEL_TYPE_ID[ct] ?? 255);
+    w.u32(modifierKey(m.id));
+    w.u16(pluginIndex);
+    w.u8(SIGNATURE_ID[m.signature] ?? 0);
+    w.u8(manifest.output === 'absolute' ? 1 : 0);
+    w.u8(BLEND_MODE_ID[m.blendMode] ?? 0);
+    w.f32(Math.max(0, Math.min(1, m.strength)));
+    w.speed(m.speed);
+    w.u8(DIRECTION_ID[m.direction] ?? 0);
+    w.f32(m.originX);
+    w.f32(m.originY);
+    w.f32(m.angle);
+    w.f32(m.fanning);
+    w.u8(m.reverse ? 1 : 0);
 
-    // Fixture bitmask: bit i set → fixture with group_index i is targeted.
-    // null/empty targetFixtureIds → all fixtures targeted (all bits set).
-    const bitmask = new Uint8Array(bitmaskBytes);
-    const targetedIndices: number[] = [];
-    
-    if (effect.targetFixtureIds?.length) {
-      for (const id of effect.targetFixtureIds) {
+    // Scalar targets by channel type (rgb/panTilt resolve their channels in the core).
+    const types = m.signature === 'scalar' ? m.targetChannels.map(t => CHANNEL_TYPE_ID[t]).filter((v): v is number => v !== undefined) : [];
+    w.u8(types.length);
+    for (const t of types) w.u8(t);
+
+    // Fixture mask; undefined targetFixtureIds = all fixtures.
+    if (m.targetFixtureIds) {
+      const mask = new Uint8Array(Math.max(1, maskBytes));
+      for (const id of m.targetFixtureIds) {
         const idx = idToIndex.get(id);
-        if (idx !== undefined) targetedIndices.push(idx);
+        if (idx !== undefined) mask[idx >> 3]! |= 1 << (idx & 7);
       }
-    } else {
-      for (let i = 0; i < fixtureCount; i++) targetedIndices.push(i);
+      w.u16(mask.length);
+      for (const b of mask) w.u8(b);
     }
-    
-    for (const idx of targetedIndices) {
-      bitmask[idx >> 3]! |= (1 << (idx & 7));
-    }
-    for (const byte of bitmask) w.u8(byte);
-
-    w.u8(DIRECTION_ID[effect.direction ?? 'LINEAR'] ?? 1);
-    w.f32(effect.originX ?? 0.5);
-    w.f32(effect.originY ?? 0.5);
-    w.f32(effect.angle ?? 0);
-    // strength is 0–100% in the UI; Rust engine expects 0–255 DMX units
-    w.f32(effect.strength * 2.55);
-    w.u8(effect.reverse ? 1 : 0);
-    w.f32(effect.fanning);
-    // Shape type: 0=sine,1=square,2=triangle,3=sawtooth,4=bounce,5=ramp,6=smooth
-    const SHAPE_ID: Record<string, number> = {
-      sine: 0, square: 1, triangle: 2, sawtooth: 3, bounce: 4, ramp: 5, smooth: 6,
-    };
-    const waveformShape = (effect as any).waveformShape ?? 'sine';
-    const waveformParams = (effect as any).waveformParams ?? { param: 0.5, start: 0, end: 1 };
-    w.u8(SHAPE_ID[waveformShape] ?? 0);
-    w.f32(waveformParams.param ?? 0.5);
-    w.f32(waveformParams.start ?? 0);
-    w.f32(waveformParams.end ?? 1);
-    // Vertical baseline offset in [-1, 1] (0 = centered on base channel value).
-    w.f32(waveformParams.offset ?? 0);
-    // Inactive-zone floor override (0..1 = explicit, <0 = disabled).
-    w.f32(waveformParams.floor ?? -1);
-    w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
-
-    // Effect type discriminator + noise parameters (always written; Waveforms use defaults)
-    const noiseParams = (effect as any).noiseParams;
-    const isNoise = !!noiseParams;
-    const NOISE_TYPE_ID: Record<string, number> = { white: 0, perlin: 1, step: 2 };
-    const CHANNEL_MODE_ID: Record<string, number> = { linked: 0, independent: 1 };
-    w.u8(isNoise ? 1 : 0);
-    w.u8(NOISE_TYPE_ID[noiseParams?.noiseType] ?? 0);
-    w.f32(noiseParams?.scale ?? 1);
-    w.u8(CHANNEL_MODE_ID[noiseParams?.channelMode] ?? 0);
-    w.f32(noiseParams?.colorVariation ?? 0);
-    w.f32(noiseParams?.fade ?? 0);
-    w.f32(noiseParams?.threshold ?? 0);
-
-    // Sequencer parameters
-    const seqParams = (effect as any).sequencerParams;
-    const isSeq = !!seqParams;
-    const SEQ_PATTERN_ID: Record<string, number> = { split: 0, checkerboard: 1, sections: 2, scatter: 3, flow: 4 };
-    w.u8(isSeq ? 1 : 0);
-    if (isSeq) {
-      w.u8(SEQ_PATTERN_ID[seqParams.patternType] ?? 0);
-      w.f32(seqParams.originX ?? 0.5);
-      w.f32(seqParams.originY ?? 0.5);
-      w.f32(seqParams.angle ?? 0);
-      w.f32(seqParams.scale ?? 0.1);
-      w.u8(seqParams.count ?? 4);
-      w.f32(seqParams.density ?? 0.5);
-      w.f32(seqParams.densityVariation ?? 0);
-      w.u8(seqParams.invert ? 1 : 0);
+    else {
+      w.u16(0);
     }
 
-    // Color parameters (hue shift + saturation)
-    const colorP = (effect as any).colorParams;
-    const isColor = !!colorP;
-    w.u8(isColor ? 1 : 0);
-    if (isColor) {
-      w.f32(colorP.hueShift ?? 0);
-      w.f32(colorP.saturation ?? 1);
-      w.f32(colorP.hueRange ?? 0);
-      w.f32(colorP.satRange ?? 0);
-    }
-
-    // Displacement parameters
-    const dispP = (effect as any).displacementParams;
-    const isDisp = !!dispP;
-    const DISP_PATTERN_ID: Record<string, number> = { perlin: 0, white: 1 };
-    w.u8(isDisp ? 1 : 0);
-    if (isDisp) {
-      w.u8(DISP_PATTERN_ID[dispP.patternType] ?? 0);
-      w.f32(dispP.amountX ?? 0.1);
-      w.f32(dispP.amountY ?? 0.1);
-      w.f32(dispP.scale ?? 2);
-      w.u32(dispP.seed ?? 0);
-    }
-
-    // Speed curve parameters
-    const scP = (effect as any).speedCurveParams;
-    const isSC = !!scP;
-    w.u8(isSC ? 1 : 0);
-    if (isSC) {
-      const pts: { x: number; y: number }[] = scP.points ?? [];
-      w.u8(Math.min(pts.length, 255));
-      for (const pt of pts.slice(0, 255)) {
-        w.f32(pt.x);
-        w.f32(pt.y);
-      }
-      w.f32(scP.maxMultiplier ?? 4);
-      w.u8(scP.cycleBeats ?? 1);
-    }
+    const params = encodeParams(manifest.params, m.params);
+    w.u16(params.length);
+    for (const v of params) w.f32(v);
   }
 
-  return w.toPacket(TYPE_FX_BIN);
+  return { packet: w.toPacket(TYPE_MODIFIERS_BIN), plugins };
 }

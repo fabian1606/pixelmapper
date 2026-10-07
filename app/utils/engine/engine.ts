@@ -8,6 +8,7 @@
  */
 import { reactive, ref, shallowRef, type Ref } from 'vue';
 import { Watchdog } from '~/utils/plugins/watchdog';
+import type { BlendMode, ModifierInstance } from './types';
 
 /** Events reported by the worker's plugin bridge. */
 export type PluginEvent =
@@ -15,9 +16,12 @@ export type PluginEvent =
   | { type: 'plugin-log'; hash: string; message: string };
 
 export class EffectEngine {
-  public effects = reactive<import('~/utils/engine/types').Effect[]>([]);
-  public stackBlendMode = ref<import('~/utils/engine/types').BlendMode>('add');
-  public activeModifier: Ref<import('~/utils/engine/types').Effect | null> = ref(null);
+  /** The modifier list (shared with the engine store's `modifiers`). */
+  public modifiers = reactive<ModifierInstance[]>([]);
+  /** Blend mode for new modifiers; the stack-mode selector applies it to all. */
+  public stackBlendMode = ref<BlendMode>('add');
+  /** Modifier selected in the UI (spatial handles, editor). */
+  public activeModifier: Ref<ModifierInstance | null> = ref(null);
   public globalBpm = ref<number>(120);
 
   /** Latest DMX frame received from the worker. */
@@ -50,7 +54,7 @@ export class EffectEngine {
 
   // Replay state for respawns.
   private packets = new Map<number, Uint8Array>();
-  private modifiers: { packet: Uint8Array; plugins: string[] } | null = null;
+  private modifiersReplay: { packet: Uint8Array; plugins: string[] } | null = null;
   private plugins = new Map<string, Uint8Array>();
   private epoch: number | null = null;
   private canvasState = new Map<string, Record<string, unknown>>();
@@ -118,7 +122,7 @@ export class EffectEngine {
     w.postMessage({ type: 'plugins-suspend', hashes: this.suspendedPlugins.value });
     for (const [hash, wasm] of this.plugins) this.postPlugin(hash, wasm);
     for (const [packetType, data] of this.packets) this.postPacket(packetType, data);
-    if (this.modifiers) this.postModifiers(this.modifiers.packet, this.modifiers.plugins);
+    if (this.modifiersReplay) this.postModifiers(this.modifiersReplay.packet, this.modifiersReplay.plugins);
   }
 
   /** Re-enables suspended plugins (one action from the UI). */
@@ -153,7 +157,7 @@ export class EffectEngine {
 
   public reset(): void {
     this.packets.clear();
-    this.modifiers = null;
+    this.modifiersReplay = null;
     this.worker?.postMessage({ type: 'reset' });
   }
 
@@ -189,7 +193,7 @@ export class EffectEngine {
 
   /** Sends the modifiers packet with its plugin table (cached for respawns). */
   public syncModifiers(packet: Uint8Array, plugins: string[]): void {
-    this.modifiers = { packet: packet.slice(), plugins: plugins.slice() };
+    this.modifiersReplay = { packet: packet.slice(), plugins: plugins.slice() };
     this.postModifiers(packet, plugins);
   }
 
@@ -241,14 +245,16 @@ export class EffectEngine {
     this.canvasPost('canvas.set_remote_selections', { json });
   }
 
-  // ── Legacy (removed with the modifier model, plan P3.11) ──
+  // ── Modifier list ─────────────────────────────
 
-  public addEffect(effect: import('~/utils/engine/types').Effect) {
-    this.effects.push(effect);
+  /** Replaces the modifier list in place (keeps the reactive array identity). */
+  public setModifiers(list: ModifierInstance[]): void {
+    this.modifiers.splice(0, this.modifiers.length, ...list);
   }
 
-  public clearEffects() {
-    this.effects.splice(0, this.effects.length);
+  /** Appends a modifier. */
+  public addModifier(m: ModifierInstance): void {
+    this.modifiers.push(m);
   }
 
   /** No-op — the worker renders on its own interval. */

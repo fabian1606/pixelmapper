@@ -1,5 +1,5 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import type { Preset } from '~/utils/engine/preset-types';
 import { applyPreset as _applyPreset, stopPreset as _stopPreset } from './preset-apply';
 import { resolvePreset } from './preset-resolve';
@@ -16,7 +16,7 @@ import { mark, measure, trace } from '~/utils/perf';
 export interface PresetActivationContext {
   savedPresets: Preset[];
   flatFixtures: Fixture[];
-  activeEffects: Effect[];
+  modifiers: ModifierInstance[];
   getSelectedPresetId: () => string | null;
   setSelectedPresetId: (id: string | null) => void;
   triggerCanvasSync: () => void;
@@ -36,7 +36,7 @@ export function applyActivePreset(ctx: PresetActivationContext, presetId: string
   if (current && current !== presetId) {
     const cur = presets.find((p) => p.id === current);
     if (cur) trace('preset.stop', () =>
-      _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.activeEffects),
+      _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.modifiers),
     );
   }
 
@@ -44,7 +44,7 @@ export function applyActivePreset(ctx: PresetActivationContext, presetId: string
     const target = presets.find((p) => p.id === presetId);
     if (!target) return;
     trace('preset.apply', () =>
-      _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.activeEffects),
+      _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.modifiers),
     );
   }
   mark('preset.apply.done');
@@ -70,7 +70,7 @@ function engineActivationContext(): PresetActivationContext {
   return {
     savedPresets: engineStore.savedPresets,
     flatFixtures: engineStore.flatFixtures,
-    activeEffects: engineStore.activeEffects,
+    modifiers: engineStore.modifiers,
     getSelectedPresetId: () => engineStore.selectedPresetId,
     setSelectedPresetId: (id) => { engineStore.selectedPresetId = id; },
     triggerCanvasSync: () => engineStore.triggerCanvasSync(),
@@ -122,11 +122,11 @@ function _transitionFlash(prevId: string | null, nextId: string | null): void {
   const presets = ctx.savedPresets;
   if (prevId && prevId !== nextId) {
     const cur = presets.find(p => p.id === prevId);
-    if (cur) _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.activeEffects);
+    if (cur) _stopPreset(resolvePreset(cur, presets), ctx.flatFixtures, ctx.modifiers);
   }
   if (nextId) {
     const target = presets.find(p => p.id === nextId);
-    if (target) _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.activeEffects);
+    if (target) _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.modifiers);
   }
   ctx.triggerCanvasSync();
 }

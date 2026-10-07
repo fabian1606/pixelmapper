@@ -1,16 +1,18 @@
 import { triggerRef } from 'vue';
 import { registerLiveOp } from '~/stores/live-bus-store';
-import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
 
 /**
  * Live preview of modifier param changes (during slider scrub or spatial drag).
- * Receiver applies changes directly to the effect; final state is committed
+ * Receiver applies changes directly to the modifier; final state is committed
  * via SerializableCommand `SetModifiers` on drag-end.
  */
 interface ModifierUpdatePayload {
   effectId: string;
-  changes: Record<string, any>;       // partial Effect — flat keys (origin x/y, angle, etc)
-  sequencerChanges?: Record<string, any>;  // partial sequencerParams
+  /** Partial modifier instance — generic fields (origin, angle, strength, …). */
+  changes: Record<string, any>;
+  /** Partial `params` (merged into the instance's params). */
+  paramChanges?: Record<string, any>;
 }
 
 registerLiveOp<ModifierUpdatePayload>('modifier.update', {
@@ -18,32 +20,29 @@ registerLiveOp<ModifierUpdatePayload>('modifier.update', {
   throttle: 'raf',
   merge: 'replace',
   persistent: true,
-  apply: ({ effectId, changes, sequencerChanges }, _userId, ctx) => {
-    const effects = ctx.engineStore.activeEffects;
-    const effect = effects.find((e: any) => e.id === effectId);
-    if (!effect) return;
-    Object.assign(effect, changes);
-    if (sequencerChanges && (effect as any).sequencerParams) {
-      Object.assign((effect as any).sequencerParams, sequencerChanges);
-    }
+  apply: ({ effectId, changes, paramChanges }, _userId, ctx) => {
+    const modifier = ctx.engineStore.modifiers.find((m: any) => m.id === effectId);
+    if (!modifier) return;
+    Object.assign(modifier, changes);
+    if (paramChanges) modifier.params = { ...modifier.params, ...paramChanges };
     ctx.engineStore.triggerCanvasSync();
   },
 });
 
 /**
- * Full effects-list sync — sent when a structural change (split) happens locally so that
- * remote clients replace their effects list instead of applying an incremental patch.
+ * Full modifier-list sync — sent when a structural change (split) happens locally so that
+ * remote clients replace their list instead of applying an incremental patch. Unknown
+ * plugin hashes are resolved by the engine store before rendering (plan P4.5).
  */
-registerLiveOp<{ effects: any[] }>('modifier.sync', {
+registerLiveOp<{ modifiers: any[] }>('modifier.sync', {
   scope: 'shared',
   throttle: 'raf',
   merge: 'replace',
   persistent: true,
-  apply: ({ effects }, _userId, ctx) => {
-    const reconstructed = cloneEffectsList(effects);
-    const active = ctx.engineStore.activeEffects;
-    active.splice(0, active.length, ...reconstructed);
-    ctx.engineStore.engine.effects = active;
+  apply: ({ modifiers }, _userId, ctx) => {
+    const active = ctx.engineStore.modifiers;
+    active.splice(0, active.length, ...cloneModifiers(modifiers ?? []));
+    ctx.engineStore.engine.modifiers = active;
     ctx.engineStore.triggerCanvasSync();
   },
 });

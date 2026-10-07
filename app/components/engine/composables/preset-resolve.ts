@@ -1,9 +1,10 @@
-import type { Preset, PresetCategory, PresetChannelSnapshot, PresetModifierSnapshot } from '~/utils/engine/preset-types';
+import type { Preset, PresetCategory, PresetChannelSnapshot } from '~/utils/engine/preset-types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { getCategoryType, getChannelFingerprint, getModifierIdentity } from './preset-helpers';
 
 interface SnapshotMaps {
   channels: Map<string, { fId: string | number; snap: PresetChannelSnapshot }>;
-  modifiers: Map<string, { fId: string | number; snap: PresetModifierSnapshot }>;
+  modifiers: Map<string, { fId: string | number; snap: ModifierInstance }>;
 }
 
 function flattenPreset(preset: Preset, maps: SnapshotMaps) {
@@ -81,7 +82,7 @@ export function resolvePreset(preset: Preset, allPresets: Preset[]): Preset {
   }
 
   // Process modifiers
-  const fIdToModifiers = new Map<string | number, PresetModifierSnapshot[]>();
+  const fIdToModifiers = new Map<string | number, ModifierInstance[]>();
   for (const { fId, snap } of maps.modifiers.values()) {
     if (!fIdToModifiers.has(fId)) fIdToModifiers.set(fId, []);
     fIdToModifiers.get(fId)!.push(snap);

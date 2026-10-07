@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { usePresets, extractCategories } from '~/components/engine/composables/use-presets';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { setActivePreset, toggleActivePreset } from '~/components/engine/composables/preset-activation';
@@ -54,7 +54,7 @@ import { Input } from '@/components/ui/input';
 const props = defineProps<{
   fixtures: Fixture[];
   /** Live reactive effects array from EffectEngine.effects */
-  effects: Effect[];
+  effects: ModifierInstance[];
   nodes?: SceneNode[];
 }>();
 

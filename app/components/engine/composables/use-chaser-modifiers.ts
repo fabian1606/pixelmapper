@@ -1,16 +1,10 @@
-import { computed, toRaw } from 'vue';
+import { computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
-import type { Effect, ChannelType } from '~/utils/engine/types';
-import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
-import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
-import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
-import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
-import { ColorEffect } from '~/utils/engine/effects/color-effect';
-import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
-import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
+import type { ModifierInstance, ChannelType } from '~/utils/engine/types';
+import { BUILTIN_ALIASES, builtinHash, cloneModifier, createModifier } from '~/utils/engine/modifiers';
+import { getManifest } from '~/utils/plugins/plugin-store';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
-import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import type { useChaserHistory } from './use-chaser-history';
@@ -25,7 +19,7 @@ export function useChaserModifiers(
   const { captureModifiers, commitModifiers } = historyTools;
 
   // Global variable to keep track of drag state for modifier continuous parameters (speed, strength, fanning)
-  let modifierDragBeforeEffects: Effect[] | null = null;
+  let modifierDragBeforeEffects: ModifierInstance[] | null = null;
   let modifierDragTimeout: any = null;
 
   const availableChannelTypes = computed<ChannelType[]>(() => {
@@ -42,14 +36,14 @@ export function useChaserModifiers(
     return findRichestFixture(props.fixtures, tabChannelFilter, effectEngine);
   });
 
-  function hasMatchingChannel(effect: Effect) {
+  function hasMatchingChannel(effect: ModifierInstance) {
     if (!effect.targetChannels) return false;
     return effect.targetChannels.some(type => availableChannelTypes.value.includes(type));
   }
 
   const activeModifiers = computed(() => {
     if (!effectEngine || !richestFixture.value) return [];
-    return effectEngine.effects.filter(effect => {
+    return effectEngine.modifiers.filter(effect => {
       // Matches the richest fixture
       const matchesFixture = effect.targetFixtureIds?.includes(richestFixture.value!.id);
 
@@ -60,102 +54,76 @@ export function useChaserModifiers(
     });
   });
 
-  const canAddDisplacement = computed(() =>
-    activeModifiers.value.some(m => !(toRaw(m) instanceof DisplacementEffect))
-  );
+  /** Average position of the edited fixtures (default origin). */
+  function averagePosition(): { x: number; y: number } {
+    const n = props.fixtures.length;
+    if (n === 0) return { x: 0.5, y: 0.5 };
+    return {
+      x: props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / n,
+      y: props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / n,
+    };
+  }
 
-  const canAddSpeedCurve = computed(() =>
-    activeModifiers.value.some(m => !(toRaw(m) instanceof SpeedCurveEffect) && !(toRaw(m) instanceof DisplacementEffect))
-  );
+  /**
+   * Host defaults for a new instance of `plugin` on the edited fixtures:
+   * targets, origin, blend mode (absolute outputs override instead of add),
+   * and per-built-in starting values that match the former effects.
+   */
+  function newInstance(plugin: string, carry?: ModifierInstance): ModifierInstance {
+    const manifest = getManifest(plugin);
+    const { x, y } = averagePosition();
+    const inst = createModifier(plugin, {
+      targetChannels: [...(carry?.targetChannels ?? availableChannelTypes.value)],
+      targetFixtureIds: carry?.targetFixtureIds ? [...carry.targetFixtureIds] : props.fixtures.map(f => f.id),
+      strength: carry?.strength ?? 1,
+      speed: carry ? { ...carry.speed } : { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
+      blendMode: manifest?.output === 'absolute' ? 'override' : (effectEngine?.stackBlendMode.value ?? 'add'),
+      originX: x,
+      originY: y,
+    });
+    if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
+      if (!carry) inst.strength = 0.5;
+      inst.speed = carry ? inst.speed : { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
+      inst.direction = 'NONE';
+    }
+    else if (plugin === builtinHash(BUILTIN_ALIASES.sequencer)) {
+      // Vertical split axis through the fixtures — sensible for horizontal rows.
+      inst.params = { ...inst.params, origin: { x, y }, angle: Math.PI / 2 };
+      inst.direction = 'NONE';
+    }
+    else if (plugin === builtinHash(BUILTIN_ALIASES.colorAdjust)) {
+      inst.direction = 'NONE';
+      inst.fanning = 0;
+    }
+    return inst;
+  }
 
-  function addWaveformModifier() {
+  /** Adds a new modifier running `plugin` to the edited fixtures. */
+  function addModifier(plugin: string) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new WaveformEffect();
-    effect.targetChannels = [...availableChannelTypes.value]; // default to all relevant channels
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effect.strength = 100;
-    effect.speed = { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 };
-    effect.fanning = 0.1;
-    effect.direction = 'LINEAR';
-    const avgX = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
-      : 0.5;
-    const avgY = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
-      : 0.5;
-
-    effect.originX = avgX;
-    effect.originY = avgY;
-    effect.angle = 0;
-    effect.reverse = false;
-    effectEngine.addEffect(effect);
-    // Assign the proxy from the reactive array to ensure Vue tracks property changes
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    const inst = newInstance(plugin);
+    effectEngine.addModifier(inst);
+    // Select the proxy from the reactive array so Vue tracks property changes.
+    effectEngine.activeModifier.value = effectEngine.modifiers[effectEngine.modifiers.length - 1] ?? inst;
     emit('change');
-    commitModifiers(before, 'Add Waveform Modifier');
+    commitModifiers(before, `Add ${getManifest(plugin)?.name ?? 'Modifier'}`);
   }
 
-  function addNoiseModifier() {
-    const before = captureModifiers();
-    if (!effectEngine || !before) return;
-    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new NoiseEffect();
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effect.strength = 50;
-    effect.speed = { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
-    emit('change');
-    commitModifiers(before, 'Add Noise Modifier');
-  }
-
-  function addDisplacementModifier() {
-    const before = captureModifiers();
-    if (!effectEngine || !before) return;
-    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new DisplacementEffect();
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effect.strength = 100;
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
-    emit('change');
-    commitModifiers(before, 'Add Displacement Modifier');
-  }
-
-  function addSpeedCurveModifier() {
-    const before = captureModifiers();
-    if (!effectEngine || !before) return;
-    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new SpeedCurveEffect();
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
-    emit('change');
-    commitModifiers(before, 'Add Speed Curve Modifier');
-  }
-
-  function cloneModifier(effect: Effect): Effect {
-    return cloneEffectsList([effect])[0]!;
-  }
-
-  function resolveStaleEffect(effect: Effect, selectedIds: (string | number)[]): Effect {
+  function resolveStaleEffect(effect: ModifierInstance, selectedIds: (string | number)[]): ModifierInstance {
     if (effect.targetFixtureIds && !effect.targetFixtureIds.some(id => selectedIds.includes(id))) {
-      const newEff = effectEngine?.effects.find(e =>
+      const newEff = effectEngine?.modifiers.find(e =>
         e.targetFixtureIds &&
         e.targetFixtureIds.some(id => selectedIds.includes(id)) &&
-        e instanceof effect.constructor
+        e.plugin === effect.plugin
       );
       if (newEff) return newEff;
     }
     return effect;
   }
 
-  function getSafeEffectToMutate(effect: Effect, selectedIds: (string | number)[]): { eff: Effect; didSplit: boolean } {
+  function getSafeEffectToMutate(effect: ModifierInstance, selectedIds: (string | number)[]): { eff: ModifierInstance; didSplit: boolean } {
     const eff = resolveStaleEffect(effect, selectedIds);
 
     if (eff.targetFixtureIds) {
@@ -167,7 +135,7 @@ export function useChaserModifiers(
         // New id so remote can distinguish the two effects after modifier.sync
         (clone as any).id = crypto.randomUUID();
         clone.targetFixtureIds = [...selectedIds];
-        effectEngine!.addEffect(clone);
+        effectEngine!.addModifier(clone);
         return { eff: clone, didSplit: true };
       } else {
         // Mutate in place & expand to all selected
@@ -181,8 +149,8 @@ export function useChaserModifiers(
 
         // Heal split / override conflicting modifiers of the same type that were overridden
         if (newlyAddedIds.length > 0 && effectEngine) {
-          effectEngine.effects.forEach(otherEff => {
-            if (otherEff !== eff && otherEff.constructor === eff.constructor) {
+          effectEngine.modifiers.forEach(otherEff => {
+            if (otherEff !== eff && otherEff.plugin === eff.plugin) {
               const sameChannels = otherEff.targetChannels && eff.targetChannels &&
                 otherEff.targetChannels.length === eff.targetChannels.length &&
                 otherEff.targetChannels.every(c => eff.targetChannels!.includes(c));
@@ -194,10 +162,10 @@ export function useChaserModifiers(
           });
 
           // Cleanup orphaned effects
-          for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-            const o = effectEngine.effects[i];
+          for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+            const o = effectEngine.modifiers[i];
             if (o && o !== eff && o.targetFixtureIds && o.targetFixtureIds.length === 0) {
-              effectEngine.effects.splice(i, 1);
+              effectEngine.modifiers.splice(i, 1);
             }
           }
         }
@@ -206,11 +174,11 @@ export function useChaserModifiers(
     return { eff, didSplit: false };
   }
 
-  function dispatchModifierUpdate(eff: Effect, changes: Record<string, any>, didSplit: boolean) {
+  function dispatchModifierUpdate(eff: ModifierInstance, changes: Record<string, any>, didSplit: boolean) {
     const liveBus = useLiveBusStore();
     if (didSplit && effectEngine) {
       // Structural change — remote must replace their full effects list
-      liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effectEngine.effects)) });
+      liveBus.dispatch('modifier.sync', { modifiers: JSON.parse(JSON.stringify(effectEngine.modifiers)) });
     } else if ((eff as any).id) {
       liveBus.dispatch('modifier.update', { effectId: (eff as any).id, changes });
     }
@@ -223,15 +191,14 @@ export function useChaserModifiers(
     }
   }
 
-  function updateModifier(effect: Effect, key: string, value: any) {
+  function updateModifier(effect: ModifierInstance, key: string, value: any) {
     if (!effectEngine) return;
 
     // Is this a continuous value change? If so, debounce the commit
-    const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning'
-      || key === 'colorParams' || key === 'waveformParams' || key === 'noiseParams' || key === 'sequencerParams' || key === 'displacementParams' || key === 'speedCurveParams';
+    const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning' || key === 'params';
     const isDirection = key === 'direction';
 
-    let before: Effect[] | null = null;
+    let before: ModifierInstance[] | null = null;
 
     if (isDirection) {
       // Immediate commit mapping for direction picks
@@ -262,7 +229,7 @@ export function useChaserModifiers(
     }
   }
 
-  function updateModifierProperties(effect: Effect, updates: Partial<Effect>, historyLabel: string, isContinuous = false) {
+  function updateModifierProperties(effect: ModifierInstance, updates: Partial<ModifierInstance>, historyLabel: string, isContinuous = false) {
     if (!effectEngine) return;
 
     if (isContinuous) {
@@ -291,7 +258,7 @@ export function useChaserModifiers(
     }
   }
 
-  function toggleTargetChannel(effect: Effect, type: ChannelType) {
+  function toggleTargetChannel(effect: ModifierInstance, type: ChannelType) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     const selectedIds = props.fixtures.map(f => f.id);
@@ -315,7 +282,7 @@ export function useChaserModifiers(
     commitModifiers(before, 'Toggle Modifier Channel');
   }
 
-  function removeModifier(effect: Effect) {
+  function removeModifier(effect: ModifierInstance) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
@@ -331,153 +298,53 @@ export function useChaserModifiers(
       eff.targetFixtureIds = eff.targetFixtureIds.filter(id => !selectedIds.includes(id));
 
       if (eff.targetFixtureIds.length === 0) {
-        const idx = effectEngine.effects.indexOf(eff);
-        if (idx >= 0) effectEngine.effects.splice(idx, 1);
+        const idx = effectEngine.modifiers.indexOf(eff);
+        if (idx >= 0) effectEngine.modifiers.splice(idx, 1);
       }
     } else {
-      const idx = effectEngine.effects.indexOf(eff);
-      if (idx >= 0) effectEngine.effects.splice(idx, 1);
+      const idx = effectEngine.modifiers.indexOf(eff);
+      if (idx >= 0) effectEngine.modifiers.splice(idx, 1);
     }
     emit('change');
     commitModifiers(before, 'Remove Modifier');
   }
 
-  function selectModifier(effect: Effect | null) {
+  function selectModifier(effect: ModifierInstance | null) {
     if (effectEngine) {
       effectEngine.activeModifier.value = effect;
     }
   }
 
-  function addSequencerModifier() {
-    const before = captureModifiers();
-    if (!effectEngine || !before) return;
-    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new SequencerEffect();
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effect.strength = 100;
-    const avgX = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
-      : 0.5;
-    const avgY = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
-      : 0.5;
-    // Default angle π/2 gives a vertical split axis — sensible default for horizontal fixture rows
-    effect.sequencerParams = { ...effect.sequencerParams, originX: avgX, originY: avgY, angle: Math.PI / 2 };
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
-    emit('change');
-    commitModifiers(before, 'Add Sequencer Modifier');
-  }
-
-  function addColorModifier() {
-    const before = captureModifiers();
-    if (!effectEngine || !before) return;
-    syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
-    const effect = new ColorEffect();
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effect.colorParams = { hueShift: 0, saturation: 1 };
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
-    emit('change');
-    commitModifiers(before, 'Add Color Modifier');
-  }
-
-  function addPinnedModifier(snapshot: PresetModifierSnapshot) {
+  /** Adds a pinned modifier snapshot to the edited fixtures (new id, current targets). */
+  function addPinnedModifier(snapshot: ModifierInstance) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     syncCategoryBeforeEdit(props.fixtures, tabChannelFilter as any, effectEngine, 'modifiers');
     const pinnedStore = usePinnedModifiersStore();
-    const effect = pinnedStore.applyPinnedModifier(snapshot);
-    if (!effect) return;
-    effect.targetChannels = [...availableChannelTypes.value];
-    effect.targetFixtureIds = props.fixtures.map(f => f.id);
-    effectEngine.addEffect(effect);
-    effectEngine.activeModifier.value = (effectEngine.effects[effectEngine.effects.length - 1] ?? effect) as Effect;
+    const inst = pinnedStore.applyPinnedModifier(snapshot);
+    if (!inst) return;
+    inst.targetChannels = [...availableChannelTypes.value];
+    inst.targetFixtureIds = props.fixtures.map(f => f.id);
+    effectEngine.addModifier(inst);
+    effectEngine.activeModifier.value = effectEngine.modifiers[effectEngine.modifiers.length - 1] ?? inst;
     emit('change');
     commitModifiers(before, 'Add Pinned Modifier');
   }
 
-  function switchModifierType(effect: Effect, type: 'Waveform' | 'Noise' | 'Sequencer' | 'Color' | 'Displacement' | 'SpeedCurve') {
+  /** Switches a modifier to another plugin, keeping targets, strength and speed. */
+  function switchModifierType(effect: ModifierInstance, plugin: string) {
     const before = captureModifiers();
-    if (!effectEngine || !before) return;
-
-    const raw = toRaw(effect);
-    const current = raw instanceof SpeedCurveEffect ? 'SpeedCurve' : raw instanceof DisplacementEffect ? 'Displacement' : raw instanceof ColorEffect ? 'Color' : raw instanceof SequencerEffect ? 'Sequencer' : raw instanceof NoiseEffect ? 'Noise' : 'Waveform';
-    if (type === current) return;
-
-    const targetChannels = [...(effect.targetChannels || [])];
-    const targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
-    const strength = effect.strength ?? 100;
-    const speed = (effect as any).speed ? { ...(effect as any).speed } : { mode: 'beat' as const, timeMs: 500, beatValue: 1, beatOffset: 0 };
-
-    const avgX = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / props.fixtures.length
-      : 0.5;
-    const avgY = props.fixtures.length > 0
-      ? props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / props.fixtures.length
-      : 0.5;
-
-    let replacement: Effect;
-    if (type === 'SpeedCurve') {
-      const sc = new SpeedCurveEffect();
-      sc.targetChannels = targetChannels;
-      sc.targetFixtureIds = targetFixtureIds;
-      replacement = sc as unknown as Effect;
-    } else if (type === 'Displacement') {
-      const d = new DisplacementEffect();
-      d.targetChannels = targetChannels;
-      d.targetFixtureIds = targetFixtureIds;
-      d.strength = strength;
-      replacement = d as unknown as Effect;
-    } else if (type === 'Noise') {
-      const n = new NoiseEffect();
-      n.targetChannels = targetChannels;
-      n.targetFixtureIds = targetFixtureIds;
-      n.strength = strength;
-      n.speed = speed;
-      replacement = n as unknown as Effect;
-    } else if (type === 'Sequencer') {
-      const s = new SequencerEffect();
-      s.targetChannels = targetChannels;
-      s.targetFixtureIds = targetFixtureIds;
-      s.strength = strength;
-      s.sequencerParams = { ...s.sequencerParams, originX: avgX, originY: avgY, angle: Math.PI / 2 };
-      replacement = s as unknown as Effect;
-    } else if (type === 'Color') {
-      const col = new ColorEffect();
-      col.targetChannels = targetChannels;
-      col.targetFixtureIds = targetFixtureIds;
-      col.strength = strength;
-      replacement = col as unknown as Effect;
-    } else {
-      const w = new WaveformEffect();
-      w.targetChannels = targetChannels;
-      w.targetFixtureIds = targetFixtureIds;
-      w.strength = strength;
-      w.speed = speed;
-      w.fanning = 0.1;
-      w.direction = 'LINEAR';
-      w.originX = avgX;
-      w.originY = avgY;
-      w.angle = 0;
-      w.reverse = false;
-      replacement = w as unknown as Effect;
-    }
-
-    const idx = effectEngine.effects.indexOf(effect);
-    if (idx >= 0) {
-      effectEngine.effects.splice(idx, 1, replacement);
-    } else {
-      effectEngine.addEffect(replacement);
-    }
+    if (!effectEngine || !before || effect.plugin === plugin) return;
+    const replacement = newInstance(plugin, effect);
+    const idx = effectEngine.modifiers.indexOf(effect);
+    if (idx >= 0) effectEngine.modifiers.splice(idx, 1, replacement);
+    else effectEngine.addModifier(replacement);
     effectEngine.activeModifier.value = replacement;
     emit('change');
-    commitModifiers(before, `Switch Modifier to ${type}`);
+    commitModifiers(before, `Switch Modifier to ${getManifest(plugin)?.name ?? 'Modifier'}`);
   }
 
-  function reverseDirection(effect: Effect) {
+  function reverseDirection(effect: ModifierInstance) {
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     const selectedIds = props.fixtures.map(f => f.id);
@@ -492,12 +359,12 @@ export function useChaserModifiers(
     const before = captureModifiers();
     if (!effectEngine || !before) return;
     // `activeModifiers` is a filtered view; we need to move within the full effects array
-    const allEffects = effectEngine.effects;
+    const allEffects = effectEngine.modifiers;
     const fromEffect = activeModifiers.value[fromIndex];
     const toEffect = activeModifiers.value[toIndex];
     if (!fromEffect || !toEffect) return;
-    const fromGlobal = allEffects.indexOf(fromEffect as Effect);
-    const toGlobal = allEffects.indexOf(toEffect as Effect);
+    const fromGlobal = allEffects.indexOf(fromEffect as ModifierInstance);
+    const toGlobal = allEffects.indexOf(toEffect as ModifierInstance);
     if (fromGlobal < 0 || toGlobal < 0) return;
     const [moved] = allEffects.splice(fromGlobal, 1);
     allEffects.splice(toGlobal, 0, moved!);
@@ -508,14 +375,7 @@ export function useChaserModifiers(
   return {
     availableChannelTypes,
     activeModifiers,
-    canAddDisplacement,
-    canAddSpeedCurve,
-    addWaveformModifier,
-    addNoiseModifier,
-    addSequencerModifier,
-    addColorModifier,
-    addDisplacementModifier,
-    addSpeedCurveModifier,
+    addModifier,
     addPinnedModifier,
     switchModifierType,
     handleModifierDragEnd,

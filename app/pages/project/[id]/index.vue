@@ -248,7 +248,7 @@ useShortcuts([
         :nodes="sceneNodes"
         :selected-ids="selectedIds"
         :fixtures="flatFixtures"
-        :effects="engine.effects"
+        :effects="engine.modifiers"
         @select="handleSelect"
         @group="handleGroup"
         @ungroup="handleUngroup"

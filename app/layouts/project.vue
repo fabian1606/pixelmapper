@@ -44,6 +44,14 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <div v-else-if="projectError === 'incompatible'" class="flex items-center justify-center h-full">
+        <div class="text-center space-y-3 max-w-sm px-4">
+          <h2 class="text-lg font-semibold">Incompatible project</h2>
+          <p class="text-sm text-muted-foreground">This project was created with an incompatible version of Pixelmapper and cannot be opened.</p>
+          <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
+        </div>
+      </div>
+
       <div v-else-if="projectError === 'error'" class="flex items-center justify-center h-full">
         <div class="text-center space-y-3 max-w-sm px-4">
           <h2 class="text-lg font-semibold">Failed to load project</h2>

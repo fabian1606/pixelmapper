@@ -1,3 +1,4 @@
+import { getManifest } from '~/utils/plugins/plugin-store';
 import type { LiveMapping, SpeedConfig } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
@@ -181,7 +182,7 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
   } else if (mapping.type === 'dimmer-group') {
     applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, ctx);
   } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null && value !== undefined) {
-    const effect = engineStore.activeEffects.find((e: any) => e.id === mapping.effectId);
+    const effect = engineStore.modifiers.find((e: any) => e.id === mapping.effectId);
     if (effect) {
       const pk = mapping.paramKey;
       if (pk === 'strength') {
@@ -190,12 +191,17 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
         if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
       } else if (pk === 'fanning') {
         effect.fanning = value;
-      } else if (pk.startsWith('waveformParams.')) {
-        const paramName = pk.split('.')[1];
-        if (!effect.waveformParams) effect.waveformParams = { param: 0.5, start: 0, end: 1 };
-        if (paramName === 'param') effect.waveformParams.param = value;
-        else if (paramName === 'start') effect.waveformParams.start = value;
-        else if (paramName === 'end') effect.waveformParams.end = value;
+      } else if (pk.startsWith('params.') || pk.startsWith('waveformParams.')) {
+        // Plugin param: the 0–1 control value maps onto the param's range.
+        const key = pk.slice(pk.indexOf('.') + 1);
+        const def = getManifest(effect.plugin)?.params.find(p => p.key === key);
+        if (def && (def.type === 'number' || def.type === 'int')) {
+          const v = def.min + value * (def.max - def.min);
+          effect.params = { ...effect.params, [key]: def.type === 'int' ? Math.round(v) : v };
+        }
+        else if (def?.type === 'bool') {
+          effect.params = { ...effect.params, [key]: value >= 0.5 };
+        }
       }
       engineStore.triggerCanvasSync?.();
     }

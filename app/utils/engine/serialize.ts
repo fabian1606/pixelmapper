@@ -3,11 +3,28 @@ import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
 import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
-import type { Effect } from './types'
+import type { ModifierInstance } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
 import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
-import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command'
+import { cloneModifiers } from './modifiers'
+
+// ─── Schema version ───────────────────────────────────────────────────────────
+
+/**
+ * Persisted format version (ADR D24). Version 2 introduced modifier
+ * instances backed by content plugins; version-1 projects and presets are
+ * not migrated.
+ */
+export const SCHEMA_VERSION = 2
+
+/** Thrown when a snapshot has an incompatible schema version. */
+export class IncompatibleProjectError extends Error {
+  constructor(readonly found: unknown) {
+    super('This project was created with an incompatible version of Pixelmapper and cannot be opened.')
+    this.name = 'IncompatibleProjectError'
+  }
+}
 
 // ─── Serialized types (plain JSON-safe objects) ───────────────────────────────
 
@@ -76,11 +93,13 @@ export interface ConnectorSnapshot {
 }
 
 export interface ProjectSnapshot {
+  /** Persisted format version; must equal `SCHEMA_VERSION`. */
+  schemaVersion: number
   sceneNodes: SerializedNode[]
   savedPresets: Preset[]
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
-  activeEffects: Effect[]
+  modifiers: ModifierInstance[]
   livePages?: LivePage[]
   /** Controller instances persisted with the project. Auto-connect on load. */
   liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
@@ -166,7 +185,7 @@ export function serializeProject(
   savedPresets: Preset[],
   pinnedModifiers: PinnedModifier[],
   globalBases: Record<string, number>,
-  activeEffects: Effect[],
+  modifiers: ModifierInstance[],
   livePages: LivePage[] = [],
   liveControllers: string[] = [],
   selectedPresetId: string | null = null,
@@ -177,11 +196,12 @@ export function serializeProject(
   savedPositions: MovingHeadPosition[] = [],
 ): ProjectSnapshot {
   return {
+    schemaVersion: SCHEMA_VERSION,
     sceneNodes: sceneNodes.map(serializeNode),
     savedPresets: JSON.parse(JSON.stringify(savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(pinnedModifiers)),
     globalBases: { ...globalBases },
-    activeEffects: JSON.parse(JSON.stringify(activeEffects)),
+    modifiers: JSON.parse(JSON.stringify(modifiers)),
     livePages: JSON.parse(JSON.stringify(livePages)),
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
     savedPositions: JSON.parse(JSON.stringify(savedPositions)),
@@ -303,7 +323,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   savedPresets: Preset[]
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
-  activeEffects: Effect[]
+  modifiers: ModifierInstance[]
   livePages: LivePage[]
   selectedPresetId: string | null
   globalBpm: number
@@ -311,13 +331,14 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   activeSectionMembers: Record<string, string[]>
   savedPositions: MovingHeadPosition[]
 } {
+  if (snapshot?.schemaVersion !== SCHEMA_VERSION) throw new IncompatibleProjectError(snapshot?.schemaVersion)
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
     // Dimmers always start off; ignore any persisted DIMMER base from older projects.
     globalBases: { ...snapshot.globalBases, DIMMER: 0 },
-    activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
+    modifiers: cloneModifiers(snapshot.modifiers ?? []),
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
     selectedPresetId: snapshot.selectedPresetId ?? null,
     globalBpm: snapshot.globalBpm ?? 120,

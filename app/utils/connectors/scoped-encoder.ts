@@ -1,6 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect, BlendMode } from '~/utils/engine/types';
-import { buildLayoutBin, buildChannelsBin, buildEffectsBin, buildStripSlotsPacket } from './binary-encoder';
+import type { ModifierInstance, BlendMode } from '~/utils/engine/types';
+import { buildLayoutBin, buildChannelsBin, buildModifiersBin, buildStripSlotsPacket } from './binary-encoder';
+import { getManifest } from '~/utils/plugins/plugin-store';
 
 // Builds binary packets scoped to a single fixture — used by the
 // WebSocketConnector so each ESP32-S3 node only renders the DMX channels
@@ -10,9 +11,11 @@ import { buildLayoutBin, buildChannelsBin, buildEffectsBin, buildStripSlotsPacke
 //  1. The fixture's `startAddress` is rebased to 1, so DMX indices on the
 //     ESP32 start at 0 and its buffer stays small (engine resizes via
 //     sync_layout).
-//  2. Effects are filtered to those that target this fixture (or all
-//     fixtures). Their `targetFixtureIds` is rewritten to the single scoped
-//     fixture's id so the bitmask in buildEffectsBin selects bit 0.
+//  2. Modifiers are filtered to those that target this fixture (or all
+//     fixtures). Their `targetFixtureIds` is rewritten to the scoped
+//     fixtures' ids so the bitmask in buildModifiersBin selects them.
+// The blend mode argument is unused (blend modes are per modifier instance);
+// on-device rendering is replaced by streamed frames in plan P6.2.
 
 export interface ScopedPackets {
   layoutPacket:    Uint8Array;
@@ -28,7 +31,7 @@ export interface FixtureSlotInput {
   ledOffset?: number;
 }
 
-function effectTargetsFixture(effect: Effect, fixtureId: string | number): boolean {
+function effectTargetsFixture(effect: ModifierInstance, fixtureId: string | number): boolean {
   // Empty/missing targetFixtureIds means "all fixtures"
   if (!effect.targetFixtureIds || effect.targetFixtureIds.length === 0) return true;
   return effect.targetFixtureIds.includes(fixtureId);
@@ -36,8 +39,8 @@ function effectTargetsFixture(effect: Effect, fixtureId: string | number): boole
 
 export function buildScopedPackets(
   fixture: Fixture,
-  allEffects: Effect[],
-  blendMode: BlendMode,
+  allEffects: ModifierInstance[],
+  _blendMode: BlendMode,
 ): ScopedPackets {
   // Shallow-clone the fixture and rebase its startAddress. Channels keep their
   // addressOffset; the encoder computes dmx_index = startAddress - 1 + addressOffset,
@@ -48,7 +51,7 @@ export function buildScopedPackets(
     { startAddress: 1 },
   );
 
-  const scopedEffects: Effect[] = allEffects
+  const scopedEffects: ModifierInstance[] = allEffects
     .filter(fx => effectTargetsFixture(fx, fixture.id))
     .map(fx => ({
       ...fx,
@@ -60,7 +63,7 @@ export function buildScopedPackets(
   return {
     layoutPacket:   buildLayoutBin([scopedFixture]),
     channelsPacket: buildChannelsBin([scopedFixture]),
-    effectsPacket:  buildEffectsBin(scopedEffects, [scopedFixture], blendMode),
+    effectsPacket:  buildModifiersBin(scopedEffects, [scopedFixture], getManifest).packet,
   };
 }
 
@@ -72,8 +75,8 @@ export function buildScopedPackets(
  */
 export function buildMultiScopedPackets(
   slots: FixtureSlotInput[],
-  allEffects: Effect[],
-  blendMode: BlendMode,
+  allEffects: ModifierInstance[],
+  _blendMode: BlendMode,
 ): ScopedPackets {
   // Rebase each fixture so its DMX indices follow on from the previous slot.
   let nextStart = 1;
@@ -94,7 +97,7 @@ export function buildMultiScopedPackets(
 
   // Effects that target at least one fixture in this scope.
   const sourceFixtureIds = slots.map(s => s.fixture.id);
-  const scopedEffects: Effect[] = allEffects
+  const scopedEffects: ModifierInstance[] = allEffects
     .filter(fx => sourceFixtureIds.some(id => effectTargetsFixture(fx, id)))
     .map(fx => ({
       ...fx,
@@ -120,7 +123,7 @@ export function buildMultiScopedPackets(
   return {
     layoutPacket:    buildLayoutBin(allScopedFixtures),
     channelsPacket:  buildChannelsBin(allScopedFixtures),
-    effectsPacket:   buildEffectsBin(scopedEffects, allScopedFixtures, blendMode),
+    effectsPacket:   buildModifiersBin(scopedEffects, allScopedFixtures, getManifest).packet,
     stripSlotsPacket,
   };
 }
@@ -131,7 +134,7 @@ export function buildMultiScopedPackets(
  */
 export function scopedFingerprint(
   fixture: Fixture,
-  allEffects: Effect[],
+  allEffects: ModifierInstance[],
   blendMode: BlendMode,
 ): { layout: string; channels: string; effects: string } {
   let layout = `${fixture.id};${fixture.fixturePosition.x};${fixture.fixturePosition.y};${fixture.rotation ?? 0};${fixture.fixtureSize.x};${fixture.fixtureSize.y};`;
@@ -149,21 +152,10 @@ export function scopedFingerprint(
     channels += cc.stepValues.slice(0, cc.stepsCount).join(',') + '|';
   }
 
-  let effects = blendMode + '|';
+  let effects = '';
   for (const fx of allEffects) {
     if (!effectTargetsFixture(fx, fixture.id)) continue;
-    effects += `${fx.id}:${fx.targetChannels?.join(',') ?? ''}:${fx.direction}:${fx.originX}:${fx.originY}:${fx.angle}:${fx.strength}:${fx.reverse ? 1 : 0}:${fx.fanning}:`;
-    effects += `${fx.speed?.mode}|${fx.speed?.timeMs}|${fx.speed?.beatValue}|${fx.speed?.beatOffset};`;
-    const wf = (fx as any).waveformShape;
-    const wp = (fx as any).waveformParams ?? {};
-    effects += `${wf}:${wp.param}:${wp.start}:${wp.end}:${wp.offset};`;
-    const np = (fx as any).noiseParams;
-    if (np) effects += `n:${np.noiseType}:${np.scale}:${np.channelMode}:${np.colorVariation}:${np.fade}:${np.threshold};`;
-    const sp = (fx as any).sequencerParams;
-    if (sp) effects += `s:${sp.patternType}:${sp.originX}:${sp.originY}:${sp.angle}:${sp.scale}:${sp.count}:${sp.density}:${sp.densityVariation}:${sp.invert ? 1 : 0};`;
-    const cp = (fx as any).colorParams;
-    if (cp) effects += `c:${cp.hueShift}:${cp.saturation}:${cp.hueRange}:${cp.satRange};`;
-    effects += '|';
+    effects += `${JSON.stringify(fx)}|`;
   }
 
   return { layout, channels, effects };
@@ -172,7 +164,7 @@ export function scopedFingerprint(
 /** Fingerprint for multi-slot connections. */
 export function multiScopedFingerprint(
   slots: FixtureSlotInput[],
-  allEffects: Effect[],
+  allEffects: ModifierInstance[],
   blendMode: BlendMode,
 ): { layout: string; channels: string; effects: string; strip: string } {
   let strip = '';
@@ -186,21 +178,10 @@ export function multiScopedFingerprint(
   }
   // Rebuild effects fingerprint across all slots
   const sourceFixtures = slots.map(s => s.fixture);
-  let effects = blendMode + '|';
+  let effects = '';
   for (const fx of allEffects) {
     if (!sourceFixtures.some(f => effectTargetsFixture(fx, f.id))) continue;
-    effects += `${fx.id}:${fx.targetChannels?.join(',') ?? ''}:${fx.direction}:${fx.originX}:${fx.originY}:${fx.angle}:${fx.strength}:${fx.reverse ? 1 : 0}:${fx.fanning}:`;
-    effects += `${fx.speed?.mode}|${fx.speed?.timeMs}|${fx.speed?.beatValue}|${fx.speed?.beatOffset};`;
-    const wf = (fx as any).waveformShape;
-    const wp = (fx as any).waveformParams ?? {};
-    effects += `${wf}:${wp.param}:${wp.start}:${wp.end}:${wp.offset};`;
-    const np = (fx as any).noiseParams;
-    if (np) effects += `n:${np.noiseType}:${np.scale}:${np.channelMode}:${np.colorVariation}:${np.fade}:${np.threshold};`;
-    const sp = (fx as any).sequencerParams;
-    if (sp) effects += `s:${sp.patternType}:${sp.originX}:${sp.originY}:${sp.angle}:${sp.scale}:${sp.count}:${sp.density}:${sp.densityVariation}:${sp.invert ? 1 : 0};`;
-    const cp = (fx as any).colorParams;
-    if (cp) effects += `c:${cp.hueShift}:${cp.saturation}:${cp.hueRange}:${cp.satRange};`;
-    effects += '|';
+    effects += `${JSON.stringify(fx)}|`;
   }
   return { layout: combined.layout, channels: combined.channels, effects, strip };
 }

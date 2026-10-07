@@ -20,12 +20,12 @@ import type {
   ViewportInfo,
   ChannelRef,
   Json,
-  BlendMode,
 } from '@pixelmapper/extension-api';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { FixtureGroup } from '~/utils/engine/core/group';
-import type { Effect, ChannelType } from '~/utils/engine/types';
+import type { ModifierInstance, ChannelType } from '~/utils/engine/types';
+import { modifierName } from '~/utils/engine/modifiers';
 import type { Preset } from '~/utils/engine/preset-types';
 import type { LivePage, LiveWidget } from '~/utils/live/types';
 import { modelTick } from './model-tick';
@@ -192,40 +192,25 @@ export function signatureTargetFor(fixture: Fixture, channelIndex: number): Sign
 
 // ── Modifiers ───────────────────────────────────
 
-/** Legacy effect → built-in plugin id until the modifier rebuild (plan P3). */
-function legacyPluginOf(effect: Effect): { plugin: string; name: string; params: Record<string, unknown> } {
-  if (effect.colorParams) return { plugin: 'builtin:color-adjust', name: 'Color', params: { ...effect.colorParams } };
-  if (effect.sequencerParams) return { plugin: 'builtin:sequencer', name: 'Sequencer', params: { ...effect.sequencerParams } };
-  if (effect.noiseParams) return { plugin: 'builtin:noise', name: 'Noise', params: { ...effect.noiseParams } };
-  if (effect.displacementParams) return { plugin: 'builtin:displacement', name: 'Displacement', params: { ...effect.displacementParams } };
-  if (effect.speedCurveParams) return { plugin: 'builtin:speed-curve', name: 'Speed Curve', params: { ...effect.speedCurveParams } };
+/** Projects a modifier instance into its scope view. */
+export function modifierView(m: ModifierInstance): ModifierInstanceView {
   return {
-    plugin: 'builtin:waveform',
-    name: 'Waveform',
-    params: { shape: effect.waveformShape ?? 'sine', ...(effect.waveformParams ?? {}) },
-  };
-}
-
-/** Projects a (legacy) effect into a modifier instance view. */
-export function modifierView(effect: Effect, blendMode: BlendMode): ModifierInstanceView {
-  const { plugin, name, params } = legacyPluginOf(effect);
-  return {
-    id: effect.id,
-    plugin,
-    name,
-    signature: effect.colorParams ? 'rgb' : 'scalar',
-    targetChannels: [...effect.targetChannels],
-    targetFixtureIds: effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined,
-    blendMode,
-    strength: effect.strength / 100,
-    speed: { ...effect.speed },
-    direction: effect.direction ?? 'NONE',
-    originX: effect.originX ?? 0.5,
-    originY: effect.originY ?? 0.5,
-    angle: effect.angle ?? 0,
-    fanning: effect.fanning,
-    reverse: effect.reverse ?? false,
-    params: jsonClone(params) as ModifierInstanceView['params'],
+    id: m.id,
+    plugin: m.plugin,
+    name: modifierName(m),
+    signature: m.signature,
+    targetChannels: [...m.targetChannels],
+    targetFixtureIds: m.targetFixtureIds ? [...m.targetFixtureIds] : undefined,
+    blendMode: m.blendMode,
+    strength: m.strength,
+    speed: { ...m.speed },
+    direction: m.direction ?? 'NONE',
+    originX: m.originX,
+    originY: m.originY,
+    angle: m.angle,
+    fanning: m.fanning,
+    reverse: m.reverse,
+    params: jsonClone(m.params) as ModifierInstanceView['params'],
   };
 }
 

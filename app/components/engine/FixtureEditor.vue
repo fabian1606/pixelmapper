@@ -18,8 +18,9 @@ import type { EffectEngine } from '~/utils/engine/engine';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { userColor } from '~/composables/live-ops/colors';
 import CollaboratorCursors from './CollaboratorCursors.vue';
-import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
-import type { Effect } from '~/utils/engine/types';
+import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
+import type { ModifierInstance } from '~/utils/engine/types';
 
 interface Props {
   fixtures: Fixture[];
@@ -198,7 +199,7 @@ watch(camera, (c) => {
 
 const activeModifier = computed(() => effectEngine?.activeModifier.value ?? null);
 
-let modifierDragBeforeEffects: Effect[] | null = null;
+let modifierDragBeforeEffects: ModifierInstance[] | null = null;
 const isSpatialDragging = ref(false);
 
 watch(selectedIdsModel, (newVal) => {
@@ -226,9 +227,9 @@ watch(remoteSelections, (sel) => {
   fixtureCanvas.value?.syncRemoteSelections(entries);
 });
 
-function handleModifierChange(modifier: Effect, changes: Partial<Effect>) {
+function handleModifierChange(modifier: ModifierInstance, changes: Partial<ModifierInstance>) {
   if (!effectEngine) return;
-  if (!modifierDragBeforeEffects) modifierDragBeforeEffects = cloneEffectsList(effectEngine.effects);
+  if (!modifierDragBeforeEffects) modifierDragBeforeEffects = cloneModifiers(effectEngine.modifiers);
   Object.assign(modifier, changes);
   engineStore.flushEngineOutput?.();
 }
@@ -237,10 +238,10 @@ function handleSpatialDragStart() {
   isSpatialDragging.value = true;
 }
 
-function handleModifierDragEnd(modifier: Effect) {
+function handleModifierDragEnd(_modifier: ModifierInstance) {
   isSpatialDragging.value = false;
   if (modifierDragBeforeEffects && effectEngine) {
-    const afterEffects = cloneEffectsList(effectEngine.effects);
+    const afterEffects = cloneModifiers(effectEngine.modifiers);
     history.execute(new SetModifiersCommand(effectEngine, modifierDragBeforeEffects, afterEffects, 'Update Spatial Handle'));
     modifierDragBeforeEffects = null;
   }
@@ -461,31 +462,8 @@ function handleMouseUp(e?: MouseEvent) {
     <!-- Collaborator cursors + remote selections -->
     <CollaboratorCursors :camera="camera" />
 
-    <!-- Effect Spatial Preview -->
-    <div
-      v-if="isSpatialDragging && activeModifier && activeModifier.getPreviewCSS"
-      class="absolute left-0 top-0 pointer-events-none"
-      :style="{
-        width: `${WORLD_WIDTH}px`,
-        height: `${WORLD_HEIGHT}px`,
-        transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`,
-        transformOrigin: '0 0',
-      }"
-    >
-      <div
-        class="pointer-events-none"
-        :style="activeModifier.getPreviewCSS({
-          worldWidth: WORLD_WIDTH,
-          worldHeight: WORLD_HEIGHT,
-          camera,
-          viewportWidth: editorWidth,
-          viewportHeight: editorHeight
-        })"
-      />
-    </div>
-
     <FixtureEditorSpatialControls
-      v-if="activeModifier && (activeModifier.fanning !== 0 || !!(activeModifier as any).sequencerParams)"
+      v-if="activeModifier && (activeModifier.fanning !== 0 || !!activeModifier.params?.origin)"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"

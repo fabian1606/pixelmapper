@@ -20,7 +20,8 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { type SnapshotMap } from './commands/set-channel-values-command';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelSections } from './composables/use-channel-sections';
-import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
+import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
 import { usePresets } from '~/components/engine/composables/use-presets';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmPanelSection from '~/components/primitives/PmPanelSection.vue';
@@ -91,7 +92,7 @@ function toggleTab(tab: ChannelCategoryKey) {
 function stopAllOrSelected() {
   const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
   const snapshots = captureSnapshots(targetFixtures);
-  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  const beforeModifiers = effectEngine ? cloneModifiers(effectEngine.modifiers) : null;
   let modifiersChanged = false;
   
   // Also clear the active preset if "stop all" is used globally (not just for selected subset)
@@ -115,7 +116,7 @@ function stopAllOrSelected() {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
         if (effect.targetFixtureIds?.includes(f.id)) {
            effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
            modifiersChanged = true;
@@ -125,13 +126,13 @@ function stopAllOrSelected() {
   }
   
   if (effectEngine && modifiersChanged && beforeModifiers) {
-      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-        const eff = effectEngine.effects[i];
+      for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+        const eff = effectEngine.modifiers[i];
         if (eff && eff.targetFixtureIds?.length === 0) {
-           effectEngine.effects.splice(i, 1);
+           effectEngine.modifiers.splice(i, 1);
         }
       }
-      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), 'Stop All Modifiers'));
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneModifiers(effectEngine.modifiers), 'Stop All Modifiers'));
   }
 
   commitSnapshots(snapshots, 'Stop All');
@@ -141,7 +142,7 @@ function resetActiveTabGroup() {
   if (!activeTab.value) return;
   const fixtures = getSelectedFixtures();
   const snapshots = captureSnapshots(fixtures);
-  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  const beforeModifiers = effectEngine ? cloneModifiers(effectEngine.modifiers) : null;
   let modifiersChanged = false;
   
   for (const f of fixtures) {
@@ -155,7 +156,7 @@ function resetActiveTabGroup() {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
          if (effect.targetFixtureIds?.includes(f.id) && effect.targetChannels?.some(t => tabChannelFilter(t))) {
            effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
            modifiersChanged = true;
@@ -165,13 +166,13 @@ function resetActiveTabGroup() {
   }
   
   if (effectEngine && modifiersChanged && beforeModifiers) {
-      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-        const eff = effectEngine.effects[i];
+      for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+        const eff = effectEngine.modifiers[i];
         if (eff && eff.targetFixtureIds?.length === 0) {
-           effectEngine.effects.splice(i, 1);
+           effectEngine.modifiers.splice(i, 1);
         }
       }
-      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), `Reset ${activeTab.value} Modifiers`));
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneModifiers(effectEngine.modifiers), `Reset ${activeTab.value} Modifiers`));
   }
 
   commitSnapshots(snapshots, `Reset ${activeTab.value}`);
@@ -266,7 +267,7 @@ const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
         if (effect.targetFixtureIds?.includes(fixture.id)) {
            for (const t of (effect.targetChannels || [])) {
               for (const cat of CHANNEL_CATEGORIES) {

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue';
 import type { SceneNode, FixtureGroup } from '~/utils/engine/core/group';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import FixtureSidebarNode from './FixtureSidebarNode.vue';
 import PresetsSidebar from './PresetsSidebar.vue';
 import SelectionInfoSection from './SelectionInfoSection.vue';
@@ -22,7 +22,7 @@ const props = defineProps<{
   nodes: SceneNode[];
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
-  effects: Effect[];
+  effects: ModifierInstance[];
 }>();
 
 const emit = defineEmits<{

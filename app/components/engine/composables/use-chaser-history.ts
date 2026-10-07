@@ -1,9 +1,10 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { SetChannelValuesCommand, createSnapshot, type SnapshotMap } from '../commands/set-channel-values-command';
-import { SetModifiersCommand, cloneEffectsList } from '../commands/set-modifiers-command';
+import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
 
 export function useChaserHistory(props: { fixtures: Fixture[] }, effectEngine: EffectEngine | undefined) {
   const history = useHistory();
@@ -42,14 +43,14 @@ export function useChaserHistory(props: { fixtures: Fixture[] }, effectEngine: E
     }
   }
 
-  function captureModifiers(): Effect[] | null {
+  function captureModifiers(): ModifierInstance[] | null {
     if (!effectEngine) return null;
-    return cloneEffectsList(effectEngine.effects);
+    return cloneModifiers(effectEngine.modifiers);
   }
 
-  function commitModifiers(before: Effect[], description: string) {
+  function commitModifiers(before: ModifierInstance[], description: string) {
     if (!effectEngine) return;
-    const after = cloneEffectsList(effectEngine.effects);
+    const after = cloneModifiers(effectEngine.modifiers);
     // Basic diff: if JSON strings are different, we commit
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       history.execute(new SetModifiersCommand(effectEngine, before, after, description));

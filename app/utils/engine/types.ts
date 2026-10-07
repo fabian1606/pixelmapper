@@ -1,82 +1,6 @@
-export type WaveformShape = 'sine' | 'square' | 'triangle' | 'sawtooth' | 'bounce' | 'ramp' | 'smooth';
-
-export type NoiseType = 'white' | 'perlin' | 'step';
-export type ChannelMode = 'linked' | 'independent';
-
-export interface NoiseParams {
-  noiseType: NoiseType;
-  /** Spatial frequency for Perlin noise (0.1–10). Higher = faster change between fixtures. */
-  scale: number;
-  channelMode: ChannelMode;
-  /** 0 = channels correlated (white output), 1 = fully decorrelated (colorful). Only active when channelMode='independent'. */
-  colorVariation: number;
-  /** Crossfade between consecutive random values as fraction of step duration (0 = hard snap, 1 = continuous). */
-  fade: number;
-  /** Only output noise above this level (0–1). Values below become 0 → sparkle/gate effect. */
-  threshold: number;
-}
-
-export interface ColorParams {
-  /** Hue rotation in degrees (-180 to +180). 0 = no change. */
-  hueShift: number;
-  /** Saturation multiplier. 0 = grayscale, 1 = unchanged, 2 = vivid. */
-  saturation: number;
-  /** Hue cycle range in degrees (0–180). Waveform oscillates hueShift ± hueRange. */
-  hueRange?: number;
-  /** Saturation cycle range (0–1). Waveform oscillates saturation ± satRange. */
-  satRange?: number;
-}
-
-export type SequencerPatternType = 'split' | 'checkerboard' | 'sections' | 'scatter' | 'flow';
-
-export interface SequencerParams {
-  patternType: SequencerPatternType;
-  /** Pattern anchor in normalized world space (0–1). */
-  originX: number;
-  originY: number;
-  /** Direction of pattern axis in radians. 0 = right (+X). */
-  angle: number;
-  /** Cell/band size relative to world width (0.01–1.0). */
-  scale: number;
-  /** Number of section bands (2–16, sections pattern only). */
-  count: number;
-  /** On-probability for scatter/flow pattern (0–1). */
-  density: number;
-  /** How much density shifts randomly per cycle (0–1, scatter only). */
-  densityVariation: number;
-  invert: boolean;
-}
-
-export interface WaveformShapeParams {
-  /**
-   * Normalized 0–1 parameter controlling the adjustable aspect of the shape.
-   * - sine:     unused (strength is the only control)
-   * - square:   dutyCycle (0.05–0.95, default 0.5)
-   * - triangle: peak position (0.05–0.95, default 0.5)
-   * - sawtooth: direction (< 0.5 = falling, ≥ 0.5 = rising)
-   * - bounce:   bounce count mapped to 1–5 integer
-   * - ramp:     softness (0 = sharp step, 1 = very smooth S-curve)
-   */
-  param: number;
-  /** Where in the cycle the waveform starts (0–1, default 0). */
-  start: number;
-  /** Where in the cycle the waveform ends (0–1, default 1). */
-  end: number;
-  /**
-   * Vertical baseline of the wave in [-1, 1]. 0 = centered on the base channel value.
-   * Shifts the entire wave by `offset * strength` in channel units; also acts as the
-   * hold value in the inactive (start/end) zones.
-   */
-  offset?: number;
-  /**
-   * Explicit floor level for the inactive (pre-start / post-end) zone, as a
-   * fraction of the base channel value (0..1). Decoupled from strength: floor=0
-   * always yields black regardless of strength. Undefined or negative = disabled
-   * (falls back to legacy offset-based hold behavior).
-   */
-  floor?: number;
-}
-
+/**
+ * Core engine model types.
+ */
 export type ChannelType =
   // Color
   | 'RED' | 'GREEN' | 'BLUE' | 'WHITE' | 'WARM_WHITE' | 'COOL_WHITE' | 'AMBER' | 'UV'
@@ -136,178 +60,44 @@ export interface SpatialVector {
   magnitude: number;
 }
 
-export interface EffectContext {
-  /**
-   * Continuous time value in milliseconds.
-   */
-  time: number;
-
-  /**
-   * The index of the fixture currently being rendered.
-   */
-  index: number;
-
-  /**
-   * The total numbers of fixtures in the engine.
-   */
-  fixtureCount: number;
-
-  /**
-   * The physical X position of the fixture in normalized world space (0.0 - 1.0).
-   */
-  x: number;
-
-  /**
-   * The physical Y position of the fixture in normalized world space (0.0 - 1.0).
-   */
-  y: number;
-}
-
-export type DisplacementPatternType = 'perlin' | 'white';
-
-export interface DisplacementParams {
-  patternType: DisplacementPatternType;
-  /** X-axis displacement amount in normalized world units (0–0.5). */
-  amountX: number;
-  /** Y-axis displacement amount in normalized world units (0–0.5). */
-  amountY: number;
-  /** Spatial frequency of the displacement field (0.1–10). */
-  scale: number;
-  /** Seed for deterministic white-noise displacement. */
-  seed: number;
-}
-
-export interface CurvePoint {
-  /** Normalized x position in the cycle [0, 1], must be monotonically increasing. */
-  x: number;
-  /** Speed multiplier [0, maxMultiplier]. 1.0 = unchanged speed. */
-  y: number;
-}
-
-export interface SpeedCurveParams {
-  /** Control points defining the speed multiplier curve. At least [{x:0},{x:1}]. */
-  points: CurvePoint[];
-  /** Y-axis maximum (slider upper bound). Typical: 4. */
-  maxMultiplier: number;
-  /** How many beats one full curve cycle spans. */
-  cycleBeats: 1 | 2 | 4 | 8;
-}
-
 export type BlendMode = 'add' | 'override' | 'multiply' | 'max' | 'min';
 
-export interface Effect {
-  /**
-   * Unique identifier for the effect instance.
-   */
-  id: string;
+/** Value space of a modifier (ADR D4): one channel, linear RGB, or pan/tilt. */
+export type Signature = 'scalar' | 'rgb' | 'panTilt';
 
+/** Value of one plugin param (see the param schema, ADR §6.2). */
+export type ParamValue = import('@pixelmapper/extension-api').ParamValue;
+
+/**
+ * A modifier instance (ADR §6.3). The plugin (content hash) computes the
+ * output; every other field is owned by the host. Plain JSON — persisted in
+ * the project, snapshotted by presets and pinned modifiers, synced live.
+ */
+export interface ModifierInstance {
+  id: string;
+  /** Content hash of the plugin (`sha256:…`). */
+  plugin: string;
+  /** One of the plugin manifest's signatures. */
+  signature: Signature;
   /**
-   * The channel types this effect applies to (e.g., ['RED', 'DIMMER']).
+   * Channel types the modifier applies to. For `scalar` these are the
+   * rendered channels; for `rgb`/`panTilt` they only scope the UI category.
    */
   targetChannels: ChannelType[];
-
-  /**
-   * Optional array of fixture IDs this effect should be restricted to.
-   * If missing, applies to all fixtures.
-   */
+  /** Restricted fixtures; undefined = all. */
   targetFixtureIds?: (string | number)[];
-
-  /**
-   * The direction the effect propagates across the fixtures.
-   */
-  direction?: EffectDirection;
-
-  /**
-   * The X origin for spatial effects (normalized 0-1).
-   */
-  originX?: number;
-
-  /**
-   * The Y origin for spatial effects (normalized 0-1).
-   */
-  originY?: number;
-
-  /**
-   * The angle for spatial effects in radians.
-   */
-  angle?: number;
-
-  /**
-   * The strength (amplitude) of the effect to apply around the base value (usually 0 to 255).
-   */
+  blendMode: BlendMode;
+  /** 0–1. */
   strength: number;
-
-  /**
-   * Reverses the propagation direction of the effect.
-   */
-  reverse?: boolean;
-
-  /**
-   * Defines how much the phase is offset per fixture. If 0, all fixtures run in sync.
-   */
-  fanning: number;
-
-  /**
-   * Speed configuration for the effect.
-   */
   speed: SpeedConfig;
-
-  /**
-   * The waveform shape to use. Defaults to 'sine' for backwards compatibility.
-   */
-  waveformShape?: WaveformShape;
-
-  /**
-   * Shape-specific parameter (normalized 0–1). See WaveformShapeParams for details.
-   */
-  waveformParams?: WaveformShapeParams;
-
-  /**
-   * Noise-specific parameters. Only present when the effect is a NoiseEffect.
-   */
-  noiseParams?: NoiseParams;
-
-  /**
-   * Sequencer-specific parameters. Only present when the effect is a SequencerEffect.
-   */
-  sequencerParams?: SequencerParams;
-
-  /**
-   * Color-specific parameters. Only present when the effect is a ColorEffect.
-   */
-  colorParams?: ColorParams;
-
-  /**
-   * Displacement-specific parameters. Only present when the effect is a DisplacementEffect.
-   */
-  displacementParams?: DisplacementParams;
-
-  /**
-   * Speed-curve-specific parameters. Only present when the effect is a SpeedCurveEffect.
-   */
-  speedCurveParams?: SpeedCurveParams;
-
-  /**
-   * Called once per frame before rendering to accumulate state (e.g., phase based on speed and delta time).
-   */
-  update?(deltaTime: number, engine: any): void;
-
-  /**
-   * Renders the raw effect wave for a given context.
-   * Expected to return a normalized shape value between -1 and 1.
-   * @param context The current context the effect is being rendered for.
-   */
-  render(context: EffectContext): number;
-
-  /**
-   * Optional method to render a background CSS preview of the effect's spatial distribution.
-   * Expected to return a style object mapping (e.g., { background: '...' }).
-   */
-  getPreviewCSS?(params: {
-    worldWidth: number;
-    worldHeight: number;
-    camera: { x: number; y: number; scale: number };
-    viewportWidth: number;
-    viewportHeight: number;
-  }): Record<string, string>;
+  direction: EffectDirection;
+  originX: number;
+  originY: number;
+  /** Radians. */
+  angle: number;
+  /** World units per cycle of spatial phase offset (0 = in sync). */
+  fanning: number;
+  reverse: boolean;
+  /** Plugin params by key (defaults from the manifest). */
+  params: Record<string, ParamValue>;
 }
