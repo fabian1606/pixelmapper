@@ -1,0 +1,96 @@
+/**
+ * Extension manifest and context (ADR §5.1, §5.2).
+ *
+ * Every extension has an entry file `extensions/<id>/extension.ts` whose
+ * default export is `defineExtension({...})`. The registry validates the
+ * manifest at registration.
+ */
+import type { Component, ComputedRef } from 'vue';
+import type { Command, CommandDefinition, CoreCommandFactory } from './commands';
+import type { ConnectorDefinition, ControllerDefinition, LiveWidgetDefinition } from './connectors';
+import type { FixtureKindDefinition } from './kinds';
+import type { PmInputName, ReplacementContribution } from './replaceables';
+import type { ScopeName, ScopeRef } from './scopes';
+import type { SlotContribution } from './slots';
+import { getHostApi } from './host';
+
+/** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
+export const API_VERSION = '1.0.0';
+
+/** Everything an extension can contribute. All lists are optional. */
+export interface ExtensionContributions {
+  slots?: SlotContribution[];
+  replaces?: ReplacementContribution[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fixtureKinds?: FixtureKindDefinition<any>[];
+  connectors?: ConnectorDefinition[];
+  controllers?: ControllerDefinition[];
+  liveWidgets?: LiveWidgetDefinition[];
+  commands?: CommandDefinition[];
+}
+
+/** API passed to the optional imperative `activate` hook. */
+export interface ExtensionApi {
+  /** The extension's own id. */
+  extensionId: string;
+  /** Core command constructors. */
+  commands: CoreCommandFactory;
+  /** Execute a command through history (undo, sync, persistence). */
+  run(command: Command): void;
+}
+
+/** An extension manifest. */
+export interface ExtensionManifest {
+  /** kebab-case, globally unique. */
+  id: string;
+  /** Semver of the extension. */
+  version: string;
+  /** Semver range of `@pixelmapper/extension-api`, e.g. `'^1.0.0'`. */
+  apiVersion: string;
+  displayName: string;
+  /** Read by humans and AI. */
+  description: string;
+  contributes?: ExtensionContributions;
+  /** Called once after registration. May return a disposer. */
+  activate?(api: ExtensionApi): void | (() => void);
+}
+
+/** Identity helper that types an extension manifest. */
+export function defineExtension(manifest: ExtensionManifest): ExtensionManifest {
+  return manifest;
+}
+
+/** Context of a component rendered by the extension host. */
+export interface ExtensionContext {
+  /** Id of the extension owning the component (`null` for core components). */
+  extensionId: string | null;
+  /** Slot the component is rendered in, e.g. `'properties/color:actions'`. */
+  slotId: string | null;
+  /** All scopes visible at this point (inherited from ancestors). */
+  scopes: { readonly [K in ScopeName]?: ScopeRef<K> };
+  /** Execute a command through history (undo, sync, persistence). */
+  run(command: Command): void;
+  /** Typed core command constructors. */
+  commands: CoreCommandFactory;
+}
+
+/**
+ * Reads an inherited scope. Returns a readonly `shallowRef` whose value is
+ * `undefined` when no ancestor provides the scope.
+ */
+export function useScope<K extends ScopeName>(name: K): ScopeRef<K> {
+  return getHostApi().useScope(name);
+}
+
+/** Returns the extension context of the calling component. */
+export function useExtensionContext(): ExtensionContext {
+  return getHostApi().useExtensionContext();
+}
+
+/**
+ * Resolves the active implementation of a `pm.*` input (core default or the
+ * user's chosen replacement). Render with `<component :is="Fader" … />`.
+ */
+export function useReplaceable(name: PmInputName): ComputedRef<Component> {
+  return getHostApi().useReplaceable(name);
+}
