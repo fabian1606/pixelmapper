@@ -7,6 +7,7 @@ import {
   ShaderMaterial,
 } from 'three';
 import type { PixelModel } from './fixture-adapter';
+import { resolvePhotometricInto } from '~/utils/engine/core/photometry';
 
 const VERT = /* glsl */ `
   attribute float aSize;
@@ -94,28 +95,13 @@ export class PixelCloud {
   }
 
   /** Per-frame hot loop: DMX buffer → per-pixel color. No allocations. */
-  updateColors(dmx: Uint8Array): void {
+  updateColors(dmx: Uint8Array, tSec: number): void {
     const m = this.model;
     const attr = this.colorAttr;
     if (!m || !attr) return;
     const out = attr.array as Float32Array;
-    const { entryStart, chanIdx, weights, dimmerIdx } = m;
     for (let p = 0; p < m.count; p++) {
-      const di = dimmerIdx[p]!;
-      const dim = di >= 0 ? (dmx[di] ?? 0) / 255 : 1;
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      const end = entryStart[p + 1]!;
-      for (let e = entryStart[p]!; e < end; e++) {
-        const w = (dmx[chanIdx[e]!] ?? 0) / 255;
-        r += weights[e * 3]! * w;
-        g += weights[e * 3 + 1]! * w;
-        b += weights[e * 3 + 2]! * w;
-      }
-      out[p * 3] = r * dim;
-      out[p * 3 + 1] = g * dim;
-      out[p * 3 + 2] = b * dim;
+      resolvePhotometricInto(m.photometry[p]!, dmx, tSec, out, p * 3);
     }
     attr.needsUpdate = true;
   }

@@ -208,9 +208,9 @@ impl WasmCanvas {
     }
 
     #[wasm_bindgen]
-    pub fn draw(&mut self, dmx_buffer: &[u8]) {
+    pub fn draw(&mut self, dmx_buffer: &[u8], elapsed_ms: f64) {
         if let Some(canvas) = &mut self.canvas {
-            crate::render::draw_frame(canvas, &self.render_state, &self.fixtures, &self.svg_cache, dmx_buffer);
+            crate::render::draw_frame(canvas, &self.render_state, &self.fixtures, &self.svg_cache, dmx_buffer, elapsed_ms / 1000.0);
         }
     }
 

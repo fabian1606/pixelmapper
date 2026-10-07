@@ -26,24 +26,8 @@ pub fn parse_svg(svg_data: &str, beams: &[FixtureBeam]) -> Option<SvgCachedFixtu
     Some(SvgCachedFixture { tree, element_to_beam })
 }
 
-fn beam_color(beam: &FixtureBeam, dmx: &[u8]) -> Color {
-    let dim = beam.dimmer_index.and_then(|i| dmx.get(i)).copied().unwrap_or(255) as f32 / 255.0;
-
-    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer.
-    if beam.color_channels.is_empty() {
-        let v = (255.0 * dim).round().clamp(0.0, 255.0) as u8;
-        return Color::rgba(v, v, v, 255);
-    }
-
-    let (mut r, mut g, mut b) = (0.0f32, 0.0f32, 0.0f32);
-    for ch in &beam.color_channels {
-        let factor = dmx.get(ch.index).copied().unwrap_or(0) as f32 / 255.0;
-        r += ch.r as f32 * factor;
-        g += ch.g as f32 * factor;
-        b += ch.b as f32 * factor;
-    }
-    let clamp = |v: f32| (v * dim).round().clamp(0.0, 255.0) as u8;
-    Color::rgba(clamp(r), clamp(g), clamp(b), 255)
+fn beam_color(beam: &FixtureBeam, dmx: &[u8], t_sec: f64) -> Color {
+    crate::render::resolve_color(&crate::render::PhotoRefs::from_beam(beam), dmx, t_sec)
 }
 
 fn usvg_color_to_femto(paint: &usvg::Paint, opacity: f32) -> Option<Color> {
@@ -87,13 +71,14 @@ fn draw_node(
     fixture: &FixtureCanvasData,
     dmx: &[u8],
     scale: f32,
+    t_sec: f64,
     parent_transform: usvg::Transform,
 ) {
     match node {
         Node::Group(g) => {
             let combined = parent_transform.pre_concat(g.transform());
             for child in g.children() {
-                draw_node(canvas, child, cached, fixture, dmx, scale, combined);
+                draw_node(canvas, child, cached, fixture, dmx, scale, t_sec, combined);
             }
         }
         Node::Path(p) => {
@@ -116,7 +101,7 @@ fn draw_node(
             // Fill
             if let Some(fill) = p.fill() {
                 let color = if let Some(beam) = mapped_beam {
-                    beam_color(beam, dmx)
+                    beam_color(beam, dmx, t_sec)
                 } else if let Some(c) = usvg_color_to_femto(fill.paint(), fill.opacity().get()) {
                     c
                 } else {
@@ -126,7 +111,7 @@ fn draw_node(
             } else if mapped_beam.is_some() {
                 // No fill defined but beam is mapped — render DMX color anyway
                 let beam = mapped_beam.unwrap();
-                let color = beam_color(beam, dmx);
+                let color = beam_color(beam, dmx, t_sec);
                 canvas.fill_path(&mut fem_path, &Paint::color(color));
             }
 
@@ -149,6 +134,7 @@ pub fn draw_svg_fixture(
     half_w: f32,
     half_h: f32,
     scale: f32,
+    t_sec: f64,
 ) {
     let vb = cached.tree.view_box();
     let vb_w = vb.rect.width();
@@ -169,7 +155,7 @@ pub fn draw_svg_fixture(
 
     let identity = usvg::Transform::identity();
     for child in cached.tree.root().children() {
-        draw_node(canvas, child, cached, fixture, dmx, scale, identity);
+        draw_node(canvas, child, cached, fixture, dmx, scale, t_sec, identity);
     }
 
     canvas.restore();

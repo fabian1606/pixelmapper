@@ -21,6 +21,8 @@ import { AlignmentGuides3D, type AlignmentGuideData } from './alignment-guides-3
 import { PixelCloud } from './pixel-instances';
 import { BeamCones } from './beam-cones';
 import { FixtureBodies } from './fixture-bodies';
+import { StripSubstrates } from './strip-substrates';
+import { SvgPlanes } from './svg-planes';
 import { buildStage, type Stage } from './stage';
 import {
   FLOOR_MARGIN_METERS,
@@ -53,6 +55,8 @@ export interface TransformDelta {
 export interface SceneManagerCallbacks {
   /** Non-reactive accessor for the current mixed DMX output buffer. */
   getDmx: () => Uint8Array;
+  /** Non-reactive accessor for elapsed engine time in ms — drives strobe animation. */
+  getElapsed?: () => number;
   /** Non-reactive accessor for the (raw, un-proxied) fixture list. */
   getFixtures: () => Fixture[];
   /** Click selection. id === null → clicked empty space. Raw modifiers so the caller applies the shared additive rule itself. */
@@ -102,6 +106,8 @@ export class ThreeSceneManager {
   private pixels = new PixelCloud();
   private beams: BeamCones;
   private bodies: FixtureBodies;
+  private strips: StripSubstrates;
+  private svgPlanes: SvgPlanes;
   private stage: Stage;
   private alignGuides: AlignmentGuides3D;
 
@@ -164,6 +170,8 @@ export class ThreeSceneManager {
 
     this.beams = new BeamCones(this.scene);
     this.bodies = new FixtureBodies(this.scene);
+    this.strips = new StripSubstrates(this.scene);
+    this.svgPlanes = new SvgPlanes(this.scene);
     this.alignGuides = new AlignmentGuides3D(this.scene);
     this.scene.add(this.pixels.points);
     this.scene.add(this.pivot);
@@ -347,9 +355,22 @@ export class ThreeSceneManager {
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
-    const hits = this.raycaster.intersectObject(this.bodies.mesh, false);
-    const hit = hits.find(h => h.instanceId !== undefined);
-    return hit ? this.bodies.fixtureIdAt(hit.instanceId!) : undefined;
+    // Bodies (instanced boxes) plus the strip substrate tubes, so clicking
+    // anywhere on a strip's curve selects it — not just its anchor box.
+    const targets = this.strips.mesh.visible
+      ? [this.bodies.mesh, this.strips.mesh]
+      : [this.bodies.mesh];
+    const hits = this.raycaster.intersectObjects(targets, false);
+    for (const hit of hits) {
+      if (hit.object === this.bodies.mesh && hit.instanceId !== undefined) {
+        return this.bodies.fixtureIdAt(hit.instanceId);
+      }
+      if (hit.object === this.strips.mesh && hit.faceIndex != null) {
+        const id = this.strips.fixtureIdAtFace(hit.faceIndex);
+        if (id !== undefined) return id;
+      }
+    }
+    return undefined;
   }
 
   /** Projects a world position to canvas CSS-pixels; `visible` is false when it's behind the camera. */
@@ -452,6 +473,7 @@ export class ThreeSceneManager {
     this.selectedIds = new Set(ids);
     this.bodies.setSelection(this.selectedIds);
     this.beams.setSelection(this.selectedIds);
+    this.strips.setSelection(this.selectedIds);
     this.refreshPivot();
   }
 
@@ -530,8 +552,11 @@ export class ThreeSceneManager {
     this.pixels.rebuild(model.pixels);
     this.beams.rebuild(model.beams);
     this.bodies.rebuild(model.bodies);
+    this.strips.rebuild(model.strips);
+    this.svgPlanes.rebuild(model.svgPlanes);
     this.bodies.setSelection(this.selectedIds);
     this.beams.setSelection(this.selectedIds);
+    this.strips.setSelection(this.selectedIds);
     this.refreshPivot();
     this.updateStageToFit(model.bodies);
   }
@@ -562,8 +587,9 @@ export class ThreeSceneManager {
     const loop = () => {
       if (!this.running) return;
       const dmx = this.callbacks.getDmx();
-      this.pixels.updateColors(dmx);
-      this.beams.update(dmx);
+      const tSec = (this.callbacks.getElapsed?.() ?? 0) / 1000;
+      this.pixels.updateColors(dmx, tSec);
+      this.beams.update(dmx, tSec);
       this.orbit.update();
       this.renderer.render(this.scene, this.camera);
       this.rafId = requestAnimationFrame(loop);
@@ -609,6 +635,8 @@ export class ThreeSceneManager {
     this.pixels.dispose();
     this.beams.dispose();
     this.bodies.dispose();
+    this.strips.dispose();
+    this.svgPlanes.dispose();
     this.alignGuides.dispose();
     this.stage.dispose();
     this.renderer.dispose();

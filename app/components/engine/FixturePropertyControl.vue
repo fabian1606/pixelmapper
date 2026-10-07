@@ -3,8 +3,10 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelType } from '~/utils/engine/types';
 import type { OflCapability, OflWheel, OflWheelSlot } from '~/utils/ofl/types';
+import { SlidersHorizontal } from 'lucide-vue-next';
 import { getIconForChannel } from '~/utils/engine/channel-categories';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
+import { useGlobalContextMenu } from '~/composables/useGlobalContextMenu';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
@@ -26,6 +28,8 @@ const emit = defineEmits<{
   (e: 'change', value: number): void;
   /** Fired before any value is written, allowing the parent to pre-sync other fixtures */
   (e: 'before-change', fixtures: Fixture[]): void;
+  /** Requests the channel-limits dialog for this channel across the given fixtures */
+  (e: 'open-limits', payload: { channelType: ChannelType; oflChannelName?: string; fixtures: Fixture[] }): void;
 }>();
 
 const { lock, unlock } = useSidebarLock();
@@ -189,6 +193,23 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', stopDrag);
 });
 
+// ─── Context menu (channel settings) ───────────────────────────────────────────
+const { openMenu } = useGlobalContextMenu();
+
+function onBoxContextMenu(e: MouseEvent) {
+  openMenu(e, [
+    {
+      label: 'Channel settings…',
+      icon: SlidersHorizontal,
+      action: () => emit('open-limits', {
+        channelType: props.type,
+        oflChannelName: props.oflChannelName,
+        fixtures: props.fixtures,
+      }),
+    },
+  ]);
+}
+
 // ─── Dropdown lock (prevent sidebar auto-close) ────────────────────────────────
 function onDropdownOpenChange(open: boolean) {
   if (open) lock();
@@ -208,6 +229,7 @@ function onDropdownOpenChange(open: boolean) {
       :activeSlotColor="activeSlotColor"
       :isDragging="isDragging"
       @dragstart="startDrag"
+      @contextmenu="onBoxContextMenu"
     />
 
     <!-- Labels -->

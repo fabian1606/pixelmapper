@@ -310,6 +310,7 @@ async function init() {
   const { ThreeSceneManager } = await import('./scene/three-scene-manager');
   manager = new ThreeSceneManager(canvasEl.value, {
     getDmx: engineStore.getOutputBuffer,
+    getElapsed: () => engineStore.currentElapsed,
     getFixtures: () => flatFixtures.value.map(f => toRaw(f)),
     onSelect: handleSelect,
     onShiftClick: handleShiftClick,

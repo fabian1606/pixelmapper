@@ -79,24 +79,16 @@ function syncFixtures() {
   };
 
   const canvasFixtures = props.fixtures.map(f => {
-    const dmxIdx = (offset: number) => f.startAddress - 1 + offset;
-    const chIdx = (type: string, beamId?: string) => {
-      const ch = f.channels.find(c => c.type === type && (!beamId ? !c.beamId : c.beamId === beamId))
-        ?? (beamId ? f.channels.find(c => c.type === type && !c.beamId) : undefined);
-      return ch != null ? dmxIdx(ch.addressOffset) : null;
-    };
-    const hexRgb = (hex: string) => {
-      const h = hex.replace('#', '');
+    // Photometry payload for the Rust renderer — mirrors the canonical formula
+    // in photometry.ts (additive colors, wheel LUTs, shutter gates, dimmers).
+    const photo = (beamId?: string) => {
+      const bp = f.getPhotometry(beamId);
       return {
-        r: parseInt(h.substring(0, 2), 16) || 0,
-        g: parseInt(h.substring(2, 4), 16) || 0,
-        b: parseInt(h.substring(4, 6), 16) || 0,
+        colorChannels: bp.colorAdd.map(c => ({ index: c.idx, r: c.r, g: c.g, b: c.b })),
+        colorLuts: bp.colorLuts.map(c => ({ index: c.idx, lut: Array.from(c.lut) })),
+        shutterChannels: bp.shutters.map(c => ({ index: c.idx, freq: Array.from(c.lut) })),
+        dimmerIndices: bp.dimmers,
       };
-    };
-    const colorChannels = (beamId?: string) => {
-      let chs = f.channels.filter(c => c.role === 'COLOR' && (!beamId ? !c.beamId : c.beamId === beamId));
-      if (beamId && chs.length === 0) chs = f.channels.filter(c => c.role === 'COLOR' && !c.beamId);
-      return chs.map(c => ({ index: dmxIdx(c.addressOffset), ...hexRgb(c.colorValue) }));
     };
     return {
       id: String(f.id),
@@ -110,15 +102,13 @@ function syncFixtures() {
       editing: props.editingId != null && f.id === props.editingId,
       svg: f.definition?.pixelmapper?.customSvg?.enabled ? (f.definition?.pixelmapper?.customSvg?.data ?? null) : null,
       channelStart: f.startAddress,
-      colorChannels: colorChannels(),
-      dimmerIndex: chIdx('DIMMER'),
+      ...photo(),
       beams: f.beams.map(b => ({
         id: String(b.id),
         localX: b.localX,
         localY: b.localY,
         svgElementId: f.definition?.pixelmapper?.customSvg?.headToElement?.[b.id] ?? null,
-        colorChannels: colorChannels(String(b.id)),
-        dimmerIndex: chIdx('DIMMER', String(b.id)),
+        ...photo(String(b.id)),
       })),
       strip: f.stripConfig
         ? {

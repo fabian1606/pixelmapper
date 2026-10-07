@@ -1,5 +1,5 @@
 import type { OflFixture, OflMatrix, OflMatrixChannelInsert } from './types';
-import { resolveOflChannel } from './capability-map';
+import { resolveOflChannel, buildRenderRanges, computeOpenDefault } from './capability-map';
 import { reactive } from 'vue';
 import { Fixture } from '../engine/core/fixture';
 import type { Channel } from '../engine/core/channel';
@@ -298,6 +298,17 @@ export function createFixtureFromOfl(
     const mapped = resolveOflChannel(channelDef, resolveKey);
     const caps = channelDef.capabilities ?? (channelDef.capability ? [channelDef.capability] : []);
 
+    // Derive render semantics (shutter gate / wheel slot colors) so the previews
+    // can honor them; also default these channels to their "open" position so a
+    // freshly added fixture lights up as soon as the dimmer is raised.
+    let renderInfo: Channel['renderInfo'];
+    if (mapped.role === 'SHUTTER' || mapped.role === 'COLOR_WHEEL') {
+      const ranges = buildRenderRanges(caps, oflFixture.wheels ?? {}, resolveKey);
+      renderInfo = { ranges };
+      const openDefault = computeOpenDefault(mapped.role, ranges);
+      if (openDefault !== undefined) mapped.defaultValue = openDefault;
+    }
+
     let resolution: 1 | 2 | 3 = 1;
     const fineAddressOffsets: number[] = [];
     let coarseDefault = mapped.defaultValue;
@@ -349,6 +360,7 @@ export function createFixtureFromOfl(
       beamId: item.beamId,
       oflCapabilities: caps,
       oflWheels: oflFixture.wheels ?? {},
+      renderInfo,
       chaserConfig: reactive({
         stepValues: [coarseDefault],
         stepsCount: 1,

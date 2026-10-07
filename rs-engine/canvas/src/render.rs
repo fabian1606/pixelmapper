@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
-use crate::types::{ColorChannel, FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
+use crate::types::{ColorChannel, LutChannel, ShutterChannel, FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
 use crate::svg_render::{SvgCachedFixture, draw_svg_fixture};
 
 pub struct RenderState {
@@ -42,24 +42,84 @@ fn border_color(selected: bool, remote_color: Option<[u8; 3]>) -> Color {
     }
 }
 
-fn read_color(channels: &[ColorChannel], dimmer: Option<usize>, buf: &[u8]) -> Color {
-    let dim = dimmer.and_then(|idx| buf.get(idx)).copied().unwrap_or(255) as f32 / 255.0;
+/// Borrowed view over the photometry-relevant channels of a beam or fixture.
+/// Mirrors the canonical formula in app/utils/engine/core/photometry.ts:
+///   rgb  = Σ colorAdd·(dmx/255) + Σ colorLut[dmx]     (no color source → white)
+///   gate = Π shutterGate(freqLut[dmx], tSec)
+///   out  = rgb × Π(dimmer/255) × gate
+pub struct PhotoRefs<'a> {
+    pub color_channels: &'a [ColorChannel],
+    pub color_luts: &'a [LutChannel],
+    pub shutter_channels: &'a [ShutterChannel],
+    pub dimmer_indices: &'a [usize],
+    pub legacy_dimmer: Option<usize>,
+}
 
-    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer
-    // so the fixture is still visible.
-    if channels.is_empty() {
-        let v = (255.0 * dim).round().clamp(0.0, 255.0) as u8;
-        return Color::rgba(v, v, v, 255);
+impl<'a> PhotoRefs<'a> {
+    pub fn from_beam(b: &'a FixtureBeam) -> Self {
+        Self {
+            color_channels: &b.color_channels,
+            color_luts: &b.color_luts,
+            shutter_channels: &b.shutter_channels,
+            dimmer_indices: &b.dimmer_indices,
+            legacy_dimmer: b.dimmer_index,
+        }
     }
 
+    pub fn from_fixture(f: &'a FixtureCanvasData) -> Self {
+        Self {
+            color_channels: &f.color_channels,
+            color_luts: &f.color_luts,
+            shutter_channels: &f.shutter_channels,
+            dimmer_indices: &f.dimmer_indices,
+            legacy_dimmer: f.dimmer_index,
+        }
+    }
+}
+
+/// Gate factor of one shutter LUT entry: -1 = closed, 0 = open, >0 = strobe Hz.
+fn shutter_gate(freq: f32, t_sec: f64) -> f32 {
+    if freq < 0.0 { return 0.0; }
+    if freq == 0.0 { return 1.0; }
+    let phase = t_sec * freq as f64;
+    if phase - phase.floor() < 0.5 { 1.0 } else { 0.0 }
+}
+
+pub fn resolve_color(p: &PhotoRefs, buf: &[u8], t_sec: f64) -> Color {
     let (mut r, mut g, mut b) = (0.0f32, 0.0f32, 0.0f32);
-    for ch in channels {
+
+    for ch in p.color_channels {
         let factor = buf.get(ch.index).copied().unwrap_or(0) as f32 / 255.0;
         r += ch.r as f32 * factor;
         g += ch.g as f32 * factor;
         b += ch.b as f32 * factor;
     }
-    let clamp = |v: f32| (v * dim).round().clamp(0.0, 255.0) as u8;
+    for ch in p.color_luts {
+        let v = buf.get(ch.index).copied().unwrap_or(0) as usize * 3;
+        r += ch.lut.get(v).copied().unwrap_or(255) as f32;
+        g += ch.lut.get(v + 1).copied().unwrap_or(255) as f32;
+        b += ch.lut.get(v + 2).copied().unwrap_or(255) as f32;
+    }
+
+    // No color source at all (e.g. dimmer-only fixture): white so it stays visible.
+    if p.color_channels.is_empty() && p.color_luts.is_empty() {
+        r = 255.0; g = 255.0; b = 255.0;
+    }
+
+    let mut factor = 1.0f32;
+    if p.dimmer_indices.is_empty() {
+        factor *= p.legacy_dimmer.and_then(|idx| buf.get(idx)).copied().unwrap_or(255) as f32 / 255.0;
+    } else {
+        for &idx in p.dimmer_indices {
+            factor *= buf.get(idx).copied().unwrap_or(0) as f32 / 255.0;
+        }
+    }
+    for sh in p.shutter_channels {
+        let dmx = buf.get(sh.index).copied().unwrap_or(0) as usize;
+        factor *= shutter_gate(sh.freq.get(dmx).copied().unwrap_or(0.0), t_sec);
+    }
+
+    let clamp = |v: f32| (v * factor).round().clamp(0.0, 255.0) as u8;
     Color::rgba(clamp(r), clamp(g), clamp(b), 255)
 }
 
@@ -346,6 +406,7 @@ fn draw_strip_fixture(
     strip: &StripData,
     dmx_buffer: &[u8],
     scale: f32,
+    t_sec: f64,
 ) {
     let points = &strip.points;
     let min_points = match strip.shape_type {
@@ -380,14 +441,20 @@ fn draw_strip_fixture(
     let led_count = strip.led_count.max(1);
     let group_size = strip.group_size.max(1);
     let beam_count = fixture.beams.len();
-    let led_r = (substrate_w * 0.6).max(2.0);
+    // Physical dot radius derived from the real LED spacing (arc length per LED,
+    // world units). ~90 % coverage between neighbours so dots nearly touch but
+    // don't overlap. Pure world size → scales naturally with zoom (as if moving
+    // physically toward/away from the fixtures); no screen-space floor. The
+    // `.max(0.5)` only guards against a zero radius in degenerate cases.
+    let spacing = total_len / led_count as f32;
+    let led_r = (spacing * 0.45).max(0.5);
 
     for led_idx in 0..led_count {
         let pixel_idx = (led_idx / group_size).min(beam_count.saturating_sub(1));
         let beam: Option<&FixtureBeam> = fixture.beams.get(pixel_idx);
         let color = match beam {
-            Some(b) => read_color(&b.color_channels, b.dimmer_index, dmx_buffer),
-            None    => read_color(&fixture.color_channels, fixture.dimmer_index, dmx_buffer),
+            Some(b) => resolve_color(&PhotoRefs::from_beam(b), dmx_buffer, t_sec),
+            None    => resolve_color(&PhotoRefs::from_fixture(fixture), dmx_buffer, t_sec),
         };
         // Circle wraps around, so LED 0 and LED N should sit next to each
         // other — distribute uniformly over the full perimeter without the
@@ -495,7 +562,7 @@ fn draw_strip_fixture(
     }
 }
 
-pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[FixtureCanvasData], svg_cache: &HashMap<String, SvgCachedFixture>, dmx_buffer: &[u8]) {
+pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[FixtureCanvasData], svg_cache: &HashMap<String, SvgCachedFixture>, dmx_buffer: &[u8], t_sec: f64) {
     canvas.set_size(state.viewport_w as u32, state.viewport_h as u32, 1.0);
     canvas.clear_rect(0, 0, state.viewport_w as u32, state.viewport_h as u32, Color::rgba(0, 0, 0, 0));
     canvas.reset_transform();
@@ -551,7 +618,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
 
         if let Some(strip) = &fixture.strip {
             // Strip points are already in world-pixel space — don't transform.
-            draw_strip_fixture(canvas, fixture, strip, dmx_buffer, state.scale);
+            draw_strip_fixture(canvas, fixture, strip, dmx_buffer, state.scale, t_sec);
             canvas.restore();
             continue;
         }
@@ -565,7 +632,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             let half_h = base * fixture.height;
 
             if let Some(cached) = svg_cache.get(&fixture.id) {
-                draw_svg_fixture(canvas, cached, fixture, dmx_buffer, half_w, half_h, state.scale);
+                draw_svg_fixture(canvas, cached, fixture, dmx_buffer, half_w, half_h, state.scale, t_sec);
             }
 
             // Selection ring on top
@@ -601,7 +668,7 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             let pixel_r = (f32::min(slot_w, slot_h) / 2.0 * 0.8).max(1.5);
 
             for beam in &fixture.beams {
-                let color = read_color(&beam.color_channels, beam.dimmer_index, dmx_buffer);
+                let color = resolve_color(&PhotoRefs::from_beam(beam), dmx_buffer, t_sec);
                 let bx = beam.local_x * half_w * 2.0;
                 let by = beam.local_y * half_h * 2.0;
                 let mut path = Path::new();
@@ -626,9 +693,9 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             canvas.scale(rx / max_r, ry / max_r);
 
             let color = if let Some(beam) = fixture.beams.first() {
-                read_color(&beam.color_channels, beam.dimmer_index, dmx_buffer)
+                resolve_color(&PhotoRefs::from_beam(beam), dmx_buffer, t_sec)
             } else {
-                read_color(&fixture.color_channels, fixture.dimmer_index, dmx_buffer)
+                resolve_color(&PhotoRefs::from_fixture(fixture), dmx_buffer, t_sec)
             };
 
             let mut path = Path::new();

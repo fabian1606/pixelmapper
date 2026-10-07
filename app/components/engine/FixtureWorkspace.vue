@@ -10,13 +10,15 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from './composables/use-history';
 import { Button } from '@/components/ui/button';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
-import { 
-  Trash2, 
+import { createHighlightCommand } from './commands/highlight-fixture-command';
+import {
+  Trash2,
   AlignHorizontalDistributeCenter,
   AlignVerticalDistributeCenter,
   AlignCenterHorizontal,
   AlignCenterVertical,
-  LayoutGrid
+  LayoutGrid,
+  Lightbulb,
 } from 'lucide-vue-next';
 
 const engineStore = useEngineStore();
@@ -110,6 +112,16 @@ const emit = defineEmits<{
 const { openMenu } = useGlobalContextMenu();
 const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
 
+function handleHighlightSelected() {
+  const targets = flatFixtures.value.filter(f => {
+    let c: SceneNode | null = f;
+    while (c) { if (selectedIds.value.has(c.id)) return true; c = c.parent; }
+    return false;
+  });
+  const command = createHighlightCommand(targets);
+  if (command) history.execute(command);
+}
+
 function onWorkspaceContextMenu(e: MouseEvent) {
   const options: ContextMenuItemOption[] = [];
 
@@ -118,6 +130,12 @@ function onWorkspaceContextMenu(e: MouseEvent) {
       label: 'Group Selection',
       shortcut: '⌘G',
       action: handleGroup,
+    });
+
+    options.push({
+      label: 'Highlight (Set to White)',
+      icon: Lightbulb,
+      action: handleHighlightSelected,
     });
 
     if (hasSelectedGroup.value) {

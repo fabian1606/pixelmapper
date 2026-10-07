@@ -25,7 +25,7 @@ function tick() {
 
   // Draw directly into the OffscreenCanvas — no main-thread round-trip.
   if (canvasReady && canvas) {
-    try { canvas.draw(view); } catch (e) { console.error('[worker] canvas.draw failed:', e); }
+    try { canvas.draw(view, elapsed); } catch (e) { console.error('[worker] canvas.draw failed:', e); }
   }
 
   // Still send the DMX buffer to main for hardware connectors and UI faders.

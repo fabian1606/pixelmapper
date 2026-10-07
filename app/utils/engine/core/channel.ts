@@ -5,9 +5,40 @@ import type { OflCapability, OflWheel } from '~/utils/ofl/types';
  * Describes how the channel contributes to the fixture's visual output.
  * - COLOR: The channel represents a specific light color (e.g., red, green, blue, white, amber).
  * - DIMMER: The channel scales all COLOR channels (0 = off, 255 = full).
- * - NONE: The channel has no color contribution (e.g., Pan, Tilt, Strobe).
+ * - COLOR_WHEEL: The DMX value SELECTS a color (wheel slot / preset) — it does NOT scale brightness.
+ * - SHUTTER: The DMX value gates the output (open / closed / strobe) — it does NOT scale brightness.
+ * - NONE: The channel has no color contribution (e.g., Pan, Tilt).
  */
-export type ChannelRole = 'COLOR' | 'DIMMER' | 'NONE';
+export type ChannelRole = 'COLOR' | 'DIMMER' | 'COLOR_WHEEL' | 'SHUTTER' | 'NONE';
+
+/**
+ * One DMX range of a COLOR_WHEEL or SHUTTER channel, describing its render effect.
+ * Serializable — persisted with the project so render behavior survives reloads
+ * (the OFL capabilities themselves are not persisted).
+ */
+export type RenderRange =
+  | {
+      kind: 'shutter';
+      /** Inclusive 8-bit DMX bounds of this range. */
+      min: number;
+      max: number;
+      /** Strobe frequency at min/max, lerped across the range: -1 = closed, 0 = open, >0 = Hz. */
+      freqStart: number;
+      freqEnd: number;
+    }
+  | {
+      kind: 'color';
+      min: number;
+      max: number;
+      /** Slot/preset color at the start of the range (0-255 each). */
+      rgb: [number, number, number];
+      /** Optional color at the end of the range (split-slot crossfade). */
+      rgbEnd?: [number, number, number];
+    };
+
+export interface ChannelRenderInfo {
+  ranges: RenderRange[];
+}
 
 /**
  * Represents a single DMX channel of a fixture.
@@ -59,6 +90,11 @@ export interface Channel {
    * Needed to resolve slot names and slot colors for WheelSlot-type capabilities.
    */
   oflWheels?: Record<string, OflWheel>;
+  /**
+   * Render semantics for COLOR_WHEEL and SHUTTER channels, derived from the OFL
+   * capabilities at fixture creation. Persisted (unlike oflCapabilities).
+   */
+  renderInfo?: ChannelRenderInfo;
   /**
    * Chaser configuration and programmed step values for this channel.
    * Always present — even a static channel has a chaserConfig with a single stepValue.

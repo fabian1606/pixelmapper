@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'dragstart', event: MouseEvent): void;
+  (e: 'contextmenu', event: MouseEvent): void;
 }>();
 
 // Visual box style
@@ -53,6 +54,7 @@ const rectStyle = computed(() => {
     :class="role !== 'NONE' ? 'bg-white/5' : 'bg-muted/40 text-muted-foreground'"
     :style="containerStyle"
     @mousedown="$emit('dragstart', $event)"
+    @contextmenu.prevent="$emit('contextmenu', $event)"
   >
     <!-- Inset hover ring -->
     <div

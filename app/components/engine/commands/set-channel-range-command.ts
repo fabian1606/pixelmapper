@@ -5,6 +5,8 @@ import { useEngineStore } from '~/stores/engine-store';
 export interface ChannelRangeState {
   rangeMin: number;
   rangeMax: number;
+  /** When present, the channel's defaultValue (reset value) is also updated. */
+  defaultValue?: number;
 }
 
 export interface ChannelRangeRef {
@@ -51,6 +53,9 @@ export class SetChannelRangeCommand implements SerializableCommand {
       if (!channel) continue;
       channel.rangeMin = state[which].rangeMin;
       channel.rangeMax = state[which].rangeMax;
+      if (state[which].defaultValue !== undefined) {
+        channel.defaultValue = state[which].defaultValue!;
+      }
     }
     useEngineStore().flushEngineOutput();
   }

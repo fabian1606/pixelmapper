@@ -1,5 +1,6 @@
 import type { ChannelType, SpatialVector } from '../types';
 import type { Channel } from './channel';
+import { buildBeamPhotometry, resolvePhotometricColor, type BeamPhotometry } from './photometry';
 import { Beam } from './beam';
 import { reactive } from 'vue';
 import type { OflFixture } from '~/utils/ofl/types';
@@ -152,37 +153,38 @@ export class Fixture {
    * Mixes its COLOR channels and applies any DIMMER channels as a global intensity multiplier.
    * Channels without a beamId apply to all beams (e.g., Master Dimmer).
    */
-  resolveColor(dmxBuffer: Uint8Array, beamId?: string): string {
-    const applies = (c: Channel) => !beamId || !c.beamId || c.beamId === beamId;
+  resolveColor(dmxBuffer: Uint8Array, beamId?: string, timeMs?: number): string {
+    const bp = this.getPhotometry(beamId);
+    const [r, g, b] = resolvePhotometricColor(bp, dmxBuffer, timeMs === undefined ? undefined : timeMs / 1000);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
 
-    const colorChannels = this.channels.filter(c => c.role === 'COLOR' && applies(c));
-    const dimmerChannels = this.channels.filter(c => c.role === 'DIMMER' && applies(c));
+  /** Cached per-beam photometry, auto-invalidated when channels are replaced or the address moves. */
+  photometryCache: Map<string, BeamPhotometry> | null = null;
+  photometryChannelsRef: Channel[] | null = null;
+  photometryStartAddress = -1;
 
-    const dimmerMultiplier = dimmerChannels.length > 0
-      ? dimmerChannels.reduce((sum, d) => sum + (dmxBuffer[this.startAddress - 1 + d.addressOffset] ?? 0), 0) / (dimmerChannels.length * 255)
-      : 1.0;
-
-
-    // No color channels (e.g. dimmer-only fixture): fall back to white × dimmer
-    // so the fixture is still visible.
-    if (colorChannels.length === 0) {
-      const v = Math.min(255, Math.max(0, Math.round(255 * dimmerMultiplier)));
-      return `rgb(${v}, ${v}, ${v})`;
+  getPhotometry(beamId?: string): BeamPhotometry {
+    if (
+      !this.photometryCache ||
+      this.photometryChannelsRef !== this.channels ||
+      this.photometryStartAddress !== this.startAddress
+    ) {
+      this.photometryCache = new Map();
+      this.photometryChannelsRef = this.channels;
+      this.photometryStartAddress = this.startAddress;
     }
-
-    let r = 0, g = 0, b = 0;
-    for (const ch of colorChannels) {
-      if (!ch.colorValue) continue;
-      const val = dmxBuffer[this.startAddress - 1 + ch.addressOffset] ?? 0;
-      const factor = val / 255;
-      const hex = ch.colorValue.replace('#', '');
-      r += parseInt(hex.substring(0, 2), 16) * factor;
-      g += parseInt(hex.substring(2, 4), 16) * factor;
-      b += parseInt(hex.substring(4, 6), 16) * factor;
+    const key = beamId ?? '';
+    let bp = this.photometryCache.get(key);
+    if (!bp) {
+      bp = buildBeamPhotometry(this, beamId);
+      this.photometryCache.set(key, bp);
     }
+    return bp;
+  }
 
-    const clamp = (v: number) => Math.min(255, Math.max(0, Math.round(v * dimmerMultiplier)));
-    return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(b)})`;
+  invalidatePhotometry(): void {
+    this.photometryCache = null;
   }
 
   /**

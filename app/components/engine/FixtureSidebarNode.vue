@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/sidebar';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
-import { Trash2 } from 'lucide-vue-next';
+import { Trash2, Lightbulb } from 'lucide-vue-next';
 import { isAdditiveModifier } from '~/utils/engine/selection-logic';
+import { createHighlightCommand } from '~/components/engine/commands/highlight-fixture-command';
 
 const props = defineProps<{
   node: SceneNode;
@@ -97,6 +98,16 @@ function cancelEditing() {
 
 const { openMenu } = useGlobalContextMenu();
 
+function collectFixtures(node: SceneNode): Fixture[] {
+  if (node instanceof FixtureGroup) return node.children.flatMap(collectFixtures);
+  return [node as Fixture];
+}
+
+function handleHighlight() {
+  const command = createHighlightCommand(collectFixtures(props.node));
+  if (command) history.execute(command);
+}
+
 function onContextMenu(e: MouseEvent) {
   const options: ContextMenuItemOption[] = [
     {
@@ -122,6 +133,12 @@ function onContextMenu(e: MouseEvent) {
     label: 'Rename',
     shortcut: 'F2',
     action: () => startEditing(),
+  });
+
+  options.push({
+    label: 'Highlight (Set to White)',
+    icon: Lightbulb,
+    action: handleHighlight,
   });
 
   if (!isGroup.value && (props.node as Fixture).definition) {

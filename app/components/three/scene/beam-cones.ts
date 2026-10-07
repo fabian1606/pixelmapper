@@ -12,6 +12,7 @@ import {
 } from 'three';
 import type { BeamModel } from './fixture-adapter';
 import { createBeamMaterial } from './beam-material';
+import { resolvePhotometricInto } from '~/utils/engine/core/photometry';
 
 const DEG2RAD = Math.PI / 180;
 /** Beam length in meters — clipped by the floor's depth buffer anyway. */
@@ -97,8 +98,10 @@ export class BeamCones {
     }
   }
 
-  /** Per-frame: pan/tilt rotation, cone angle, color × dimmer intensity. */
-  update(dmx: Uint8Array): void {
+  private tmpColor = new Float32Array(3);
+
+  /** Per-frame: pan/tilt rotation, cone angle, color × dimmer × shutter intensity. */
+  update(dmx: Uint8Array, tSec: number): void {
     for (const rig of this.rigs) {
       const m = rig.model;
 
@@ -128,21 +131,14 @@ export class BeamCones {
       const radius = Math.tan(halfAngle) * BEAM_LENGTH;
       rig.cone.scale.set(radius, BEAM_LENGTH, radius);
 
-      // Color × dimmer, same mixing semantics as the pixel hot loop.
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      for (const entry of m.colorEntries) {
-        const w = (dmx[entry.idx] ?? 0) / 255;
-        r += entry.r * w;
-        g += entry.g * w;
-        b += entry.b * w;
-      }
-      if (m.colorEntries.length === 0) {
-        r = 1; g = 1; b = 1; // dimmer-only fixture beams white
-      }
-      const dim = m.dimmerIdx >= 0 ? (dmx[m.dimmerIdx] ?? 0) / 255 : 1;
-      const intensity = Math.max(r, g, b) * dim;
+      // Color × dimmer × shutter gate, same canonical formula as the pixel
+      // hot loop (photometry.ts). Color wheels contribute their slot color
+      // at full brightness — they never scale intensity.
+      resolvePhotometricInto(m.photometry, dmx, tSec, this.tmpColor, 0);
+      const r = this.tmpColor[0]!;
+      const g = this.tmpColor[1]!;
+      const b = this.tmpColor[2]!;
+      const intensity = Math.max(r, g, b);
 
       if (intensity <= 0.004) {
         rig.cone.visible = false;
@@ -150,7 +146,7 @@ export class BeamCones {
       }
       rig.cone.visible = true;
       const u = rig.material.uniforms;
-      u.uColor!.value.setRGB(r * dim, g * dim, b * dim);
+      u.uColor!.value.setRGB(r, g, b);
       u.uIntensity!.value = Math.min(1, intensity);
       // World-space beam axis for the barrel fade.
       this.tmpDir.set(0, -1, 0).applyQuaternion(rig.cone.getWorldQuaternion(this.tmpQuat));

@@ -27,6 +27,7 @@ function handleAction(action?: () => void) {
     <!-- Backdrop: clicking outside closes the menu -->
     <div
       v-if="isOpen"
+      data-overlay-root
       class="fixed inset-0 z-[200]"
       @mousedown.self="closeMenu"
       @contextmenu.prevent

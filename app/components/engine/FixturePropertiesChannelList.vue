@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { ChannelSection } from './composables/use-channel-sections';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import FixturePropertyControl from './FixturePropertyControl.vue';
 import FixtureColorPicker from './FixtureColorPicker.vue';
 import FixturePanTiltPad from './FixturePanTiltPad.vue';
 import FixtureMovementRange from './FixtureMovementRange.vue';
+import ChannelLimitsDialog from './ChannelLimitsDialog.vue';
 
 defineProps<{
   channelSections: ChannelSection[];
@@ -18,6 +20,8 @@ const emit = defineEmits<{
 function handleBeforeChange(fixtures: Fixture[]) {
   emit('before-change', fixtures);
 }
+
+const limitsDialog = ref<InstanceType<typeof ChannelLimitsDialog> | null>(null);
 </script>
 
 <template>
@@ -37,6 +41,7 @@ function handleBeforeChange(fixtures: Fixture[]) {
         @before-change="handleBeforeChange"
       />
       <FixtureMovementRange :channel-sections="channelSections" />
+      <ChannelLimitsDialog ref="limitsDialog" />
     </div>
     <div v-for="(section, idx) in channelSections" :key="idx">
       <!-- Section label: only shown when multiple fixture types are selected -->
@@ -57,6 +62,7 @@ function handleBeforeChange(fixtures: Fixture[]) {
           :fixtures="entry.fixtures"
           :active-step="activeStep"
           @before-change="handleBeforeChange"
+          @open-limits="limitsDialog?.open($event)"
         />
       </div>
     </div>

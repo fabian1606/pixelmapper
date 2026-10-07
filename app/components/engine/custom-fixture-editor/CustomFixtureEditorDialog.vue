@@ -8,12 +8,15 @@ import CustomFixtureHeader from './Header/CustomFixtureHeader.vue';
 import CustomFixtureSidebar from './Sidebar/CustomFixtureSidebar.vue';
 import CustomFixtureCanvas from './Canvas/CustomFixtureCanvas.vue';
 import CustomFixtureChannelEditor from './ChannelEditor/CustomFixtureChannelEditor.vue';
+import AiEnrichmentReview from './AiEnrichmentReview.vue';
 
 import { useCustomFixtureForm } from '~/composables/engine/useCustomFixtureForm';
+import { useAiFixtureEnrichment, type EnrichmentProposal } from '~/composables/engine/useAiFixtureEnrichment';
 
 import { buildOflFixture, initFromOflFixture } from '~/utils/engine/custom-fixture-omapping';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import { computeHeadElementCentroids } from '~/utils/engine/svg-element-positions';
+import { applyEnrichmentProposals } from '~/utils/engine/enrichment-apply';
 import type { OflFixture } from '~/utils/ofl/types';
 
 const props = defineProps<{ 
@@ -54,6 +57,51 @@ const extractStatus = ref('Analyzing PDF...');
 const extractError = ref('');
 
 const runtimeConfig = useRuntimeConfig();
+
+// AI Enrichment State — compares the current draft against a manual PDF and
+// proposes corrections to shutter/dimmer/wheel-slot behavior for review.
+const { isEnriching, enrichStatus, enrichError, proposals, enrichFromManual } = useAiFixtureEnrichment();
+const reviewDialogOpen = ref(false);
+const enrichFileInput = ref<HTMLInputElement | null>(null);
+
+function currentDraftAsOfl(): OflFixture {
+  const headPositions =
+    useCustomSvg.value && customSvgData.value && Object.keys(headToElementMap.value).length > 0
+      ? computeHeadElementCentroids(customSvgData.value, headToElementMap.value)
+      : {};
+  return buildOflFixture(
+    formState, channels.value, modes.value, wheels.value,
+    fixtureCategory.value, pixelColumns.value, pixelRows.value,
+    customSvgData.value, headToElementMap.value, headCountManual.value, useCustomSvg.value,
+    headPositions,
+  );
+}
+
+function startEnrichment() {
+  enrichFileInput.value?.click();
+}
+
+async function handleEnrichPdfUpload(file: File) {
+  reviewDialogOpen.value = true;
+  await enrichFromManual(currentDraftAsOfl(), file);
+}
+
+function applyProposals(accepted: EnrichmentProposal[]) {
+  if (accepted.length === 0) return;
+  const patched = applyEnrichmentProposals(currentDraftAsOfl(), accepted);
+  const init = initFromOflFixture(patched);
+  Object.assign(formState, init.state);
+  channels.value = init.channels;
+  modes.value = init.modes;
+  wheels.value = init.wheels;
+  fixtureCategory.value = init.category;
+  pixelColumns.value = init.pixelCols;
+  pixelRows.value = init.pixelRows;
+  headCountManual.value = init.headCount;
+  useCustomSvg.value = init.useCustomSvg;
+  customSvgData.value = init.customSvgData;
+  headToElementMap.value = init.headToElementMap;
+}
 
 async function handleAIPdfUpload(file: File) {
   aiUploadPending.value = false;
@@ -207,11 +255,34 @@ function handleSave() {
     <DialogContent
       class="!max-w-[1400px] !w-[96vw] !h-[72vh] p-0 overflow-hidden bg-background border-none shadow-2xl flex flex-col gap-0"
     >
-      <CustomFixtureHeader 
-        :steps="STEPS" 
-        :current-step-idx="currentStepIdx" 
-        @update:current-step-idx="i => currentStepIdx = i" 
+      <CustomFixtureHeader
+        :steps="STEPS"
+        :current-step-idx="currentStepIdx"
+        @update:current-step-idx="i => currentStepIdx = i"
       />
+
+      <div
+        v-if="props.fixtureToEdit && !aiUploadPending && !isExtracting"
+        class="flex justify-end px-4 pt-2"
+      >
+        <button
+          class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4"
+          @click="startEnrichment"
+        >
+          Verify with AI (compare against manual)
+        </button>
+        <input
+          ref="enrichFileInput"
+          type="file"
+          accept="application/pdf"
+          class="hidden"
+          @change="(e) => {
+            const target = e.target as HTMLInputElement;
+            if (target.files?.length) handleEnrichPdfUpload(target.files[0] as File);
+            target.value = '';
+          }"
+        />
+      </div>
 
       <div class="flex flex-1 min-h-0 relative">
         <template v-if="aiUploadPending">
@@ -341,4 +412,14 @@ function handleSave() {
       </div>
     </DialogContent>
   </Dialog>
+
+  <AiEnrichmentReview
+    :open="reviewDialogOpen"
+    :is-enriching="isEnriching"
+    :status="enrichStatus"
+    :error="enrichError"
+    :proposals="proposals"
+    @update:open="reviewDialogOpen = $event"
+    @apply="applyProposals"
+  />
 </template>

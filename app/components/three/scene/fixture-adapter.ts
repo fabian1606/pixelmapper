@@ -1,10 +1,34 @@
 import { Euler, Vector3 } from 'three';
-import type { Fixture } from '~/utils/engine/core/fixture';
+import type { Fixture, StripPoint } from '~/utils/engine/core/fixture';
+import { buildBeamPhotometry, type BeamPhotometry } from '~/utils/engine/core/photometry';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS, STAGE_SIZE_METERS } from '~/utils/engine/constants';
 import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
 import { sampleStripCapped, pointAtArcLength } from '~/utils/engine/strip-geometry';
 
 const DEG2RAD = Math.PI / 180;
+
+/**
+ * Full fixture footprint in meters — the 3D equivalent of the 2D canvas's
+ * body box (render.rs: half_w = FIXTURE_RADIUS · fixture.width px, so the
+ * full width is FIXTURE_RADIUS·2·fixtureSize px). Beam `localX/localY` are
+ * normalized ±0.5 offsets across exactly this footprint.
+ */
+function footprintMeters(f: Fixture): { x: number; y: number } {
+  const diameterPx = FIXTURE_RADIUS * 2;
+  return {
+    x: (f.fixtureSize?.x ?? 1) * diameterPx / PIXELS_PER_METER,
+    y: (f.fixtureSize?.y ?? 1) * diameterPx / PIXELS_PER_METER,
+  };
+}
+
+/** Smallest gap between adjacent distinct values, or `fallback` with <2 distinct values. */
+function minAdjacentGap(values: number[], fallback: number): number {
+  const distinct = [...new Set(values)].sort((a, b) => a - b);
+  if (distinct.length < 2) return fallback;
+  let min = Infinity;
+  for (let i = 1; i < distinct.length; i++) min = Math.min(min, distinct[i]! - distinct[i - 1]!);
+  return min;
+}
 
 /**
  * 2D world → 3D stage mapping. The 2D canvas is the top-down view of the
@@ -46,14 +70,8 @@ export interface PixelModel {
   positions: Float32Array;
   /** Point diameter per pixel, meters. */
   sizes: Float32Array;
-  /** Prefix offsets (count+1) into chanIdx/weights. */
-  entryStart: Uint32Array;
-  /** Absolute DMX index per color entry. */
-  chanIdx: Int32Array;
-  /** r,g,b weight (0-1) per color entry. */
-  weights: Float32Array;
-  /** Absolute DMX dimmer index per pixel, -1 = none (multiplier 1). */
-  dimmerIdx: Int32Array;
+  /** Photometry descriptor per pixel (colors, wheels, dimmers, shutters). */
+  photometry: BeamPhotometry[];
   /** Pixel index → owning fixture id (for selection tinting, debugging). */
   pixelFixture: Array<string | number>;
 }
@@ -66,13 +84,6 @@ export interface BodyModel {
   /** Box size in meters (x, y, z). */
   size: Vector3;
   isStrip: boolean;
-}
-
-export interface ColorEntry {
-  idx: number;
-  r: number;
-  g: number;
-  b: number;
 }
 
 /** Beam-capable fixture (moving head / spot / PAR with lens data). */
@@ -97,23 +108,39 @@ export interface BeamModel {
    * instead of straight down into the floor plane.
    */
   hasTilt: boolean;
-  colorEntries: ColorEntry[];
-  dimmerIdx: number;
+  /** Photometry descriptor across all channels of the fixture. */
+  photometry: BeamPhotometry;
+}
+
+/** Substrate geometry for one NeoPixel strip — the visible PCB/tube of the strip. */
+export interface StripModel {
+  fixtureId: string | number;
+  /** Polyline in world meters, already oriented (tilt/roll about the centroid pivot). */
+  polyline: Vector3[];
+  /** Circle shapes form a closed ring (no seam). */
+  isClosed: boolean;
+  /** Tube radius in meters. */
+  radius: number;
+}
+
+/** SVG artwork rendered as a textured plane at the fixture's footprint. */
+export interface SvgPlaneModel {
+  fixtureId: string | number;
+  position: Vector3;
+  euler: Euler;
+  /** Plane extents in meters (fixture footprint). */
+  width: number;
+  height: number;
+  /** Raw SVG source — doubles as the texture cache key. */
+  svgData: string;
 }
 
 export interface SceneModel {
   pixels: PixelModel;
   bodies: BodyModel[];
   beams: BeamModel[];
-}
-
-function hexRgb(hex: string): { r: number; g: number; b: number } {
-  const h = (hex || '').replace('#', '');
-  return {
-    r: (parseInt(h.substring(0, 2), 16) || 0) / 255,
-    g: (parseInt(h.substring(2, 4), 16) || 0) / 255,
-    b: (parseInt(h.substring(4, 6), 16) || 0) / 255,
-  };
+  strips: StripModel[];
+  svgPlanes: SvgPlaneModel[];
 }
 
 /** Parses OFL angle strings like "540deg" / "-270deg". */
@@ -121,24 +148,6 @@ function parseDeg(s: string | undefined): number | null {
   if (!s) return null;
   const m = /-?\d+(\.\d+)?/.exec(s);
   return m ? parseFloat(m[0]) : null;
-}
-
-/**
- * Mirrors the channel-selection semantics of Fixture.resolveColor / the 2D
- * canvas (FixtureCanvas.syncFixtures): channels scoped to the beam, falling
- * back to fixture-level channels when the beam has none of its own.
- */
-function colorEntriesFor(f: Fixture, beamId?: string): ColorEntry[] {
-  const dmxIdx = (offset: number) => f.startAddress - 1 + offset;
-  let chs = f.channels.filter(c => c.role === 'COLOR' && (!beamId ? !c.beamId : c.beamId === beamId));
-  if (beamId && chs.length === 0) chs = f.channels.filter(c => c.role === 'COLOR' && !c.beamId);
-  return chs.map(c => ({ idx: dmxIdx(c.addressOffset), ...hexRgb(c.colorValue) }));
-}
-
-function dimmerIdxFor(f: Fixture, beamId?: string): number {
-  const ch = f.channels.find(c => c.type === 'DIMMER' && (!beamId ? !c.beamId : c.beamId === beamId))
-    ?? (beamId ? f.channels.find(c => c.type === 'DIMMER' && !c.beamId) : undefined);
-  return ch != null ? f.startAddress - 1 + ch.addressOffset : -1;
 }
 
 function channelDmxIdx(f: Fixture, types: string[]): { idx: number; fineIdx: number } {
@@ -173,8 +182,7 @@ function capabilityRangeDeg(f: Fixture, type: 'PAN' | 'TILT', fallback: number):
 interface RawPixel {
   x: number; y: number; z: number;
   size: number;
-  entries: ColorEntry[];
-  dimmerIdx: number;
+  photometry: BeamPhotometry;
   fixtureId: string | number;
 }
 
@@ -186,6 +194,8 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
   const rawPixels: RawPixel[] = [];
   const bodies: BodyModel[] = [];
   const beams: BeamModel[] = [];
+  const strips: StripModel[] = [];
+  const svgPlanes: SvgPlaneModel[] = [];
 
   for (const f of fixtures) {
     const pos = fixtureWorldPosition(f);
@@ -197,32 +207,70 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
       const sampled = sampleStripCapped(sc.shapeType, sc.points, targetLength, sc.clockwise ?? true);
       const ledCount = Math.max(1, sc.ledCount);
       const groupSize = Math.max(1, sc.groupSize);
-      const size = Math.min(0.3, Math.max(0.04, (sc.lengthMeters / ledCount) * groupSize));
-      // One point per logical pixel (= one Beam `pixel-N`), positioned at its
-      // LED group's center using the SAME arc parametrization as the 2D
-      // renderer (2.5% inset on open shapes, full wrap on circles).
-      for (let p = 0; p < f.beams.length; p++) {
-        const beam = f.beams[p]!;
-        const midLed = Math.min(ledCount - 1, p * groupSize + (groupSize - 1) / 2);
+
+      // Orientation: tilt/roll about the fixture position (= strip AABB
+      // centroid, kept in sync by syncStripBounds). Yaw is deliberately
+      // omitted — 2D ignores `rotation` for strips and syncStripBounds resets
+      // it to 0, so applying it here could only desync the top-down footprint.
+      const stripEuler = new Euler((f.tiltX || 0) * DEG2RAD, 0, (f.rollZ || 0) * DEG2RAD, 'YXZ');
+      const hasOrientation = stripEuler.x !== 0 || stripEuler.z !== 0;
+      const toWorld = (pt: StripPoint): Vector3 => {
+        const v = new Vector3(worldPxToMeters(pt.x) - pos.x, 0, worldPxToMeters(pt.y) - pos.z);
+        if (hasOrientation) v.applyEuler(stripEuler);
+        return v.add(pos);
+      };
+
+      // One point per PHYSICAL LED (matching the 2D renderer), colored by its
+      // group's beam. Photometry is resolved once per beam and shared across
+      // the group's LEDs. Same arc parametrization as 2D: 2.5% inset on open
+      // shapes, full wrap on circles.
+      const beamPhotometry = f.beams.map(b => buildBeamPhotometry(f, String(b.id)));
+      const fallbackPhotometry = beamPhotometry[0] ?? buildBeamPhotometry(f);
+      // Physical dot size from the real LED pitch — pure world size, like 2D's
+      // led_r = spacing·0.45 (this is a diameter, hence ·0.9).
+      const spacing = sc.lengthMeters / ledCount;
+      const size = Math.max(0.004, spacing * 0.9);
+      for (let led = 0; led < ledCount; led++) {
+        const pixelIdx = Math.min(Math.floor(led / groupSize), f.beams.length - 1);
         const t = sc.shapeType === 'circle'
-          ? midLed / ledCount
-          : ledCount > 1 ? 0.025 + (midLed / (ledCount - 1)) * 0.95 : 0.5;
+          ? led / ledCount
+          : ledCount > 1 ? 0.025 + (led / (ledCount - 1)) * 0.95 : 0.5;
         const pt = pointAtArcLength(sampled, t * sampled.totalLength);
+        const w = toWorld(pt);
         rawPixels.push({
-          x: worldPxToMeters(pt.x),
-          y: pos.y,
-          z: worldPxToMeters(pt.y),
+          x: w.x,
+          y: w.y,
+          z: w.z,
           size,
-          entries: colorEntriesFor(f, String(beam.id)),
-          dimmerIdx: dimmerIdxFor(f, String(beam.id)),
+          photometry: beamPhotometry[pixelIdx] ?? fallbackPhotometry,
           fixtureId: f.id,
         });
       }
-      // Strip body: thin AABB along the sampled polyline is overkill; use a
-      // small handle box at the strip anchor for selection.
+
+      // Substrate polyline for the tube mesh — downsample the dense arc
+      // samples (bezier emits 32/segment) so the merged tube stays cheap.
+      if (sampled.points.length >= 2 && sampled.totalLength > 0) {
+        const isClosed = sc.shapeType === 'circle';
+        const pts = sampled.points;
+        // For closed rings the sampler's last point duplicates the first —
+        // drop it so the closed CatmullRomCurve3 doesn't get a seam kink.
+        const last = isClosed ? pts.length - 1 : pts.length;
+        const step = Math.max(1, Math.ceil(last / 96));
+        const polyline: Vector3[] = [];
+        for (let i = 0; i < last; i += step) polyline.push(toWorld(pts[i]!));
+        if (!isClosed && (last - 1) % step !== 0) polyline.push(toWorld(pts[last - 1]!));
+        if (polyline.length >= 2) {
+          // Radius ≈ the 2D substrate's 5px stroke width (5/250/2 m), padded a
+          // touch so it reads at typical orbit distances.
+          strips.push({ fixtureId: f.id, polyline, isClosed, radius: 0.01 });
+        }
+      }
+
+      // Strip body: small handle box at the centroid pivot — fallback raycast
+      // target plus the projection anchor for line/box-select and the gizmo.
       bodies.push({
         fixtureId: f.id,
-        position: new Vector3(worldPxToMeters(sc.points[0]?.x ?? 0), pos.y, worldPxToMeters(sc.points[0]?.y ?? 0)),
+        position: pos.clone(),
         euler,
         size: new Vector3(0.15, 0.15, 0.15),
         isStrip: true,
@@ -230,21 +278,31 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
       continue;
     }
 
-    // Regular fixture: one pixel per beam, offsets rotated by the fixture euler.
-    const bodyRadius = (FIXTURE_RADIUS * 2) / PIXELS_PER_METER;
+    // Regular fixture: one pixel per beam. localX/localY are normalized ±0.5
+    // offsets across the fixture footprint (NOT the stage), matching 2D's
+    // bx = local_x · half_w·2.
+    const fp = footprintMeters(f);
+    // Pixel diameter from the real slot spacing between neighboring beams,
+    // mirroring render.rs (pixel_r = min(slot_w, slot_h)/2 · 0.8).
+    const slotW = fp.x * minAdjacentGap(f.beams.map(b => b.localX), 1);
+    const slotH = fp.y * minAdjacentGap(f.beams.map(b => b.localY), 1);
+    const pixelDiameter = f.beams.length > 1
+      ? Math.max(0.02, Math.min(slotW, slotH) * 0.8)
+      : Math.min(fp.x, fp.y);
     for (const b of f.beams) {
       const offset = new Vector3(
-        b.localX * STAGE_SIZE_METERS,
-        (b.localZ || 0) * STAGE_SIZE_METERS,
-        b.localY * STAGE_SIZE_METERS,
+        b.localX * fp.x,
+        // localZ has no 2D counterpart and is 0 in practice; scale it with the
+        // x-footprint so any future use stays proportional to the fixture.
+        (b.localZ || 0) * fp.x,
+        b.localY * fp.y,
       ).applyEuler(euler);
       rawPixels.push({
         x: pos.x + offset.x,
         y: pos.y + offset.y,
         z: pos.z + offset.z,
-        size: f.beams.length > 1 ? Math.max(0.05, bodyRadius / Math.sqrt(f.beams.length)) : bodyRadius,
-        entries: colorEntriesFor(f, String(b.id)),
-        dimmerIdx: dimmerIdxFor(f, String(b.id)),
+        size: pixelDiameter,
+        photometry: buildBeamPhotometry(f, String(b.id)),
         fixtureId: f.id,
       });
     }
@@ -253,13 +311,23 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
       fixtureId: f.id,
       position: pos.clone(),
       euler,
-      size: new Vector3(
-        Math.max(0.15, (f.fixtureSize?.x ?? 1) * (FIXTURE_RADIUS / PIXELS_PER_METER)),
-        0.18,
-        Math.max(0.15, (f.fixtureSize?.y ?? 1) * (FIXTURE_RADIUS / PIXELS_PER_METER)),
-      ),
+      size: new Vector3(Math.max(0.15, fp.x), 0.18, Math.max(0.15, fp.y)),
       isStrip: false,
     });
+
+    // SVG artwork as a textured plane at the footprint — the dots on top
+    // convey the DMX state, exactly like the 2D renderer's element fills.
+    const customSvg = f.definition?.pixelmapper?.customSvg;
+    if (customSvg?.enabled && customSvg.data) {
+      svgPlanes.push({
+        fixtureId: f.id,
+        position: pos.clone(),
+        euler,
+        width: fp.x,
+        height: fp.y,
+        svgData: customSvg.data,
+      });
+    }
 
     // Beam cones: moving heads (pan/tilt), lens-bearing fixtures, and any
     // simple single-head fixture (PARs, spots, generic RGB) — only matrix/
@@ -283,47 +351,33 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
         beamAngleMinDeg: lens?.[0] ?? 25,
         beamAngleMaxDeg: lens?.[1] ?? lens?.[0] ?? 25,
         hasTilt: tilt.idx >= 0,
-        colorEntries: colorEntriesFor(f),
-        dimmerIdx: dimmerIdxFor(f),
+        photometry: buildBeamPhotometry(f),
       });
     }
   }
 
-  // Pack raw pixels into flat typed arrays for the per-frame hot loop.
+  // Pack raw pixels into flat arrays for the per-frame hot loop.
   const count = rawPixels.length;
   const positions = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
-  const entryStart = new Uint32Array(count + 1);
-  const dimmerIdx = new Int32Array(count);
+  const photometry: BeamPhotometry[] = new Array(count);
   const pixelFixture: Array<string | number> = new Array(count);
-  let totalEntries = 0;
-  for (let i = 0; i < count; i++) totalEntries += rawPixels[i]!.entries.length;
-  const chanIdx = new Int32Array(totalEntries);
-  const weights = new Float32Array(totalEntries * 3);
 
-  let e = 0;
   for (let i = 0; i < count; i++) {
     const p = rawPixels[i]!;
     positions[i * 3] = p.x;
     positions[i * 3 + 1] = p.y;
     positions[i * 3 + 2] = p.z;
     sizes[i] = p.size;
-    entryStart[i] = e;
-    dimmerIdx[i] = p.dimmerIdx;
+    photometry[i] = p.photometry;
     pixelFixture[i] = p.fixtureId;
-    for (const entry of p.entries) {
-      chanIdx[e] = entry.idx;
-      weights[e * 3] = entry.r;
-      weights[e * 3 + 1] = entry.g;
-      weights[e * 3 + 2] = entry.b;
-      e++;
-    }
   }
-  entryStart[count] = e;
 
   return {
-    pixels: { count, positions, sizes, entryStart, chanIdx, weights, dimmerIdx, pixelFixture },
+    pixels: { count, positions, sizes, photometry, pixelFixture },
     bodies,
     beams,
+    strips,
+    svgPlanes,
   };
 }

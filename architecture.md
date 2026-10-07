@@ -2,60 +2,77 @@
 
 ## Overview
 
-Pixelmapper is a DMX lighting controller with a Vue 3/TypeScript frontend and a Rust engine that runs on two target platforms:
+Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript frontend and a Rust engine compiled to WebAssembly.
 
-1. **Browser** — Rust compiled to WebAssembly (WASM), runs directly in the browser tab
-2. **ESP32-P4** — Rust compiled to a static C library (`no_std`), runs natively on the microcontroller
+- **Rendering runs in the browser today** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`).
+- **Planned targets:** a **Tauri** desktop app (native Rust engine, direct ArtNet) and a backend render engine for generated visuals.
+- **ESP32 on-device rendering is no longer a goal.** ESP32 devices are pure output devices that receive rendered frames. (This replaces the former principle "browser and ESP32 run the same engine".)
 
-The key design principle: **both targets use the exact same Rust engine and the same binary protocol.** The browser tab and the ESP32 receive identical byte sequences and produce identical DMX output.
+## Architectural Principles
+
+1. **Small core, everything specific is a plugin.** The core MUST run and be usable with zero extensions installed. See [ADR 0001](architecture/adr/0001-extension-and-content-plugin-system.md).
+2. **Two plugin kinds:**
+   - **Extensions** — features of the software (controls like the color picker, fixture kinds like NeoPixel strips, connectors, hardware controllers, live widgets). Authored as Nuxt layers in `extensions/`, distributed as prebuilt ES bundles, trusted, always active when installed. They talk to the core only through `@pixelmapper/extension-api`: auto-slots from layout primitives, inherited domain scopes, replaceable `pm.*` inputs, commands, and an opt-in live-value channel.
+   - **Content plugins** — code that shapes the visual output (modifiers now; shaders and visuals later). AssemblyScript compiled to sandboxed WASM, pure functions, content-addressed by hash, shareable and generatable at runtime. Built-ins live in `plugins/`.
+3. **AI-first.** Every plugin surface is typed, self-describing (manifest `description`, param schemas) and validated by a standalone toolchain, so an AI agent can generate extensions (as code) and content plugins (live) safely.
+4. **Command pattern for every mutation** (undo/redo, persistence, live collaboration) — extensions included.
+5. **Rust orchestrates rendering**; modifiers run behind the `ModifierRuntime` trait (browser: JS bridge in the worker; Tauri: `wasmtime`).
 
 ## File Structure
 
+Current layout. The target layout after the plugin-system migration is specified in [ADR 0001 §4](architecture/adr/0001-extension-and-content-plugin-system.md#4-repository-layout-target); follow the [implementation plan](architecture/plugin-system-implementation-plan.md) to get there.
+
 ```
 pixelmapper/
-├── aiBackendService/              # Express backend with LangGraph for AI tasks
-│   ├── src/
-│   │   ├── nodes/                 # LangGraph nodes (e.g., extractGeneralInfo)
-│   │   ├── graph.ts               # LangGraph StateGraph pipeline
-│   │   ├── server.ts              # Express API
-│   │   └── state.ts               # Graph state schema
-│   ├── index.ts                   # Entry point for backend
-├── app/                           # Nuxt 4 / Vue 3 frontend
-│   ├── stores/
-│   │   ├── engine-store.ts        # Render loop, packet cache, revision tracking
-│   │   └── connections-store.ts   # Connector registry
+├── aiBackendService/              # Express + LangGraph backend for AI tasks (fixture extraction/enrichment)
+│   └── src/{graph,server,state,model}.ts, nodes/
+├── app/                           # Nuxt 4 / Vue 3 frontend (the core)
+│   ├── components/
+│   │   ├── engine/                # Workspace, sidebars, property controls, modifier editors, commands
+│   │   ├── live/                  # Live mode canvas + widgets
+│   │   ├── design/                # Universe inspector, patch table
+│   │   ├── three/                 # 3D viewport + scene builders
+│   │   └── ui/                    # shadcn-vue primitives (not replaceable)
+│   ├── stores/                    # Pinia stores (engine-store = render loop & project state)
 │   └── utils/
-│       ├── engine/
-│       │   └── engine.ts          # Thin WASM wrapper (EffectEngine)
-│       └── connectors/
-│           ├── binary-encoder.ts  # Single source of truth for all packet encoding
-│           ├── base-connector.ts  # Abstract connector base class
-│           └── serial-connector.ts # USB Serial → ESP32
+│       ├── engine/                # Fixture model, worker, serialization, (legacy) TS effect classes
+│       ├── connectors/            # Connectors + binary encoders (→ become extensions)
+│       ├── controllers/           # Controller driver contracts (→ extensions)
+│       └── ofl/                   # Open Fixture Library import
+├── controllers/                   # Hardware controller drivers (→ extensions/controller-*)
 ├── rs-engine/
-│   ├── core/                      # Platform-agnostic Rust engine
-│   │   ├── src/
-│   │   │   ├── engine.rs          # EffectEngine, render loop, DMX buffer
-│   │   │   ├── bin_protocol.rs    # Binary packet parsers (layout, channels, effects)
-│   │   │   ├── effects.rs         # Effect implementations (Sine, etc.)
-│   │   │   ├── types.rs           # Shared data types
-│   │   │   └── wasm_bindings.rs   # wasm-bindgen bindings for the browser
-│   │   └── pkg/                   # Compiled WASM package (generated, do not edit)
-│   └── ffi/                       # C FFI layer for ESP32
-│       ├── src/lib.rs             # extern "C" functions, delegates to core
-│       └── include/engine_ffi.h   # C header for PlatformIO
-└── pio/
-    └── src/main.cpp               # ESP32 Arduino sketch
+│   ├── core/                      # Engine, render loop, binary protocol, effects (→ signatures + ModifierRuntime)
+│   ├── canvas/                    # 2D renderer (WASM)
+│   └── ffi/                       # ESP32 C FFI (to be removed, see plan P0.4)
+├── supabase/migrations/           # Database schema
+└── pio*/                          # ESP32 firmware (out of scope for the plugin migration)
 ```
 
-Detailed documentation per subsystem:
+## Documentation Map
 
-- [Engine & Render Loop](architecture/engine.md)
+- **Decisions:** [ADR 0001 — Extension & Content-Plugin System](architecture/adr/0001-extension-and-content-plugin-system.md)
+- **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
+- [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - [Core Concepts: Fixtures, Channels, Beams](architecture/core-concepts.md)
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
+- Created during the migration: `architecture/extensions.md`, `architecture/guides/authoring-extensions.md`, `architecture/guides/authoring-content-plugins.md`
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| **Modifier** | A content plugin that changes channel values over time/space (called `Effect` in pre-migration code). |
+| **Signature** | The typed value tuple a modifier reads/writes: `scalar`, `rgb`, `panTilt`. Mapped to DMX channels by the core. |
+| **Extension** | Trusted, installable feature package (Nuxt layer / ES bundle). |
+| **Content plugin** | Sandboxed AssemblyScript/WASM package identified by content hash. |
+| **Scope** | Typed, readonly domain object (fixture, channel, modifier, …) inherited down the component tree and visible to extensions. |
+| **Slot** | Extension point auto-generated by a layout primitive; id = primitive id path + position, e.g. `properties/color:actions`. |
+| **`pm.*` input** | Replaceable domain input (fader, color input, XY input, …) with a typed contract; also the UI kit for content-plugin params. |
+| **Fixture kind** | Extension-provided fixture generator that compiles a config into channels, beams, body primitives and handles. |
 
 ## Custom Fixtures (SVG Based)
 

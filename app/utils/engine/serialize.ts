@@ -1,6 +1,6 @@
 import { Fixture, type StripConfig } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
-import type { Channel } from './core/channel'
+import type { Channel, ChannelRenderInfo } from './core/channel'
 import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
 import type { Effect } from './types'
@@ -24,6 +24,7 @@ export interface SerializedChannel {
   rangeMin?: number
   rangeMax?: number
   beamId?: string
+  renderInfo?: ChannelRenderInfo
   chaserConfig: any
 }
 
@@ -116,6 +117,7 @@ function serializeChannel(ch: Channel): SerializedChannel {
     rangeMin: ch.rangeMin,
     rangeMax: ch.rangeMax,
     beamId: ch.beamId,
+    renderInfo: ch.renderInfo ? JSON.parse(JSON.stringify(ch.renderInfo)) : undefined,
     chaserConfig: JSON.parse(JSON.stringify(ch.chaserConfig)),
   }
 }
@@ -193,14 +195,39 @@ export function serializeProject(
 
 // ─── Deserialization ──────────────────────────────────────────────────────────
 
+/**
+ * Migrates channels from snapshots that predate the photometric render model:
+ * color wheels used to be role 'COLOR' with a white colorValue (making brightness
+ * scale with the wheel position) and strobe channels were role 'NONE' (ignored).
+ */
+function migrateLegacyChannel(data: SerializedChannel): { role: Channel['role']; renderInfo?: ChannelRenderInfo } {
+  if (data.renderInfo) return { role: data.role, renderInfo: data.renderInfo }
+
+  if ((data.type === 'COLOR_WHEEL' || data.type === 'COLOR_PRESET' || data.type === 'COLOR_TEMPERATURE') && data.role === 'COLOR') {
+    return {
+      role: 'COLOR_WHEEL',
+      renderInfo: { ranges: [{ kind: 'color', min: 0, max: 255, rgb: [255, 255, 255] }] },
+    }
+  }
+  if (data.type === 'STROBE' && data.role === 'NONE') {
+    return {
+      role: 'SHUTTER',
+      renderInfo: { ranges: [{ kind: 'shutter', min: 0, max: 255, freqStart: 0, freqEnd: 0 }] },
+    }
+  }
+  return { role: data.role }
+}
+
 function deserializeChannel(data: SerializedChannel): Channel {
+  const migrated = migrateLegacyChannel(data)
   return {
     type: data.type,
     addressOffset: data.addressOffset,
     resolution: data.resolution,
     fineAddressOffsets: data.fineAddressOffsets,
     isFine: data.isFine,
-    role: data.role,
+    role: migrated.role,
+    renderInfo: migrated.renderInfo,
     colorValue: data.colorValue,
     oflChannelName: data.oflChannelName,
     defaultValue: data.defaultValue,

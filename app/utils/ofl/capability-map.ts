@@ -1,6 +1,6 @@
 import type { ChannelType } from '../engine/types';
-import type { ChannelRole } from '../engine/core/channel';
-import type { OflCapability, OflColor } from './types';
+import type { ChannelRole, RenderRange } from '../engine/core/channel';
+import type { OflCapability, OflColor, OflWheel, OflWheelSlot } from './types';
 
 // ─── Color Mapping ────────────────────────────────────────────────────────────
 
@@ -78,9 +78,9 @@ export function mapOflCapabilityToChannel(
     }
 
     case 'ColorPreset':
-      return { type: 'COLOR_PRESET', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+      return { type: 'COLOR_PRESET', role: 'COLOR_WHEEL', colorValue: '#FFFFFF', defaultValue };
     case 'ColorTemperature':
-      return { type: 'COLOR_TEMPERATURE', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+      return { type: 'COLOR_TEMPERATURE', role: 'COLOR_WHEEL', colorValue: '#FFFFFF', defaultValue };
 
     case 'Pan':
     case 'PanContinuous':
@@ -94,7 +94,7 @@ export function mapOflCapabilityToChannel(
       return { type: 'PANTILT_SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
 
     case 'ShutterStrobe':
-      return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
+      return { type: 'STROBE', role: 'SHUTTER', colorValue: '#888888', defaultValue };
     case 'StrobeSpeed':
       return { type: 'STROBE_SPEED', role: 'NONE', colorValue: '#888888', defaultValue };
     case 'StrobeDuration':
@@ -132,7 +132,7 @@ export function mapOflCapabilityToChannel(
       const rawWheel = capability.wheel ?? channelName;
       const wheelName = (Array.isArray(rawWheel) ? rawWheel[0] : rawWheel)?.toLowerCase() ?? '';
       if (wheelName.includes('color')) {
-        return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+        return { type: 'COLOR_WHEEL', role: 'COLOR_WHEEL', colorValue: '#FFFFFF', defaultValue };
       }
       if (wheelName.includes('gobo') || wheelName.includes('pattern')) {
         if (capability.type === 'WheelRotation' || capability.type === 'WheelSlotRotation') {
@@ -190,7 +190,7 @@ export function mapOflCapabilityToChannel(
 function heuristicFallbackMap(channelName: string, defaultValue: number): MappedChannel {
   const name = channelName.toLowerCase();
 
-  if (name.includes('shutter') || name.includes('strobe')) return { type: 'STROBE', role: 'NONE', colorValue: '#888888', defaultValue };
+  if (name.includes('shutter') || name.includes('strobe')) return { type: 'STROBE', role: 'SHUTTER', colorValue: '#888888', defaultValue };
   if (name.includes('dimmer') || name.includes('intensity')) return { type: 'DIMMER', role: 'DIMMER', colorValue: '#FFFFFF', defaultValue: 0 };
   if (name.includes('pan')) return { type: 'PAN', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('tilt')) return { type: 'TILT', role: 'NONE', colorValue: '#888888', defaultValue };
@@ -200,8 +200,8 @@ function heuristicFallbackMap(channelName: string, defaultValue: number): Mapped
   if (name.includes('frost')) return { type: 'FROST', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('prism')) return { type: 'PRISM', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('gobo')) return { type: 'GOBO_WHEEL', role: 'NONE', colorValue: '#888888', defaultValue };
-  if (name.includes('color') && (name.includes('preset') || name.includes('macro'))) return { type: 'COLOR_PRESET', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
-  if (name.includes('color')) return { type: 'COLOR_WHEEL', role: 'COLOR', colorValue: '#FFFFFF', defaultValue };
+  if (name.includes('color') && (name.includes('preset') || name.includes('macro'))) return { type: 'COLOR_PRESET', role: 'COLOR_WHEEL', colorValue: '#FFFFFF', defaultValue };
+  if (name.includes('color')) return { type: 'COLOR_WHEEL', role: 'COLOR_WHEEL', colorValue: '#FFFFFF', defaultValue };
   if (name.includes('macro')) return { type: 'GENERIC', role: 'NONE', colorValue: '#888888', defaultValue };
   if (name.includes('control') || name.includes('reset') || name.includes('blackout on move')) return { type: 'MAINTENANCE', role: 'NONE', colorValue: '#888888', defaultValue };
 
@@ -223,4 +223,195 @@ export function resolveOflChannel(channelDef: import('./types').OflChannel, chan
     defaultValue = Math.round((parseFloat(rawDefault) / 100) * 255);
   }
   return mapOflCapabilityToChannel(primaryCap, defaultValue, channelName);
+}
+
+// ─── Render-Range Derivation (SHUTTER / COLOR_WHEEL semantics) ────────────────
+
+const WHITE: [number, number, number] = [255, 255, 255];
+const MAX_STROBE_HZ = 25; // avoid aliasing against the ~60fps preview
+
+function parseHexColor(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m || !m[1]) return null;
+  const v = parseInt(m[1], 16);
+  return [(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff];
+}
+
+/** Average of multiple hex colors (multi-color slots like split gels). */
+function averageColors(colors?: string[]): [number, number, number] | null {
+  if (!colors || colors.length === 0) return null;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const c of colors) {
+    const rgb = parseHexColor(c);
+    if (!rgb) continue;
+    r += rgb[0]; g += rgb[1]; b += rgb[2]; n++;
+  }
+  if (n === 0) return null;
+  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+}
+
+/**
+ * Parses an OFL speed string into a strobe frequency in Hz.
+ * Accepts "3Hz", "50%", "slow", "fast". Returns undefined when unparseable.
+ */
+function parseStrobeHz(s?: string): number | undefined {
+  if (!s) return undefined;
+  const hz = /(-?[\d.]+)\s*Hz/i.exec(s);
+  if (hz && hz[1]) return Math.min(MAX_STROBE_HZ, Math.abs(parseFloat(hz[1])));
+  const pct = /([\d.]+)\s*%/.exec(s);
+  if (pct && pct[1]) return Math.min(MAX_STROBE_HZ, 1 + (parseFloat(pct[1]) / 100) * 9);
+  const t = s.trim().toLowerCase();
+  if (t.includes('slow')) return 1;
+  if (t.includes('fast')) return 10;
+  return undefined;
+}
+
+/** DMX bounds of a capability; a single capability without dmxRange spans the full channel. */
+function capRange(cap: OflCapability, isOnly: boolean): [number, number] | null {
+  if (cap.dmxRange) return [cap.dmxRange[0], cap.dmxRange[1]];
+  return isOnly ? [0, 255] : null;
+}
+
+/** Resolves the wheel a capability refers to (explicit wheel name, else channel name). */
+function wheelFor(
+  cap: { wheel?: string | string[] },
+  channelName: string,
+  wheels: Record<string, OflWheel>,
+): OflWheel | undefined {
+  const raw = cap.wheel ?? channelName;
+  const name = Array.isArray(raw) ? raw[0] : raw;
+  if (!name) return undefined;
+  if (wheels[name]) return wheels[name];
+  // Fall back to case-insensitive match (channel names don't always match wheel keys exactly)
+  const lower = name.toLowerCase();
+  const key = Object.keys(wheels).find(k => k.toLowerCase() === lower || lower.includes(k.toLowerCase()));
+  return key ? wheels[key] : undefined;
+}
+
+/** Color of a (possibly fractional) 1-based slot number. Slots without colors render white, never black. */
+function slotColor(wheel: OflWheel | undefined, slotNumber: number): [number, number, number] {
+  if (!wheel || wheel.slots.length === 0) return WHITE;
+  const colorOf = (slot: OflWheelSlot | undefined): [number, number, number] =>
+    averageColors(slot?.colors) ?? WHITE;
+  const base = Math.floor(slotNumber);
+  const frac = slotNumber - base;
+  const idx = ((base - 1) % wheel.slots.length + wheel.slots.length) % wheel.slots.length;
+  const c0 = colorOf(wheel.slots[idx]);
+  if (frac < 0.01) return c0;
+  const c1 = colorOf(wheel.slots[(idx + 1) % wheel.slots.length]);
+  return [
+    Math.round(c0[0] + (c1[0] - c0[0]) * frac),
+    Math.round(c0[1] + (c1[1] - c0[1]) * frac),
+    Math.round(c0[2] + (c1[2] - c0[2]) * frac),
+  ];
+}
+
+/** Average color over all colored slots — used for whole-wheel rotation ranges. */
+function wheelAverageColor(wheel: OflWheel | undefined): [number, number, number] {
+  if (!wheel) return WHITE;
+  const all = wheel.slots.flatMap(s => s.colors ?? []);
+  return averageColors(all) ?? WHITE;
+}
+
+/**
+ * Derives the serializable render semantics of a SHUTTER or COLOR_WHEEL channel
+ * from its OFL capabilities (+ the fixture's wheel definitions).
+ * Returns an empty array when nothing render-relevant was found — the LUT
+ * builder then falls back to always-open / white.
+ */
+export function buildRenderRanges(
+  capabilities: OflCapability[],
+  wheels: Record<string, OflWheel> = {},
+  channelName: string = '',
+): RenderRange[] {
+  const ranges: RenderRange[] = [];
+  const isOnly = capabilities.length === 1;
+
+  for (const cap of capabilities) {
+    const dmx = capRange(cap, isOnly);
+    if (!dmx) continue;
+    const [min, max] = dmx;
+
+    switch (cap.type) {
+      case 'ShutterStrobe': {
+        if (cap.shutterEffect === 'Open') {
+          ranges.push({ kind: 'shutter', min, max, freqStart: 0, freqEnd: 0 });
+        } else if (cap.shutterEffect === 'Closed') {
+          ranges.push({ kind: 'shutter', min, max, freqStart: -1, freqEnd: -1 });
+        } else {
+          const start = parseStrobeHz(cap.speedStart) ?? parseStrobeHz(cap.speed) ?? 1;
+          const end = parseStrobeHz(cap.speedEnd) ?? parseStrobeHz(cap.speed) ?? 10;
+          ranges.push({ kind: 'shutter', min, max, freqStart: start, freqEnd: end });
+        }
+        break;
+      }
+
+      case 'NoFunction':
+        // On a shutter channel NoFunction usually means blackout; only treat it
+        // that way when the channel actually has shutter semantics elsewhere.
+        if (capabilities.some(c => c.type === 'ShutterStrobe')) {
+          ranges.push({ kind: 'shutter', min, max, freqStart: -1, freqEnd: -1 });
+        }
+        break;
+
+      case 'WheelSlot':
+      case 'WheelShake':
+      case 'WheelSlotRotation': {
+        const wheel = wheelFor(cap, channelName, wheels);
+        const start = cap.slotNumberStart ?? cap.slotNumber;
+        const end = cap.slotNumberEnd ?? cap.slotNumber;
+        if (start === undefined) {
+          ranges.push({ kind: 'color', min, max, rgb: wheelAverageColor(wheel) });
+        } else {
+          const rgb = slotColor(wheel, start);
+          const rgbEnd = end !== undefined && end !== start ? slotColor(wheel, end) : undefined;
+          ranges.push({ kind: 'color', min, max, rgb, rgbEnd });
+        }
+        break;
+      }
+
+      case 'WheelRotation': {
+        const wheel = wheelFor(cap, channelName, wheels);
+        ranges.push({ kind: 'color', min, max, rgb: wheelAverageColor(wheel) });
+        break;
+      }
+
+      case 'ColorPreset': {
+        const rgb = averageColors(cap.colors ?? cap.colorsStart) ?? WHITE;
+        const endColors = averageColors(cap.colorsEnd);
+        ranges.push({ kind: 'color', min, max, rgb, rgbEnd: endColors ?? undefined });
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  return ranges;
+}
+
+/**
+ * Computes the DMX value that puts a SHUTTER channel to "open" or a COLOR_WHEEL
+ * channel to its open/white slot. Used for auto-defaults and the highlight action.
+ */
+export function computeOpenDefault(role: ChannelRole, ranges: RenderRange[]): number | undefined {
+  const mid = (r: { min: number; max: number }) => Math.round((r.min + r.max) / 2);
+
+  if (role === 'SHUTTER') {
+    const open = ranges.find(r => r.kind === 'shutter' && r.freqStart === 0 && r.freqEnd === 0);
+    if (open) return mid(open);
+    const notClosed = ranges.find(r => r.kind === 'shutter' && r.freqStart >= 0);
+    return notClosed ? mid(notClosed) : undefined;
+  }
+
+  if (role === 'COLOR_WHEEL') {
+    const isWhite = (rgb: [number, number, number]) => rgb[0] >= 250 && rgb[1] >= 250 && rgb[2] >= 250;
+    const white = ranges.find(r => r.kind === 'color' && isWhite(r.rgb) && !r.rgbEnd);
+    if (white) return mid(white);
+    const first = ranges.find(r => r.kind === 'color');
+    return first ? mid(first) : undefined;
+  }
+
+  return undefined;
 }

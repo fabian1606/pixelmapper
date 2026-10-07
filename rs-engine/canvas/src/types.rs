@@ -11,6 +11,22 @@ pub struct ColorChannel {
     pub b: u8,
 }
 
+/// One COLOR_WHEEL-role channel: the DMX value SELECTS a color via a 256-entry
+/// RGB lookup table (768 bytes, [r,g,b] per DMX value). Never scales brightness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LutChannel {
+    pub index: usize,
+    pub lut: Vec<u8>,
+}
+
+/// One SHUTTER-role channel: 256-entry frequency table indexed by DMX value.
+/// -1 = closed, 0 = open, >0 = strobe frequency in Hz.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShutterChannel {
+    pub index: usize,
+    pub freq: Vec<f32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixtureBeam {
     pub id: String,
@@ -23,6 +39,16 @@ pub struct FixtureBeam {
     pub color_channels: Vec<ColorChannel>,
     #[serde(rename = "dimmerIndex", default)]
     pub dimmer_index: Option<usize>,
+    /// COLOR_WHEEL-role channels for this beam (dmx → slot color LUT)
+    #[serde(rename = "colorLuts", default)]
+    pub color_luts: Vec<LutChannel>,
+    /// SHUTTER-role channels for this beam (dmx → open/closed/strobe-Hz LUT)
+    #[serde(rename = "shutterChannels", default)]
+    pub shutter_channels: Vec<ShutterChannel>,
+    /// All DIMMER-role channel indices; factors multiply. Supersedes dimmerIndex
+    /// when non-empty (dimmerIndex kept for payload back-compat).
+    #[serde(rename = "dimmerIndices", default)]
+    pub dimmer_indices: Vec<usize>,
     /// ID of the SVG element that this beam is mapped to (custom SVG fixtures only)
     #[serde(rename = "svgElementId", default)]
     pub svg_element_id: Option<String>,
@@ -124,6 +150,12 @@ pub struct FixtureCanvasData {
     pub color_channels: Vec<ColorChannel>,
     #[serde(rename = "dimmerIndex", default)]
     pub dimmer_index: Option<usize>,
+    #[serde(rename = "colorLuts", default)]
+    pub color_luts: Vec<LutChannel>,
+    #[serde(rename = "shutterChannels", default)]
+    pub shutter_channels: Vec<ShutterChannel>,
+    #[serde(rename = "dimmerIndices", default)]
+    pub dimmer_indices: Vec<usize>,
 
     /// Present when this fixture is a parametric NeoPixel strip.
     /// Switches the renderer into Figma-style vector-line mode.

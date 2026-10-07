@@ -3,6 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import { extractionGraph } from "./graph.js";
 import { extractTextWithMistralOcr } from "./utils/mistralOcr.js";
+import { enrichFixtureFromManual } from "./nodes/enrichFixture/index.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -58,6 +59,42 @@ app.post("/extract-fixture-pdf", upload.single('manualPdf'), async (req, res) =>
   } catch (error: any) {
     console.error("Error during PDF extraction:", error);
     res.write(`data: ${JSON.stringify({ error: "An error occurred during extraction.", details: error.message })}\n\n`);
+    res.end();
+  }
+});
+
+// Enrichment endpoint: given an existing fixture definition (as OFL JSON) and
+// its manual PDF, propose corrections to shutter/dimmer/wheel-slot behavior
+// for the user to review and accept in the custom fixture editor.
+app.post("/enrich-fixture-pdf", upload.single('manualPdf'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "manualPdf file is required." });
+  }
+  let existingFixture;
+  try {
+    existingFixture = JSON.parse(req.body.existingOfl);
+  } catch {
+    return res.status(400).json({ error: "existingOfl must be a valid JSON string." });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  try {
+    res.write(`data: ${JSON.stringify({ status: "Starting Mistral OCR processing..." })}\n\n`);
+    const manualText = await extractTextWithMistralOcr(req.file.originalname, req.file.buffer);
+
+    const proposals = await enrichFixtureFromManual(existingFixture, manualText, (message) => {
+      res.write(`data: ${JSON.stringify({ status: message })}\n\n`);
+    });
+
+    res.write(`data: ${JSON.stringify({ success: true, data: { proposals } })}\n\n`);
+    res.end();
+  } catch (error: any) {
+    console.error("Error during fixture enrichment:", error);
+    res.write(`data: ${JSON.stringify({ error: "An error occurred during enrichment.", details: error.message })}\n\n`);
     res.end();
   }
 });

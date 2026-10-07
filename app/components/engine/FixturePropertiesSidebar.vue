@@ -14,6 +14,7 @@ import type { ChannelType } from '~/utils/engine/types';
 import FixturePropertiesTabBar from './FixturePropertiesTabBar.vue';
 import FixturePropertiesChannelList from './FixturePropertiesChannelList.vue';
 import { provideSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
+import { FLOATING_OVERLAY_SELECTORS, isOverlayInteraction } from '~/utils/floating-overlay';
 import { syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { type SnapshotMap } from './commands/set-channel-values-command';
@@ -52,13 +53,23 @@ const effectsManager = ref<InstanceType<typeof CategoryEffectsManager> | null>(n
 
 onClickOutside(
   sidebarRef,
-  () => {
+  (event) => {
     // Don't close the sidebar if a child floating UI (dropdown, popover) is open
     if (lockedOpenCount.value !== undefined && lockedOpenCount.value > 0) return;
+    // Re-check the target here: the `ignore` option below is bypassed whenever
+    // an overlay component stops pointerdown propagation (see floating-overlay.ts).
+    if (isOverlayInteraction(event.target)) return;
     activeTab.value = null;
     if (effectEngine) effectEngine.activeModifier.value = null;
   },
-  { ignore: ['.viewport'] } // Don't close when clicking or dragging anywhere on the canvas
+  {
+    ignore: [
+      '.viewport', // Don't close when clicking or dragging anywhere on the canvas
+      // Teleported floating layers (context menu, dialogs, dropdowns, …) are
+      // outside the sidebar DOM but belong to it interaction-wise.
+      ...FLOATING_OVERLAY_SELECTORS,
+    ],
+  }
 );
 
 function toggleTab(tab: ChannelCategoryKey) {
