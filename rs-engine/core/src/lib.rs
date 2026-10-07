@@ -3,6 +3,8 @@ pub mod effects;
 pub mod engine;
 pub mod bin_protocol;
 pub mod signatures;
+pub mod phase;
+pub mod beat_clock;
 
 // Temporary golden generator for the AssemblyScript built-ins (plan P3.3).
 #[cfg(test)]
