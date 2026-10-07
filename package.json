@@ -2,6 +2,11 @@
   "name": "pixelmapper",
   "type": "module",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "extensions/*",
+    "plugins/*"
+  ],
   "scripts": {
     "build": "nuxt build",
     "dev": "concurrently -n nuxt,canvas,core,artnet -c cyan,yellow,green,magenta \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\"",
@@ -30,6 +35,7 @@
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",
     "@pinia/nuxt": "^0.11.3",
+    "@pixelmapper/extension-api": "workspace:*",
     "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
