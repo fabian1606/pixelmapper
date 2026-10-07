@@ -21,7 +21,8 @@ import { AlignmentGuides3D, type AlignmentGuideData } from './alignment-guides-3
 import { PixelCloud } from './pixel-instances';
 import { BeamCones } from './beam-cones';
 import { FixtureBodies } from './fixture-bodies';
-import { StripSubstrates } from './strip-substrates';
+import { BodyPolylines } from './body-polylines';
+import { BodyShapes } from './body-shapes';
 import { SvgPlanes } from './svg-planes';
 import { buildStage, type Stage } from './stage';
 import {
@@ -106,7 +107,8 @@ export class ThreeSceneManager {
   private pixels = new PixelCloud();
   private beams: BeamCones;
   private bodies: FixtureBodies;
-  private strips: StripSubstrates;
+  private polylines: BodyPolylines;
+  private shapes: BodyShapes;
   private svgPlanes: SvgPlanes;
   private stage: Stage;
   private alignGuides: AlignmentGuides3D;
@@ -170,7 +172,8 @@ export class ThreeSceneManager {
 
     this.beams = new BeamCones(this.scene);
     this.bodies = new FixtureBodies(this.scene);
-    this.strips = new StripSubstrates(this.scene);
+    this.polylines = new BodyPolylines(this.scene);
+    this.shapes = new BodyShapes(this.scene);
     this.svgPlanes = new SvgPlanes(this.scene);
     this.alignGuides = new AlignmentGuides3D(this.scene);
     this.scene.add(this.pixels.points);
@@ -355,18 +358,17 @@ export class ThreeSceneManager {
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
-    // Bodies (instanced boxes) plus the strip substrate tubes, so clicking
-    // anywhere on a strip's curve selects it — not just its anchor box.
-    const targets = this.strips.mesh.visible
-      ? [this.bodies.mesh, this.strips.mesh]
-      : [this.bodies.mesh];
+    // Bodies (instanced boxes) plus kind body meshes (polyline tubes, flat
+    // shapes), so clicking anywhere on a kind fixture's body selects it.
+    const targets = [this.bodies.mesh, this.polylines.mesh, this.shapes.mesh].filter(m => m.visible);
     const hits = this.raycaster.intersectObjects(targets, false);
     for (const hit of hits) {
       if (hit.object === this.bodies.mesh && hit.instanceId !== undefined) {
         return this.bodies.fixtureIdAt(hit.instanceId);
       }
-      if (hit.object === this.strips.mesh && hit.faceIndex != null) {
-        const id = this.strips.fixtureIdAtFace(hit.faceIndex);
+      if (hit.faceIndex != null) {
+        const owner = hit.object === this.polylines.mesh ? this.polylines : hit.object === this.shapes.mesh ? this.shapes : null;
+        const id = owner?.fixtureIdAtFace(hit.faceIndex);
         if (id !== undefined) return id;
       }
     }
@@ -473,7 +475,8 @@ export class ThreeSceneManager {
     this.selectedIds = new Set(ids);
     this.bodies.setSelection(this.selectedIds);
     this.beams.setSelection(this.selectedIds);
-    this.strips.setSelection(this.selectedIds);
+    this.polylines.setSelection(this.selectedIds);
+    this.shapes.setSelection(this.selectedIds);
     this.refreshPivot();
   }
 
@@ -552,11 +555,13 @@ export class ThreeSceneManager {
     this.pixels.rebuild(model.pixels);
     this.beams.rebuild(model.beams);
     this.bodies.rebuild(model.bodies);
-    this.strips.rebuild(model.strips);
+    this.polylines.rebuild(model.polylines);
+    this.shapes.rebuild(model.shapes);
     this.svgPlanes.rebuild(model.svgPlanes);
     this.bodies.setSelection(this.selectedIds);
     this.beams.setSelection(this.selectedIds);
-    this.strips.setSelection(this.selectedIds);
+    this.polylines.setSelection(this.selectedIds);
+    this.shapes.setSelection(this.selectedIds);
     this.refreshPivot();
     this.updateStageToFit(model.bodies);
   }
@@ -635,7 +640,8 @@ export class ThreeSceneManager {
     this.pixels.dispose();
     this.beams.dispose();
     this.bodies.dispose();
-    this.strips.dispose();
+    this.polylines.dispose();
+    this.shapes.dispose();
     this.svgPlanes.dispose();
     this.alignGuides.dispose();
     this.stage.dispose();
