@@ -7,11 +7,12 @@
  * their implementation from there. Distribution bundles rewrite `vue`,
  * `pinia` and this package to the same globals.
  */
-import type { Component, ComputedRef, MaybeRef, ShallowRef } from 'vue';
+import type { Component, ComputedRef, DeepReadonly, MaybeRef, ShallowRef } from 'vue';
+import type { FixtureId } from './model';
 import type { ExtensionContext, ExtensionManifest } from './manifest';
 import type { LiveFrame, LiveTarget, LiveValueOf, LiveValueOptions, OnFrameOptions } from './live';
 import type { PmInputName } from './replaceables';
-import type { ScopeName, ScopeRef } from './scopes';
+import type { FixtureView, ScopeName, ScopeRef } from './scopes';
 
 /** The implementation of the API composables, provided by the host. */
 export interface HostApi {
@@ -25,6 +26,8 @@ export interface HostApi {
   ): Readonly<ShallowRef<LiveValueOf<T> | undefined>>;
   onFrame(cb: (frame: LiveFrame) => void, opts?: OnFrameOptions): void;
   useReplaceable(name: PmInputName): ComputedRef<Component>;
+  /** Readonly view of a fixture by id (usable outside components, e.g. in connectors). */
+  getFixture(id: FixtureId): DeepReadonly<FixtureView> | undefined;
   /** Validates and registers an extension manifest. */
   registerExtension(manifest: ExtensionManifest): void;
 }

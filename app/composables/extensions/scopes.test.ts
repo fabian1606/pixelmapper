@@ -30,7 +30,7 @@ describe('scope system', () => {
     let seenSelection: ScopeRef<'selection'> | undefined;
     let seenFixture: ScopeRef<'fixture'> | undefined;
 
-    const L1 = provider(() => provideScope('project', shallowRef<ProjectInfo>({ id: 'p', name: 'P', bpm: 120, requires: [] })));
+    const L1 = provider(() => provideScope('project', shallowRef<ProjectInfo>({ id: 'p', name: 'P', bpm: 120, requires: [], fixtures: [] })));
     const L2 = provider(() => provideScope('selection', shallowRef<SelectionInfo>({ fixtureIds: [1], nodeIds: [1] })));
     const L3 = provider(() => provideScope('fixture', shallowRef(fixture('f1'))));
     const Leaf = defineComponent({
@@ -55,7 +55,7 @@ describe('scope system', () => {
 
     const Outer = provider(() => {
       provideScope('fixture', shallowRef(fixture('outer')));
-      provideScope('project', shallowRef<ProjectInfo>({ id: 'p', name: 'P', bpm: 120, requires: [] }));
+      provideScope('project', shallowRef<ProjectInfo>({ id: 'p', name: 'P', bpm: 120, requires: [], fixtures: [] }));
     });
     const Inner = provider(() => provideScope('fixture', shallowRef(fixture('inner'))));
     const ReadInner = defineComponent({

@@ -19,6 +19,7 @@ import type {
   ViewportMode,
   ViewportInfo,
   ChannelRef,
+  FixtureSummary,
   Json,
 } from '@pixelmapper/extension-api';
 import type { Fixture } from '~/utils/engine/core/fixture';
@@ -127,6 +128,12 @@ export function channelView(fixture: Fixture, index: number): ChannelView {
       comment: cap.comment,
     })),
   };
+}
+
+/** Light fixture list for the project scope. */
+export function fixtureSummaries(fixtures: readonly Fixture[]): FixtureSummary[] {
+  void modelTick.value;
+  return fixtures.map(f => ({ id: f.id, name: f.name, startAddress: f.startAddress, channelCount: f.channels.length, kindId: f.kind?.id }));
 }
 
 /** Projects one fixture (channels, beams, kind/extension data). */

@@ -42,6 +42,19 @@ export interface ProjectInfo {
   bpm: number;
   /** Extensions this project depends on. */
   requires: ProjectRequirement[];
+  /** Every fixture in scene order (for pickers; use `getFixture` for details). */
+  fixtures: FixtureSummary[];
+}
+
+/** Light entry of the project's fixture list. */
+export interface FixtureSummary {
+  id: FixtureId;
+  name: string;
+  /** 1-based absolute DMX start address. */
+  startAddress: number;
+  channelCount: number;
+  /** Kind id for kind fixtures. */
+  kindId?: string;
 }
 
 /** Current selection. Provided at the app root. */

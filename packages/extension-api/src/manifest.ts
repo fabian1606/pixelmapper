@@ -114,3 +114,12 @@ export function useExtensionContext(): ExtensionContext {
 export function useReplaceable(name: PmInputName): ComputedRef<Component> {
   return getHostApi().useReplaceable(name);
 }
+
+/**
+ * Readonly view of a fixture by id. Unlike `ctx.getFixture` it works outside
+ * components (connectors, plain modules); call it when needed — the view is
+ * a snapshot.
+ */
+export function getFixture(id: FixtureId): DeepReadonly<FixtureView> | undefined {
+  return getHostApi().getFixture(id);
+}

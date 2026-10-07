@@ -13,7 +13,7 @@ import * as pinia from 'pinia';
 import * as apiModule from '@pixelmapper/extension-api';
 import type { ExtensionManifest, HostApi } from '@pixelmapper/extension-api';
 import { useScope } from '~/composables/extensions/use-scope';
-import { useExtensionContext } from '~/composables/extensions/use-extension-context';
+import { getFixture, useExtensionContext } from '~/composables/extensions/use-extension-context';
 import { useReplaceable } from '~/composables/extensions/use-replaceable';
 import { useLiveValue } from '~/composables/extensions/use-live-value';
 import { onFrame } from '~/composables/extensions/on-frame';
@@ -45,6 +45,7 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     useLiveValue: overrides.useLiveValue ?? useLiveValue,
     onFrame: overrides.onFrame ?? ((cb, opts) => { onFrame(cb, opts); }),
     useReplaceable: overrides.useReplaceable ?? useReplaceable,
+    getFixture,
     registerExtension: safeRegister,
   };
 

@@ -18,9 +18,24 @@ export interface LogLine {
   text: string;
 }
 
+/** Rendered-output state passed to connectors every frame. */
+export interface ConnectorEngineState {
+  /** Current tempo. */
+  bpm: number;
+  /** Milliseconds since the shared clock epoch. */
+  elapsedMs: number;
+  /** Beats since the clock epoch. */
+  beatTime: number;
+  /**
+   * Final DMX of all universes (flat, post-override): index = absolute
+   * address − 1. Do not retain beyond the call.
+   */
+  dmxBuffer: Uint8Array;
+}
+
 /**
- * Runtime contract of a connector instance. Structurally matches the core
- * `BaseConnector`; a reusable base class is provided by the host from plan P6.
+ * Runtime contract of a connector instance. Extend `ConnectorBase` (from
+ * this package) rather than implementing it from scratch.
  */
 export interface Connector {
   readonly id: string;
@@ -28,6 +43,10 @@ export interface Connector {
   status: Ref<ConnectorStatus>;
   errorMessage: Ref<string | null>;
   logs: LogLine[];
+  /** User-visible name of this instance. */
+  label: Ref<string>;
+  /** True while a dropped connection is being retried. */
+  autoReconnect: Ref<boolean>;
   /** Number of physical DMX outputs (0 = no direct DMX output). */
   outputCount: number;
   /** `outputMapping[i]` = universe of output `i` (0 = unassigned). */
@@ -36,8 +55,16 @@ export interface Connector {
   disconnect(): Promise<void>;
   /** Called once per frame per active output; MUST be non-blocking. */
   sendFrame(dmxBuffer: Uint8Array, universe?: number): void;
+  /** Called every frame while connected (connectors without DMX outputs). */
+  onEngineState?(state: ConnectorEngineState): void;
+  /** True when the host may connect on startup without a user gesture. */
+  canAutoConnect(): boolean;
   /** Serializable per-device configuration. */
   getConfig(): Record<string, unknown>;
+  /** Applies (a part of) a stored config. */
+  applyConfig(config: Record<string, unknown>): void;
+  /** Sets the universe of one output. */
+  setOutputUniverse(outputIndex: number, universe: number): void;
 }
 
 /** An output (or input) connector type contributed by an extension. */
@@ -53,7 +80,12 @@ export interface ConnectorDefinition {
   create(id: string): Connector;
   /** Restore an instance from its stored config. */
   fromConfig(id: string, config: Record<string, unknown>): Connector;
-  /** Config UI rendered on the connections page. */
+  /**
+   * Config UI rendered on the connections page: prop `connector`, emits
+   * `change(patch)`. The host applies the patch (`connector.applyConfig`)
+   * and persists the config per user and device (ADR D18). Label, outputs
+   * and logs are rendered by the host.
+   */
   settings?: Component;
 }
 

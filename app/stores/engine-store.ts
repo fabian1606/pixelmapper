@@ -6,8 +6,6 @@ import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
-import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
-import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN,
   buildLayoutBin, buildChannelsBin, buildModifiersBin,
@@ -29,7 +27,6 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 // Side-effect import — registers 'connector.add' / 'connector.remove' /
 // 'connector.update' factories so the tail replay can recreate connector
 // mutations on project load even before any UI page has been visited.
-import '~/components/engine/commands/connector-commands';
 // Side-effect import — registers the 'SetChannelRange' factory so per-channel
 // range edits replay correctly on project load.
 import '~/components/engine/commands/set-channel-range-command';
@@ -796,24 +793,12 @@ export const useEngineStore = defineStore('engine', () => {
       connectionsStore.sendFrame(outputBuffer);
       // Extension live values (no-op without subscribers).
       liveHub.ingest(outputBuffer, elapsedMs, Date.now(), signatures);
-      try {
-        connectionsStore.notifyEngineState({
-          bpm: engine.globalBpm.value,
-          elapsedMs,
-          layoutRevision: layoutRevision.value,
-          channelsRevision: channelsRevision.value,
-          effectsRevision: effectsRevision.value,
-          layoutPacket,
-          channelsPacket,
-          effectsPacket: modifiersPacket,
-          dmxBuffer: outputBuffer,
-          fixtures: flatFixtures.value,
-          modifiers: modifiers.value,
-          blendMode: engine.stackBlendMode.value,
-        });
-      } catch (e) {
-        console.warn('[engine] notifyEngineState threw:', e);
-      }
+      connectionsStore.notifyEngineState({
+        bpm: engine.globalBpm.value,
+        elapsedMs,
+        beatTime: Math.max(0, (elapsedMs * engine.globalBpm.value) / 60000),
+        dmxBuffer: outputBuffer,
+      });
     };
 
     // Lightweight rAF loop: only dispatches changed packets to the worker.
@@ -917,8 +902,6 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
-    const connectionsStore = useConnectionsStore();
-    connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
     const restored = deserializeProject(snapshot);
     const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, modifiers: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = restored;
     sceneNodes.value = nodes;
@@ -1041,10 +1024,7 @@ export const useEngineStore = defineStore('engine', () => {
     // Disconnect any hardware-controller instances from the previous project
     // so MIDI/HID ports don't leak across project loads. Bindings cleared too.
     await useControllerStore().reset();
-    // Same idea for output connectors — kill their websockets + retry timers
-    // before applyProjectSnapshot() recreates the (possibly differently-shaped)
-    // connector list from the new project's snapshot.
-    await useConnectionsStore().reset();
+    // Output connectors are per user/device (ADR D18) and survive project switches.
 
     // Apply the base snapshot if present. Version-1 projects are rejected (ADR D24).
     if (data.snapshot) {
@@ -1124,20 +1104,6 @@ export const useEngineStore = defineStore('engine', () => {
       }
     }
 
-    // Auto-connect WebSocket strip connectors that are fully configured. One
-    // attempt per connector; the per-connector autoReconnect flag arms only on
-    // a successful 'connected', so failed initial attempts leave the card
-    // showing "Verbinden" instead of spinning forever. Serial is intentionally
-    // skipped — requestPort() needs a user gesture.
-    for (const c of useConnectionsStore().connectors) {
-      if (c instanceof WebSocketConnector && c.url.value && c.fixtureId != null) {
-        c.connect().catch((e: unknown) => console.warn('[engine] ws auto-connect failed:', c.id, e));
-      }
-      if (c instanceof ArtNetConnector && c.bridgeUrl.value) {
-        c.connect().catch((e: unknown) => console.warn('[engine] artnet auto-connect failed:', c.id, e));
-      }
-    }
-
     // ── Persistence: unified queue ──────────────────────────────────────────
     // Both history commands AND persistent live-ops flow through the LiveBus
     // persist queue. A single in-flight guard there serializes the push-change
@@ -1186,7 +1152,6 @@ export const useEngineStore = defineStore('engine', () => {
       if (removed.length > 0) console.info('[engine] extensions no longer required:', removed.join(', '));
       const pinnedStore = usePinnedModifiersStore();
       const liveStore = useLiveModeStore();
-      const connectionsStore = useConnectionsStore();
       return serializeProject(
         sceneNodes.value,
         savedPresets.value,
@@ -1196,7 +1161,6 @@ export const useEngineStore = defineStore('engine', () => {
         liveStore.pages,
         liveStore.liveControllers,
         selectedPresetId.value,
-        connectionsStore.getSnapshots(),
         engine.globalBpm.value,
         clockEpoch.value,
         Object.fromEntries(

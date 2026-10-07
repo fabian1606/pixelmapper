@@ -8,31 +8,11 @@ import { beamWorldPx } from '~/utils/kinds/kind-host';
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
-export const TYPE_BPM           = 0x10;
-export const TYPE_VERSION_REQ   = 0x11;
-export const TYPE_TIMESYNC      = 0x13;
+// Engine packets (the ESP firmware protocol lives in extensions/connector-esp).
 export const TYPE_LAYOUT_BIN    = 0x14;
 export const TYPE_CHAN_BIN      = 0x15;
 /** Modifier instances (replaces the former TYPE_FX_BIN, same id). */
 export const TYPE_MODIFIERS_BIN = 0x16;
-export const TYPE_OTA_BEGIN     = 0x15;
-export const TYPE_OTA_CHUNK     = 0x16;
-export const TYPE_OTA_END       = 0x17;
-export const TYPE_UNIVERSE_MAP  = 0x18;
-export const TYPE_STRIP_CONFIG  = 0x19;
-export const TYPE_STRIP_SLOTS   = 0x1A;
-// ESP-NOW USB bridge (separate esp32s3_espnow_bridge firmware):
-export const TYPE_COLOR_CMD     = 0x20; // r,g,b,brightness → ESP-NOW broadcast
-
-// Chip-type IDs sent in TYPE_STRIP_CONFIG / TYPE_STRIP_SLOTS. ESP32-S3 firmware
-// v1 only honours WS2812B (id 0); the field exists for forward-compat.
-export const STRIP_CHIP_TYPE_ID: Record<string, number> = {
-  'WS2812B':     0,
-  'WS2811':      1,
-  'SK6812-RGB':  2,
-  'SK6812-RGBW': 3,
-  'APA102':      4,
-};
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -74,10 +54,6 @@ class BufWriter {
 
   u32(v: number) { this.buf.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff); }
 
-  bytes(arr: Uint8Array) {
-    for (let i = 0; i < arr.length; i++) this.buf.push(arr[i]!);
-  }
-
   toPacket(type: number): Uint8Array {
     const out = new Uint8Array(5 + this.buf.length);
     out[0] = MAGIC0; out[1] = MAGIC1; out[2] = type;
@@ -86,129 +62,6 @@ class BufWriter {
     for (let i = 0; i < this.buf.length; i++) out[5 + i] = this.buf[i]!;
     return out;
   }
-}
-
-// ── Simple fixed packets ──────────────────────────────────────────────────────
-
-export function buildVersionRequestPacket(): Uint8Array {
-  // Zero-length payload — ESP32 replies with "[version] X.Y.Z\n" on serial
-  const out = new Uint8Array(5);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_VERSION_REQ; out[3] = 0; out[4] = 0;
-  return out;
-}
-
-export function buildBpmPacket(bpm: number): Uint8Array {
-  const out = new Uint8Array(9);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_BPM; out[3] = 4; out[4] = 0;
-  new DataView(out.buffer).setFloat32(5, bpm, true);
-  return out;
-}
-
-export function buildTimesyncPacket(elapsedMs: number): Uint8Array {
-  const out = new Uint8Array(9);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_TIMESYNC; out[3] = 4; out[4] = 0;
-  new DataView(out.buffer).setFloat32(5, elapsedMs, true);
-  return out;
-}
-
-export function buildOtaBeginPacket(totalSize: number): Uint8Array {
-  const w = new BufWriter();
-  w.u32(totalSize);
-  return w.toPacket(TYPE_OTA_BEGIN);
-}
-
-export function buildOtaChunkPacket(chunk: Uint8Array): Uint8Array {
-  const w = new BufWriter();
-  w.bytes(chunk);
-  return w.toPacket(TYPE_OTA_CHUNK);
-}
-
-export function buildOtaEndPacket(): Uint8Array {
-  const w = new BufWriter();
-  return w.toPacket(TYPE_OTA_END);
-}
-
-// ── Strip config packet (TYPE_STRIP_CONFIG 0x19) ─────────────────────────────
-// Tells the ESP32-S3 node which LED strip layout to drive. Sent on connect and
-// whenever the bound strip fixture's kind config changes. Firmware v1 only consumes
-// ledCount + groupSize; chipType is forward-compat (always 0/WS2812B today).
-
-export interface StripConfigPayload {
-  chipType:     string;   // "WS2812B" | "SK6812-RGB" | …
-  ledCount:     number;
-  groupSize:    number;
-  ledsPerMeter: number;
-}
-
-export function buildStripConfigPacket(cfg: StripConfigPayload): Uint8Array {
-  const w = new BufWriter();
-  w.u8(STRIP_CHIP_TYPE_ID[cfg.chipType] ?? 0);
-  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledCount))));
-  w.u16(Math.max(1, Math.min(65535, Math.round(cfg.groupSize))));
-  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledsPerMeter))));
-  return w.toPacket(TYPE_STRIP_CONFIG);
-}
-
-// ── Strip slots packet (TYPE_STRIP_SLOTS 0x1A) ───────────────────────────────
-// Sent instead of (or in addition to) TYPE_STRIP_CONFIG when a single ESP32
-// drives multiple LED strips on different GPIO pins.
-//
-// Payload:
-//   [slotCount: u8]
-//   per slot (8 bytes):
-//     [pin: u8, chipType: u8, ledCount: u16, groupSize: u16, ledsPerMeter: u16]
-//
-// NOTE: ledOffset (start-LED on shared pin) is stored in FixtureSlotInput but
-// NOT yet encoded on the wire — the firmware (main.cpp) needs to be compiled
-// with the working-tree changes (pinBase / ledOffset support, 10 bytes/slot)
-// before that field can be sent. Until then keep the packet at 8 bytes so it
-// stays compatible with the HEAD firmware that expects exactly 8 bytes/slot.
-
-export interface StripSlotPayload extends StripConfigPayload {
-  pin: number;        // GPIO pin number
-  ledOffset?: number; // Start-LED auf dem Pin (default 0) — not yet encoded
-}
-
-export function buildStripSlotsPacket(slots: StripSlotPayload[]): Uint8Array {
-  const w = new BufWriter();
-  w.u8(Math.min(slots.length, 255));
-  for (const s of slots) {
-    w.u8(s.pin & 0xff);
-    w.u8(STRIP_CHIP_TYPE_ID[s.chipType] ?? 0);
-    w.u16(Math.max(0, Math.min(65535, Math.round(s.ledCount))));
-    w.u16(Math.max(1, Math.min(65535, Math.round(s.groupSize))));
-    w.u16(Math.max(0, Math.min(65535, Math.round(s.ledsPerMeter))));
-    // ledOffset goes here once the firmware is updated to 10 bytes/slot:
-    // w.u16(Math.max(0, Math.min(65535, Math.round(s.ledOffset ?? 0))));
-  }
-  return w.toPacket(TYPE_STRIP_SLOTS);
-}
-
-// ── ESP-NOW USB bridge packets ────────────────────────────────────────────
-// Sent to the standalone esp32s3_espnow_bridge firmware over USB serial. The
-// bridge re-broadcasts whatever it receives via ESP-NOW to FF:FF:FF:FF:FF:FF,
-// stamping each packet with its persisted receiver-id so multiple bridges can
-// coexist on one channel.
-
-/** Color frame: 4 bytes the bridge broadcasts as-is (r,g,b,brightness). */
-export function buildColorCommandPacket(r: number, g: number, b: number, brightness: number): Uint8Array {
-  const w = new BufWriter();
-  w.u8(r & 0xff);
-  w.u8(g & 0xff);
-  w.u8(b & 0xff);
-  w.u8(brightness & 0xff);
-  return w.toPacket(TYPE_COLOR_CMD);
-}
-
-// ── Universe map packet (TYPE_UNIVERSE_MAP 0x18) ──────────────────────────────
-// Tells the ESP32 which DMX universes it should render and output.
-// Payload: [count, universe1, universe2, ...]
-
-export function buildUniverseMapPacket(universes: number[]): Uint8Array {
-  const w = new BufWriter();
-  w.u8(universes.length);
-  for (const u of universes) w.u8(u);
-  return w.toPacket(TYPE_UNIVERSE_MAP);
 }
 
 /** FNV-1a hash of a fixture id (stable seed source for modifiers). */

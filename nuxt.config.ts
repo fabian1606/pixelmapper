@@ -11,8 +11,10 @@ import { fileURLToPath } from 'node:url';
 const FIRST_PARTY_EXTENSIONS: string[] = [
   './extensions/color-picker',
   './extensions/pan-tilt',
-  // Catalog extension (ADR §5.9); a layer until the runtime loader (P6.5/P6.6) installs it on demand.
+  './extensions/connector-artnet',
+  // Catalog extensions (ADR §5.9); layers until the runtime loader (P6.5/P6.6) installs them on demand.
   './extensions/neopixel-strip',
+  './extensions/connector-esp',
 ];
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 

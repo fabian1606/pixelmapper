@@ -1,0 +1,8 @@
+{
+  "name": "@pixelmapper/ext-connector-esp",
+  "version": "1.0.0",
+  "description": "Pixelmapper ESP32 nodes: USB serial DMX, WebSocket LED strips, ESP-NOW bridge.",
+  "private": true,
+  "type": "module",
+  "main": "./nuxt.config.ts"
+}

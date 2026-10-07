@@ -90,13 +90,6 @@ export interface SerializedGroup {
 
 export type SerializedNode = SerializedFixture | SerializedGroup
 
-export interface ConnectorSnapshot {
-  id: string
-  type: string
-  label: string
-  config: Record<string, unknown>
-}
-
 export interface ProjectSnapshot {
   /** Persisted format version; must equal `SCHEMA_VERSION`. */
   schemaVersion: number
@@ -110,8 +103,6 @@ export interface ProjectSnapshot {
   liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
   /** Which preset is active at snapshot time — restored so reload keeps it. */
   selectedPresetId?: string | null
-  /** WebSocket connectors to restore on reload. */
-  connectors?: ConnectorSnapshot[]
   /** Global BPM at snapshot time — restored on reload. */
   globalBpm?: number
   /** Shared clock epoch — restored so effects render deterministically. */
@@ -199,7 +190,6 @@ export function serializeProject(
   livePages: LivePage[] = [],
   liveControllers: string[] = [],
   selectedPresetId: string | null = null,
-  connectors: ConnectorSnapshot[] = [],
   globalBpm: number = 120,
   clockEpoch: number = Date.now(),
   activeSectionMembers: Record<string, string[]> = {},
@@ -218,7 +208,6 @@ export function serializeProject(
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
     savedPositions: JSON.parse(JSON.stringify(savedPositions)),
     selectedPresetId,
-    connectors: JSON.parse(JSON.stringify(connectors)),
     globalBpm,
     clockEpoch,
     activeSectionMembers,

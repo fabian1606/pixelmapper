@@ -1,0 +1,8 @@
+{
+  "name": "@pixelmapper/ext-connector-artnet",
+  "version": "1.0.0",
+  "description": "ArtNet output through a local bridge.",
+  "private": true,
+  "type": "module",
+  "main": "./nuxt.config.ts"
+}

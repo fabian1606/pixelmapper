@@ -28,7 +28,7 @@ export function setExtensionRunHook(hook: typeof afterRunHook): void {
  * Read-only fixture view by id (reactive through the engine store + model
  * tick). Views are frozen in dev, so the readonly typing is enforced at runtime.
  */
-const getFixture: ExtensionContext['getFixture'] = (id: FixtureId) => {
+export const getFixture: ExtensionContext['getFixture'] = (id: FixtureId) => {
   const fixture = useEngineStore().flatFixtures.find(f => f.id === id);
   return fixture ? (fixtureView(fixture) as unknown as ReturnType<ExtensionContext['getFixture']>) : undefined;
 };
