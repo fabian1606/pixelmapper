@@ -70,6 +70,7 @@ mod ct {
     pub const CYAN: u8 = 8;
     pub const MAGENTA: u8 = 9;
     pub const YELLOW: u8 = 10;
+    pub const DIMMER: u8 = 13;
     pub const PAN: u8 = 14;
     pub const TILT: u8 = 15;
 }
@@ -483,6 +484,46 @@ impl EffectEngine {
             vals[k] = buf.get(c.dmx[k]).copied().unwrap_or(0.0) / 255.0;
         }
         rgb_read(c.system, &vals)
+    }
+
+    // ── Signature readback (live values, plan P3.15) ─────
+
+    /// Normalized signature tuple of fixture `group`'s first head after the
+    /// last render (padded to 3 components). Scalar reads the DIMMER channel,
+    /// else the fixture's first channel. `None` when the fixture lacks the
+    /// signature's channels.
+    pub fn signature_values(&self, group: usize, signature: Signature) -> Option<[f32; 3]> {
+        match signature {
+            Signature::Scalar => {
+                let mut chans = self.targets.iter().filter(|t| t.group_index == group && t.resolution > 0);
+                let t = self.targets.iter()
+                    .find(|t| t.group_index == group && t.resolution > 0 && t.channel_type_id == ct::DIMMER)
+                    .or_else(|| chans.next())?;
+                let v = self.render_buffer.get(t.dmx_index).copied()? / 255.0;
+                Some([v, 0.0, 0.0])
+            }
+            Signature::Rgb => {
+                let c = self.heads.iter().find(|h| h.group == group && h.color.is_some())?.color.as_ref()?;
+                Some(Self::read_rgb(&self.render_buffer, c))
+            }
+            Signature::PanTilt => {
+                let h = self.heads.iter().find(|h| h.group == group && h.pan.is_some() && h.tilt.is_some())?;
+                let ((pc, pf), (tc, tf)) = (h.pan?, h.tilt?);
+                Some([Self::read_pair(&self.render_buffer, pc, pf), Self::read_pair(&self.render_buffer, tc, tf), 0.0])
+            }
+        }
+    }
+
+    /// Reads several `(group, signature id)` requests (flat pairs) into
+    /// `out` as 3 f32 each; unavailable tuples are NaN.
+    pub fn read_signatures(&self, requests: &[u32], out: &mut Vec<f32>) {
+        out.clear();
+        for pair in requests.chunks_exact(2) {
+            let v = Signature::from_id(pair[1] as u8)
+                .and_then(|sig| self.signature_values(pair[0] as usize, sig))
+                .unwrap_or([f32::NAN; 3]);
+            out.extend_from_slice(&v);
+        }
     }
 
     /// Collects the samples of instance `idx` into `self.refs`.

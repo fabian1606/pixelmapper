@@ -54,7 +54,7 @@ import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
-import { liveHub } from '~/utils/extensions/live-hub';
+import { liveHub, type SignatureFrame } from '~/utils/extensions/live-hub';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { notify } from '~/composables/use-notifications';
 import { isBuiltinHash } from '~/utils/plugins/builtin-index';
@@ -693,11 +693,25 @@ export const useEngineStore = defineStore('engine', () => {
         return fixture && ch ? fixture.startAddress + ch.addressOffset : null;
       },
       beatSource: () => ({ bpm: engine.globalBpm.value, clockEpoch: clockEpoch.value }),
+      // Signature tuples are read by the worker; fixtures map to their layout
+      // group index (position in flatFixtures).
+      requestSignatures(targets, generation) {
+        const index = new Map(flatFixtures.value.map((f, i) => [f.id, i]));
+        const ids = { scalar: 0, rgb: 1, panTilt: 2 } as const;
+        const flat = new Uint32Array(targets.length * 2);
+        targets.forEach((t, i) => {
+          flat[i * 2] = index.get(t.fixtureId) ?? 0xffffffff;
+          flat[i * 2 + 1] = ids[t.signature];
+        });
+        engine.requestSignatures(flat, generation);
+      },
     });
+    // Group indexes change with the layout.
+    watch(layoutRevision, () => liveHub.refreshSignatureRequests());
 
     // Frame-receive handler: called by the worker engine on every rendered frame.
     // Runs off the main-thread render loop — Vue cascade can't block it.
-    engine.onFrame = (dmx: Uint8Array, elapsedMs: number) => {
+    engine.onFrame = (dmx: Uint8Array, elapsedMs: number, signatures?: SignatureFrame) => {
       bufferLength.value = dmx.length;
       bufferRevision.value++;
       currentElapsed.value = elapsedMs;
@@ -716,7 +730,7 @@ export const useEngineStore = defineStore('engine', () => {
 
       connectionsStore.sendFrame(outputBuffer);
       // Extension live values (no-op without subscribers).
-      liveHub.ingest(outputBuffer, elapsedMs);
+      liveHub.ingest(outputBuffer, elapsedMs, Date.now(), signatures);
       try {
         connectionsStore.notifyEngineState({
           bpm: engine.globalBpm.value,

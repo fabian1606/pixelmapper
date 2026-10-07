@@ -13,7 +13,7 @@ import { getHostApi } from './host';
 export type LiveTarget =
   /** Rendered DMX value 0–255 (coarse byte) of one channel. */
   | { kind: 'channel'; fixtureId: FixtureId; channelIndex: number }
-  /** Normalized signature tuple after modifiers (available from plan P3). */
+  /** Normalized signature tuple of the fixture's first head after modifiers (scalar = dimmer). */
   | { kind: 'signature'; fixtureId: FixtureId; signature: Signature }
   /** Beat clock. */
   | { kind: 'beat' }

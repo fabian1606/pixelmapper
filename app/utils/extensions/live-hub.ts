@@ -6,8 +6,11 @@
  * targets from each rendered frame. With zero subscribers `ingest` returns
  * immediately and no extraction work happens.
  *
- * Targets in this phase: `channel`, `universe`, `beat`. `signature` arrives
- * with the modifier runtime (plan P3.15) and yields `undefined` until then.
+ * `channel`, `universe` and `beat` are extracted from the DMX frame on the
+ * main thread. `signature` tuples (plan P3.15) come from the engine worker:
+ * the hub reports the subscribed signature targets (`requestSignatures`),
+ * the worker reads them after each render and the store passes them to
+ * `ingest` tagged with the request generation, so stale tuples are dropped.
  */
 import type { BeatInfo, FixtureId, LiveFrame, LiveTarget } from '@pixelmapper/extension-api';
 
@@ -23,6 +26,20 @@ export interface LiveHubSources {
   resolveChannelAddress(fixtureId: FixtureId, channelIndex: number): number | null;
   /** Current tempo and clock epoch (ms since Unix epoch). */
   beatSource(): { bpm: number; clockEpoch: number };
+  /**
+   * Asks the engine for these signature tuples from now on (empty = none).
+   * `generation` must be echoed with the values (see `SignatureFrame`).
+   */
+  requestSignatures?(targets: SignatureTarget[], generation: number): void;
+}
+
+/** A `signature` live target. */
+export type SignatureTarget = Extract<LiveTarget, { kind: 'signature' }>;
+
+/** Signature tuples of one frame: 3 f32 per requested target (NaN = unavailable). */
+export interface SignatureFrame {
+  generation: number;
+  values: Float32Array;
 }
 
 /** Stable key of a target (subscriptions with equal keys share extraction). */
@@ -72,10 +89,40 @@ export class LiveHub {
   private sources: LiveHubSources | null = null;
   /** Latest frame, kept so new subscribers get a value immediately. */
   private last: { dmx: Uint8Array; timeMs: number } | null = null;
+  /** Requested signature targets (request order) and their generation. */
+  private signatureOrder: SignatureTarget[] = [];
+  private signatureGeneration = 0;
+  /** Latest tuple per signature target key. */
+  private signatureValues = new Map<string, Float32Array>();
 
   /** Installs the host lookups (engine store). */
   configure(sources: LiveHubSources): void {
     this.sources = sources;
+    this.updateSignatureRequests(true);
+  }
+
+  /** Re-sends the signature request (e.g. after a layout change). */
+  refreshSignatureRequests(): void {
+    this.updateSignatureRequests(true);
+  }
+
+  /** Recomputes the requested signature targets; notifies on change. */
+  private updateSignatureRequests(force = false): void {
+    const next = [...this.subs.values()].map(s => s.target).filter((t): t is SignatureTarget => t.kind === 'signature');
+    const same = next.length === this.signatureOrder.length
+      && next.every((t, i) => targetKey(t) === targetKey(this.signatureOrder[i]!));
+    if (same && !force) return;
+    this.signatureOrder = next;
+    this.signatureGeneration++;
+    for (const key of [...this.signatureValues.keys()]) {
+      if (!next.some(t => targetKey(t) === key)) this.signatureValues.delete(key);
+    }
+    this.sources?.requestSignatures?.(next, this.signatureGeneration);
+  }
+
+  /** Current signature request generation (tests). */
+  get signatureRequestGeneration(): number {
+    return this.signatureGeneration;
   }
 
   /** Number of distinct subscribed targets (ref-counted). */
@@ -105,13 +152,17 @@ export class LiveHub {
       this.subs.set(key, sub);
     }
     sub.listeners.add(listener);
+    if (target.kind === 'signature') this.updateSignatureRequests();
     if (this.last) listener(this.extract(target, this.last.dmx, Date.now()));
 
     return () => {
       const s = this.subs.get(key);
       if (!s) return;
       s.listeners.delete(listener);
-      if (s.listeners.size === 0) this.subs.delete(key);
+      if (s.listeners.size === 0) {
+        this.subs.delete(key);
+        if (target.kind === 'signature') this.updateSignatureRequests();
+      }
     };
   }
 
@@ -139,7 +190,7 @@ export class LiveHub {
       case 'beat':
         return src ? extractors.beat(nowMs, src.beatSource()) : undefined;
       case 'signature':
-        return undefined;
+        return this.signatureValues.get(targetKey(target));
     }
   }
 
@@ -147,12 +198,13 @@ export class LiveHub {
    * Feeds a rendered frame (called by the engine store per worker frame).
    * Returns immediately when nobody listens.
    */
-  ingest(dmx: Uint8Array, timeMs: number, nowMs: number = Date.now()): void {
+  ingest(dmx: Uint8Array, timeMs: number, nowMs: number = Date.now(), signatures?: SignatureFrame): void {
     if (!this.active) {
       this.last = null;
       return;
     }
     this.last = { dmx, timeMs };
+    if (signatures) this.ingestSignatures(signatures);
 
     for (const sub of this.subs.values()) {
       const value = this.extract(sub.target, dmx, nowMs);
@@ -173,11 +225,28 @@ export class LiveHub {
     }
   }
 
+  /** Stores the tuples of a frame (ignored when the request changed since). */
+  private ingestSignatures({ generation, values }: SignatureFrame): void {
+    if (generation !== this.signatureGeneration || values.length < this.signatureOrder.length * 3) return;
+    this.signatureOrder.forEach((t, i) => {
+      const v = values.subarray(i * 3, i * 3 + 3);
+      if (Number.isNaN(v[0])) {
+        this.signatureValues.delete(targetKey(t));
+        return;
+      }
+      // Copy only the signature's components so listeners may keep the array.
+      const arity = t.signature === 'rgb' ? 3 : t.signature === 'panTilt' ? 2 : 1;
+      this.signatureValues.set(targetKey(t), v.slice(0, arity));
+    });
+  }
+
   /** Test helper. */
   reset(): void {
     this.subs.clear();
     this.frameCallbacks.clear();
     this.last = null;
+    this.signatureOrder = [];
+    this.signatureValues.clear();
   }
 }
 

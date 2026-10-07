@@ -16,6 +16,9 @@ let bpm = 120;
 let clockEpoch = Date.now();
 let lastTime = Date.now();
 let renderHandle: ReturnType<typeof setInterval> | null = null;
+// Live-value signature requests: flat (group index, signature id) pairs.
+let signatureRequests: Uint32Array = new Uint32Array(0);
+let signatureGeneration = 0;
 
 function tick() {
   if (!engine) return;
@@ -37,7 +40,17 @@ function tick() {
   // Still send the DMX buffer to main for hardware connectors and UI faders.
   const dmx = new Uint8Array(view.length);
   dmx.set(view);
-  (self as unknown as Worker).postMessage({ type: 'frame', dmx, elapsedMs: elapsed }, [dmx.buffer]);
+  if (signatureRequests.length > 0) {
+    // Requested signature tuples (3 f32 each) travel with the frame.
+    const values = engine.read_signatures(signatureRequests);
+    (self as unknown as Worker).postMessage(
+      { type: 'frame', dmx, elapsedMs: elapsed, signatures: { generation: signatureGeneration, values } },
+      [dmx.buffer, values.buffer],
+    );
+  }
+  else {
+    (self as unknown as Worker).postMessage({ type: 'frame', dmx, elapsedMs: elapsed }, [dmx.buffer]);
+  }
 
   try {
     performance.mark('worker.tick.end');
@@ -69,6 +82,9 @@ self.onmessage = (e: MessageEvent) => {
     plugins?: string[];
     packet?: ArrayBuffer;
     hashes?: string[];
+    // live-value signature requests
+    requests?: Uint32Array;
+    generation?: number;
     // canvas messages
     offscreen?: OffscreenCanvas;
     json?: string;
@@ -117,6 +133,10 @@ self.onmessage = (e: MessageEvent) => {
         bridge.setTable(m.plugins ?? []);
         engine.dispatch(0x16, new Uint8Array(m.packet));
       }
+      break;
+    case 'signatures-request':
+      signatureRequests = m.requests ?? new Uint32Array(0);
+      signatureGeneration = m.generation ?? 0;
       break;
     case 'reset':
       if (renderHandle) { clearInterval(renderHandle); renderHandle = null; }

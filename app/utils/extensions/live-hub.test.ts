@@ -126,3 +126,49 @@ describe('useLiveValue / onFrame', () => {
     expect(liveHub.active).toBe(false);
   });
 });
+
+describe('live hub: signature targets (P3.15)', () => {
+  /** Configures the hub with a recording `requestSignatures`. */
+  function withRequests() {
+    const calls: { keys: string[]; generation: number }[] = [];
+    liveHub.configure({
+      resolveChannelAddress: () => null,
+      beatSource: () => ({ bpm: 120, clockEpoch: 0 }),
+      requestSignatures: (targets, generation) => calls.push({ keys: targets.map(t => `${t.fixtureId}:${t.signature}`), generation }),
+    });
+    return calls;
+  }
+
+  it('requests subscribed signatures and drops them on unsubscribe', () => {
+    const calls = withRequests();
+    const off = liveHub.subscribe({ kind: 'signature', fixtureId: 'a', signature: 'rgb' }, () => {});
+    expect(calls.at(-1)!.keys).toEqual(['a:rgb']);
+    // Other target kinds do not change the request.
+    const before = calls.length;
+    liveHub.subscribe({ kind: 'beat' }, () => {});
+    expect(calls.length).toBe(before);
+    off();
+    expect(calls.at(-1)!.keys).toEqual([]);
+  });
+
+  it('delivers tuples of the current generation only, sliced to the arity', () => {
+    const calls = withRequests();
+    const rgb = vi.fn();
+    const pt = vi.fn();
+    liveHub.subscribe({ kind: 'signature', fixtureId: 'a', signature: 'rgb' }, rgb);
+    liveHub.subscribe({ kind: 'signature', fixtureId: 'b', signature: 'panTilt' }, pt);
+    const gen = calls.at(-1)!.generation;
+
+    // Stale generation → ignored.
+    liveHub.ingest(frame(), 0, 0, { generation: gen - 1, values: new Float32Array([9, 9, 9, 9, 9, 9]) });
+    expect(rgb).toHaveBeenLastCalledWith(undefined);
+
+    liveHub.ingest(frame(), 0, 0, { generation: gen, values: new Float32Array([1, 0.5, 0, 0.25, 0.75, 0]) });
+    expect(Array.from(rgb.mock.lastCall![0] as Float32Array)).toEqual([1, 0.5, 0]);
+    expect(Array.from(pt.mock.lastCall![0] as Float32Array)).toEqual([0.25, 0.75]);
+
+    // NaN = unavailable.
+    liveHub.ingest(frame(), 0, 0, { generation: gen, values: new Float32Array([NaN, NaN, NaN, 0, 0, 0]) });
+    expect(rgb).toHaveBeenLastCalledWith(undefined);
+  });
+});

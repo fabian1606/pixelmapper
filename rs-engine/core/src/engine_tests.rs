@@ -229,3 +229,24 @@ fn bad_modifier_packets_are_rejected() {
     assert_eq!(e.dispatch_bin(0x16, &[2, 0, 0]), -1, "unknown version");
     assert_eq!(e.dispatch_bin(0x16, &[1, 1, 0]), -1, "truncated");
 }
+
+#[test]
+fn read_signatures_after_render() {
+    let (mut e, _) = engine(vec![1.0, 1.0, 0.0]);
+    e.dispatch_bin(0x14, &layout(&[
+        vec![(0, 0, 0, 1, 0xFFFF), (1, 1, 0, 1, 0xFFFF), (2, 2, 0, 1, 0xFFFF), (3, DIMMER, 0, 1, 0xFFFF)],
+        vec![(4, 14, 0, 1, 0xFFFF), (5, 15, 0, 1, 0xFFFF)],
+    ]));
+    e.dispatch_bin(0x15, &channels(&[(0, 0.0), (1, 0.0), (2, 255.0), (3, 51.0), (4, 255.0), (5, 0.0)]));
+    e.dispatch_bin(0x16, &modifiers(&[inst(1, 1, 1, 1.0)])); // rgb override → yellow
+    e.render(0.0, 16.0);
+
+    let mut out = Vec::new();
+    // (group 0, rgb), (group 0, scalar), (group 1, panTilt), (group 1, rgb = unavailable)
+    e.read_signatures(&[0, 1, 0, 0, 1, 2, 1, 1], &mut out);
+    assert_eq!(out.len(), 12);
+    assert_eq!(&out[0..3], &[1.0, 1.0, 0.0]);
+    assert!((out[3] - 0.2).abs() < 1e-6, "scalar reads DIMMER");
+    assert_eq!(&out[6..8], &[1.0, 0.0]);
+    assert!(out[9].is_nan());
+}

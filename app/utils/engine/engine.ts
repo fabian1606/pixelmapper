@@ -9,6 +9,7 @@
 import { reactive, ref, shallowRef, type Ref } from 'vue';
 import { Watchdog } from '~/utils/plugins/watchdog';
 import type { BlendMode, ModifierInstance } from './types';
+import type { SignatureFrame } from '~/utils/extensions/live-hub';
 
 /** Events reported by the worker's plugin bridge. */
 export type PluginEvent =
@@ -31,7 +32,7 @@ export class EffectEngine {
   public readonly ready: Promise<void>;
 
   /** Called for every rendered frame (engine store). */
-  public onFrame: ((dmx: Uint8Array, elapsedMs: number) => void) | null = null;
+  public onFrame: ((dmx: Uint8Array, elapsedMs: number, signatures?: SignatureFrame) => void) | null = null;
 
   /** Called for plugin errors/logs from the worker. */
   public onPluginEvent: ((event: PluginEvent) => void) | null = null;
@@ -58,6 +59,7 @@ export class EffectEngine {
   private plugins = new Map<string, Uint8Array>();
   private epoch: number | null = null;
   private canvasState = new Map<string, Record<string, unknown>>();
+  private signatureRequest: { requests: Uint32Array; generation: number } | null = null;
 
   constructor() {
     this.ready = new Promise<void>((resolve) => { this.readyResolve = resolve; });
@@ -78,7 +80,7 @@ export class EffectEngine {
   private spawn(): void {
     const worker = new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (e: MessageEvent) => {
-      const m = e.data as { type: string; dmx?: Uint8Array; elapsedMs?: number };
+      const m = e.data as { type: string; dmx?: Uint8Array; elapsedMs?: number; signatures?: SignatureFrame };
       if (m.type === 'ready') {
         this.readyResolve();
         this.watchdog?.beat();
@@ -86,7 +88,7 @@ export class EffectEngine {
       else if (m.type === 'frame' && m.dmx && m.elapsedMs !== undefined) {
         this.watchdog?.beat();
         this.dmxBuffer = m.dmx;
-        this.onFrame?.(m.dmx, m.elapsedMs);
+        this.onFrame?.(m.dmx, m.elapsedMs, m.signatures);
       }
       else if (m.type === 'plugin-error' || m.type === 'plugin-log') {
         this.onPluginEvent?.(e.data as PluginEvent);
@@ -123,6 +125,7 @@ export class EffectEngine {
     for (const [hash, wasm] of this.plugins) this.postPlugin(hash, wasm);
     for (const [packetType, data] of this.packets) this.postPacket(packetType, data);
     if (this.modifiersReplay) this.postModifiers(this.modifiersReplay.packet, this.modifiersReplay.plugins);
+    if (this.signatureRequest) this.worker?.postMessage({ type: 'signatures-request', ...this.signatureRequest });
   }
 
   /** Re-enables suspended plugins (one action from the UI). */
@@ -195,6 +198,17 @@ export class EffectEngine {
   public syncModifiers(packet: Uint8Array, plugins: string[]): void {
     this.modifiersReplay = { packet: packet.slice(), plugins: plugins.slice() };
     this.postModifiers(packet, plugins);
+  }
+
+  // ── Live values ───────────────────────────────
+
+  /**
+   * Requests signature tuples for live values: flat (group index,
+   * signature id) pairs, echoed with `generation` in frame messages.
+   */
+  public requestSignatures(requests: Uint32Array, generation: number): void {
+    this.signatureRequest = { requests: requests.slice(), generation };
+    this.worker?.postMessage({ type: 'signatures-request', requests: requests.slice(), generation });
   }
 
   // ── Canvas (OffscreenCanvas in worker) ─────────

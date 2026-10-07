@@ -51,6 +51,16 @@ impl WasmEngine {
         self.engine.retry_disabled();
     }
 
+    /// Normalized signature tuples for live values: `requests` are flat
+    /// `(group index, signature id)` pairs; returns 3 f32 per request (NaN =
+    /// unavailable).
+    #[wasm_bindgen]
+    pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(requests.len() / 2 * 3);
+        self.engine.read_signatures(requests, &mut out);
+        out
+    }
+
     /// Zero-copy view of the DMX buffer (re-fetch after any dispatch).
     #[wasm_bindgen]
     pub fn get_dmx_view(&self) -> js_sys::Uint8Array {
