@@ -85,7 +85,7 @@ Domain inputs have typed contracts (`PmInputContracts` in `replaceables.ts`) and
 
 Every contract has `modelValue` / `update:modelValue`, `scrubStart` / `scrubEnd` (callers bracket a drag into one undo step), `disabled`, `label`, `size`. Resolution (`app/utils/extensions/replacements.ts`): no replacement → default; one → it; several → the user's stored choice (`localStorage['pm.replacements']`), otherwise the default plus a one-time `ReplacementChoiceDialog`.
 
-Call sites today: property sidebar box fader (`pm.fader` `variant="box"`) and value field, live slider (`pm.fader` vertical), live beat (`pm.tapTempo`), live button (`pm.button`), engine number fields (`pm.numberInput`). Color, XY and curve call sites move over with plan P2/P3.
+Call sites today: property sidebar box fader (`pm.fader` `variant="box"`) and value field, live slider (`pm.fader` vertical), live beat (`pm.tapTempo`), live button (`pm.button`), engine number fields (`pm.numberInput`), property sidebar color (`pm.colorInput`) and pan/tilt (`pm.xyInput`), live `color` and `xy` widgets. Curve, select, toggle and angle call sites arrive with the param UI (plan P3.13).
 
 ## Live values
 
@@ -94,6 +94,51 @@ Call sites today: property sidebar box fader (`pm.fader` `variant="box"`) and va
 - `useLiveValue(target, { fps })` → throttled `shallowRef`, active only while mounted, the document is visible and the component's root is on screen.
 - `onFrame(cb, { targets })` → raw frame (`timeMs`, `beat`, `dmx`), disposed on unmount. Never drive Vue state at frame rate from it.
 - Targets: `channel` (rendered coarse byte), `universe` (512-byte copy), `beat` (`beatTime`, `bpm`, `phase`); `signature` follows with the modifier runtime (P3.15).
+
+## Live widgets
+
+Live widget types come from `app/utils/live/widget-registry.ts`: the core types (`button` → `pm.button`, `slider` → `pm.fader`, `xy` → `pm.xyInput`, `color` → `pm.colorInput`, `label`, `beat` → `pm.tapTempo`, `fixture-preview`; `controller-twin` until plan P6.4) plus `contributes.liveWidgets` from extensions. Extension widget types are namespaced (`<extensionId>/<name>`), receive no props (read the `liveWidget` scope), keep their configuration in `widget.extensionData[extensionId]` (seeded from `defaultConfig()`), and render a "not installed" placeholder when the extension is missing — without creating a project dependency. Legacy type names `xy-pad`/`color-wheel` are mapped to `xy`/`color` on load.
+
+## Reference example: `extensions/color-picker`
+
+The color picker is the smallest complete replacement extension and the template for new ones:
+
+```
+extensions/color-picker/
+├── package.json              # @pixelmapper/ext-color-picker (Bun workspace member)
+├── nuxt.config.ts            # empty layer config
+├── plugins/register.ts       # registerExtension(manifest)
+├── extension.ts              # manifest: replaces pm.colorInput
+├── components/ColorPicker.vue
+├── utils/hsv.ts              # own helpers — core utils are off limits
+└── color-picker.test.ts      # host-side test (may import core)
+```
+
+```ts
+// extension.ts
+export default defineExtension({
+  id: 'color-picker',
+  version: '1.0.0',
+  apiVersion: '^1.0.0',
+  displayName: 'Color Picker',
+  description: 'HSV color wheel with swatches for every color input (fixtures, live widgets, modifier params).',
+  contributes: {
+    replaces: [{ replaces: 'pm.colorInput', component: ColorPicker }],
+  },
+});
+```
+
+`ColorPicker.vue` implements the contract and nothing else:
+
+```ts
+const props = withDefaults(defineProps<ColorInputProps>(), { disabled: false, size: 'md' });
+const emit = defineEmits<ColorInputEmits>();
+// pointerdown → emit('scrubStart'); every move → emit('update:modelValue', rgb); pointerup → emit('scrubEnd')
+```
+
+It never touches fixtures: the core `FixtureColorControl` maps the selection's RGB / color-wheel channels to one `RgbColor` (swatches = wheel slots), and the live `color` widget maps the active preset's color — both render `<Replaceable name="pm.colorInput">`. Installing the extension therefore upgrades the property sidebar, the live color widget and (from plan P3) color params at once; without it the core default (RGB faders + hex) works everywhere.
+
+`extensions/pan-tilt` shows the other two patterns: a replacement (`pm.xyInput` → pad) and a scoped slot contribution (`properties/position:after`, `when: s => s.signature?.signature === 'panTilt'`) that reads `selection` + `ctx.getFixture()`, previews with `ctx.preview` and writes with `ctx.run(ctx.commands.setChannelRanges(...))`.
 
 ## Minimal example
 

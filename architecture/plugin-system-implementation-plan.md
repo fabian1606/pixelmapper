@@ -61,13 +61,13 @@ Goal: the extension machinery exists and the existing UI is rebuilt from layout 
 
 Goal: prove the API by extracting UI-only features.
 
-- [ ] **P2.1 `extensions/color-picker`.** Move `FixtureColorPicker.vue` (and `ColorEditor.vue` parts used for picking) into the layer; rewrite to the `pm.colorInput` contract (props/emits only, `useExtensionContext` for anything else); contribute `replaces: 'pm.colorInput'`. Remove direct usages from `FixturePropertyControl*.vue`.
+- [x] **P2.1 `extensions/color-picker`.** Move `FixtureColorPicker.vue` (and `ColorEditor.vue` parts used for picking) into the layer; rewrite to the `pm.colorInput` contract (props/emits only, `useExtensionContext` for anything else); contribute `replaces: 'pm.colorInput'`. Remove direct usages from `FixturePropertyControl*.vue`.
   *Done when:* with the extension: full picker in properties sidebar, live color widget, and (later) color params; without it (remove from `extends`): RGB faders + hex, no errors.
-- [ ] **P2.2 `extensions/pan-tilt`.** Move `FixturePanTiltPad.vue` → replaces `pm.xyInput`. Move `FixtureMovementRange.vue`, `MovementRangePad.vue`, `MovementRangeSlider.vue` → slot contribution `properties/position:after` with `when: s => !!s.signature && s.signature.signature === 'panTilt'`, writing via core commands (`set-channel-range-command`).
+- [x] **P2.2 `extensions/pan-tilt`.** Move `FixturePanTiltPad.vue` → replaces `pm.xyInput`. Move `FixtureMovementRange.vue`, `MovementRangePad.vue`, `MovementRangeSlider.vue` → slot contribution `properties/position:after` with `when: s => !!s.signature && s.signature.signature === 'panTilt'`, writing via core commands (`set-channel-range-command`).
   *Done when:* same with/without check as P2.1.
-- [ ] **P2.3 Live widget dedupe.** Core widgets per ADR §5.7 (`button`, `slider`, `xy`, `color`, `label`, `beat`, `fixture-preview`) rendering `pm.*` inputs; delete `LiveColorWheelWidget.vue` and `LiveXYPadWidget.vue` (replaced by `color`/`xy` using `pm.colorInput`/`pm.xyInput`). Map old type names `color-wheel`→`color`, `xy-pad`→`xy` (no persistence migration needed — clean break comes in P3, but keep the names consistent from now on). Add `LiveWidgetDefinition` registry so extensions can add widget types; unknown types render a placeholder.
-- [ ] **P2.4 `extensions/live-widgets`.** Holds any non-core widget kinds that remain (if none remain after P2.3, skip creating it and remove it from the ADR distribution set via an amendment).
-- [ ] **P2.5 Docs.** `architecture/extensions.md`: add color-picker as the reference example.
+- [x] **P2.3 Live widget dedupe.** Core widgets per ADR §5.7 (`button`, `slider`, `xy`, `color`, `label`, `beat`, `fixture-preview`) rendering `pm.*` inputs; delete `LiveColorWheelWidget.vue` and `LiveXYPadWidget.vue` (replaced by `color`/`xy` using `pm.colorInput`/`pm.xyInput`). Map old type names `color-wheel`→`color`, `xy-pad`→`xy` (no persistence migration needed — clean break comes in P3, but keep the names consistent from now on). Add `LiveWidgetDefinition` registry so extensions can add widget types; unknown types render a placeholder.
+- [x] **P2.4 `extensions/live-widgets`.** Holds any non-core widget kinds that remain (if none remain after P2.3, skip creating it and remove it from the ADR distribution set via an amendment).
+- [x] **P2.5 Docs.** `architecture/extensions.md`: add color-picker as the reference example.
 
 ---
 

@@ -4,8 +4,8 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import { fileURLToPath } from 'node:url';
 
 /**
- * First-party extensions included as Nuxt layers (ADR §5.9 distribution set).
- * Filled as extensions are extracted (plan P2+). The dev-only `_debug-slots`
+ * First-party extensions included as Nuxt layers (ADR §5.9 distribution set,
+ * amended by A12: color-picker, pan-tilt, connector-artnet). The dev-only `_debug-slots`
  * extension labels every slot; enable it with PM_DEBUG_SLOTS=1 in dev.
  */
 const FIRST_PARTY_EXTENSIONS: string[] = [
