@@ -72,14 +72,14 @@ pixelmapper/
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN`
-- [Authoring content plugins](architecture/guides/authoring-content-plugins.md) — SDK, manifest, params, validation (AI-ready)
+- [Authoring extensions](architecture/guides/authoring-extensions.md) — task-oriented: controls, panel actions, kinds, connectors, controllers, widgets, commands (AI-ready)
+- [Authoring content plugins](architecture/guides/authoring-content-plugins.md) — SDK, manifest, params, validation, custom panels (AI-ready)
 - [Core Concepts: Fixtures, Channels, Beams](architecture/core-concepts.md)
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
 - [Extensions — how the extension host works](architecture/extensions.md) (registry, scopes, slots, `pm.*` replaceables, live values)
-- Created later in the migration: `architecture/guides/authoring-extensions.md`
 
 ## Glossary
 

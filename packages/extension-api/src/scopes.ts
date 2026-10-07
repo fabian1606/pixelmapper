@@ -188,10 +188,7 @@ export interface SignatureTarget {
 /** Readonly view of a modifier instance (ADR §6.3). */
 export interface ModifierInstanceView {
   id: string;
-  /**
-   * Content-plugin hash (`'sha256:…'`). Until the modifier rebuild (plan P3)
-   * built-in modifiers use `'builtin:<type>'`.
-   */
+  /** Content-plugin hash (`'sha256:…'`); built-ins too. */
   plugin: string;
   /** Display name. */
   name: string;

@@ -150,7 +150,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 
 ## Phase 7 — AI-readiness & documentation
 
-- [ ] **P7.1 Authoring guides.** + `architecture/guides/authoring-extensions.md` (task-oriented: "add a control", "add a panel section", "add a fixture kind", "add a connector", with complete small examples and the rules from ADR §5) and finalize `authoring-content-plugins.md`. Both written to be pasted as AI context.
+- [x] **P7.1 Authoring guides.** + `architecture/guides/authoring-extensions.md` (task-oriented: "add a control", "add a panel section", "add a fixture kind", "add a connector", with complete small examples and the rules from ADR §5) and finalize `authoring-content-plugins.md`. Both written to be pasted as AI context.
 - [ ] **P7.2 Generated API reference.** Script that emits `docs/ai/extension-api.d.ts` and `docs/ai/plugin-sdk.d.ts` (bundled declaration files) + a JSON index of all `pm.*` contracts, scopes, slot ids (collected at runtime from the primitives in a dev build) and param types.
 - [ ] **P7.3 Slot id catalog.** Dev-only page `/dev/slots` listing all slot ids currently rendered, with their available scopes (helps humans and agents choose a slot).
 - [ ] **P7.4 Final architecture pass.** Update `architecture.md` overview + file structure; mark ADR 0001 implementation status; remove stale docs (`arcitecture.md` content merged or deleted — ask the owner before deleting).

@@ -1,6 +1,6 @@
 # Authoring Content Plugins (Modifiers)
 
-This guide is self-contained: it can be handed to a developer or an AI as the only context needed to write a Pixelmapper modifier plugin. Background: [ADR 0001 §6](../adr/0001-extension-and-content-plugin-system.md), [engine.md](../engine.md).
+This guide is self-contained: it can be handed to a developer or an AI as the only context needed to write a Pixelmapper modifier plugin. Background: [ADR 0001 §6](../adr/0001-extension-and-content-plugin-system.md), [engine.md](../engine.md). UI, hardware and fixture-type additions are **extensions** instead: [authoring-extensions.md](authoring-extensions.md).
 
 ## What a modifier is
 
