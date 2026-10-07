@@ -5,12 +5,13 @@
  * default export is `defineExtension({...})`. The registry validates the
  * manifest at registration.
  */
-import type { Component, ComputedRef } from 'vue';
+import type { Component, ComputedRef, DeepReadonly } from 'vue';
 import type { Command, CommandDefinition, CoreCommandFactory } from './commands';
 import type { ConnectorDefinition, ControllerDefinition, LiveWidgetDefinition } from './connectors';
 import type { FixtureKindDefinition } from './kinds';
 import type { PmInputName, ReplacementContribution } from './replaceables';
-import type { ScopeName, ScopeRef } from './scopes';
+import type { FixtureId } from './model';
+import type { FixtureView, ScopeName, ScopeRef } from './scopes';
 import type { SlotContribution } from './slots';
 import { getHostApi } from './host';
 
@@ -72,6 +73,25 @@ export interface ExtensionContext {
   run(command: Command): void;
   /** Typed core command constructors. */
   commands: CoreCommandFactory;
+  /**
+   * Readonly view of any fixture (e.g. every id in the `selection` scope).
+   * Reactive when read inside a `computed`/template.
+   */
+  getFixture(id: FixtureId): DeepReadonly<FixtureView> | undefined;
+  /** Temporary local output preview (see `OutputPreview`). */
+  preview: OutputPreview;
+}
+
+/**
+ * Temporary, local-only output preview: forces rendered DMX values without
+ * touching project state (not persisted, not synced, no history). Cleared
+ * automatically when the calling component unmounts.
+ */
+export interface OutputPreview {
+  /** Forces the coarse byte of a channel to `dmxValue` (0–255). */
+  setChannel(fixtureId: FixtureId, channelIndex: number, dmxValue: number): void;
+  /** Removes all preview values set through this context. */
+  clear(): void;
 }
 
 /**

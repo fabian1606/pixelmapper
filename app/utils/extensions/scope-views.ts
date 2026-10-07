@@ -28,6 +28,7 @@ import { FixtureGroup } from '~/utils/engine/core/group';
 import type { Effect, ChannelType } from '~/utils/engine/types';
 import type { Preset } from '~/utils/engine/preset-types';
 import type { LivePage, LiveWidget } from '~/utils/live/types';
+import { modelTick } from './model-tick';
 
 // ── Freezing ────────────────────────────────────
 
@@ -91,6 +92,7 @@ export function viewportView(pageMode: PageViewportMode, routePath: string): Vie
 
 /** Projects one channel of a fixture. */
 export function channelView(fixture: Fixture, index: number): ChannelView {
+  void modelTick.value; // re-project on non-reactive model changes
   const ch = fixture.channels[index]!;
   const cfg = ch.chaserConfig;
   const value = cfg?.stepValues?.[cfg.activeEditStep] ?? cfg?.stepValues?.[0] ?? ch.defaultValue;
@@ -104,6 +106,7 @@ export function channelView(fixture: Fixture, index: number): ChannelView {
     dmxAddress: fixture.startAddress + ch.addressOffset,
     resolution: ch.resolution ?? 1,
     fineAddressOffsets: [...(ch.fineAddressOffsets ?? [])],
+    isFine: ch.isFine ?? false,
     rangeMin: ch.rangeMin ?? 0,
     rangeMax: ch.rangeMax ?? 255,
     defaultValue: ch.defaultValue,
@@ -120,6 +123,7 @@ export function channelView(fixture: Fixture, index: number): ChannelView {
 
 /** Projects one fixture (channels, beams, kind/extension data). */
 export function fixtureView(fixture: Fixture): FixtureView {
+  void modelTick.value; // re-project on non-reactive model changes
   const beams: BeamView[] = fixture.beams.map(b => ({ id: b.id, x: b.localX, y: b.localY, z: b.localZ }));
   const extra = fixture as Fixture & {
     kind?: { id: string; version: string; config: Json };

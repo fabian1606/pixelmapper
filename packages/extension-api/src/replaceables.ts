@@ -16,10 +16,8 @@ import type { CurvePoint } from './params';
 /** Visual size of an input. */
 export type InputSize = 'sm' | 'md' | 'lg';
 
-/** Props every `pm.*` contract shares. */
-export interface CommonInputProps<T> {
-  /** Current value. Normalized where applicable (documented per input). */
-  modelValue: T;
+/** Props every `pm.*` contract shares (besides `modelValue`). */
+export interface BaseInputProps {
   /** Disable interaction. */
   disabled?: boolean;
   /** Optional label rendered by the input. */
@@ -27,6 +25,14 @@ export interface CommonInputProps<T> {
   /** Visual size. Default `'md'`. */
   size?: InputSize;
 }
+
+/**
+ * Shared props including the value. Each contract below declares its
+ * `modelValue` concretely (normalized where applicable) instead of extending
+ * this generic, because Vue's SFC compiler cannot reliably resolve generic
+ * type arguments when deriving runtime prop types.
+ */
+export type CommonInputProps<T> = BaseInputProps & { modelValue: T };
 
 /**
  * Emits every `pm.*` contract shares. `scrubStart`/`scrubEnd` bracket a
@@ -42,7 +48,9 @@ export interface CommonInputEmits<T> {
 // ── pm.fader ────────────────────────────────────
 
 /** Props of `pm.fader`: a linear slider. */
-export interface FaderProps extends CommonInputProps<number> {
+export interface FaderProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: number;
   /** Lower bound. Default 0. */
   min?: number;
   /** Upper bound. Default 1. */
@@ -76,7 +84,9 @@ export type FaderEmits = CommonInputEmits<number>;
 // ── pm.numberInput ──────────────────────────────
 
 /** Props of `pm.numberInput`: a draggable numeric field. */
-export interface NumberInputProps extends CommonInputProps<number> {
+export interface NumberInputProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: number;
   min?: number;
   max?: number;
   step?: number;
@@ -100,7 +110,9 @@ export interface ColorSwatch {
 }
 
 /** Props of `pm.colorInput`: linear RGB color, components 0–1. */
-export interface ColorInputProps extends CommonInputProps<RgbColor> {
+export interface ColorInputProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: RgbColor;
   /** Optional preset swatches; picking one emits its color as one edit. */
   swatches?: ColorSwatch[];
 }
@@ -110,7 +122,9 @@ export type ColorInputEmits = CommonInputEmits<RgbColor>;
 // ── pm.xyInput ──────────────────────────────────
 
 /** Props of `pm.xyInput`: normalized 2D point (0–1 per axis). */
-export interface XyInputProps extends CommonInputProps<Vec2> {
+export interface XyInputProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: Vec2;
   /** Axis labels, e.g. `['Pan', 'Tilt']`. */
   axisLabels?: [string, string];
   /** Optional allowed sub-rectangle (normalized), drawn as a hint. */
@@ -129,7 +143,9 @@ export interface SelectOption {
   icon?: string;
 }
 /** Props of `pm.select`: enum choice. */
-export interface SelectProps extends CommonInputProps<string> {
+export interface SelectProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: string;
   options: SelectOption[];
   /** Presentation. Default `'auto'` (segmented for ≤ 4 options). */
   variant?: 'auto' | 'segmented' | 'dropdown';
@@ -140,14 +156,19 @@ export type SelectEmits = CommonInputEmits<string>;
 // ── pm.toggle ───────────────────────────────────
 
 /** Props of `pm.toggle`: boolean switch. */
-export type ToggleProps = CommonInputProps<boolean>;
+export interface ToggleProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: boolean;
+}
 /** Emits of `pm.toggle`. */
 export type ToggleEmits = CommonInputEmits<boolean>;
 
 // ── pm.curve ────────────────────────────────────
 
 /** Props of `pm.curve`: editable curve of control points (normalized). */
-export interface CurveProps extends CommonInputProps<CurvePoint[]> {
+export interface CurveProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: CurvePoint[];
   /** Display scale of the y axis (value 1 is shown as `yMax`). Default 1. */
   yMax?: number;
 }
@@ -157,14 +178,19 @@ export type CurveEmits = CommonInputEmits<CurvePoint[]>;
 // ── pm.angle ────────────────────────────────────
 
 /** Props of `pm.angle`: angle in radians. */
-export type AngleProps = CommonInputProps<number>;
+export interface AngleProps extends BaseInputProps {
+  /** Current angle in radians. */
+  modelValue: number;
+}
 /** Emits of `pm.angle`. */
 export type AngleEmits = CommonInputEmits<number>;
 
 // ── pm.tapTempo ─────────────────────────────────
 
 /** Props of `pm.tapTempo`: tempo in BPM with tap input. */
-export interface TapTempoProps extends CommonInputProps<number> {
+export interface TapTempoProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: number;
   /** Current beat phase 0–1 for the visual pulse (optional). */
   phase?: number;
   /** Accent/background color (CSS color). */
@@ -179,7 +205,9 @@ export interface TapTempoEmits extends CommonInputEmits<number> {
 // ── pm.button ───────────────────────────────────
 
 /** Props of `pm.button`: a live/trigger button (not the shadcn button). */
-export interface TriggerButtonProps extends CommonInputProps<boolean> {
+export interface TriggerButtonProps extends BaseInputProps {
+  /** Current value. */
+  modelValue: boolean;
   /** `'momentary'` = active while pressed; `'toggle'` = flips on press. Default `'momentary'`. */
   mode?: 'momentary' | 'toggle';
   /** Accent color (CSS color). */

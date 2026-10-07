@@ -26,6 +26,7 @@ import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmPanelSection from '~/components/primitives/PmPanelSection.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { fixtureView } from '~/utils/extensions/scope-views';
+import type { SignatureTarget } from '@pixelmapper/extension-api';
 interface Props {
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
@@ -204,6 +205,25 @@ function getSelectedFixtures(): Fixture[] {
 
 const availableTabs = computed(() => {
   return getAvailableCategories(getSelectedFixtures());
+});
+
+// Extension scope: in the position section, `signature` is the pan/tilt target
+// of the first selected moving fixture (slot `properties/position:*`). Channel
+// controls provide their own, more specific signature.
+provideScope('signature', (): SignatureTarget | undefined => {
+  if (activeTab.value !== 'position') return undefined;
+  for (const f of getSelectedFixtures()) {
+    const pan = f.channels.findIndex(c => c.type === 'PAN' && !c.isFine);
+    const tilt = f.channels.findIndex(c => c.type === 'TILT' && !c.isFine);
+    if (pan >= 0 && tilt >= 0) {
+      return {
+        signature: 'panTilt',
+        fixtureId: f.id,
+        channelRefs: [{ channelIndex: pan, type: 'PAN' }, { channelIndex: tilt, type: 'TILT' }],
+      };
+    }
+  }
+  return undefined;
 });
 
 // Extension scope: the property sidebar exposes `fixture` for a single selection.

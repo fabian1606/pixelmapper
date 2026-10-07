@@ -4,8 +4,7 @@ import type { ChannelSection } from './composables/use-channel-sections';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import FixturePropertyControl from './FixturePropertyControl.vue';
 import FixtureColorControl from './FixtureColorControl.vue';
-import FixturePanTiltPad from './FixturePanTiltPad.vue';
-import FixtureMovementRange from './FixtureMovementRange.vue';
+import FixturePanTiltControl from './FixturePanTiltControl.vue';
 import ChannelLimitsDialog from './ChannelLimitsDialog.vue';
 
 defineProps<{
@@ -35,12 +34,11 @@ const limitsDialog = ref<InstanceType<typeof ChannelLimitsDialog> | null>(null);
         :active-step="activeStep"
         @before-change="handleBeforeChange"
       />
-      <FixturePanTiltPad
+      <FixturePanTiltControl
         :channel-sections="channelSections"
         :active-step="activeStep"
         @before-change="handleBeforeChange"
       />
-      <FixtureMovementRange :channel-sections="channelSections" />
       <ChannelLimitsDialog ref="limitsDialog" />
     </div>
     <div v-for="(section, idx) in channelSections" :key="idx">

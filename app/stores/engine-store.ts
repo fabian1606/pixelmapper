@@ -51,6 +51,7 @@ import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
 import { liveHub } from '~/utils/extensions/live-hub';
+import { bumpModelTick } from '~/utils/extensions/model-tick';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -473,6 +474,9 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   // ── Render loop state ─────────────────────────────────────────────────────
+
+  // Extension scope views re-project when the (mostly non-reactive) model changes.
+  watch([layoutRevision, channelsRevision, sceneNodes], bumpModelTick);
 
   const clockEpoch = ref(Date.now());
   function setClockEpoch(ms: number) { clockEpoch.value = ms; engine.postEpoch(ms); }

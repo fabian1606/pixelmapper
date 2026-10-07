@@ -74,6 +74,14 @@ export interface ChannelValueWrite {
   value: number;
 }
 
+/** One channel output-range write (DMX 0–255; min/max are ordered by the host). */
+export interface ChannelRangeWrite {
+  fixtureId: FixtureId;
+  channelIndex: number;
+  min: number;
+  max: number;
+}
+
 /**
  * Typed constructors of core commands available to extensions. The list is
  * part of the versioned API. Each call returns a `Command` that is executed
@@ -83,7 +91,9 @@ export interface CoreCommandFactory {
   /** Set programmed static values of channels of one fixture. */
   setChannelValues(args: { fixtureId: FixtureId; values: ChannelValueWrite[]; description?: string }): Command;
   /** Limit a channel's output range (DMX 0–255). */
-  setChannelRange(args: { fixtureId: FixtureId; channelIndex: number; min: number; max: number }): Command;
+  setChannelRange(args: ChannelRangeWrite): Command;
+  /** Limit several channels' output ranges as one undo step. */
+  setChannelRanges(args: { changes: ChannelRangeWrite[]; description?: string }): Command;
   /** Replace a kind fixture's config; rebuilds and stores `compiled`. Available from plan P5. */
   setFixtureKindConfig(args: { fixtureId: FixtureId; config: Json }): Command;
   /** Add a fixture from a kind or an OFL key at a normalized position. Available from plan P5. */

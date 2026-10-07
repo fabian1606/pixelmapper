@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * Movement-range pad (0–255 DMX space). Emits `input` with the new range
+ * while dragging and `commit` when the drag ends.
+ */
 import { ref, computed, onUnmounted } from 'vue';
 
 const props = defineProps<{

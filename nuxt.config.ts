@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
  */
 const FIRST_PARTY_EXTENSIONS: string[] = [
   './extensions/color-picker',
+  './extensions/pan-tilt',
 ];
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 

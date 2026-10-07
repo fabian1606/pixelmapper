@@ -88,6 +88,8 @@ export interface ChannelView {
   resolution: 1 | 2 | 3;
   /** Offsets of fine/ultra-fine bytes, if `resolution > 1`. */
   fineAddressOffsets: number[];
+  /** True if this entry is the fine/ultra-fine byte of another channel. */
+  isFine: boolean;
   /** Lower DMX bound (0–255) the output is remapped into. */
   rangeMin: number;
   /** Upper DMX bound (0–255) the output is remapped into. */

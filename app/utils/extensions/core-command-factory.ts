@@ -5,7 +5,7 @@
  * command classes (which hold live model references). Factories whose core
  * support lands in a later plan phase throw a descriptive error.
  */
-import type { Command, CoreCommandFactory, FixtureId } from '@pixelmapper/extension-api';
+import type { ChannelRangeWrite, Command, CoreCommandFactory, FixtureId } from '@pixelmapper/extension-api';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useEngineStore } from '~/stores/engine-store';
@@ -46,6 +46,24 @@ function findNode(nodes: readonly SceneNode[], id: string | number): SceneNode |
 /** Clamps a DMX byte. */
 const dmx = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
 
+/** Range writes for several channels as one `SetChannelRangeCommand`. */
+function setChannelRanges({ changes, description }: { changes: ChannelRangeWrite[]; description?: string }): Command {
+  const snapshots: RangeSnapshotMap = new Map();
+  for (const { fixtureId, channelIndex, min, max } of changes) {
+    const fixture = requireFixture(fixtureId);
+    const channel = fixture.channels[channelIndex];
+    if (!channel) throw new Error(`[extension-api] channel ${channelIndex} not found on fixture "${String(fixtureId)}"`);
+    snapshots.set(
+      { fixture, channelIndex },
+      {
+        before: { rangeMin: channel.rangeMin ?? 0, rangeMax: channel.rangeMax ?? 255 },
+        after: { rangeMin: dmx(Math.min(min, max)), rangeMax: dmx(Math.max(min, max)) },
+      },
+    );
+  }
+  return new SetChannelRangeCommand(snapshots, description);
+}
+
 /** Creates the factory. Stateless; safe to share. */
 export function createCoreCommandFactory(): CoreCommandFactory {
   return {
@@ -65,20 +83,8 @@ export function createCoreCommandFactory(): CoreCommandFactory {
       return new SetChannelValuesCommand(snapshots, description);
     },
 
-    setChannelRange({ fixtureId, channelIndex, min, max }): Command {
-      const fixture = requireFixture(fixtureId);
-      const channel = fixture.channels[channelIndex];
-      if (!channel) throw new Error(`[extension-api] channel ${channelIndex} not found on fixture "${String(fixtureId)}"`);
-      const snapshots: RangeSnapshotMap = new Map();
-      snapshots.set(
-        { fixture, channelIndex },
-        {
-          before: { rangeMin: channel.rangeMin ?? 0, rangeMax: channel.rangeMax ?? 255 },
-          after: { rangeMin: dmx(Math.min(min, max)), rangeMax: dmx(Math.max(min, max)) },
-        },
-      );
-      return new SetChannelRangeCommand(snapshots);
-    },
+    setChannelRange: write => setChannelRanges({ changes: [write] }),
+    setChannelRanges,
 
     setFixtureKindConfig: () => notYet('setFixtureKindConfig', 'P5.1'),
     addFixture: () => notYet('addFixture', 'P5.1'),
