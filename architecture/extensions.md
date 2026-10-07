@@ -23,10 +23,37 @@ extensions/<id>/                     app/ (core)
 ## Boot and registration
 
 1. `app/plugins/00.extensions.client.ts` calls `installSharedGlobals()` (`app/utils/extensions/shared-globals.ts`): `vue`, `pinia` and the API (package exports + host implementations) go to `globalThis.__PIXELMAPPER_SHARED__`.
-2. First-party extensions are Nuxt layers listed in `FIRST_PARTY_EXTENSIONS` in `nuxt.config.ts` (`extends`). Each layer has `plugins/register.ts` calling `registerExtension(manifest)`. Calls that run before step 1 are queued in `globalThis.__PIXELMAPPER_PENDING__` and drained by `installSharedGlobals`, so plugin order does not matter.
-3. (Plan P6.6) cached installed bundles are imported, then the project loads.
+2. The **distribution set** (`color-picker`, `pan-tilt`, `connector-artnet`) are Nuxt layers listed in `FIRST_PARTY_EXTENSIONS` in `nuxt.config.ts` (`extends`). Each layer has `plugins/register.ts` calling `registerExtension(manifest)`. Calls that run before step 1 are queued in `globalThis.__PIXELMAPPER_PENDING__` and drained by `installSharedGlobals`, so plugin order does not matter.
+3. `app/plugins/03.extension-loader.client.ts` loads the user's **installed bundles** (see below); `engineStore.loadProject` awaits `extensionsReady()` before it checks `requires` and deserializes fixtures.
+
+Catalog extensions (`neopixel-strip`, `connector-esp`, `controller-akai-apc-mini-mk2`) are installed on demand in production; in dev they are additionally layered for HMR (`PM_CATALOG_LAYERS=0` turns that off). `PM_NO_EXTENSIONS=1` builds the core with `extends: []` (`bun run check:zero-extensions`, ADR D17).
 
 `registerExtension` validates the manifest (`validateManifest` in `registry.ts`): kebab-case unique id, semver `version`, `apiVersion` range compatible with `API_VERSION`, command types `<id>/<name>`, live widget types `<id>/<name>`, unique fixture-kind ids and connector types, no duplicate replacement within the extension. Invalid manifests are logged, not thrown, at boot.
+
+## Bundles, installation and loading (ADR §5.9)
+
+**Build.** `packages/extension-build` bundles an extension folder in Vite library mode (`bun run build:extensions` builds every non-distribution first-party extension into `public/extensions/<id>/<version>/` plus `public/extensions/catalog.json`; `nuxt build` runs it first):
+
+- `index.js` — ESM; default export = the manifest. `vue`, `pinia` and `@pixelmapper/extension-api` are virtual modules reading `globalThis.__PIXELMAPPER_SHARED__`, so a bundle never ships its own Vue and shares the host's instances (`ConnectorBase`, `ControllerDriverBase` come from the API module).
+- `style.css` — Tailwind utilities scanned from the extension's own sources (no preflight), colors mapped to the host's theme variables.
+- `extension.json` — metadata without components: id, version, apiVersion, names, contribution summary (kind ids + `requiredWhenUsed`, connector types, controllers, slots, replacements, commands).
+
+**Sources.** The app catalog (`/extensions`) and the Supabase registry (`extensions` table + public `extensions` bucket, migration `006_extensions.sql`: anyone reads, a publisher owns the ids it published first, rows are immutable).
+
+**Installed list.** Per user: Supabase `user_extensions` (mirrored to localStorage) when signed in, else `localStorage["pm:installed-extensions:local"]`. Installed = active (D19); there is no per-project toggle.
+
+**Loading** (`app/utils/extensions/loader.ts`): for every installed `{ id, versionRange }` — skip when a layer already registered the id; pick the highest version satisfying the range (newest published, else cached); download into IndexedDB (`pm-extensions`, offline afterwards); inject the CSS (`<style data-pm-extension="id@version">`); `import()` the JS from a blob URL; `registerExtension(manifest, 'bundle')`. Failures are reported per extension, never fatal.
+
+**Installing** (Extensions page, `/extensions`): install by catalog entry, id, `id@range` or a link ending in the id, after the dialog showing id, version, source and *“Extensions run with full access to your projects and this app.”* Install/update/uninstall change the list and reload the app. Bundles from imported `.pmproject` files are offered from the cache (works offline).
+
+## Project requirements and the open gate (ADR D20, §5.10)
+
+`project.requires: { id, version: '^major.minor' }[]` is maintained by `app/utils/extensions/requires.ts`:
+
+- executing an extension's namespaced command, or `SetFixtureKindConfig`/`AddFixtures` for a kind of E (unless the kind sets `requiredWhenUsed: false`), adds E — a new requirement is written to a snapshot immediately;
+- every snapshot write recomputes the list from the state: E stays while a fixture uses one of its required kinds or any `extensionData[E]` exists (fixtures, project, live widgets); removals happen with that snapshot, so the change log after it holds no E commands.
+
+On open, the snapshot's `requires` plus the owners of namespaced commands in the change-log tail are checked against the registered extensions (`semver.satisfies`). Missing or incompatible ones stop the load: `MissingExtensionDialog` lists them with Install/Update buttons (catalog, registry or cached bundles) and “Back to projects”. There is no degraded mode.
 
 ## Scopes
 
@@ -232,8 +259,8 @@ export default defineExtension({
 
 The kind appears as a card in **Add Fixture** and in the library under its category; the default add form and the selection-panel editor are generated from `configSchema` (provide `library.addForm` for a custom form: prop `modelValue`, emits `update:modelValue` and `add(config, count)`). Edits are core `SetFixtureKindConfig` commands; using the kind adds the extension to the project's `requires` (unless `requiredWhenUsed: false`). The full first-party example is `extensions/neopixel-strip`.
 
-## Extension data and project requirements
+## Extension data
 
 Extensions persist small JSON state with `ctx.run(ctx.commands.setExtensionData({ owner: 'fixture' | 'project' | 'liveWidget', ownerId, key, value }))`; it is stored at `owner.extensionData[extensionId][key]` and undone like any command.
 
-`project.requires` (`app/utils/extensions/requires.ts`) is maintained automatically: executing an extension's namespaced command or editing/adding fixtures of its kinds adds the extension (and writes a snapshot right away); every snapshot write recomputes the list from the state — an extension stays while a fixture uses one of its required kinds or any `extensionData[id]` exists.
+Using extension data or kinds keeps the extension in the project's `requires` (see “Project requirements and the open gate” above).

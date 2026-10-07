@@ -144,7 +144,7 @@ Goal: one modifier pipeline; built-ins in AS; TS/Rust effect duplicates gone. **
 - [x] **P6.7 Install UI + missing-extension gate.** Extensions page (installed list, install by id/link with warning dialog, update); `MissingExtensionDialog.vue` on project open (ADR §5.10).
 - [x] **P6.8 Project export/import.** `.pmproject` zip (ADR §6.10): project JSON + referenced plugin packages + required extension bundles; import installs/caches bundled extensions and plugins (with the same warning dialog for extensions).
 - [x] **P6.9 Zero-extension check.** CI job / script that builds with `extends: []` and runs a smoke test (open project without kinds, add OFL fixture, add built-in modifier, render) — ADR D17.
-- [ ] **P6.10 Docs.** Rewrite `architecture/connectors.md` (connectors as extensions, per-device config); `architecture/extensions.md` (bundling, loading, install, requires).
+- [x] **P6.10 Docs.** Rewrite `architecture/connectors.md` (connectors as extensions, per-device config); `architecture/extensions.md` (bundling, loading, install, requires).
 
 ---
 
