@@ -23,7 +23,7 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { cloneModifiers } from '~/utils/engine/modifiers';
-import { getManifest, loadWasm } from '~/utils/plugins/plugin-store';
+import { getManifest, loadWasm, resolve as resolvePlugin, resolveErrors } from '~/utils/plugins/plugin-store';
 import { BUILTIN_PLUGINS } from '~/utils/plugins/builtin-index';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 // Side-effect import — registers 'connector.add' / 'connector.remove' /
@@ -537,6 +537,7 @@ export const useEngineStore = defineStore('engine', () => {
     ({ packet: modifiersPacket, plugins: modifierPlugins } = trace('packet.modifiers', () =>
       buildModifiersBin(modifiers.value, flatFixtures.value, getManifest)));
     ensurePluginsLoaded(modifierPlugins);
+    resolveUnknownPlugins(modifiers.value);
     effectsRevision.value++;
   }
 
@@ -549,6 +550,21 @@ export const useEngineStore = defineStore('engine', () => {
       if (engine.hasPlugin(hash)) continue;
       void loadWasm(hash).then((wasm) => {
         if (wasm && !engine.hasPlugin(hash)) engine.loadPlugin(hash, wasm);
+      });
+    }
+  }
+
+  /**
+   * Resolves plugins referenced by modifiers whose manifest is unknown here
+   * (shared projects, live collaboration). The modifiers packet skips such
+   * instances; once a plugin resolves the packet is rebuilt.
+   */
+  function resolveUnknownPlugins(list: readonly import('~/utils/engine/types').ModifierInstance[]): void {
+    for (const m of list) {
+      // Known, or already failed (no retry storm on every flush).
+      if (getManifest(m.plugin) || resolveErrors.value.has(m.plugin)) continue;
+      void resolvePlugin(m.plugin).then((known) => {
+        if (known) flushEngineOutput();
       });
     }
   }
