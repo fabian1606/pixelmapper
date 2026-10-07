@@ -94,7 +94,7 @@ Callers with custom markup list positions in `manual` and render the outlets the
 </PmListItem>
 ```
 
-Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled in the UI):
+Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled in the UI, open `/dev/slots` in dev for the catalog of slots rendered in the session with their scopes and contributors, or read `docs/ai/index.json`):
 
 - `scene:header`, `scene/fixture:badges|actions`, `scene/group:badges|actions`
 - `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions`
