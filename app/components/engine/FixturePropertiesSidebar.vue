@@ -27,6 +27,7 @@ import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmPanelSection from '~/components/primitives/PmPanelSection.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { fixtureView } from '~/utils/extensions/scope-views';
+import { modelTick } from '~/utils/extensions/model-tick';
 import type { SignatureTarget } from '@pixelmapper/extension-api';
 interface Props {
   selectedIds: Set<string | number>;
@@ -188,6 +189,11 @@ function handleBeforeChange(fixtures: Fixture[]) {
 // Helpers ------------------------------------------------------------------
 
 function getSelectedFixtures(): Fixture[] {
+  // Track selection and scene changes explicitly: the scene array is mutated
+  // in place (shallowRef + triggerRef), so `props.nodes` keeps its identity
+  // and an empty traversal would otherwise never read `selectedIds`.
+  void modelTick.value;
+  void props.selectedIds;
   const result: Fixture[] = [];
   function traverse(nodes: SceneNode[], inherited = false) {
     for (const node of nodes) {
