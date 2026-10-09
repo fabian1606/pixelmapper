@@ -27,12 +27,16 @@ const emit = defineEmits<{
 
 // ─── Fixture kinds ────────────────────────────────────────────────────────────
 
-/** Registered kinds matching the search / category filter. */
+/**
+ * Registered kinds matching the search / category filter. Kinds live in
+ * their category (and in search results), not in the unfiltered list.
+ */
 const visibleKinds = computed(() => {
   const q = search.value.trim().toLowerCase();
-  const cat = categoryFilter.value;
+  const cat = categoryFilter.value && categoryFilter.value !== 'All' ? categoryFilter.value : '';
+  if (!q && !cat) return [];
   return listKinds().filter(({ def }) =>
-    (!cat || cat === 'All' || def.library.category === cat)
+    (!cat || def.library.category === cat)
     && (!q || `${def.label} ${def.description} ${def.library.category}`.toLowerCase().includes(q)));
 });
 
@@ -227,12 +231,12 @@ function slugId(key: string): string {
         <button
           v-for="k in visibleKinds"
           :key="k.def.id"
-          class="flex items-center gap-3 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40 group/item"
+          class="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40 group/item"
           @click="emit('select-kind', k.def.id)"
         >
           <component :is="iconByName(k.def.icon)" class="size-4 text-primary shrink-0" />
-          <span class="flex flex-col min-w-0">
-            <span class="text-sm font-medium text-foreground group-hover/item:text-primary transition-colors">{{ k.def.label }}</span>
+          <span class="flex flex-1 flex-col min-w-0">
+            <span class="text-sm font-medium text-foreground truncate group-hover/item:text-primary transition-colors">{{ k.def.label }}</span>
             <span class="text-[10px] text-muted-foreground truncate">{{ k.def.library.category }} · {{ k.def.description }}</span>
           </span>
         </button>

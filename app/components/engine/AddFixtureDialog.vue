@@ -301,7 +301,7 @@ watch(() => props.open, (isOpen) => {
 <template>
   <Dialog :open="open" @update:open="val => emit('update:open', val)">
     <DialogContent class="sm:max-w-[850px] p-0 overflow-hidden bg-background border-none shadow-2xl">
-      <div class="flex flex-col h-[85vh]">
+      <div class="flex flex-col h-[85vh] min-w-0">
 
         <!-- ── Landing View ──────────────────────────────────────────────── -->
         <template v-if="view === 'landing'">
@@ -508,7 +508,7 @@ watch(() => props.open, (isOpen) => {
             <DialogTitle class="text-lg font-bold tracking-tight">Add from Library</DialogTitle>
           </div>
 
-          <div class="flex-1 flex flex-col min-h-0 bg-muted/20">
+          <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-muted/20">
             <FixtureLibraryBrowser
               class="flex-1"
               :selected-key="selectedSummary?.key"
