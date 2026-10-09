@@ -156,7 +156,7 @@ function startRafLoop() {
 // ─── Init ─────────────────────────────────────────────────────────────────────────────────────
 async function initAndDraw() {
   // Local WasmCanvas for hit-test only — no GL needed.
-  await initWasm(wasmUrl);
+  await initWasm({ module_or_path: wasmUrl });
   if (!canvasEl.value || !effectEngine) return;
 
   localCanvas = new WasmCanvas();

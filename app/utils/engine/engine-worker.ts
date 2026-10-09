@@ -60,7 +60,7 @@ function tick() {
 
 async function init() {
   // Init both WASM modules in parallel.
-  await Promise.all([initWasm(wasmUrl), initCanvasWasm(canvasWasmUrl)]);
+  await Promise.all([initWasm({ module_or_path: wasmUrl }), initCanvasWasm({ module_or_path: canvasWasmUrl })]);
   engine = new WasmEngine();
   engine.reset_clock(bpm);
   canvas = new WasmCanvas();
