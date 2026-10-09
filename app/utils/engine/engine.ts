@@ -106,6 +106,7 @@ export class EffectEngine {
     if (!this.worker) return;
     console.warn('[engine] worker stalled — respawning');
     this.worker.terminate();
+    this.watchdog?.disarm();
     this.spawn();
 
     const suspended = [...this.plugins.keys()].filter(h => !this.isTrustedPlugin(h));

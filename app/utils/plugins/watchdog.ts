@@ -20,6 +20,8 @@ export interface WatchdogOptions {
 
 export class Watchdog {
   private last = 0;
+  /** False until the first heartbeat (worker start-up is not a stall). */
+  private armed = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly timeoutMs: number;
   private readonly now: () => number;
@@ -32,12 +34,19 @@ export class Watchdog {
   /** Records a heartbeat. */
   beat(): void {
     this.last = this.now();
+    this.armed = true;
+  }
+
+  /** Waits for the next heartbeat before checking again (e.g. after a respawn). */
+  disarm(): void {
+    this.armed = false;
   }
 
   /** Starts watching (the first heartbeat arms it). */
   start(): void {
     this.stop();
     this.last = this.now();
+    this.armed = false;
     this.timer = setInterval(() => this.check(), this.opts.intervalMs ?? 250);
   }
 
@@ -49,6 +58,7 @@ export class Watchdog {
 
   /** One check; exposed for tests. */
   check(): void {
+    if (!this.armed) return;
     if (typeof document !== 'undefined' && document.hidden) {
       this.last = this.now();
       return;

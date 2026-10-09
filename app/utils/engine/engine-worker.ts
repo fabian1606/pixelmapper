@@ -67,9 +67,23 @@ async function init() {
   lastTime = Date.now();
   renderHandle = setInterval(tick, 16);
   (self as unknown as Worker).postMessage({ type: 'ready' });
+  // Handle everything that arrived during start-up, in order (a respawned
+  // worker receives the full replay and the new OffscreenCanvas right away).
+  initialized = true;
+  for (const e of pending.splice(0)) handleMessage(e);
 }
 
+/** Messages received before the WASM modules were ready. */
+const pending: MessageEvent[] = [];
+let initialized = false;
+
 self.onmessage = (e: MessageEvent) => {
+  if (!initialized) pending.push(e);
+  else handleMessage(e);
+};
+
+/** Handles one message from the main thread (engine ready). */
+function handleMessage(e: MessageEvent) {
   const m = e.data as {
     type: string;
     packetType?: number;
@@ -198,6 +212,6 @@ self.onmessage = (e: MessageEvent) => {
       }
       break;
   }
-};
+}
 
 init();
