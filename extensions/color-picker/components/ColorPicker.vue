@@ -3,6 +3,8 @@
  * `pm.colorInput` replacement: HSV color wheel (angle = hue, radius =
  * saturation, value fixed at full brightness) plus a swatch grid.
  *
+ * With `swatchesOnly` (e.g. color-wheel fixtures) only the swatches show.
+ *
  * Contract only: `modelValue` (linear RGB 0–1) in, `update:modelValue`,
  * `scrubStart`, `scrubEnd` out. During a drag the handle follows the pointer
  * locally so it stays smooth even when the caller throttles writes.
@@ -89,7 +91,9 @@ const handleStyle = computed(() => {
 <template>
   <div class="flex flex-col items-center gap-4 w-full h-full" :class="disabled && 'opacity-50 pointer-events-none'">
     <div v-if="label" class="self-start text-xs text-muted-foreground">{{ label }}</div>
+    <!-- Wheel only when colors can be mixed freely (as before the extension split) -->
     <div
+      v-if="!swatchesOnly"
       ref="wheelRef"
       class="relative rounded-full shadow-inner cursor-crosshair touch-none select-none shrink-0"
       :class="wheelClass"

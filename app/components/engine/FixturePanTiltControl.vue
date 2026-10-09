@@ -106,7 +106,8 @@ function apply(p: Vec2) {
 </script>
 
 <template>
-  <div v-if="targets.length > 0" class="mb-6">
+  <div v-if="targets.length > 0" class="mt-4 mb-10">
+    <!-- Spacing as in the pre-extension controls (my-4 inside mb-6) -->
     <Replaceable
       name="pm.xyInput"
       :model-value="value"

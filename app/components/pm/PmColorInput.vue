@@ -62,9 +62,10 @@ function commitHex() {
 <template>
   <div class="flex flex-col gap-1.5" :class="disabled && 'opacity-50 pointer-events-none'">
     <div v-if="label" class="text-xs text-muted-foreground">{{ label }}</div>
+    <!-- Free mixing only when the target supports it (swatchesOnly: wheels only) -->
     <component
       :is="Fader"
-      v-for="ch in CHANNELS"
+      v-for="ch in swatchesOnly ? [] : CHANNELS"
       :key="ch.key"
       :model-value="modelValue[ch.key]"
       :label="ch.label"
@@ -88,7 +89,7 @@ function commitHex() {
         @click="pickSwatch(sw)"
       />
     </div>
-    <div class="flex items-center gap-2">
+    <div v-if="!swatchesOnly" class="flex items-center gap-2">
       <span class="size-6 rounded border border-border shrink-0" :style="{ backgroundColor: hex }" />
       <input
         v-model="hexText"

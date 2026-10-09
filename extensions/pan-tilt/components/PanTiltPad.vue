@@ -87,25 +87,23 @@ const boundsStyle = computed(() => {
     >
       <!-- Grid lines for visual guidance -->
       <div class="absolute inset-0 pointer-events-none opacity-30">
-        <div class="absolute top-1/2 left-0 right-0 h-px bg-foreground/20" />
-        <div class="absolute left-1/2 top-0 bottom-0 w-px bg-foreground/20" />
-        <div class="absolute top-1/4 left-0 right-0 h-px bg-foreground/5" />
-        <div class="absolute top-3/4 left-0 right-0 h-px bg-foreground/5" />
-        <div class="absolute left-1/4 top-0 bottom-0 w-px bg-foreground/5" />
-        <div class="absolute left-3/4 top-0 bottom-0 w-px bg-foreground/5" />
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 rounded-full border border-foreground/10" />
+        <div class="absolute top-1/2 left-0 right-0 h-px bg-white/20" />
+        <div class="absolute left-1/2 top-0 bottom-0 w-px bg-white/20" />
+        <div class="absolute top-1/4 left-0 right-0 h-px bg-white/5" />
+        <div class="absolute top-3/4 left-0 right-0 h-px bg-white/5" />
+        <div class="absolute left-1/4 top-0 bottom-0 w-px bg-white/5" />
+        <div class="absolute left-3/4 top-0 bottom-0 w-px bg-white/5" />
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 rounded-full border border-white/10" />
       </div>
       <!-- Allowed area -->
       <div v-if="boundsStyle" class="absolute border border-primary/40 bg-primary/5 pointer-events-none" :style="boundsStyle" />
-      <!-- Handle -->
+      <!-- Handle (grows slightly while dragging) -->
       <div
-        class="absolute w-6 h-6 -ml-3 -mt-3 rounded-full border border-background shadow-md pointer-events-none bg-primary flex items-center justify-center"
+        class="absolute w-6 h-6 -ml-3 -mt-3 rounded-full border border-white shadow-md pointer-events-none bg-primary flex items-center justify-center transition-transform duration-75"
+        :class="preview ? 'scale-110' : 'scale-100'"
         :style="handleStyle"
       >
-        <div class="w-2 h-2 rounded-full bg-background/80" />
-      </div>
-      <div v-if="axisLabels" class="absolute bottom-1 inset-x-0 flex justify-between px-2 text-[9px] text-muted-foreground pointer-events-none">
-        <span>{{ axisLabels[0] }}</span><span>{{ axisLabels[1] }}</span>
+        <div class="w-2 h-2 rounded-full bg-white/80" />
       </div>
     </div>
   </div>

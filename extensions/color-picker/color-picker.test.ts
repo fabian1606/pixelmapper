@@ -83,3 +83,14 @@ describe('color-picker extension', () => {
     }
   });
 });
+
+describe('ColorPicker swatchesOnly', () => {
+  it('hides the wheel when the target cannot mix colors (color-wheel fixtures)', () => {
+    const swatches = [{ color: { r: 1, g: 0, b: 0 }, label: 'Red' }];
+    const full = mount(ColorPicker, { props: { modelValue: { r: 0, g: 0, b: 0 }, swatches } });
+    expect(full.find('[role="slider"]').exists()).toBe(true);
+    const only = mount(ColorPicker, { props: { modelValue: { r: 0, g: 0, b: 0 }, swatches, swatchesOnly: true } });
+    expect(only.find('[role="slider"]').exists()).toBe(false);
+    expect(only.findAll('button[title="Red"]')).toHaveLength(1);
+  });
+});

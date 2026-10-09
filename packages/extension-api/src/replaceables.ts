@@ -115,6 +115,11 @@ export interface ColorInputProps extends BaseInputProps {
   modelValue: RgbColor;
   /** Optional preset swatches; picking one emits its color as one edit. */
   swatches?: ColorSwatch[];
+  /**
+   * The target cannot mix colors (e.g. only color wheels): offer just the
+   * swatches, no free color selection.
+   */
+  swatchesOnly?: boolean;
 }
 /** Emits of `pm.colorInput`. */
 export type ColorInputEmits = CommonInputEmits<RgbColor>;

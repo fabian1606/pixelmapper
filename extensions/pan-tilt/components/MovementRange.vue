@@ -177,7 +177,7 @@ onBeforeUnmount(() => {
   <button
     v-if="targets.length > 0"
     type="button"
-    class="w-full inline-flex items-center justify-center gap-2 h-8 rounded-md border border-border bg-background text-sm hover:bg-accent transition-colors"
+    class="w-full inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 h-8 gap-2 px-3 has-[>svg]:px-2.5"
     @click="openEditor"
   >
     <!-- "move" icon -->
@@ -188,20 +188,32 @@ onBeforeUnmount(() => {
   </button>
 
   <Teleport to="body">
-    <!-- data-overlay-root: clicks here must not close the properties sidebar -->
+    <!-- data-overlay-root: clicks here must not close the properties sidebar.
+         Styled like the app's shadcn Dialog; a backdrop click does not close
+         it (as before), Cancel / X / Escape discard the preview. -->
     <div
       v-if="open"
       data-overlay-root
-      class="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center"
-      @pointerdown.self="close"
+      class="fixed inset-0 z-[150] bg-black/80 animate-in fade-in-0 flex items-center justify-center"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="pm-movement-range-title"
-        class="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-lg space-y-4"
+        class="relative grid gap-4 w-full max-w-[calc(100%-2rem)] sm:max-w-lg rounded-lg border bg-background p-6 shadow-lg duration-200 animate-in fade-in-0 zoom-in-95"
       >
-        <h2 id="pm-movement-range-title" class="text-lg font-semibold">Movement Range</h2>
+        <h2 id="pm-movement-range-title" class="text-lg leading-none font-semibold">Movement Range</h2>
+        <button
+          type="button"
+          class="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:outline-hidden"
+          aria-label="Close"
+          @click="close"
+        >
+          <!-- "x" icon -->
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
 
         <div class="flex items-center justify-between">
           <label class="flex items-center gap-2 text-xs text-muted-foreground">
@@ -267,8 +279,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" class="h-8 px-3 rounded-md text-sm hover:bg-accent" @click="close">Cancel</button>
-          <button type="button" class="h-8 px-3 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90" @click="apply">Apply</button>
+          <button type="button" class="inline-flex items-center justify-center h-8 px-3 rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50" @click="close">Cancel</button>
+          <button type="button" class="inline-flex items-center justify-center h-8 px-3 rounded-md text-sm font-medium transition-all bg-primary text-primary-foreground hover:bg-primary/90" @click="apply">Apply</button>
         </div>
       </div>
     </div>

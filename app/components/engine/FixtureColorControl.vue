@@ -74,6 +74,9 @@ function isRgb(fd: ColorFixtureData): boolean {
   return fd.redChs.length > 0 && fd.greenChs.length > 0 && fd.blueChs.length > 0;
 }
 
+/** True when at least one selected fixture can mix RGB freely. */
+const hasRgb = computed(() => colorFixtures.value.some(isRgb));
+
 // ─── Color-wheel slots ───────────────────────────────────────────────────────
 
 interface WheelSlot {
@@ -193,11 +196,13 @@ function apply(color: RgbColor) {
 </script>
 
 <template>
-  <div v-if="colorFixtures.length > 0" class="mb-6">
+  <div v-if="colorFixtures.length > 0" class="mt-4 mb-10">
+    <!-- Spacing as in the pre-extension controls (my-4 inside mb-6) -->
     <Replaceable
       name="pm.colorInput"
       :model-value="value"
       :swatches="swatches"
+      :swatches-only="!hasRgb"
       @update:model-value="apply"
       @scrub-start="onScrubStart"
       @scrub-end="onScrubEnd"
