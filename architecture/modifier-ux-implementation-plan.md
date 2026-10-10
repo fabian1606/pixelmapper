@@ -25,9 +25,10 @@ Work phase by phase. Every task has an ID (`M<phase>.<n>`), the files it touches
 
 After trying M4 in the app, the owner simplified the Distribution UI:
 
-1. **One dropdown** instead of Scope + "All same": `All the same` · `Across fixtures` · `Within each fixture`.
-   - *Across fixtures* starts with a direction: mode *Linear*, handle placed along the selection and visible on the canvas.
-   - Modes in the row: `Linear · Radial · Conical · Order`.
+1. **One dropdown "Spread"** instead of Scope + Mode: `All the same` · `Spatial 2D` · `Fixture by fixture` · `Within each fixture`.
+   - *Spatial 2D* starts with a direction: mode *Linear*, handle placed along the selection and visible on the canvas. Its mode row is `Linear · Radial · Conical`.
+   - *Fixture by fixture* = mode `order`: number 1 is the start, the highest number the end.
+   - The canvas handle shows **only** for Spatial 2D (also for plugins with an own `origin` point param).
 2. **Order = one `Reassign` button** (no tool row).
    - Pressing it hides the numbers and shows a hint on the canvas: "Click fixtures in order · Shift-click = same step · or draw a line".
    - Clicks number the fixtures 1, 2, 3 …; a drawn line orders by projection and ends the session.

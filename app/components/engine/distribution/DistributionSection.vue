@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
  * Shared Distribution section of every modifier card (plan M4.1, revision
- * R1). One dropdown chooses how the modifier spreads: all the same, across
- * fixtures (direction on the canvas) or within each fixture. Across fixtures
- * offers the modes the manifest allows; Order has a single Reassign action.
+ * R1). One dropdown chooses how the modifier spreads:
+ * - All the same;
+ * - Spatial 2D: Linear / Radial / Conical with the handle on the canvas;
+ * - Fixture by fixture: the numbers on the canvas (1 = start, highest = end),
+ *   set with a single Reassign action;
+ * - Within each fixture: over the heads, optionally offset by the numbers.
  * Spatial values are edited on the canvas (principle 2).
  */
 import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { CircleDot, ListOrdered, MoveRight, RotateCw } from 'lucide-vue-next';
+import { CircleDot, MoveRight, RotateCw } from 'lucide-vue-next';
 import type { Distribution, DistributionMode, Vec2 } from '@pixelmapper/extension-api';
 import type { ManifestDistribution } from '@pixelmapper/plugin-toolchain/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -31,13 +34,13 @@ const emit = defineEmits<{
 }>();
 
 /** The dropdown's choices. */
-type Spread = 'same' | 'across' | 'within';
+type Spread = 'same' | 'spatial' | 'order' | 'within';
 
+/** Spatial 2D modes (the handle on the canvas). */
 const MODES: Segment<DistributionMode>[] = [
   { value: 'linear', label: 'Linear', icon: MoveRight, title: 'Along a direction — drag the handle on the canvas' },
   { value: 'radial', label: 'Radial', icon: CircleDot, title: 'Outward from a center' },
   { value: 'conical', label: 'Conical', icon: RotateCw, title: 'Around a center' },
-  { value: 'order', label: 'Order', icon: ListOrdered, title: 'In the order of the numbers on the canvas' },
 ];
 const OFFSETS: Segment<'none' | 'order'>[] = [
   { value: 'none', label: 'None', title: 'Every fixture runs the same' },
@@ -53,23 +56,28 @@ const modes = computed(() => MODES.filter(m => offered.value.includes(m.value)).
 const spreads = computed(() => {
   const out: { value: Spread; label: string }[] = [];
   if (offered.value.includes('none')) out.push({ value: 'same', label: 'All the same' });
-  if (modes.value.length) out.push({ value: 'across', label: 'Across fixtures' });
+  if (modes.value.length) out.push({ value: 'spatial', label: 'Spatial 2D' });
+  if (offered.value.includes('order')) out.push({ value: 'order', label: 'Fixture by fixture' });
   if (!props.options?.scopes || props.options.scopes.includes('within')) out.push({ value: 'within', label: 'Within each fixture' });
   return out;
 });
-const spread = computed<Spread>(() => (d.value.scope === 'within' ? 'within' : d.value.mode === 'none' ? 'same' : 'across'));
-const ordered = computed(() => (spread.value === 'across' && d.value.mode === 'order') || (spread.value === 'within' && d.value.withinOffset === 'order'));
+const spread = computed<Spread>(() => {
+  if (d.value.scope === 'within') return 'within';
+  return d.value.mode === 'none' ? 'same' : d.value.mode === 'order' ? 'order' : 'spatial';
+});
+const ordered = computed(() => spread.value === 'order' || (spread.value === 'within' && d.value.withinOffset === 'order'));
 const isReassigning = computed(() => reassigning.value === props.modifierId);
 
-/** Switches the spread; entering "Across fixtures" starts with a direction along the selection. */
+/** Switches the spread; entering "Spatial 2D" starts with a direction along the selection. */
 function setSpread(v: Spread) {
   if (v === spread.value) return;
   if (v === 'same') emit('update', { ...d.value, scope: 'across', mode: 'none' }, 'Spread: All the same');
+  else if (v === 'order') emit('update', { ...d.value, scope: 'across', mode: 'order' }, 'Spread: Fixture by fixture');
   else if (v === 'within') emit('update', { ...d.value, scope: 'within' }, 'Spread: Within each fixture');
   else {
     const mode = modes.value.some(m => m.value === 'linear') ? 'linear' : modes.value[0]!.value;
     const handle = props.selectionAxis ? { origin: { ...props.selectionAxis.a }, end: { ...props.selectionAxis.b } } : {};
-    emit('update', { ...d.value, ...handle, scope: 'across', mode }, 'Spread: Across fixtures');
+    emit('update', { ...d.value, ...handle, scope: 'across', mode }, 'Spread: Spatial 2D');
   }
 }
 
@@ -90,7 +98,7 @@ defineExpose({ setSpread });
         </SelectContent>
       </Select>
     </div>
-    <div v-if="spread === 'across'" class="flex items-center gap-2">
+    <div v-if="spread === 'spatial'" class="flex items-center gap-2">
       <span class="w-14 shrink-0 text-[11px] text-muted-foreground">Mode</span>
       <SegmentedControl class="flex-1" aria-label="Mode" :options="modes" :model-value="d.mode" @update:model-value="v => emit('update', { ...d, mode: v }, 'Change Distribution Mode')" />
     </div>
@@ -98,7 +106,7 @@ defineExpose({ setSpread });
       <span class="w-14 shrink-0 text-[11px] text-muted-foreground leading-tight">Offset</span>
       <SegmentedControl class="flex-1" aria-label="Offset per fixture" :options="OFFSETS" :model-value="d.withinOffset" @update:model-value="v => emit('update', { ...d, withinOffset: v }, 'Change Within Offset')" />
     </div>
-    <p v-if="spread === 'across' && d.mode !== 'order'" class="text-[11px] text-muted-foreground truncate">Drag the handle on the canvas</p>
+    <p v-if="spread === 'spatial'" class="text-[11px] text-muted-foreground truncate">Drag the handle on the canvas</p>
     <div v-if="ordered" class="flex items-center gap-2">
       <span class="flex-1 min-w-0 truncate text-[11px] text-muted-foreground">{{ isReassigning ? 'Click fixtures or draw a line on the canvas' : 'Numbers on the canvas set the order' }}</span>
       <button

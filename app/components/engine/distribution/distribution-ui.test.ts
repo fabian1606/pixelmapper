@@ -27,32 +27,33 @@ const modifier = (d: Distribution, targets?: string[]) => ({ id: 'm1', distribut
 describe('DistributionSection (M4.1, R1)', () => {
   it('offers only the manifest modes, in manifest order', () => {
     const w = mount(DistributionSection, {
-      props: { modifierId: 'm1', distribution: createDistribution({ mode: 'linear' }), options: { modes: ['order', 'linear', 'radial'], scopes: ['across'] } },
+      props: { modifierId: 'm1', distribution: createDistribution({ mode: 'linear' }), options: { modes: ['order', 'radial', 'linear'], scopes: ['across'] } },
     });
     const modes = w.find('[aria-label="Mode"]').findAll('button').map(b => b.attributes('data-value'));
-    expect(modes).toEqual(['order', 'linear', 'radial']);
+    expect(modes).toEqual(['radial', 'linear']);
   });
 
   it('switching mode keeps the other fields', async () => {
     const d = createDistribution({ mode: 'linear', reverse: true, origin: { x: 0.1, y: 0.2 } });
     const w = mount(DistributionSection, { props: { modifierId: 'm1', distribution: d } });
-    await w.find('[aria-label="Mode"] [data-value="order"]').trigger('click');
+    await w.find('[aria-label="Mode"] [data-value="radial"]').trigger('click');
     const [next, desc] = w.emitted('update')![0] as [Distribution, string];
-    expect(next.mode).toBe('order');
+    expect(next.mode).toBe('radial');
     expect(next).toMatchObject({ reverse: true, origin: { x: 0.1, y: 0.2 } });
     expect(desc).toBe('Change Distribution Mode');
   });
 
-  it('"Across fixtures" starts linear with the handle along the selection', async () => {
+  it('"Spatial 2D" starts linear with the handle along the selection', async () => {
     const axis = { a: { x: 0.1, y: 0.5 }, b: { x: 0.9, y: 0.5 } };
     const w = mount(DistributionSection, { props: { modifierId: 'm1', distribution: createDistribution({ mode: 'none' }), selectionAxis: axis } });
-    (w.vm as unknown as { setSpread: (v: string) => void }).setSpread('across');
+    (w.vm as unknown as { setSpread: (v: string) => void }).setSpread('spatial');
     const [next] = w.emitted('update')![0] as [Distribution];
     expect(next).toMatchObject({ scope: 'across', mode: 'linear', origin: axis.a, end: axis.b });
   });
 
   it('order mode has only a Reassign button that starts a session', async () => {
     const w = mount(DistributionSection, { props: { modifierId: 'm1', distribution: createDistribution({ mode: 'order' }) } });
+    expect(w.find('[aria-label="Mode"]').exists()).toBe(false);
     expect(w.findAll('button').map(b => b.text())).toContain('Reassign');
     expect(w.text()).not.toMatch(/Snap|Mirror|Grouping|Clear|Reverse/);
     await w.find('[data-reassign]').trigger('click');

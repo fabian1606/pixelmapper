@@ -524,7 +524,7 @@ function handleMouseUp(e?: MouseEvent) {
     </div>
 
     <FixtureEditorSpatialControls
-      v-if="activeModifier && !orderToolActive && ((activeModifier.distribution?.scope === 'across' && ['linear', 'radial', 'conical'].includes(activeModifier.distribution.mode)) || !!activeModifier.params?.origin)"
+      v-if="activeModifier && !orderToolActive && activeModifier.distribution?.scope === 'across' && ['linear', 'radial', 'conical'].includes(activeModifier.distribution.mode)"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"
