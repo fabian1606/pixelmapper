@@ -51,5 +51,5 @@ describe('FixturePropertiesSidebar', () => {
     await nextTick();
     expect(visibleTabs(w.element as HTMLElement)).toContain('Color Properties');
     w.unmount();
-  });
+  }, 30_000); // Imports the whole sidebar tree; slow under a parallel full run.
 });

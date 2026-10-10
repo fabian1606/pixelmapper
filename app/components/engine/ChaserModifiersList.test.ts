@@ -52,4 +52,16 @@ describe('modifier card plugin status', () => {
     expect(w.text()).not.toContain('Loading plugin');
     expect(w.text()).toContain('Shape');
   });
+
+  it('card order: header, params, tempo, distribution; extension slots render (plan M5.6)', async () => {
+    const w = await mountWith(builtinHash(BUILTIN_ALIASES.waveform));
+    const html = w.html();
+    const pos = (sel: string) => html.indexOf(sel);
+    expect(pos('data-card-title')).toBeGreaterThan(-1);
+    expect(pos('data-param=')).toBeGreaterThan(pos('data-card-title'));
+    expect(pos('data-card-tempo')).toBeGreaterThan(pos('data-param='));
+    expect(pos('data-distribution-section')).toBeGreaterThan(pos('data-card-tempo'));
+    // One channel type → no channel chips.
+    expect(pos('data-card-channels')).toBe(-1);
+  });
 });

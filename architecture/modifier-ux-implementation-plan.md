@@ -43,6 +43,12 @@ After trying M4 in the app, the owner simplified the Distribution UI:
    - The choice *Alternate (1-2-1-2)* / *Blocks (1-1-2-2)* lives only where it is visible: Pattern (grid rows) and the Color Shift palette (`Spread: Gradient / Alternate`).
    - Random grouping is dropped (Noise *Random Pick* covers it), and so is the Wave recipe *Every Other* (duplicate of Pattern *Odd/Even*).
 6. **Any interaction inside a card makes that modifier active**, so its canvas handle and tools appear.
+7. **Distribution is generic, never per modifier.**
+   - A modifier only declares which spread options it offers (`distribution.modes/scopes`).
+   - The host computes `spatial`, `rank` and the head index for every sample.
+   - Built-in plugins MUST NOT derive their spatial layout from `s.x/s.y` or own origin/angle params; position-based noise textures are the only exception (Noise *Coherence*).
+   - Fixture by fixture and Within each fixture never depend on the handle (core test `order_and_within_ignore_the_handle`).
+   - The old Sequencer/Noise violate this until M8/M9 replace them.
 
 ## 0. Background
 
@@ -554,13 +560,13 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - exactly 0 or 1 preset has `default: true`.
 
   *Accept:* toolchain tests incl. error messages.
-- [ ] **M5.2 Recipe bar** (`app/components/plugin-host/RecipeBar.vue`):
+- [x] **M5.2 Recipe bar** (`app/components/plugin-host/RecipeBar.vue`):
   - Horizontal wrap of tiles: 64×28 animated thumbnail (`renderStrip` with the preset applied, 24 cols, ~15 fps, paused when off-screen via `IntersectionObserver`) + label.
   - Active tile = the preset whose params deep-equal the instance (else none, label "Custom").
   - Click applies params + speed + distribution + strength as **one** `SetModifiersCommand`; distribution fields not given by the preset are kept.
 
   *Accept:* applying each preset is one undo step; "Custom" shows after any edit.
-- [ ] **M5.3 ParamForm v2** (`app/components/plugin-host/ParamForm.vue`):
+- [x] **M5.3 ParamForm v2** (`app/components/plugin-host/ParamForm.vue`):
   - Render order:
     1. composite editors (`editors`, filtered by `when`);
     2. primary params not bound to an editor;
@@ -570,14 +576,14 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - Pass the curve props (M2.7).
 
   *Accept:* tests — bound params do not appear twice; `when` hides/shows; More toggles.
-- [ ] **M5.4 `EndlessStrip.vue`** (`app/components/plugin-host/`):
+- [x] **M5.4 `EndlessStrip.vue`** (`app/components/plugin-host/`):
   - 100 % width, 14 px high canvas with `renderStrip(m, 256)` per animation frame (throttled to 30 fps).
   - Scalar → greyscale, rgb → colors, panTilt → hidden.
   - Uses the instance's real speed and the distribution grouping, but a virtual continuous `spatial`.
 
   *Accept:* renders for scalar/rgb; stops when the card is off-screen.
-- [ ] **M5.5 Live phase for playheads.** Expose the instance's current `timePhase` (computed from the shared clock in TS, `speedPhase`) via a small composable `useModifierPhase(m)` for curve playheads and the steps grid.
-- [ ] **M5.6 Card layout** (`app/components/engine/ChaserModifiersList.vue`, split into `ModifierCard.vue` + `ModifierCardHeader.vue` to stay < 200 lines). All cards expanded.
+- [x] **M5.5 Live phase for playheads.** Expose the instance's current `timePhase` (computed from the shared clock in TS, `speedPhase`) via a small composable `useModifierPhase(m)` for curve playheads and the steps grid.
+- [x] **M5.6 Card layout** (`app/components/engine/ChaserModifiersList.vue`, split into `ModifierCard.vue` + `ModifierCardHeader.vue` to stay < 200 lines). All cards expanded.
   1. **Header:**
      - title `"<Plugin name> · <active recipe label | Custom>"`;
      - right: plugin switch (menu, not a prominent select), pin, delete;
@@ -591,8 +597,8 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   7. "More" (advanced params + blend mode per card).
 
   *Accept:* snapshot/DOM test of the order; existing extension slots (`modifiers/modifier:badges|actions`) still render (regenerate the slot catalog).
-- [ ] **M5.7 Add menu.** Each modifier entry shows its label + `purpose` + a tiny thumbnail of its default preset. "Browse & import…" and "New from code…" stay at the bottom.
-- [ ] **M5.8 Defaults on add** (`app/components/engine/composables/use-chaser-modifiers.ts`):
+- [x] **M5.7 Add menu.** Each modifier entry shows its label + `purpose` + a tiny thumbnail of its default preset. "Browse & import…" and "New from code…" stay at the bottom.
+- [x] **M5.8 Defaults on add** (`app/components/engine/composables/use-chaser-modifiers.ts`):
   - When adding, run `analyzeSelection` and pick the preset by the manifest-declared rule `presets[].when?: { kind?: ('single'|'row'|'ring'|'area')[]; multiHead?: boolean; hasColor?: boolean }`; fall back to `default: true`.
   - Then fill the distribution: `origin/end` = `selection.axis`, and for order, `order.line = selection.axis` (ranks resolve automatically).
 

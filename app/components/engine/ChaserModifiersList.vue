@@ -6,22 +6,17 @@
  * manifest schema) and the host-owned generic fields.
  */
 import { computed, ref } from 'vue';
-import { Plus, Trash2, ChevronDown, Star, Code2, Library, Loader2, AlertTriangle } from 'lucide-vue-next';
+import { Plus, ChevronDown, Star, Code2, Library } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import type { ChannelType, ModifierInstance } from '~/utils/engine/types';
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
-import { getManifest, getPackage, listPlugins, pluginStatus, retryResolve } from '~/utils/plugins/plugin-store';
+import { listPlugins, retryResolve } from '~/utils/plugins/plugin-store';
 import { useEngineStore } from '~/stores/engine-store';
-import ModifierGenericFields from './ModifierGenericFields.vue';
-import DistributionSection from './distribution/DistributionSection.vue';
-import ParamForm from '~/components/plugin-host/ParamForm.vue';
-import PluginIframePanel from '~/components/plugin-host/PluginIframePanel.vue';
-import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
+import ModifierCard from './modifier-card/ModifierCard.vue';
 import NewModifierDialog from '~/components/plugin-host/NewModifierDialog.vue';
 import PluginLibraryDialog from '~/components/plugin-host/PluginLibraryDialog.vue';
+import RecipeThumb from '~/components/plugin-host/RecipeThumb.vue';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
@@ -67,34 +62,11 @@ function modifierScope(modifier: ModifierInstance) {
 /** Modifier plugins the user can add. */
 const modifierPlugins = computed(() => listPlugins().filter(p => p.manifest.kind === 'modifier'));
 
-/** Plugins a card can switch to: those supporting its signature. */
-function compatiblePlugins(modifier: ModifierInstance) {
-  return modifierPlugins.value.filter(p => p.hash === modifier.plugin || p.manifest.signatures.includes(modifier.signature));
-}
-
-/** Display name of a plugin hash (falls back to a short hash). */
-function pluginName(hash: string): string {
-  return getManifest(hash)?.name ?? `Unknown (${hash.slice(7, 15)})`;
-}
-
 const engineStore = useEngineStore();
 
 /** Retries resolving a plugin that failed; re-encodes the stack on success. */
 async function retry(hash: string) {
   if (await retryResolve(hash)) engineStore.flushEngineOutput();
-}
-
-/** Custom panel of an instance's plugin, if it ships one. */
-function panelOf(modifier: ModifierInstance) {
-  const manifest = getManifest(modifier.plugin);
-  const uiJs = getPackage(modifier.plugin)?.uiJs;
-  if (!manifest?.ui || !uiJs) return null;
-  return { manifest, uiJs, placement: manifest.ui.placement ?? 'below-params' };
-}
-
-/** The params schema of an instance (empty when the plugin is unknown). */
-function paramSchema(modifier: ModifierInstance) {
-  return getManifest(modifier.plugin)?.params ?? [];
 }
 
 /** "New from code" and plugin library dialogs. */
@@ -158,124 +130,33 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
       :manual="['badges', 'actions']"
       v-slot="{ Badges, Actions }"
       data-modifier-card
-      class="border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col cursor-pointer transition-colors"
+      class="border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col transition-colors"
       :class="[
         activeModifier === modifier ? 'border-primary ring-1 ring-primary' : 'border-border/60 hover:border-primary/50',
         dragFromIndex !== null && dragOverIndex === i && dragFromIndex !== i ? 'ring-2 ring-primary/60' : '',
+        dragFromIndex === i ? 'cursor-grabbing' : '',
       ]"
-      @click="emit('select-modifier', modifier)"
+      @pointerdown.capture="activeModifier !== modifier && emit('select-modifier', modifier)"
+      @click.stop
     >
-      <!-- Modifier Header -->
-      <div
-        class="flex items-center justify-between p-3 border-b border-border/60 bg-muted/20"
-        :class="dragFromIndex === i ? 'cursor-grabbing' : 'cursor-grab'"
-        @mousedown="onDragHandleMousedown($event, i)"
-      >
-        <Select
-          :model-value="modifier.plugin"
-          @update:model-value="(v: any) => { if (v && v !== modifier.plugin) emit('switch-modifier-type', modifier, String(v)); }"
-        >
-          <SelectTrigger class="w-[150px] h-8 text-xs font-medium border-0 shadow-none focus:ring-0 px-2 bg-transparent hover:bg-muted/50 transition-colors" @click.stop>
-            <SelectValue placeholder="Select Modifier">{{ pluginName(modifier.plugin) }}</SelectValue>
-          </SelectTrigger>
-          <SelectContent @pointerdown.stop>
-            <SelectItem v-for="p in compatiblePlugins(modifier)" :key="p.hash" :value="p.hash" class="text-xs">
-              {{ p.manifest.name }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <!-- Extension slots: modifiers/modifier:badges|actions -->
-        <div class="ml-auto flex items-center gap-1 empty:hidden" @mousedown.stop><component :is="Badges" /><component :is="Actions" /></div>
-        <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-yellow-400" @click.stop="emit('pin-modifier', modifier)">
-          <Star class="h-4 w-4" :class="pinnedEffectIds.has(modifier.id) ? 'fill-yellow-400 text-yellow-400' : ''" />
-        </Button>
-        <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click.stop="emit('remove-modifier', modifier)">
-          <Trash2 class="h-4 w-4" />
-        </Button>
-      </div>
-
-      <!-- Any interaction inside a card makes it the active modifier (plan R1): its canvas handle and tools appear. -->
-      <div class="p-3 space-y-4" @click.stop @pointerdown.capture="activeModifier !== modifier && emit('select-modifier', modifier)">
-        <!-- Plugin not known here yet (shared project / live collaboration): resolving by hash -->
-        <div v-if="pluginStatus(modifier.plugin).state === 'pending'" class="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 class="h-3.5 w-3.5 animate-spin" /> Loading plugin…
-        </div>
-        <div v-else-if="pluginStatus(modifier.plugin).state === 'error'" class="flex items-start gap-2 text-xs text-destructive">
-          <AlertTriangle class="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span class="flex-1">Plugin unavailable: {{ (pluginStatus(modifier.plugin) as { error: string }).error }}</span>
-          <Button variant="outline" size="sm" class="h-6 text-[11px]" @click="retry(modifier.plugin)">Retry</Button>
-        </div>
-        <!-- One-cycle preview (main-thread preview pool) -->
-        <ModifierPreview v-else :modifier="modifier" />
-
-        <!-- Target Channels -->
-        <div class="space-y-2">
-          <Label class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Target Channels</Label>
-          <div class="flex flex-wrap gap-1.5">
-            <button
-              v-for="type in availableChannelTypes"
-              :key="type"
-              @click.stop="emit('toggle-target-channel', modifier, type)"
-              class="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-all"
-              :class="[
-                modifier.targetChannels.includes(type)
-                  ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
-                  : 'bg-transparent text-muted-foreground border-border hover:border-muted-foreground/50 hover:bg-muted/30',
-                (modifier.targetChannels.includes(type) && modifier.targetChannels.length <= 1) ? 'opacity-50 cursor-not-allowed' : ''
-              ]"
-              :disabled="modifier.targetChannels.includes(type) && modifier.targetChannels.length <= 1"
-            >
-              {{ type }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Plugin params (schema-driven) and optional custom panel (ui.placement) -->
-        <div v-if="paramSchema(modifier).length || panelOf(modifier)" class="pt-3 border-t border-border/40 flex flex-col gap-3">
-          <PluginIframePanel
-            v-if="panelOf(modifier) && panelOf(modifier)!.placement === 'above-params'"
-            :modifier="modifier" :manifest="panelOf(modifier)!.manifest" :ui-js="panelOf(modifier)!.uiJs"
-            @update:params="v => emit('update-modifier', modifier, 'params', v)"
-            @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
-          />
-          <ParamForm
-            v-if="paramSchema(modifier).length && panelOf(modifier)?.placement !== 'replace-params'"
-            :schema="paramSchema(modifier)"
-            :model-value="modifier.params"
-            @update:model-value="v => emit('update-modifier', modifier, 'params', v)"
-            @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
-          />
-          <PluginIframePanel
-            v-if="panelOf(modifier) && panelOf(modifier)!.placement !== 'above-params'"
-            :modifier="modifier" :manifest="panelOf(modifier)!.manifest" :ui-js="panelOf(modifier)!.uiJs"
-            @update:params="v => emit('update-modifier', modifier, 'params', v)"
-            @scrub-end="emit('handle-modifier-drag-end', 'Update Modifier Params')"
-          />
-        </div>
-
-        <!-- Host-owned fields -->
-        <div class="pt-3 border-t border-border/40">
-          <ModifierGenericFields
-            :modifier="modifier"
-            @update="(k, v) => emit('update-modifier', modifier, k, v)"
-            @update-properties="(u, d) => emit('update-modifier-properties', modifier, u, d)"
-            @drag-end="d => emit('handle-modifier-drag-end', d)"
-            @dropdown-open-change="v => emit('dropdown-open-change', v)"
-          />
-        </div>
-
-        <!-- Shared distribution (plan M4.1) -->
-        <div class="pt-3 border-t border-border/40">
-          <DistributionSection
-            :modifier-id="modifier.id"
-            :distribution="modifier.distribution"
-            :options="getManifest(modifier.plugin)?.distribution"
-            :selection-axis="selectionAxis"
-            @update="(d, desc) => emit('update-modifier-properties', modifier, { distribution: d }, desc)"
-            @dropdown-open-change="v => emit('dropdown-open-change', v)"
-          />
-        </div>
-      </div>
+      <ModifierCard
+          :modifier="modifier"
+          :available-channel-types="availableChannelTypes"
+          :pinned="pinnedEffectIds.has(modifier.id)"
+          :selection-axis="selectionAxis"
+          :badges="Badges"
+          :actions="Actions"
+          @drag-start="e => onDragHandleMousedown(e, i)"
+          @patch="(u, d, c) => emit('update-modifier-properties', modifier, u, d, c)"
+          @update="(k, v) => emit('update-modifier', modifier, k, v)"
+          @drag-end="d => emit('handle-modifier-drag-end', d)"
+          @toggle-channel="t => emit('toggle-target-channel', modifier, t)"
+          @switch="p => emit('switch-modifier-type', modifier, p)"
+          @pin="emit('pin-modifier', modifier)"
+          @remove="emit('remove-modifier', modifier)"
+          @retry="retry(modifier.plugin)"
+          @dropdown-open-change="v => emit('dropdown-open-change', v)"
+        />
     </PmListItem>
     </ScopeProvider>
 
@@ -296,8 +177,12 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
             <template #item="{ item, run, disabled }">
               <DropdownMenuItem :disabled="disabled" @click="run">{{ item.label }}</DropdownMenuItem>
             </template>
-            <DropdownMenuItem v-for="p in modifierPlugins" :key="p.hash" @click="emit('add-modifier', p.hash)">
-              {{ p.manifest.name }}
+            <DropdownMenuItem v-for="p in modifierPlugins" :key="p.hash" class="gap-2 max-w-[280px]" :data-add="p.manifest.alias" @click="emit('add-modifier', p.hash)">
+              <RecipeThumb :plugin="p.hash" />
+              <span class="flex flex-col min-w-0">
+                <span class="truncate">{{ p.manifest.name }}</span>
+                <span v-if="p.manifest.purpose" class="truncate text-[10px] text-muted-foreground">{{ p.manifest.purpose }}</span>
+              </span>
             </DropdownMenuItem>
           </PmMenuGroup>
           <DropdownMenuItem class="gap-2" @click="libraryOpen = true">

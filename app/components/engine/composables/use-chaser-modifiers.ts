@@ -9,6 +9,8 @@ import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import type { useChaserHistory } from './use-chaser-history';
 import { analyzeSelection } from '~/utils/engine/distribution/selection-shape';
+import { applyPreset, pickPreset } from '~/utils/engine/recipes';
+import { selectionDistribution } from '~/utils/engine/distribution/selection-defaults';
 
 export function useChaserModifiers(
   props: { fixtures: Fixture[]; activeTab: string },
@@ -37,6 +39,9 @@ export function useChaserModifiers(
   const selectionShape = computed(() => analyzeSelection(props.fixtures.map(f => ({
     x: f.fixturePosition.x, y: f.fixturePosition.y, heads: f.beams.length,
   }))));
+
+  /** The edited fixtures have a color system (recipe rule `hasColor`). */
+  const hasColor = computed(() => props.fixtures.some(f => f.channels.some(c => c.type === 'RED' || c.type === 'CYAN')));
 
   const richestFixture = computed(() => {
     return findRichestFixture(props.fixtures, tabChannelFilter, effectEngine);
@@ -86,6 +91,13 @@ export function useChaserModifiers(
       blendMode: manifest?.output === 'absolute' ? 'override' : (effectEngine?.stackBlendMode.value ?? 'add'),
       distribution: carry ? carry.distribution : { mode: 'linear', origin: { ...selectionShape.value.axis.a }, end: { ...selectionShape.value.axis.b } },
     });
+    // Recipes (plan M5.8): the recipe matching the selection, placed on it.
+    const preset = !carry && manifest ? pickPreset(manifest, { shape: selectionShape.value, hasColor: hasColor.value }) : null;
+    if (preset && manifest) {
+      const applied = applyPreset(inst, manifest, preset);
+      applied.distribution = selectionDistribution(applied.distribution, selectionShape.value);
+      return applied;
+    }
     if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
       if (!carry) inst.strength = 0.5;
       inst.speed = carry ? inst.speed : { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };

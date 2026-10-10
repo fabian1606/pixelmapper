@@ -68,7 +68,8 @@ export function validateManifestUx(m: Partial<ContentPluginManifest>, errors: st
     else {
       if (d.modes !== undefined && (!Array.isArray(d.modes) || d.modes.some(x => !MODES.includes(x)))) errors.push(`distribution.modes must list ${MODES.join(', ')}`);
       if (d.scopes !== undefined && (!Array.isArray(d.scopes) || d.scopes.some(x => !SCOPES.includes(x)))) errors.push(`distribution.scopes must list ${SCOPES.join(', ')}`);
-      if (d.default?.mode !== undefined && !MODES.includes(d.default.mode)) errors.push('distribution.default.mode is invalid');
+      const mode = (d.default as { mode?: string } | undefined)?.mode;
+      if (mode !== undefined && !MODES.includes(mode)) errors.push('distribution.default.mode is invalid');
     }
   }
 

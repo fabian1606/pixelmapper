@@ -90,3 +90,21 @@ fn frame_counts() {
     d.scope = Scope::Within;
     assert_eq!(d.frame_counts(8), (8, 2));
 }
+
+#[test]
+fn order_and_within_ignore_the_handle() {
+    // The handle (origin/end) only matters for Spatial 2D modes; Fixture by
+    // fixture and Within each fixture must not depend on it (plan R1).
+    let mut perms = HashMap::new();
+    for (scope, mode, within_order) in [(Scope::Across, Mode::Order, false), (Scope::Within, Mode::Linear, false), (Scope::Within, Mode::Order, true)] {
+        let base = Distribution { scope, mode, within_order, ranks: vec![2, 0, 1], rank_count: 3, ..Default::default() };
+        let moved = Distribution { origin: (0.9, 0.1), end: (0.1, 0.8), ..base.clone() };
+        for f in 0..3 {
+            for head in 0..4 {
+                let a = base.sample(0.3, 0.6, f, head, 4, &mut perms);
+                let b = moved.sample(0.3, 0.6, f, head, 4, &mut perms);
+                assert_eq!(a, b, "{scope:?}/{mode:?} fixture {f} head {head}");
+            }
+        }
+    }
+}

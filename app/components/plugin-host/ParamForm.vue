@@ -1,22 +1,22 @@
 <script setup lang="ts">
 /**
- * Renders a param schema (ADR §6.2) with the replaceable `pm.*` inputs.
+ * Renders a param schema (ADR §6.2) with the replaceable `pm.*` inputs —
+ * v2 (plan M5.3): composite editors first (bound to several params, filtered
+ * by `when`), then primary params not bound to an editor, then "More"
+ * (collapsed by default, remembered per plugin) with advanced params and the
+ * caller's `#more` slot. Hidden params never render.
  *
  * Used for content-plugin params (modifier cards) and fixture-kind configs.
- * Each param type has a default input (`PARAM_DEFAULT_INPUT`); `ui` overrides
- * it. Params with the same `group` share a titled section. `scrub-start` /
- * `scrub-end` pass through so the caller can coalesce one drag into one undo
- * step.
+ * `scrub-start` / `scrub-end` pass through so the caller can coalesce one
+ * drag into one undo step.
  */
-import { computed } from 'vue';
-import {
-  PARAM_DEFAULT_INPUT,
-  type ParamDef,
-  type ParamSchema,
-  type ParamValue,
-  type PmInputName,
-} from '@pixelmapper/extension-api';
+import { computed, ref, useSlots, watch } from 'vue';
+import { ChevronRight } from 'lucide-vue-next';
+import type { ParamSchema, ParamValue, PmInputName } from '@pixelmapper/extension-api';
+import type { ManifestEditor } from '@pixelmapper/plugin-toolchain/types';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
+import ParamFormGroups from './ParamFormGroups.vue';
+import { applyEditorValue, editorValue, layoutParams } from './param-form-layout';
 
 const props = withDefaults(defineProps<{
   schema: ParamSchema;
@@ -24,13 +24,21 @@ const props = withDefaults(defineProps<{
   modelValue: Record<string, ParamValue>;
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  /** Composite editors (manifest `editors`). */
+  editors?: ManifestEditor[];
+  /** Key for remembering the "More" state (e.g. the plugin alias). */
+  moreKey?: string;
+  /** `distribution.mode` of the instance (for `when`). */
+  distributionMode?: string;
   /** Fixtures in order (curve axis `fixtures`): the instance's resolved rank count. */
   ticks?: number;
   /** Beats per cycle (curve axis `beats`). */
   beats?: number;
   /** Live position in the cycle (0–1) for `cycle` curves' playheads; null = none. */
   playhead?: number | null;
-}>(), { disabled: false, size: 'sm', ticks: 0, beats: 0, playhead: null });
+  /** Extra props for composite editors (e.g. rank count, live phase). */
+  editorContext?: Record<string, unknown>;
+}>(), { disabled: false, size: 'sm', ticks: 0, beats: 0, playhead: null, editors: () => [] });
 
 const emit = defineEmits<{
   'update:modelValue': [values: Record<string, ParamValue>];
@@ -40,87 +48,84 @@ const emit = defineEmits<{
   scrubEnd: [];
 }>();
 
-/** Params grouped by `group` (ungrouped first), preserving manifest order. */
-const groups = computed(() => {
-  const out: { name: string | null; params: ParamDef[] }[] = [];
-  for (const p of props.schema) {
-    const name = p.group ?? null;
-    let g = out.find(x => x.name === name);
-    if (!g) {
-      g = { name, params: [] };
-      if (name === null) out.unshift(g);
-      else out.push(g);
-    }
-    g.params.push(p);
+const slots = useSlots();
+const layout = computed(() => layoutParams(props.schema, props.editors, { params: props.modelValue, distributionMode: props.distributionMode }));
+
+/** "More" open state, remembered per plugin in localStorage. */
+const storageKey = computed(() => (props.moreKey ? `pm:param-more:${props.moreKey}` : null));
+const moreOpen = ref(readMore());
+watch(storageKey, () => { moreOpen.value = readMore(); });
+function readMore(): boolean {
+  try {
+    return !!props.moreKey && localStorage.getItem(`pm:param-more:${props.moreKey}`) === '1';
   }
-  return out;
-});
-
-/** The `pm.*` input of a param. */
-function inputOf(p: ParamDef): PmInputName {
-  return p.ui ?? PARAM_DEFAULT_INPUT[p.type];
-}
-
-/** Current value of a param (default when unset). */
-function valueOf(p: ParamDef): ParamValue {
-  return props.modelValue[p.key] ?? p.default;
-}
-
-/** Type-specific props for the input. */
-function inputProps(p: ParamDef): Record<string, unknown> {
-  const base = { label: p.label, size: props.size, disabled: props.disabled, title: p.description };
-  switch (p.type) {
-    case 'number':
-      return { ...base, min: p.min, max: p.max, step: p.step, unit: p.unit, showValue: true };
-    case 'int':
-      return { ...base, min: p.min, max: p.max, step: 1 };
-    case 'enum':
-      return { ...base, options: p.options.map((o, i) => ({ value: o, label: p.optionLabels?.[i] ?? o })) };
-    case 'point':
-      return { ...base, axisLabels: ['X', 'Y'] };
-    case 'curve': {
-      const domain = p.domain ?? 'cycle';
-      return {
-        ...base,
-        shapes: p.shapes,
-        allowFree: p.allowFree ?? true,
-        domain,
-        axis: p.axis ?? 'none',
-        range: p.range ?? 'unipolar',
-        ticks: p.axis === 'beats' ? props.beats : props.ticks,
-        playhead: domain === 'cycle' ? props.playhead : null,
-      };
-    }
-    default:
-      return base;
+  catch {
+    return false;
   }
+}
+function toggleMore() {
+  moreOpen.value = !moreOpen.value;
+  try {
+    if (storageKey.value) localStorage.setItem(storageKey.value, moreOpen.value ? '1' : '0');
+  }
+  catch { /* storage unavailable */ }
+}
+const hasMore = computed(() => layout.value.advanced.length > 0 || !!slots.more);
+
+/** Emits a composite editor's value (bound keys only). */
+function setEditor(editor: ManifestEditor, value: Record<string, ParamValue>) {
+  const next = applyEditorValue(editor, props.modelValue, value);
+  emit('update:modelValue', next);
+  for (const key of Object.values(editor.bind)) emit('change', key, next[key]!);
 }
 
 /** Emits a new value for one param. */
-function set(p: ParamDef, value: ParamValue) {
-  const v = p.type === 'int' ? Math.round(Number(value)) : value;
-  emit('update:modelValue', { ...props.modelValue, [p.key]: v });
-  emit('change', p.key, v);
+function set(key: string, value: ParamValue) {
+  emit('update:modelValue', { ...props.modelValue, [key]: value });
+  emit('change', key, value);
 }
+
+const groupProps = computed(() => ({
+  schema: props.schema, modelValue: props.modelValue, disabled: props.disabled, size: props.size,
+  ticks: props.ticks, beats: props.beats, playhead: props.playhead,
+}));
 </script>
 
 <template>
   <div class="flex flex-col gap-3">
-    <section v-for="g in groups" :key="g.name ?? '_'" class="flex flex-col gap-2">
-      <div v-if="g.name" class="flex items-center gap-2">
-        <span class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase shrink-0">{{ g.name }}</span>
-        <div class="h-px bg-border flex-1" />
+    <Replaceable
+      v-for="e in layout.editors"
+      :key="e.id"
+      :name="(e.input as PmInputName)"
+      :model-value="editorValue(e, schema, modelValue)"
+      :label="e.label"
+      :size="size"
+      :disabled="disabled"
+      v-bind="editorContext"
+      :data-editor="e.id"
+      @update:model-value="(v: Record<string, ParamValue>) => setEditor(e, v)"
+      @scrub-start="emit('scrubStart')"
+      @scrub-end="emit('scrubEnd')"
+    />
+    <ParamFormGroups
+      v-if="layout.primary.length"
+      v-bind="groupProps" :groups="layout.primary"
+      @set="set" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
+    >
+      <template v-for="(_, name) in $slots" #[name]="slotProps" :key="name"><slot :name="name" v-bind="slotProps ?? {}" /></template>
+    </ParamFormGroups>
+    <div v-if="hasMore" class="flex flex-col gap-2">
+      <button type="button" class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground self-start" :aria-expanded="moreOpen" data-more @click.stop="toggleMore">
+        <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="moreOpen && 'rotate-90'" /> More
+      </button>
+      <div v-if="moreOpen" class="flex flex-col gap-3 pl-1" data-more-content>
+        <ParamFormGroups
+          v-if="layout.advanced.length"
+          v-bind="groupProps" :groups="layout.advanced"
+          @set="set" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
+        />
+        <slot name="more" />
       </div>
-      <Replaceable
-        v-for="p in g.params"
-        :key="p.key"
-        :name="inputOf(p)"
-        :model-value="valueOf(p)"
-        v-bind="inputProps(p)"
-        @update:model-value="(v: ParamValue) => set(p, v)"
-        @scrub-start="emit('scrubStart')"
-        @scrub-end="emit('scrubEnd')"
-      />
-    </section>
+    </div>
   </div>
 </template>
