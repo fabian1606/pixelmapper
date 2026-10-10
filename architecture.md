@@ -88,6 +88,8 @@ pixelmapper/
 
 - **Decisions:** [ADR 0001 — Extension & Content-Plugin System](architecture/adr/0001-extension-and-content-plugin-system.md)
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
+- **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
+- [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
 - [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN`
 - [Authoring extensions](architecture/guides/authoring-extensions.md) — task-oriented: controls, panel actions, kinds, connectors, controllers, widgets, commands (AI-ready)
