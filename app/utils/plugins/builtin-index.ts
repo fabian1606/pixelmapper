@@ -19,8 +19,8 @@ export interface BuiltinPlugin {
 export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/color-adjust",
-    "name": "Color Adjust",
-    "hash": "sha256:090e2bc0a1a59f3aa152be198af698453918ca331ad99f1a3d7d7fb19446e793",
+    "name": "Color Shift",
+    "hash": "sha256:792e8836d580e06fd98ddad53b69af615bc0106009892c1b2d55fde57cc87a6b",
     "signatures": [
       "rgb"
     ],
@@ -28,15 +28,124 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "schema": 1,
       "kind": "modifier",
       "alias": "@pixelmapper/color-adjust",
-      "name": "Color Adjust",
-      "version": "1.0.0",
-      "apiVersion": "^1.0.0",
-      "description": "Shifts hue and scales saturation of the fixtures' current color, optionally cycling hue/saturation with a waveform over the modifier phase (hue ± hue range, saturation ± saturation range). Near-black colors keep their hue.",
+      "name": "Color Shift",
+      "version": "2.0.0",
+      "apiVersion": "^1.1.0",
+      "description": "Colors that move across the fixtures. Palette: colors from a gradient run along the distribution (Arrange Gradient) or alternate fixture by fixture (Arrange Alternate); Transition goes from hard steps to soft blends. Shift: the fixtures' own hue swings around a center (hue strip) following the profile curve, optionally dipping to white. The motion curve moves the colors during one pass.",
+      "purpose": "Colors drift, alternate or run across your fixtures.",
       "signatures": [
         "rgb"
       ],
       "output": "absolute",
+      "distribution": {
+        "modes": [
+          "none",
+          "linear",
+          "radial",
+          "conical",
+          "order"
+        ],
+        "scopes": [
+          "across",
+          "within"
+        ],
+        "grouping": false,
+        "default": {
+          "mode": "linear"
+        }
+      },
+      "editors": [
+        {
+          "id": "hue",
+          "input": "pm.hueRange",
+          "bind": {
+            "shift": "hueShift",
+            "range": "hueRange"
+          },
+          "when": {
+            "mode": "shift"
+          }
+        }
+      ],
       "params": [
+        {
+          "key": "mode",
+          "type": "enum",
+          "options": [
+            "palette",
+            "shift"
+          ],
+          "optionLabels": [
+            "Palette",
+            "Shift"
+          ],
+          "default": "shift",
+          "label": "Mode",
+          "tier": "primary",
+          "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue."
+        },
+        {
+          "key": "palette",
+          "type": "gradient",
+          "label": "Palette",
+          "tier": "primary",
+          "when": {
+            "mode": "palette"
+          },
+          "default": {
+            "stops": [
+              {
+                "pos": 0,
+                "color": {
+                  "r": 1,
+                  "g": 0,
+                  "b": 0
+                }
+              },
+              {
+                "pos": 0.5,
+                "color": {
+                  "r": 0,
+                  "g": 0,
+                  "b": 1
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "arrange",
+          "type": "enum",
+          "options": [
+            "gradient",
+            "alternate"
+          ],
+          "optionLabels": [
+            "Gradient",
+            "Alternate"
+          ],
+          "default": "gradient",
+          "label": "Arrange",
+          "tier": "primary",
+          "when": {
+            "mode": "palette"
+          },
+          "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color."
+        },
+        {
+          "key": "transition",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "label": "Transition",
+          "tier": "primary",
+          "when": {
+            "mode": "palette",
+            "arrange": "gradient"
+          },
+          "description": "Hard steps (0) to soft blends (1)."
+        },
         {
           "key": "hueShift",
           "type": "number",
@@ -44,7 +153,18 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "max": 180,
           "default": 0,
           "label": "Hue shift",
-          "unit": "°"
+          "unit": "°",
+          "tier": "hidden"
+        },
+        {
+          "key": "hueRange",
+          "type": "number",
+          "min": 0,
+          "max": 180,
+          "default": 40,
+          "label": "Hue range",
+          "unit": "°",
+          "tier": "hidden"
         },
         {
           "key": "saturation",
@@ -52,60 +172,366 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "min": 0,
           "max": 2,
           "default": 1,
-          "label": "Saturation"
+          "label": "Saturation",
+          "tier": "primary",
+          "when": {
+            "mode": "shift"
+          }
         },
         {
-          "key": "hueRange",
-          "type": "number",
-          "min": 0,
-          "max": 180,
-          "default": 0,
-          "label": "Hue cycle",
-          "unit": "°",
-          "group": "Cycle"
-        },
-        {
-          "key": "satRange",
+          "key": "satDip",
           "type": "number",
           "min": 0,
           "max": 1,
           "default": 0,
-          "label": "Saturation cycle",
-          "group": "Cycle"
+          "label": "White dip",
+          "tier": "advanced",
+          "when": {
+            "mode": "shift"
+          },
+          "description": "How far the profile's peak fades toward white."
         },
         {
-          "key": "shape",
-          "type": "enum",
-          "options": [
-            "sine",
-            "square",
-            "triangle",
-            "sawtooth",
-            "bounce",
-            "ramp",
-            "smooth"
+          "key": "profile",
+          "type": "curve",
+          "label": "Profile",
+          "tier": "advanced",
+          "when": {
+            "mode": "shift"
+          },
+          "description": "How the hue swings over the distance from the moving position.",
+          "domain": "signed",
+          "axis": "fixtures",
+          "range": "unipolar",
+          "shapes": [
+            "wave",
+            "dot",
+            "bar",
+            "wedge",
+            "flash"
           ],
-          "optionLabels": [
-            "Sine",
-            "Square",
-            "Triangle",
-            "Sawtooth",
-            "Bounce",
-            "Ramp",
-            "Smooth"
-          ],
-          "default": "sine",
-          "label": "Cycle shape",
-          "group": "Cycle"
+          "default": {
+            "shape": "wave",
+            "args": {}
+          }
         },
         {
-          "key": "shapeParam",
-          "type": "number",
-          "min": 0,
-          "max": 1,
-          "default": 0.5,
-          "label": "Shape amount",
-          "group": "Cycle"
+          "key": "motion",
+          "type": "curve",
+          "label": "Motion",
+          "tier": "primary",
+          "description": "Where the colors are during one pass.",
+          "domain": "cycle",
+          "axis": "beats",
+          "shapes": [
+            "run",
+            "pingpong",
+            "step",
+            "hold",
+            "ease"
+          ],
+          "default": {
+            "shape": "run",
+            "args": {}
+          }
+        }
+      ],
+      "presets": [
+        {
+          "id": "drift",
+          "label": "Drift",
+          "description": "The fixtures' color drifts gently around its hue.",
+          "default": true,
+          "params": {
+            "mode": "shift",
+            "hueShift": 0,
+            "hueRange": 40,
+            "profile": {
+              "shape": "wave",
+              "args": {}
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "hasColor": true
+          }
+        },
+        {
+          "id": "rainbow",
+          "label": "Rainbow",
+          "description": "The full color wheel runs across the fixtures.",
+          "params": {
+            "mode": "shift",
+            "hueShift": 0,
+            "hueRange": 180,
+            "profile": {
+              "shape": "wedge",
+              "args": {
+                "length": 1
+              }
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "two-colors",
+          "label": "Two Colors",
+          "description": "Everything switches between two colors on the beat.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.5,
+                  "color": {
+                    "r": 0,
+                    "g": 0,
+                    "b": 1
+                  }
+                }
+              ]
+            },
+            "arrange": "gradient",
+            "transition": 0,
+            "motion": {
+              "shape": "step",
+              "args": {
+                "count": 2
+              }
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "hasColor": false
+          }
+        },
+        {
+          "id": "spread-colors",
+          "label": "Spread Colors",
+          "description": "Neighbouring fixtures get different colors.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 0,
+                    "g": 1,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 1,
+                    "g": 1,
+                    "b": 0
+                  }
+                }
+              ]
+            },
+            "arrange": "alternate",
+            "transition": 0,
+            "motion": {
+              "shape": "hold",
+              "args": {
+                "pause": 1
+              }
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "order",
+            "reverse": false,
+            "order": {
+              "mirror": false
+            }
+          },
+          "strength": 1
+        },
+        {
+          "id": "palette-run",
+          "label": "Palette Run",
+          "description": "A soft three-color gradient runs across the fixtures.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0.4
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 1,
+                    "g": 0.6,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 0.2,
+                    "g": 0,
+                    "b": 1
+                  }
+                }
+              ]
+            },
+            "arrange": "gradient",
+            "transition": 1,
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "white-accent",
+          "label": "White Accent",
+          "description": "The color flashes toward white once per pass.",
+          "params": {
+            "mode": "shift",
+            "hueShift": 0,
+            "hueRange": 0,
+            "satDip": 1,
+            "profile": {
+              "shape": "flash",
+              "args": {}
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "bar-gradient",
+          "label": "Bar Gradient",
+          "description": "A two-color gradient runs through every bar.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 0,
+                    "g": 0.4,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.5,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0.6
+                  }
+                }
+              ]
+            },
+            "arrange": "gradient",
+            "transition": 1,
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "within",
+            "withinOffset": "none",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "multiHead": true
+          }
         }
       ]
     }

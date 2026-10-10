@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { ModifierInstance } from '~/utils/engine/types';
 import SpatialHandle from './SpatialHandle.vue';
+import PaletteStopsOverlay from './distribution/PaletteStopsOverlay.vue';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 
 const liveBus = useLiveBusStore();
@@ -181,6 +182,18 @@ function handleWindowMouseUp() {
       :x="getOriginViewportPos(activeModifier).x"
       :y="getOriginViewportPos(activeModifier).y"
       @dragstart="handleOriginDragStart($event)"
+    />
+
+    <!-- Palette stops of a gradient param on the handle line (plan M7.6) -->
+    <PaletteStopsOverlay
+      :modifier="activeModifier"
+      :world-width="worldWidth"
+      :world-height="worldHeight"
+      :world-to-viewport="worldToViewport"
+      :viewport-el="viewportEl"
+      :camera="camera"
+      @change="params => { emit('modifierChange', activeModifier!, { params }); liveBus.dispatch('modifier.update', { effectId: activeModifier!.id, changes: {}, paramChanges: params }); emit('redraw'); }"
+      @commit="emit('modifierDragEnd', activeModifier!)"
     />
 
     <!-- ② Endpoint handle -->

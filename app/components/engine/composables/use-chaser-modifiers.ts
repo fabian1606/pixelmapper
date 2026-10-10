@@ -11,6 +11,7 @@ import type { useChaserHistory } from './use-chaser-history';
 import { analyzeSelection } from '~/utils/engine/distribution/selection-shape';
 import { applyPreset, pickPreset } from '~/utils/engine/recipes';
 import { selectionDistribution } from '~/utils/engine/distribution/selection-defaults';
+import { hasSaturatedColor } from '~/utils/engine/fixture-color';
 
 export function useChaserModifiers(
   props: { fixtures: Fixture[]; activeTab: string },
@@ -40,8 +41,8 @@ export function useChaserModifiers(
     x: f.fixturePosition.x, y: f.fixturePosition.y, heads: f.beams.length,
   }))));
 
-  /** The edited fixtures have a color system (recipe rule `hasColor`). */
-  const hasColor = computed(() => props.fixtures.some(f => f.channels.some(c => c.type === 'RED' || c.type === 'CYAN')));
+  /** The edited fixtures show a saturated programmed color (recipe rule `hasColor`). */
+  const hasColor = computed(() => props.fixtures.some(hasSaturatedColor));
 
   const richestFixture = computed(() => {
     return findRichestFixture(props.fixtures, tabChannelFilter, effectEngine);

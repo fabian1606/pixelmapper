@@ -12,6 +12,7 @@
     "./curve-shapes": "./src/curve-shapes.ts",
     "./manifest": "./src/manifest.ts",
     "./manifest-curve": "./src/manifest-curve.ts",
+    "./param-structs": "./src/param-structs.ts",
     "./hash": "./src/hash.ts",
     "./runtime": "./src/runtime.ts",
     "./types": "./src/types.ts",

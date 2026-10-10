@@ -12,6 +12,7 @@
 import type { Component } from 'vue';
 import type { RgbColor, Vec2 } from './model';
 import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
+import type { GradientValue, StepsValue } from './params';
 
 /** Visual size of an input. */
 export type InputSize = 'sm' | 'md' | 'lg';
@@ -240,6 +241,47 @@ export interface TriggerButtonEmits extends CommonInputEmits<boolean> {
   release: [];
 }
 
+// ── pm.gradient ─────────────────────────────────
+
+/** Props of `pm.gradient`: color stops on a bar (1–8 stops). */
+export interface GradientProps extends BaseInputProps {
+  modelValue: GradientValue;
+}
+/** Emits of `pm.gradient`. */
+export type GradientEmits = CommonInputEmits<GradientValue>;
+
+// ── pm.hueRange ─────────────────────────────────
+
+/**
+ * Props of `pm.hueRange` (composite editor): a 360° hue strip centered on the
+ * fixtures' hue; `shift` (degrees, −180…180) moves the center, `range`
+ * (degrees, 0…180) the swing on both sides.
+ */
+export interface HueRangeProps extends BaseInputProps {
+  modelValue: { shift: number; range: number };
+  /** Current hue of the fixtures (degrees) the strip is centered on. Default 0. */
+  baseHue?: number;
+}
+/** Emits of `pm.hueRange`. */
+export type HueRangeEmits = CommonInputEmits<{ shift: number; range: number }>;
+
+// ── pm.steps ────────────────────────────────────
+
+/**
+ * Props of `pm.steps`: a grid of groups (rows) × steps (columns). Rows use
+ * the shared group colors; rows at or beyond `activeGroups` are shown
+ * disabled (the rig has fewer groups).
+ */
+export interface StepsProps extends BaseInputProps {
+  modelValue: StepsValue;
+  /** Groups the rig actually has (0 = unknown, all rows active). */
+  activeGroups?: number;
+  /** Live position in steps (e.g. 2.4 = step 2), or null. */
+  playhead?: number | null;
+}
+/** Emits of `pm.steps`. */
+export type StepsEmits = CommonInputEmits<StepsValue>;
+
 // ── Contract map ────────────────────────────────
 
 /** All replaceable inputs and their contracts. */
@@ -254,6 +296,9 @@ export interface PmInputContracts {
   'pm.angle': { props: AngleProps; emits: AngleEmits };
   'pm.tapTempo': { props: TapTempoProps; emits: TapTempoEmits };
   'pm.button': { props: TriggerButtonProps; emits: TriggerButtonEmits };
+  'pm.gradient': { props: GradientProps; emits: GradientEmits };
+  'pm.hueRange': { props: HueRangeProps; emits: HueRangeEmits };
+  'pm.steps': { props: StepsProps; emits: StepsEmits };
 }
 
 /** Name of a replaceable input. */
@@ -271,6 +316,9 @@ export const PM_INPUT_NAMES: readonly PmInputName[] = [
   'pm.angle',
   'pm.tapTempo',
   'pm.button',
+  'pm.gradient',
+  'pm.hueRange',
+  'pm.steps',
 ];
 
 /**

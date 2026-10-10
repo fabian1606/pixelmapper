@@ -7,6 +7,7 @@ import type { ParamDef } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
 import { validateCurveParam } from './manifest-curve';
 import { validateManifestUx } from './manifest-ux';
+import { checkGradient, checkSteps } from './param-structs';
 
 /** Plugin ABI/SDK version this toolchain produces. */
 export const PLUGIN_API_VERSION = '1.1.0';
@@ -14,8 +15,8 @@ export const PLUGIN_API_VERSION = '1.1.0';
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];
 const OUTPUTS = ['bipolar', 'absolute', 'scale'];
-const PARAM_TYPES = ['number', 'int', 'bool', 'enum', 'color', 'angle', 'point', 'curve'];
-const UI_INPUTS = ['pm.fader', 'pm.numberInput', 'pm.colorInput', 'pm.xyInput', 'pm.select', 'pm.toggle', 'pm.curve', 'pm.angle', 'pm.tapTempo', 'pm.button'];
+const PARAM_TYPES = ['number', 'int', 'bool', 'enum', 'color', 'angle', 'point', 'curve', 'gradient', 'steps'];
+const UI_INPUTS = ['pm.fader', 'pm.numberInput', 'pm.colorInput', 'pm.xyInput', 'pm.select', 'pm.toggle', 'pm.curve', 'pm.angle', 'pm.tapTempo', 'pm.button', 'pm.gradient', 'pm.steps'];
 const ALIAS_RE = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
 const KEY_RE = /^[a-z][a-zA-Z0-9]*$/;
 
@@ -68,6 +69,16 @@ function validateParam(p: ParamDef, i: number, errors: string[], warnings: strin
     case 'curve':
       validateCurveParam(p, where, errors, warnings);
       break;
+    case 'gradient': {
+      const msg = checkGradient(p.default);
+      if (msg) errors.push(`${where}: default ${msg}`);
+      break;
+    }
+    case 'steps': {
+      const msg = checkSteps(p.default);
+      if (msg) errors.push(`${where}: default ${msg}`);
+      break;
+    }
   }
 }
 

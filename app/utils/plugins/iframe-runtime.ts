@@ -11,8 +11,9 @@
  * `api.render` is synchronous: the iframe receives the plugin's own
  * (budget-instrumented) wasm and instantiates it locally.
  */
-import type { ParamDef, ParamSchema, ParamValue } from '@pixelmapper/extension-api';
+import type { GradientValue, ParamDef, ParamSchema, ParamValue } from '@pixelmapper/extension-api';
 import { validateCurveValue } from '@pixelmapper/plugin-toolchain/manifest-curve';
+import { checkGradient, checkSteps, normalizeGradient } from '@pixelmapper/plugin-toolchain/param-structs';
 
 // ── Messages ─────────────────────────────────────
 
@@ -68,6 +69,10 @@ export function coerceParam(def: ParamDef, value: unknown): ParamValue | null {
       const p = value as { x?: unknown; y?: unknown } | null;
       return p && isUnit(p.x) && isUnit(p.y) ? { x: p.x, y: p.y } : null;
     }
+    case 'gradient':
+      return checkGradient(value) ? null : (normalizeGradient(value as GradientValue) as ParamValue);
+    case 'steps':
+      return checkSteps(value) ? null : (JSON.parse(JSON.stringify(value)) as ParamValue);
     case 'curve': {
       // v2 values (`{ shape, args }`, `{ points }`) are checked by the shared curve validator.
       if (!Array.isArray(value)) {

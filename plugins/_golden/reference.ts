@@ -75,3 +75,54 @@ export const isMultiHead = (p: ManifestPreset) => !!p.when?.multiHead || p.distr
 export async function loadManifest(dir: string): Promise<ContentPluginManifest> {
   return JSON.parse(await Bun.file(`${dir}/manifest.json`).text()) as ContentPluginManifest;
 }
+
+/** SDK `rgbToHsl` (h ∈ [0, 1)). */
+export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (Math.abs(max - min) < 1e-6) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? ((g - b) / d + (g < b ? 6 : 0)) / 6 : max === g ? ((b - r) / d + 2) / 6 : ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+/** SDK `hslToRgb`. */
+export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s < 1e-6) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const f = (t: number) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 0.5) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return [f(h + 1 / 3), f(h), f(h - 1 / 3)];
+}
+
+/** SDK `sampleGradient` (channel `c`) on an encoded gradient at `offset`. */
+export function sampleGradient(buf: Float32Array, offset: number, u: number, transition: number, c: number): number {
+  const n = Math.max(1, Math.min(8, Math.trunc(buf[offset]!)));
+  const pos = (i: number) => buf[offset + 1 + i * 4]!;
+  const ch = (i: number) => buf[offset + 2 + i * 4 + c]!;
+  if (n === 1) return ch(0);
+  const x = u - Math.floor(u);
+  let k = n - 1;
+  for (let i = 0; i < n; i++) if (x < pos(i)) { k = i - 1; break; }
+  const ki = k < 0 ? n - 1 : k;
+  const kj = (ki + 1) % n;
+  const start = k < 0 ? pos(n - 1) - 1 : pos(ki);
+  const end = kj === 0 ? pos(0) + 1 : pos(kj);
+  const f = (x - start) / Math.max(end - start, 1e-6);
+  const w = Math.max(transition, 0);
+  let t = 0;
+  if (w > 0 && f > 1 - w) {
+    const s = (f - (1 - w)) / w;
+    t = s * s * (3 - 2 * s);
+  }
+  return ch(ki) + (ch(kj) - ch(ki)) * t;
+}

@@ -10,6 +10,7 @@ import type { ParamSchema, ParamValue } from '@pixelmapper/extension-api';
 import legacy from './builtin-legacy.json';
 import { BUILTIN_BY_ALIAS } from './builtin-index';
 import { migrateWaveformV1, type WaveformV1Params } from './legacy/waveform-v1';
+import { migrateColorAdjustV1, type ColorAdjustV1Params } from './legacy/color-adjust-v1';
 
 /** A former built-in. */
 export interface LegacyBuiltin {
@@ -31,6 +32,7 @@ interface MigratableInstance {
 /** Param migrations by `alias@major` of the old version. */
 const MIGRATIONS: Record<string, (params: Record<string, ParamValue>, m: MigratableInstance) => Record<string, ParamValue>> = {
   '@pixelmapper/waveform@1': (p, m) => migrateWaveformV1(p as WaveformV1Params, m.strength ?? 1),
+  '@pixelmapper/color-adjust@1': p => migrateColorAdjustV1(p as ColorAdjustV1Params),
 };
 
 /** The former built-in a hash belongs to, if any. */

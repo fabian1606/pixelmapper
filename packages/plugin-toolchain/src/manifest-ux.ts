@@ -5,6 +5,7 @@
 import type { ParamDef, ParamSchema } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
 import { validateCurveValue } from './manifest-curve';
+import { checkGradient, checkSteps } from './param-structs';
 
 const MODES = ['none', 'linear', 'radial', 'conical', 'order'];
 const SCOPES = ['across', 'within'];
@@ -27,6 +28,8 @@ export function checkParamValue(def: ParamDef, v: unknown): string | null {
     case 'angle': return isNum(v) ? null : 'must be a number (radians)';
     case 'color': return isObj(v) && isNum(v.r) && isNum(v.g) && isNum(v.b) ? null : 'must be { r, g, b }';
     case 'point': return isObj(v) && isNum(v.x) && isNum(v.y) ? null : 'must be { x, y }';
+    case 'gradient': return checkGradient(v);
+    case 'steps': return checkSteps(v);
     case 'curve': {
       const errors: string[] = [];
       validateCurveValue(v, 'value', def.domain ?? 'cycle', errors, []);

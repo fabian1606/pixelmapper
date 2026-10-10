@@ -14,6 +14,8 @@ import { getManifest, getPackage, pluginStatus } from '~/utils/plugins/plugin-st
 import { resolveDistribution } from '~/utils/engine/distribution/resolve';
 import { useModifierPhase } from '~/composables/engine/use-modifier-phase';
 import { useEngineStore } from '~/stores/engine-store';
+import type { Fixture } from '~/utils/engine/core/fixture';
+import { fixtureBaseColor, hueSat } from '~/utils/engine/fixture-color';
 import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
 import ModifierCardHeader from './ModifierCardHeader.vue';
 import ModifierCardMore from './ModifierCardMore.vue';
@@ -63,6 +65,12 @@ const panel = computed(() => {
 
 /** The first profile curve (signed domain) hosts the endless strip. */
 const stripKey = computed(() => manifest.value?.params.find(p => p.type === 'curve' && p.domain === 'signed')?.key ?? null);
+/** Hue of the first targeted fixture's programmed color (hue strip center). */
+const baseHue = computed(() => {
+  const f = resolved.value.targeted[0];
+  const c = f ? fixtureBaseColor(f as Fixture) : null;
+  return c ? Math.round(hueSat(c).hue) : 0;
+});
 const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modifier.speed.beatValue : 0));
 </script>
 
@@ -98,7 +106,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           :schema="manifest.params" :model-value="modifier.params" :editors="manifest.editors"
           :more-key="manifest.alias" :distribution-mode="modifier.distribution.mode"
           :ticks="resolved.ticks" :beats="beats" :playhead="position"
-          :editor-context="{ rankCount: resolved.ticks, groups: resolved.ticks, playhead: position, modifier }"
+          :editor-context="{ rankCount: resolved.ticks, activeGroups: resolved.ticks, playhead: position, baseHue }"
           @update:model-value="v => emit('update', 'params', v)" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         >
           <template v-if="stripKey" #[`strip:${stripKey}`]><EndlessStrip :modifier="modifier" :rank-count="resolved.ticks" /></template>

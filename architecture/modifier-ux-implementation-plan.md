@@ -653,13 +653,13 @@ Rewrite `plugins/waveform` (keep the alias `waveform`; display name **"Wave"**).
 
 Rewrite `plugins/color-adjust` (alias kept; display name **"Color Shift"**).
 
-- [ ] **M7.1 `gradient` param type** (§1.5) + toolchain encode/validate + `pm.gradient` contract.
-- [ ] **M7.2 `PmGradient.vue`:**
+- [x] **M7.1 `gradient` param type** (§1.5) + toolchain encode/validate + `pm.gradient` contract.
+- [x] **M7.2 `PmGradient.vue`:**
   - gradient bar with stops; drag stops; click the bar adds a stop (color interpolated);
   - Del removes (min 1 stop);
   - clicking a stop opens `pm.colorInput` in a popover (the extension color picker applies automatically through `Replaceable`).
-- [ ] **M7.3 `PmHueRange.vue`** (port `ColorEditor.vue` from master): composite `{ shift, range }`; 360° strip centered on the base hue; drag center = shift, drag within 5 % of an edge = range; EditableNumbers in the header.
-- [ ] **M7.4 Manifest:**
+- [x] **M7.3 `PmHueRange.vue`** (port `ColorEditor.vue` from master): composite `{ shift, range }`; 360° strip centered on the base hue; drag center = shift, drag within 5 % of an edge = range; EditableNumbers in the header.
+- [x] **M7.4 Manifest:**
   - `signatures: ["rgb"]`, `output: "absolute"`.
   - Params:
     - `mode` enum `palette|shift` (primary, segmented)
@@ -672,24 +672,29 @@ Rewrite `plugins/color-adjust` (alias kept; display name **"Color Shift"**).
     - `motion` curve (`run,pingpong,step,hold,ease`)
   - Editors: `{ id:'hue', input:'pm.hueRange', bind:{ shift:'hueShift', range:'hueRange' }, when:{ mode:'shift' } }`.
   - Distribution: all modes, both scopes, grouping.
-- [ ] **M7.5 Plugin math:**
+- [x] **M7.5 Plugin math:**
   ```
   m = motion(fract(timePhase)); u = fract(spatial − m)
   palette: c = gradientSample(u, transition)   // transition 0 = nearest stop (hard), 1 = linear blend
   shift:   p = profile(u) ; hue = base.h + hueShift + hueRange·(2p − 1) ; sat = base.s·saturation·(1 − satDip·p)
   ```
-- [ ] **M7.6 Canvas palette stops.**
+  *Implemented:*
+  - Shift: the dip ("White dip") blends toward white at the programmed brightness, `rgb += (level − rgb)·satDip·p`; lowering HSL saturation only produced grey.
+  - Palette keeps the programmed brightness (max of the base RGB; unlit bases take the palette as is).
+  - Hard palettes hold each stop until the next one, wrapping.
+  - R1 adds `arrange: gradient | alternate` (alternate = stop `(rank + ⌊m·stops⌋) mod stops`).
+- [x] **M7.6 Canvas palette stops.**
   - With mode palette and distribution linear/radial/conical, draw the stops on the gradient line in `FixtureEditorSpatialControls.vue`.
   - Dragging a stop along the line writes `palette.stops[i].pos`; clicking opens the same color popover.
   - **Follow-up (not in this plan):** the same overlay in the 3D viewport.
-- [ ] **M7.7 Goldens + legacy mapping** (old `hueShift/saturation/hueRange/satRange/shape/shapeParam` → mode shift + profile; M6.5 mechanism).
+- [x] **M7.7 Goldens + legacy mapping** (old `hueShift/saturation/hueRange/satRange/shape/shapeParam` → mode shift + profile; M6.5 mechanism).
 
 ### Phase M8 — Pattern
 
 Rewrite `plugins/sequencer` (alias kept; display name **"Pattern"**).
 
-- [ ] **M8.1 `steps` param type** (§1.5) + encode/validate + contract.
-- [ ] **M8.2 `PmSteps.vue`:**
+- [x] **M8.1 `steps` param type** (§1.5) + encode/validate + contract.
+- [x] **M8.2 `PmSteps.vue`:**
   - grid with rows = groups (row color = canvas group color; label "Group A…"), columns = steps, header numbers;
   - "+" adds a step, a column's context menu deletes it;
   - click toggles a cell; drag paints;

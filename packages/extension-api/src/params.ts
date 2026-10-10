@@ -96,6 +96,33 @@ export interface CurveParam extends ParamBase<'curve', CurveValue> {
   range?: CurveRange;
 }
 
+/** One color stop of a gradient (position 0–1). */
+export interface GradientStop {
+  pos: number;
+  color: RgbColor;
+}
+
+/** A gradient: 1–8 stops sorted by `pos`. */
+export interface GradientValue {
+  stops: GradientStop[];
+}
+
+/** Color gradient. Wire: 33 f32 (`count, (pos, r, g, b) × 8`). Default input: `pm.gradient`. */
+export type GradientParam = ParamBase<'gradient', GradientValue>;
+
+/** A step grid: `cells[step][group]` on/off; 1–8 groups, 1–16 steps. */
+export interface StepsValue {
+  groups: number;
+  steps: number;
+  cells: boolean[][];
+}
+
+/**
+ * Step grid. Wire: 18 f32 (`groups, steps, mask[16]`, `mask[s]` bit `g` =
+ * group `g` on in step `s`). Default input: `pm.steps`.
+ */
+export type StepsParam = ParamBase<'steps', StepsValue>;
+
 /** Any param definition. */
 export type ParamDef =
   | NumberParam
@@ -105,7 +132,9 @@ export type ParamDef =
   | ColorParam
   | AngleParam
   | PointParam
-  | CurveParam;
+  | CurveParam
+  | GradientParam
+  | StepsParam;
 
 /** Param type discriminator. */
 export type ParamType = ParamDef['type'];
@@ -114,7 +143,7 @@ export type ParamType = ParamDef['type'];
 export type ParamSchema = ParamDef[];
 
 /** Runtime value of any param. */
-export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue;
+export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue;
 
 /** Number of f32 slots each param type occupies in the params block. */
 export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>> = {
@@ -126,6 +155,8 @@ export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>> = {
   angle: 1,
   point: 2,
   curve: 128,
+  gradient: 33,
+  steps: 18,
 };
 
 /** Default `pm.*` input per param type (D13). */
@@ -138,4 +169,6 @@ export const PARAM_DEFAULT_INPUT: Readonly<Record<ParamType, PmInputName>> = {
   angle: 'pm.angle',
   point: 'pm.xyInput',
   curve: 'pm.curve',
+  gradient: 'pm.gradient',
+  steps: 'pm.steps',
 };
