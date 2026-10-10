@@ -5,6 +5,7 @@
 import semver from 'semver';
 import type { ParamDef } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
+import { validateCurveParam } from './manifest-curve';
 
 /** Plugin ABI/SDK version this toolchain produces. */
 export const PLUGIN_API_VERSION = '1.0.0';
@@ -21,13 +22,15 @@ const KEY_RE = /^[a-z][a-zA-Z0-9]*$/;
 export interface ManifestValidation {
   ok: boolean;
   errors: string[];
+  /** Non-fatal findings (e.g. curve shapes only known to extensions). */
+  warnings: string[];
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isUnit = (v: unknown) => isNum(v) && v >= 0 && v <= 1;
 
-/** Validates one param definition; pushes readable errors. */
-function validateParam(p: ParamDef, i: number, errors: string[]): void {
+/** Validates one param definition; pushes readable errors and warnings. */
+function validateParam(p: ParamDef, i: number, errors: string[], warnings: string[]): void {
   const where = `params[${i}] "${String((p as { key?: unknown }).key)}"`;
   if (typeof p.key !== 'string' || !KEY_RE.test(p.key)) errors.push(`${where}: key must be camelCase`);
   if (!PARAM_TYPES.includes(p.type)) {
@@ -62,9 +65,7 @@ function validateParam(p: ParamDef, i: number, errors: string[]): void {
       if (!p.default || !isUnit(p.default.x) || !isUnit(p.default.y)) errors.push(`${where}: default must be { x, y } in 0–1`);
       break;
     case 'curve':
-      if (!Array.isArray(p.default) || p.default.length < 2) errors.push(`${where}: default must have ≥ 2 points`);
-      else if (p.default.some(pt => !isUnit(pt.x) || !isUnit(pt.y))) errors.push(`${where}: curve points must be in 0–1`);
-      else if (p.default.some((pt, j) => j > 0 && pt.x <= p.default[j - 1]!.x)) errors.push(`${where}: curve x must increase`);
+      validateCurveParam(p, where, errors, warnings);
       break;
   }
 }
@@ -72,8 +73,9 @@ function validateParam(p: ParamDef, i: number, errors: string[]): void {
 /** Validates a manifest (structure and values). */
 export function validateManifest(json: unknown): ManifestValidation {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const m = json as Partial<ContentPluginManifest> | null;
-  if (!m || typeof m !== 'object') return { ok: false, errors: ['manifest must be an object'] };
+  if (!m || typeof m !== 'object') return { ok: false, errors: ['manifest must be an object'], warnings };
 
   if (m.schema !== 1) errors.push('schema must be 1');
   if (!KINDS.includes(String(m.kind))) errors.push(`kind must be one of ${KINDS.join(', ')}`);
@@ -92,7 +94,7 @@ export function validateManifest(json: unknown): ManifestValidation {
   else {
     const keys = new Set<string>();
     m.params.forEach((p, i) => {
-      validateParam(p, i, errors);
+      validateParam(p, i, errors, warnings);
       if (keys.has(p.key)) errors.push(`params[${i}]: duplicate key "${p.key}"`);
       keys.add(p.key);
     });
@@ -103,5 +105,5 @@ export function validateManifest(json: unknown): ManifestValidation {
     if (m.ui?.placement && !['below-params', 'above-params', 'replace-params'].includes(m.ui.placement)) errors.push('ui.placement is invalid');
   }
 
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings };
 }

@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./params": "./src/params.ts",
+    "./curve-shapes": "./src/curve-shapes.ts",
     "./manifest": "./src/manifest.ts",
     "./hash": "./src/hash.ts",
     "./runtime": "./src/runtime.ts",

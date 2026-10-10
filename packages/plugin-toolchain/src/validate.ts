@@ -144,6 +144,7 @@ export async function validate(
   const report = () => ({ ok: errors.length === 0, errors, warnings, metrics });
 
   const mv = validateManifest(pkg.manifest);
+  warnings.push(...mv.warnings.map(w => `manifest: ${w}`));
   if (!mv.ok) {
     errors.push(...mv.errors.map(e => `manifest: ${e}`));
     return report();
