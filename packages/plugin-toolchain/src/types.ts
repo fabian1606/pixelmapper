@@ -3,8 +3,14 @@
  */
 import type { ParamSchema, ParamValue, Signature } from '@pixelmapper/extension-api';
 
-/** How the host combines a modifier's output with the base value. */
-export type ModifierOutputMode = 'bipolar' | 'absolute';
+/**
+ * How the host combines a modifier's output with the base value:
+ * - `bipolar`: modulation in [−1, 1], `base + strength × (out − 1) / 2` (A13);
+ * - `absolute`: target value in [0, 1], mixed by blend mode;
+ * - `scale`: level in [0, 1] as a fraction of the programmed value,
+ *   `base × (1 − strength + strength × out)` (A20).
+ */
+export type ModifierOutputMode = 'bipolar' | 'absolute' | 'scale';
 
 /** Plugin kinds; only `modifier` is implemented (`shader`/`visual` reserved). */
 export type ContentPluginKind = 'modifier' | 'shader' | 'visual';

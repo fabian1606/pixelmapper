@@ -18,6 +18,7 @@ import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
 import type { ModifierInstance, SpeedConfig } from '~/utils/engine/types';
 import { modifierKey } from '~/utils/engine/modifiers';
 import { getManifest, loadWasm } from './plugin-store';
+import { mapOutput } from './host-mapping';
 
 // ── Pool state ─────────────────────────────────────
 
@@ -168,8 +169,8 @@ export interface PreviewResult {
 
 /**
  * Renders `count` samples whose positions/phases come from `place`, then
- * applies the host mapping (bipolar: `base + strength × (out − 1) / 2`;
- * absolute: `base + (out − base) × strength`), clamped to [0, 1].
+ * applies the host mapping (`mapOutput`: bipolar, absolute or scale), clamped
+ * to [0, 1].
  */
 function render(
   m: ModifierInstance,
@@ -215,13 +216,9 @@ function render(
   try {
     instance.prepare(encodeParams(manifest.params, m.params));
     const out = instance.render(ctx, samples, count);
-    const bipolar = manifest.output === 'bipolar';
     for (let i = 0; i < count; i++) {
       for (let c = 0; c < arity; c++) {
-        const b = base[c] ?? 0;
-        const raw = out[i * arity + c]!;
-        const v = bipolar ? b + (m.strength * (raw - 1)) / 2 : b + (raw - b) * m.strength;
-        out[i * arity + c] = Math.max(0, Math.min(1, v));
+        out[i * arity + c] = mapOutput(manifest.output, base[c] ?? 0, out[i * arity + c]!, m.strength);
       }
     }
     return { values: out, arity };

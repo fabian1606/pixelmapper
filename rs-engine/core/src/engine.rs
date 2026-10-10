@@ -197,7 +197,8 @@ impl ModifierInstance {
 
 // ── Blending ─────────────────────────────────────
 
-/// Blends one component (all values normalized 0–1). See ADR amendment A13.
+/// Blends one component (all values normalized 0–1). See ADR amendments A13
+/// (bipolar, absolute) and A20 (scale).
 pub fn blend(mode: BlendMode, output: OutputMode, prev: f32, base: f32, out: f32, strength: f32) -> f32 {
     let v = match output {
         OutputMode::Bipolar => {
@@ -206,6 +207,18 @@ pub fn blend(mode: BlendMode, output: OutputMode, prev: f32, base: f32, out: f32
                 BlendMode::Add => prev + (mapped - base),
                 BlendMode::Override => mapped,
                 BlendMode::Multiply => prev * mapped,
+                BlendMode::Max => prev.max(mapped),
+                BlendMode::Min => prev.min(mapped),
+            }
+        }
+        OutputMode::Scale => {
+            // Level as a fraction of the programmed value (ADR A20).
+            let factor = 1.0 - strength + strength * out.clamp(0.0, 1.0);
+            let mapped = base * factor;
+            match mode {
+                BlendMode::Add => prev + (mapped - base),
+                BlendMode::Override => mapped,
+                BlendMode::Multiply => prev * factor,
                 BlendMode::Max => prev.max(mapped),
                 BlendMode::Min => prev.min(mapped),
             }

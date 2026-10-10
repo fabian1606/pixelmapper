@@ -224,6 +224,27 @@ fn blend_modes() {
 }
 
 #[test]
+fn scale_output_is_a_fraction_of_the_programmed_value() {
+    use crate::types::{BlendMode as B, OutputMode as O};
+    // Floor 20 % at full strength: 20 % of the base at any base.
+    assert!((blend(B::Override, O::Scale, 1.0, 1.0, 0.2, 1.0) - 0.2).abs() < 1e-6);
+    assert!((blend(B::Override, O::Scale, 0.6, 0.6, 0.2, 1.0) - 0.12).abs() < 1e-6);
+    assert!((blend(B::Override, O::Scale, 0.3, 0.3, 0.2, 1.0) - 0.06).abs() < 1e-6);
+    // Peak lands on the base; half strength halves the depth.
+    assert!((blend(B::Override, O::Scale, 0.3, 0.3, 1.0, 1.0) - 0.3).abs() < 1e-6);
+    assert!((blend(B::Override, O::Scale, 0.3, 0.3, 0.0, 0.5) - 0.15).abs() < 1e-6);
+    // Add applies the delta to the working value; multiply applies the factor.
+    assert!((blend(B::Add, O::Scale, 0.5, 0.8, 0.5, 1.0) - 0.1).abs() < 1e-6);
+    assert!((blend(B::Multiply, O::Scale, 0.5, 0.8, 0.5, 1.0) - 0.25).abs() < 1e-6);
+    // At base 100 % scale equals the bipolar mapping (out = 2v − 1).
+    for v in [0.0f32, 0.25, 0.7, 1.0] {
+        let s = blend(B::Override, O::Scale, 1.0, 1.0, v, 0.6);
+        let b = blend(B::Override, O::Bipolar, 1.0, 1.0, 2.0 * v - 1.0, 0.6);
+        assert!((s - b).abs() < 1e-6);
+    }
+}
+
+#[test]
 fn bad_modifier_packets_are_rejected() {
     let (mut e, _) = engine(vec![0.0]);
     assert_eq!(e.dispatch_bin(0x16, &[2, 0, 0]), -1, "unknown version");

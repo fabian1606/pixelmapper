@@ -11,6 +11,7 @@ export const PLUGIN_API_VERSION = '1.0.0';
 
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];
+const OUTPUTS = ['bipolar', 'absolute', 'scale'];
 const PARAM_TYPES = ['number', 'int', 'bool', 'enum', 'color', 'angle', 'point', 'curve'];
 const UI_INPUTS = ['pm.fader', 'pm.numberInput', 'pm.colorInput', 'pm.xyInput', 'pm.select', 'pm.toggle', 'pm.curve', 'pm.angle', 'pm.tapTempo', 'pm.button'];
 const ALIAS_RE = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
@@ -85,7 +86,7 @@ export function validateManifest(json: unknown): ManifestValidation {
   if (typeof m.description !== 'string' || m.description.trim().length < 10) errors.push('description is required (≥ 10 characters, read by humans and AI)');
   if (!Array.isArray(m.signatures) || m.signatures.length === 0) errors.push('signatures must be a non-empty array');
   else for (const s of m.signatures) if (!SIGNATURES.includes(s)) errors.push(`unknown signature "${s}"`);
-  if (m.output !== 'bipolar' && m.output !== 'absolute') errors.push('output must be "bipolar" or "absolute"');
+  if (!OUTPUTS.includes(String(m.output))) errors.push('output must be "bipolar", "absolute" or "scale"');
 
   if (!Array.isArray(m.params)) errors.push('params must be an array');
   else {

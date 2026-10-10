@@ -5,7 +5,7 @@
  * renders 240 frames (4 s @ 60 fps) for several param variants and every
  * declared signature, and rejects: invalid manifest, forbidden imports,
  * uninstrumented modules, traps/aborts/budget overruns, NaN/∞, outputs out of
- * range (`absolute` [0, 1]; `bipolar` [−2, 2], amendment A13), state across
+ * range (`absolute`/`scale` [0, 1]; `bipolar` [−2, 2], amendments A13/A20), state across
  * frames (frame 120 after 0–119 ≠ frame 120 fresh), and > 2 ms median per
  * frame scaled to 512 samples. Warns on constant output.
  */
@@ -41,7 +41,7 @@ export interface ValidateOptions {
 }
 
 const FIXTURES = 64;
-const RANGE: Record<ContentPluginManifest['output'], [number, number]> = { absolute: [0, 1], bipolar: [-2, 2] };
+const RANGE: Record<ContentPluginManifest['output'], [number, number]> = { absolute: [0, 1], bipolar: [-2, 2], scale: [0, 1] };
 const TOLERANCE = 1e-4;
 
 /** Deterministic PRNG (mulberry32). */

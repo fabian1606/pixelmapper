@@ -34,6 +34,20 @@ pub enum OutputMode {
     Bipolar,
     /// Target value in [0, 1], mixed by blend mode with strength as amount.
     Absolute,
+    /// Level in [0, 1] as a fraction of the programmed value (ADR A20):
+    /// `mapped = base · (1 − strength + strength · v)`.
+    Scale,
+}
+
+impl OutputMode {
+    /// Wire id → output mode (0 bipolar, 1 absolute, 2 scale; unknown → bipolar).
+    pub fn from_id(id: u8) -> Self {
+        match id {
+            1 => OutputMode::Absolute,
+            2 => OutputMode::Scale,
+            _ => OutputMode::Bipolar,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

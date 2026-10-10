@@ -146,7 +146,7 @@ pub fn parse_modifiers_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             let key = c.u32()?;
             let plugin = c.u16()? as u32;
             let signature = Signature::from_id(c.u8()?)?;
-            let output = if c.u8()? == 1 { OutputMode::Absolute } else { OutputMode::Bipolar };
+            let output = OutputMode::from_id(c.u8()?);
             let blend = BlendMode::from_id(c.u8()?);
             let strength = c.f32()?.clamp(0.0, 1.0);
             let speed = c.speed()?;

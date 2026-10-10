@@ -174,6 +174,8 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
 
 const BLEND_MODE_ID: Record<string, number> = { add: 0, override: 1, multiply: 2, max: 3, min: 4 };
 const SIGNATURE_ID: Record<string, number> = { scalar: 0, rgb: 1, panTilt: 2 };
+/** Manifest output → wire id (rs-engine `OutputMode::from_id`). */
+const OUTPUT_MODE_ID: Record<string, number> = { bipolar: 0, absolute: 1, scale: 2 };
 
 /** Result of `buildModifiersBin`. */
 export interface ModifiersPacket {
@@ -210,7 +212,7 @@ export function buildModifiersBin(
     w.u32(modifierKey(m.id));
     w.u16(pluginIndex);
     w.u8(SIGNATURE_ID[m.signature] ?? 0);
-    w.u8(manifest.output === 'absolute' ? 1 : 0);
+    w.u8(OUTPUT_MODE_ID[manifest.output] ?? 0);
     w.u8(BLEND_MODE_ID[m.blendMode] ?? 0);
     w.f32(Math.max(0, Math.min(1, m.strength)));
     w.speed(m.speed);

@@ -116,6 +116,11 @@ describe('validation harness', () => {
     expect(r.errors[0]).toMatch(/outside \[0, 1\]/);
   }, 60_000);
 
+  it('rejects scale output outside [0, 1] (A20)', async () => {
+    const r = await check(mod('out.set(0, 1.5);'), manifest({ output: 'scale' }));
+    expect(r.errors[0]).toMatch(/outside \[0, 1\] for "scale"/);
+  }, 60_000);
+
   it('rejects forbidden imports', async () => {
     const src = mod('evil(); out.set(0, 0.0);', '@external("env", "evil") declare function evil(): void;');
     const { pkg } = await buildPackage(manifest(), { 'modifier.ts': src });
