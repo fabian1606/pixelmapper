@@ -304,21 +304,19 @@ function deserializeNode(data: SerializedNode, parent: FixtureGroup | null = nul
 
 /**
  * Brings a snapshot to `SCHEMA_VERSION`: v2 → v3 migrates every modifier
- * instance (live list, presets, pinned modifiers). Throws
- * `IncompatibleProjectError` for other versions.
+ * instance (live list, presets, pinned modifiers), and former built-in
+ * hashes are redirected. Throws `IncompatibleProjectError` for other versions.
  */
 export function migrateSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
-  if (snapshot?.schemaVersion === SCHEMA_VERSION) return snapshot
-  if (snapshot?.schemaVersion === 2) {
-    return {
-      ...snapshot,
-      schemaVersion: SCHEMA_VERSION,
-      modifiers: migrateModifiersDeep(snapshot.modifiers ?? []),
-      savedPresets: migrateModifiersDeep(snapshot.savedPresets ?? []),
-      pinnedModifiers: migrateModifiersDeep(snapshot.pinnedModifiers ?? []),
-    }
+  if (snapshot?.schemaVersion !== SCHEMA_VERSION && snapshot?.schemaVersion !== 2) throw new IncompatibleProjectError(snapshot?.schemaVersion)
+  // Deep and idempotent: also redirects former built-in hashes in v3 snapshots (plan M6.5).
+  return {
+    ...snapshot,
+    schemaVersion: SCHEMA_VERSION,
+    modifiers: migrateModifiersDeep(snapshot.modifiers ?? []),
+    savedPresets: migrateModifiersDeep(snapshot.savedPresets ?? []),
+    pinnedModifiers: migrateModifiersDeep(snapshot.pinnedModifiers ?? []),
   }
-  throw new IncompatibleProjectError(snapshot?.schemaVersion)
 }
 
 export function deserializeProject(snapshot: ProjectSnapshot): {

@@ -60,12 +60,12 @@ describe('in-iframe runtime', () => {
   it.skipIf(!existsSync(wasmPath))('mounts the panel, renders with the plugin and sends validated messages', () => {
     const ui = `export function mount(el, api) {
       const s = new Float32Array(16 * 4);
-      for (let i = 0; i < 4; i++) { s[i * 16 + 2] = i / 4; s[i * 16 + 8] = 1; }
+      for (let i = 0; i < 4; i++) { s[i * 16 + 13] = i / 4; s[i * 16 + 8] = 1; }
       const out = api.render(s, 4);
       el.result = Array.from(out);
       el.theme = api.theme['--primary'];
       api.beginScrub();
-      api.setParam('shape', 'square');
+      api.setParam('invert', true);
       api.endScrub();
       api.onParams(p => { el.params = p; });
     }`;
@@ -90,8 +90,8 @@ describe('in-iframe runtime', () => {
     const types = sent.map(s => s.msg.type);
     expect(types).not.toContain('error');
     expect(root.theme).toBe('red');
-    // Sine over phases 0, .25, .5, .75 → 0, 1, 0, -1.
-    expect((root.result as number[]).map(v => Math.round(v * 100) / 100 + 0)).toEqual([0, 1, 0, -1]);
+    // Wave default (a dot at the moving position, time 0) over spatial 0, .25, .5, .75 → 1, 0, 0, 0.
+    expect((root.result as number[]).map(v => Math.round(v * 100) / 100 + 0)).toEqual([1, 0, 0, 0]);
     expect(types).toEqual(['ready', 'scrub', 'set-param', 'scrub']);
 
     onMessage({ source: parentWin, data: envelope('c1', { type: 'params', params: { shape: 'square' }, encoded }) });

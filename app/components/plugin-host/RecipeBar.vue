@@ -9,7 +9,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ContentPluginManifest, ManifestPreset } from '@pixelmapper/plugin-toolchain/types';
 import type { ModifierInstance } from '~/utils/engine/types';
-import { activePreset, applyPreset } from '~/utils/engine/recipes';
+import { activePreset, applyPreset, applyPresetOnSelection } from '~/utils/engine/recipes';
+import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
 import { previewRgb, renderStrip } from '~/utils/plugins/preview-pool';
 import { sampleClock } from '~/composables/engine/use-modifier-phase';
 
@@ -17,6 +18,8 @@ const props = defineProps<{
   modifier: ModifierInstance;
   manifest: ContentPluginManifest;
   rankCount?: number;
+  /** Current selection (recipes that change the mode are placed on it). */
+  selectionShape?: SelectionShape;
 }>();
 
 const emit = defineEmits<{
@@ -82,7 +85,7 @@ onBeforeUnmount(() => {
       :aria-pressed="active?.id === p.id"
       :title="p.description ?? p.label"
       :data-recipe="p.id"
-      @click.stop="emit('apply', applyPreset(modifier, manifest, p), p)"
+      @click.stop="emit('apply', applyPresetOnSelection(modifier, manifest, p, selectionShape), p)"
     >
       <canvas :ref="el => { if (el) canvases[i] = el as HTMLCanvasElement }" :width="COLS" height="1" class="block w-16 h-7 rounded-sm bg-black" style="image-rendering: pixelated" aria-hidden="true" />
       <span class="w-full truncate text-center text-[9px] font-medium leading-tight">{{ p.label }}</span>

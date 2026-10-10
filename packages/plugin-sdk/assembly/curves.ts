@@ -18,3 +18,18 @@ export function sampleLut(lut: usize, x: f32, size: i32 = CURVE_LUT_SIZE): f32 {
   const b = load<f32>(lut + (<usize>(i + 1) << 2));
   return a + (b - a) * t;
 }
+
+/** Wraps `x` into [−1, 1) (period 2; signed-domain profiles repeat with it). */
+export function wrapSigned(x: f32): f32 {
+  const y = (x + 1.0) * 0.5;
+  return (y - Mathf.floor(y)) * 2.0 - 1.0;
+}
+
+/**
+ * Samples a `signed`-domain LUT (curve `domain: "signed"`, x ∈ [−1, 1]) at
+ * `x`; values outside [−1, 1] wrap (periodic profiles).
+ */
+export function sampleSignedLut(lut: usize, x: f32, size: i32 = CURVE_LUT_SIZE): f32 {
+  const w = x < -1.0 || x > 1.0 ? wrapSigned(x) : x;
+  return sampleLut(lut, (w + 1.0) * 0.5, size);
+}

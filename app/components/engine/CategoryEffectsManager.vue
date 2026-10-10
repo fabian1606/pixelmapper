@@ -232,7 +232,7 @@ defineExpose({
             :available-channel-types="availableChannelTypes"
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
-            :selection-axis="selectionShape.axis"
+            :selection-shape="selectionShape"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
             @toggle-target-channel="toggleTargetChannel"

@@ -18,6 +18,39 @@ const ROOT = resolve(import.meta.dir, '..');
 const PLUGINS_DIR = join(ROOT, 'plugins');
 const OUT_DIR = join(ROOT, 'public/plugins');
 const INDEX_FILE = join(ROOT, 'app/utils/plugins/builtin-index.ts');
+/** Previous built-in hashes (plan M6.5): old hash → alias, version, param schema. Only ever grows. */
+const LEGACY_FILE = join(ROOT, 'app/utils/plugins/builtin-legacy.json');
+
+/** A former built-in (its hash can still appear in saved projects). */
+interface LegacyEntry {
+  hash: string;
+  alias: string;
+  version: string;
+  params: ContentPluginManifest['params'];
+}
+
+/** Built-ins listed in a previously generated index (empty when absent or unreadable). */
+function previousBuiltins(indexSource: string): Built[] {
+  const m = indexSource.match(/BUILTIN_PLUGINS: readonly BuiltinPlugin\[\] = (\[[\s\S]*?\n\]);/);
+  try {
+    return m ? (JSON.parse(m[1]!) as Built[]) : [];
+  }
+  catch {
+    return [];
+  }
+}
+
+/** Adds every previous built-in hash that is no longer current to the legacy list. */
+async function recordLegacy(previous: Built[], current: Built[]): Promise<void> {
+  const list = JSON.parse(await readFile(LEGACY_FILE, 'utf8').catch(() => '[]')) as LegacyEntry[];
+  const known = new Set([...list.map(e => e.hash), ...current.map(c => c.hash)]);
+  const added = previous
+    .filter(p => !known.has(p.hash))
+    .map(p => ({ hash: p.hash, alias: p.alias, version: p.manifest.version, params: p.manifest.params }));
+  if (added.length === 0) return;
+  await writeFile(LEGACY_FILE, `${JSON.stringify([...list, ...added], null, 2)}\n`);
+  console.log(`[build-plugins] recorded ${added.length} legacy hash(es) in builtin-legacy.json`);
+}
 
 /** One built plugin for the index. */
 interface Built {
@@ -111,6 +144,7 @@ export function isBuiltinHash(hash: string): boolean {
 `;
   await mkdir(join(ROOT, 'app/utils/plugins'), { recursive: true });
   const previous = await readFile(INDEX_FILE, 'utf8').catch(() => '');
+  await recordLegacy(previousBuiltins(previous), built);
   if (previous !== index) await writeFile(INDEX_FILE, index);
   console.log(`[build-plugins] ${built.length} plugin(s) in ${Math.round(performance.now() - t0)} ms`);
 }

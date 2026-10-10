@@ -18,6 +18,7 @@
  */
 import type { Distribution } from '@pixelmapper/extension-api';
 import { createDistribution } from '~/utils/engine/distribution/create';
+import { legacyBuiltin, migrateLegacyPlugin } from '~/utils/plugins/builtin-legacy';
 
 /** Fields of a v2 instance that the distribution replaces. */
 export const LEGACY_DIRECTION_KEYS = ['direction', 'originX', 'originY', 'angle', 'fanning', 'reverse'] as const;
@@ -63,11 +64,21 @@ export function isLegacyModifier(v: unknown): v is Record<string, unknown> & Leg
     && LEGACY_DIRECTION_KEYS.some(k => k in v);
 }
 
-/** Migrates one v2 instance (other objects are returned unchanged). */
+/**
+ * Migrates one instance (other objects are returned unchanged): v2 direction
+ * fields → distribution, and former built-in hashes → the current built-in
+ * with migrated params (plan M6.5).
+ */
 export function migrateModifier<T>(m: T): T {
-  if (!isLegacyModifier(m)) return m;
-  const out: Record<string, unknown> = { ...m, distribution: distributionFromLegacy(m) };
-  for (const k of LEGACY_DIRECTION_KEYS) delete out[k];
+  let out: unknown = m;
+  if (isLegacyModifier(out)) {
+    const next: Record<string, unknown> = { ...out, distribution: distributionFromLegacy(out) };
+    for (const k of LEGACY_DIRECTION_KEYS) delete next[k];
+    out = next;
+  }
+  if (isObject(out) && typeof out.plugin === 'string' && legacyBuiltin(out.plugin)) {
+    out = migrateLegacyPlugin(out as unknown as Parameters<typeof migrateLegacyPlugin>[0]);
+  }
   return out as T;
 }
 

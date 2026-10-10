@@ -608,7 +608,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
 
 Rewrite `plugins/waveform` (keep the alias `waveform`; display name **"Wave"**). Needs ABI 1.1 and M0.2.
 
-- [ ] **M6.1 Manifest**
+- [x] **M6.1 Manifest**
   - `signatures: ["scalar"]`, output per M0.2.
   - Params:
     - `profile`: curve, `domain: signed`, `axis: fixtures`, `range: unipolar`, `shapes: ["dot","bar","wave","wedge","edge","flash"]`, `tier: primary`, default `{ shape:"dot", args:{ width:0.15, softness:0.5, repeat:1, peak:1, floor:0 } }`.
@@ -616,7 +616,7 @@ Rewrite `plugins/waveform` (keep the alias `waveform`; display name **"Wave"**).
     - `invert`: bool, advanced.
   - Distribution: all modes, both scopes, grouping true, default `{ mode:"order" }`.
   - Presets: §3.2.
-- [ ] **M6.2 Plugin math**
+- [x] **M6.2 Plugin math**
   ```
   m  = motion(fract(ctx.timePhase))                 // position 0–1 of the pass
   x  = s.spatial − m                                // ∈ [−1, 1] for spatial ∈ [0, 1]
@@ -627,20 +627,27 @@ Rewrite `plugins/waveform` (keep the alias `waveform`; display name **"Wave"**).
   ```
   - Periodic profile shapes (dot, bar, wave, wedge, flash) have period `1/repeat` in x.
   - `edge` is non-periodic: `v = x ≤ 0 ? 1 : 0` with softness ramp → **Build**.
-- [ ] **M6.3 Goldens.**
+- [x] **M6.3 Goldens.**
   - New goldens for the presets on an 8-fixture row at 8 times.
   - Old goldens move to the legacy-mapping test (M6.4).
-- [ ] **M6.4 Legacy conversion.** Map old `{shape, param, start, end, offset, useFloor, floor}` to the new profile/motion (`app/utils/engine/migrations/wave-v2.ts`):
+- [x] **M6.4 Legacy conversion.** Map old `{shape, param, start, end, offset, useFloor, floor}` to the new profile/motion (`app/utils/engine/migrations/wave-v2.ts`):
   - shape → profile shape with the time curve reproduced as a *motion = run, distribution unchanged* equivalent where possible;
   - otherwise a free-points profile sampled from the old `evaluateShape` (128 points);
   - document the residual differences (window/offset).
 
   *Accept:* old projects render within 2 % RMS.
-- [ ] **M6.5 Old plugin hashes.**
+
+  *Implemented* (`app/utils/plugins/legacy/waveform-v1.ts`): every old shape (window, offset, floor included) becomes a 128-point free profile with motion *Run*. Exact at base 100 % except:
+  - hard edges blur over one LUT step (1/64 cycle; the RMS test excludes that band);
+  - below base 100 % dips are relative, not absolute (A20);
+  - the floor with strength < 1 − floor clamps at 0.
+- [x] **M6.5 Old plugin hashes.**
   - `scripts/build-plugins.ts` keeps `app/utils/plugins/builtin-legacy.ts`: old hash → `{ alias, migrateParams }`.
   - `plugin-store.ts` resolves a legacy hash to the current built-in and runs `migrateParams` once (marking the instance dirty → persisted).
 
   *Accept:* a project saved before M6 opens without "missing plugin" and keeps its look.
+
+  *Implemented:* `build-plugins.ts` appends replaced hashes (with version and param schema) to `app/utils/plugins/builtin-legacy.json`; `builtin-legacy.ts` redirects them inside the deep load migration (snapshots of any schema, change-log payloads, live sync) and runs `alias@major` param migrations.
 
 ### Phase M7 — Color Shift
 
@@ -828,11 +835,11 @@ Reference rigs: 8 PARs in a row, 12 in a ring, 4 LED bars. The tempo column is t
 | **Ping-Pong** | wedge length 0.3 | pingpong | 8 beats | order | — |
 | **Center Out** | dot w 0.2 | run | 4 beats | order, line from center to one end, mirror | — |
 | **Chain** | dot w 0.1 repeat 3 | run | 8 beats | order | — |
-| **Every Other** | bar w 0.5 soft 0 repeat ½·ranks (args repeat = ticks/2) | step count 2 | 1 beat | order, grouping everyN 2 | — |
+| ~~Every Other~~ | *removed in R1 (duplicate of Pattern Odd/Even)* | | | | |
 | **Build** | edge soft 0.05 | hold pause 0.25 | 8 beats | order | — |
 | **Breathe** | wave floor 0.2 | run | 4 beats | none | single |
 | **Ring** | dot w 0.25 | run | 4 beats | radial (origin = centroid, end = radius) | ring |
-| **Flash Chain** | flash attack 0.05 decay 0.3 | step count 0 | 1 beat | order | — |
+| **Flash Chain** | flash attack 0.05 decay 0.3 | run *(impl.: step left the head dark for the whole step)* | 4 beats *(impl.)* | order | — |
 | **Bar Chase** | dot w 0.25 | run | 2 beats | within, offset order | multiHead |
 
 ### 3.3 Noise recipes

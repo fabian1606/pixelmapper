@@ -14,6 +14,7 @@ import { getManifest, getPackage, pluginStatus } from '~/utils/plugins/plugin-st
 import { resolveDistribution } from '~/utils/engine/distribution/resolve';
 import { useModifierPhase } from '~/composables/engine/use-modifier-phase';
 import { useEngineStore } from '~/stores/engine-store';
+import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
 import ModifierCardHeader from './ModifierCardHeader.vue';
 import ModifierCardMore from './ModifierCardMore.vue';
 import ModifierGenericFields from '../ModifierGenericFields.vue';
@@ -27,7 +28,7 @@ const props = defineProps<{
   modifier: ModifierInstance;
   availableChannelTypes: ChannelType[];
   pinned: boolean;
-  selectionAxis?: { a: { x: number; y: number }; b: { x: number; y: number } };
+  selectionShape?: SelectionShape;
   badges: Component;
   actions: Component;
 }>();
@@ -84,7 +85,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
       </div>
       <template v-if="manifest">
         <RecipeBar
-          :modifier="modifier" :manifest="manifest" :rank-count="resolved.ticks"
+          :modifier="modifier" :manifest="manifest" :rank-count="resolved.ticks" :selection-shape="selectionShape"
           @apply="(next, p) => emit('patch', { params: next.params, speed: next.speed, distribution: next.distribution, strength: next.strength }, `Recipe: ${p.label}`)"
         />
         <PluginIframePanel
@@ -123,7 +124,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
       </div>
       <div class="pt-3 border-t border-border/40">
         <DistributionSection
-          :modifier-id="modifier.id" :distribution="modifier.distribution" :options="manifest?.distribution" :selection-axis="selectionAxis"
+          :modifier-id="modifier.id" :distribution="modifier.distribution" :options="manifest?.distribution" :selection-axis="selectionShape?.axis"
           @update="(d, desc) => emit('patch', { distribution: d }, desc)"
           @dropdown-open-change="v => emit('dropdown-open-change', v)"
         />

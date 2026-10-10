@@ -3,10 +3,13 @@
  * active recipe of an instance, and the recipe picked for a selection.
  */
 import { defaultParams } from '@pixelmapper/plugin-toolchain/params';
+import { clampArgs, getShape } from '@pixelmapper/plugin-toolchain/curve-shapes';
+import { isShapeCurve } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest, ManifestPreset } from '@pixelmapper/plugin-toolchain/types';
 import type { ModifierInstance, SpeedConfig } from './types';
 import { applyDistributionPatch } from './distribution/create';
 import type { SelectionShape } from './distribution/selection-shape';
+import { selectionDistribution } from './distribution/selection-defaults';
 
 /** Deep equality of JSON values (key order independent). */
 export function jsonEqual(a: unknown, b: unknown): boolean {
@@ -39,10 +42,35 @@ export function applyPreset(m: ModifierInstance, manifest: ContentPluginManifest
   };
 }
 
+/**
+ * A recipe applied on a card (plan M5.2, risk table): like `applyPreset`, and
+ * when the recipe changes the mode or the mirror flag the distribution is
+ * placed on the current selection; otherwise the user's handle and order stay.
+ */
+export function applyPresetOnSelection(m: ModifierInstance, manifest: ContentPluginManifest, preset: ManifestPreset, shape?: SelectionShape): ModifierInstance {
+  const next = applyPreset(m, manifest, preset);
+  const changed = next.distribution.mode !== m.distribution.mode || !!next.distribution.order.mirror !== !!m.distribution.order.mirror;
+  if (shape && changed) next.distribution = selectionDistribution(next.distribution, shape);
+  return next;
+}
+
+/** Params with defaults filled in and programmatic curves' args completed (comparison form). */
+function normalizedParams(manifest: ContentPluginManifest, params: ModifierInstance['params']): ModifierInstance['params'] {
+  const out = { ...defaultParams(manifest.params), ...params };
+  for (const def of manifest.params) {
+    const v = out[def.key];
+    if (def.type === 'curve' && isShapeCurve(v)) {
+      const shape = getShape(v.shape);
+      if (shape) out[def.key] = { shape: v.shape, args: clampArgs(shape, v.args) };
+    }
+  }
+  return out;
+}
+
 /** The recipe whose params equal the instance's params, or null ("Custom"). */
 export function activePreset(m: ModifierInstance, manifest: ContentPluginManifest): ManifestPreset | null {
-  const full = { ...defaultParams(manifest.params), ...m.params };
-  return manifest.presets?.find(p => jsonEqual(presetParams(manifest, p), full)) ?? null;
+  const full = normalizedParams(manifest, m.params);
+  return manifest.presets?.find(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full)) ?? null;
 }
 
 /** Context of the recipe choice on add. */

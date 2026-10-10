@@ -12,6 +12,7 @@
  * (budget-instrumented) wasm and instantiates it locally.
  */
 import type { ParamDef, ParamSchema, ParamValue } from '@pixelmapper/extension-api';
+import { validateCurveValue } from '@pixelmapper/plugin-toolchain/manifest-curve';
 
 // ── Messages ─────────────────────────────────────
 
@@ -68,7 +69,13 @@ export function coerceParam(def: ParamDef, value: unknown): ParamValue | null {
       return p && isUnit(p.x) && isUnit(p.y) ? { x: p.x, y: p.y } : null;
     }
     case 'curve': {
-      if (!Array.isArray(value) || value.length < 2 || value.length > 64) return null;
+      // v2 values (`{ shape, args }`, `{ points }`) are checked by the shared curve validator.
+      if (!Array.isArray(value)) {
+        const errors: string[] = [];
+        validateCurveValue(value, 'value', def.domain ?? 'cycle', errors, []);
+        return errors.length === 0 && JSON.stringify(value).length < 16_384 ? JSON.parse(JSON.stringify(value)) as ParamValue : null;
+      }
+      if (value.length < 2 || value.length > 64) return null;
       const pts = value.map(p => ({ x: (p as { x: unknown }).x, y: (p as { y: unknown }).y }));
       if (!pts.every(p => isUnit(p.x) && isUnit(p.y))) return null;
       if (pts.some((p, i) => i > 0 && (p.x as number) <= (pts[i - 1]!.x as number))) return null;

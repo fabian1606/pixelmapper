@@ -50,7 +50,7 @@ describe('modifier card plugin status', () => {
   it('renders known plugins normally', async () => {
     const w = await mountWith(builtinHash(BUILTIN_ALIASES.waveform));
     expect(w.text()).not.toContain('Loading plugin');
-    expect(w.text()).toContain('Shape');
+    expect(w.text()).toContain('Profile');
   });
 
   it('card order: header, params, tempo, distribution; extension slots render (plan M5.6)', async () => {

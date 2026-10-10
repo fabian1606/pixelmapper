@@ -29,8 +29,8 @@ defineProps<{
   availableChannelTypes: ChannelType[];
   pinnedModifiers: PinnedModifier[];
   pinnedEffectIds: Set<string>;
-  /** Main axis of the edited fixtures (default distribution handle). */
-  selectionAxis?: { a: { x: number; y: number }; b: { x: number; y: number } };
+  /** Shape of the edited fixtures (default handles, recipe placement). */
+  selectionShape?: import('~/utils/engine/distribution/selection-shape').SelectionShape;
 }>();
 
 const emit = defineEmits<{
@@ -143,7 +143,7 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
           :modifier="modifier"
           :available-channel-types="availableChannelTypes"
           :pinned="pinnedEffectIds.has(modifier.id)"
-          :selection-axis="selectionAxis"
+          :selection-shape="selectionShape"
           :badges="Badges"
           :actions="Actions"
           @drag-start="e => onDragHandleMousedown(e, i)"

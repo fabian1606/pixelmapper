@@ -44,6 +44,7 @@ describe.skipIf(!built)('preview pool', () => {
     const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), {
       targetChannels: ['DIMMER'],
       distribution: { mode: 'linear', origin: { x: 0, y: 0.5 }, end: { x: 0.5, y: 0.5 } },
+      params: { profile: { shape: 'wave', args: {} } },
     });
     const before = previewRevision.value;
     renderField(m, 8, 2);
