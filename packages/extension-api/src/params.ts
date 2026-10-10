@@ -7,6 +7,7 @@
  */
 import type { PmInputName } from './replaceables';
 import type { RgbColor, Vec2 } from './model';
+import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
 
 /** One control point of a curve param. Both axes are normalized 0–1. */
 export interface CurvePoint {
@@ -68,8 +69,22 @@ export type AngleParam = ParamBase<'angle', number>;
 /** Normalized 2D point. Wire: 2 f32. Default input: `pm.xyInput`. */
 export type PointParam = ParamBase<'point', Vec2>;
 
-/** Curve of control points. Wire: 128 f32 host-sampled LUT. Default input: `pm.curve`. */
-export type CurveParam = ParamBase<'curve', CurvePoint[]>;
+/**
+ * Curve (v2, plan M1.1). Wire: 128 f32 host-sampled LUT over `domain`.
+ * Default input: `pm.curve`.
+ */
+export interface CurveParam extends ParamBase<'curve', CurveValue> {
+  /** Offered shapes (registry ids) in UI order; omitted = free editing only. */
+  shapes?: string[];
+  /** Allow converting to free points. Default true. */
+  allowFree?: boolean;
+  /** LUT x-range: `cycle` = [0, 1] (default), `signed` = [−1, 1]. */
+  domain?: CurveDomain;
+  /** Tick/snap context in the editor. Default `none`. */
+  axis?: CurveAxis;
+  /** y display; the wire stays 0–1. Default `unipolar`. */
+  range?: CurveRange;
+}
 
 /** Any param definition. */
 export type ParamDef =
@@ -89,7 +104,7 @@ export type ParamType = ParamDef['type'];
 export type ParamSchema = ParamDef[];
 
 /** Runtime value of any param. */
-export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurvePoint[];
+export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue;
 
 /** Number of f32 slots each param type occupies in the params block. */
 export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>> = {
