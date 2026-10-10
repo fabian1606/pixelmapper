@@ -36,11 +36,11 @@ const emit = defineEmits<{
 /** The dropdown's choices. */
 type Spread = 'same' | 'spatial' | 'order' | 'within';
 
-/** Spatial 2D modes (the handle on the canvas). */
+/** Spatial 2D modes (the handle on the canvas); icons only, names in the hover title. */
 const MODES: Segment<DistributionMode>[] = [
-  { value: 'linear', label: 'Linear', icon: MoveRight, title: 'Along a direction — drag the handle on the canvas' },
-  { value: 'radial', label: 'Radial', icon: CircleDot, title: 'Outward from a center' },
-  { value: 'conical', label: 'Conical', icon: RotateCw, title: 'Around a center' },
+  { value: 'linear', icon: MoveRight, title: 'Linear — along a direction (drag the handle on the canvas)' },
+  { value: 'radial', icon: CircleDot, title: 'Radial — outward from a center' },
+  { value: 'conical', icon: RotateCw, title: 'Conical — around a center' },
 ];
 const OFFSETS: Segment<'none' | 'order'>[] = [
   { value: 'none', label: 'None', title: 'Every fixture runs the same' },
