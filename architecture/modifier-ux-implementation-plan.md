@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Ready to implement |
+| **Status** | Implemented (M0–M12, with owner revision R1) |
 | **Date** | 2026-10-10 |
 | **Builds on** | [ADR 0001](adr/0001-extension-and-content-plugin-system.md) (content plugins, ABI v1, `pm.*` inputs) |
 | **Design rules for new modifiers** | [Modifier design principles](guides/modifier-design-principles.md) |
@@ -802,18 +802,28 @@ Rewrite `plugins/noise` (alias and name **"Noise"** kept).
 
 ### Phase M12 — Verification
 
-- [ ] **M12.1 Unit/integration:** all tests listed per task; parity TS ↔ Rust distribution table; migration round trips.
-- [ ] **M12.2 Browser matrix** (local Supabase stand-in as used for the last fixes, Playwright script in the scratchpad or a committed `scripts/qa/modifiers.ts`).
+- [x] **M12.1 Unit/integration:** all tests listed per task; parity TS ↔ Rust distribution table; migration round trips.
+- [x] **M12.2 Browser matrix** (local Supabase stand-in as used for the last fixes, Playwright script in the scratchpad or a committed `scripts/qa/modifiers.ts`).
   - Rigs: (a) 8 PARs in a row, (b) 12 in a ring, (c) symmetric double row 2×6, (d) 4 LED bars à 16 px.
   - For every recipe of §3–§6, apply it and capture a canvas screenshot plus frame samples at 4 phases. Assert the described look with simple checks: number of lit fixtures, order of lighting, pairs equal on (c).
-- [ ] **M12.3 Interaction:**
+- [x] **M12.3 Interaction:**
   - drag every curve handle;
   - draw an order line on (c) and verify pairs;
   - click order;
   - drag palette stops on the canvas;
   - paint the steps grid;
   - undo/redo each as one step.
-- [ ] **M12.4** Full gate + zero-extension build.
+- [x] **M12.4** Full gate + zero-extension build.
+
+  *Results (2026-10-10):*
+  - **M12.1:** 387 Vitest tests and 30 Rust tests, including the TS ↔ Rust parity table and legacy/migration round trips.
+  - **M12.2:** browser matrix against a local Supabase stand-in (Bun server emulating auth, `load-project` and change recording) and the production build, driven by Playwright from the session scratchpad. 4 rigs × 4 modifiers × all recipes, DMX sampled at 4 phases, with stage screenshots.
+    - Confirmed: Chase order, Center Out / Outside-In symmetry, pairs equal on the double row, Build fill, Odd/Even, Left/Right, Blocks and Build-Up stepping, Random Pick lights a third, flash chains.
+    - Found and fixed: recipe titles of twin recipes, Chain dots too narrow, Checker identical to Odd/Even (removed).
+  - **M12.3:** 25/25 interaction checks.
+    - All four curve handle kinds drag; an order line on the double row pairs fixtures; a click order follows the clicks; palette stops drag on the canvas; the step grid toggles and paints.
+    - Each is one undo step, and redo works.
+  - **M12.4:** typecheck has no new errors (50 pre-existing), tests, lint, `check:extensions`, `cargo test`, `build` and `check:zero-extensions` are green. Builds next to a running dev server use `PM_BUILD_DIR=.nuxt-qa`.
 
 ---
 
@@ -882,7 +892,7 @@ Reference rigs: 8 PARs in a row, 12 in a ring, 4 LED bars. The tempo column is t
 | **Blocks** | 4×4 diagonal | sections 4 | 0 | 1 beat | — |
 | **Outside-In** | 3×3 diagonal | order mirror line (outside→center), sections 3 | 0 | 1 beat | — |
 | **Build-Up** | 4×4 lower-triangular | sections 4 | 0 | 1 beat | — |
-| **Checker** | 2×2 diagonal | everyN 2 on order by rows (line across rows) | 0 | 1 beat | area |
+| ~~Checker~~ | *removed (browser matrix): identical to Odd/Even in every stored field; Odd/Even now also applies to areas* | | | | |
 | **Segments** | 4×4 diagonal | within scope, sections 4 | 0 | 1/2 beat | multiHead |
 
 ### 3.5 Color Shift recipes

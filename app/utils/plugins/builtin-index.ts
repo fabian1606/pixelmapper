@@ -923,7 +923,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/sequencer",
     "name": "Pattern",
-    "hash": "sha256:9f90af8d6ab3cca30a463eefe52eb910e952434d951f36bbc2bd4d096b9091cf",
+    "hash": "sha256:69707d139884cfa5ec4a2e19f486ccd04b2a725c7640e7c4896cd4f7ed49cc65",
     "signatures": [
       "scalar"
     ],
@@ -1050,7 +1050,8 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "default": true,
           "when": {
             "kind": [
-              "row"
+              "row",
+              "area"
             ]
           }
         },
@@ -1236,47 +1237,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             }
           },
           "strength": 1
-        },
-        {
-          "id": "checker",
-          "label": "Checker",
-          "description": "Alternating fixtures across the area.",
-          "params": {
-            "arrange": "alternate",
-            "steps": {
-              "groups": 2,
-              "steps": 2,
-              "cells": [
-                [
-                  true,
-                  false
-                ],
-                [
-                  false,
-                  true
-                ]
-              ]
-            },
-            "transition": 0
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 1
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
-          },
-          "strength": 1,
-          "when": {
-            "kind": [
-              "area"
-            ]
-          }
         },
         {
           "id": "segments",

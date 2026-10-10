@@ -121,7 +121,8 @@
       "default": true,
       "when": {
         "kind": [
-          "row"
+          "row",
+          "area"
         ]
       }
     },
@@ -307,47 +308,6 @@
         }
       },
       "strength": 1
-    },
-    {
-      "id": "checker",
-      "label": "Checker",
-      "description": "Alternating fixtures across the area.",
-      "params": {
-        "arrange": "alternate",
-        "steps": {
-          "groups": 2,
-          "steps": 2,
-          "cells": [
-            [
-              true,
-              false
-            ],
-            [
-              false,
-              true
-            ]
-          ]
-        },
-        "transition": 0
-      },
-      "speed": {
-        "mode": "beat",
-        "beatValue": 1
-      },
-      "distribution": {
-        "scope": "across",
-        "mode": "order",
-        "reverse": false,
-        "order": {
-          "mirror": false
-        }
-      },
-      "strength": 1,
-      "when": {
-        "kind": [
-          "area"
-        ]
-      }
     },
     {
       "id": "segments",

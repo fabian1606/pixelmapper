@@ -589,5 +589,65 @@
         "description": "Dark where the profile is lit."
       }
     ]
+  },
+  {
+    "hash": "sha256:9f90af8d6ab3cca30a463eefe52eb910e952434d951f36bbc2bd4d096b9091cf",
+    "alias": "@pixelmapper/sequencer",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "alternate",
+          "blocks"
+        ],
+        "optionLabels": [
+          "Alternate",
+          "Blocks"
+        ],
+        "default": "alternate",
+        "label": "Groups",
+        "tier": "primary",
+        "description": "How the numbered fixtures form the grid's rows: alternate (1-2-1-2) or consecutive blocks (1-1-2-2)."
+      },
+      {
+        "key": "steps",
+        "type": "steps",
+        "label": "Steps",
+        "tier": "primary",
+        "default": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "description": "Hard switch (0) to a crossfade over the whole step (1)."
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert",
+        "tier": "advanced"
+      }
+    ]
   }
 ]
