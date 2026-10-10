@@ -52,7 +52,7 @@
     },
     {
       "id": "chain", "label": "Chain", "description": "Three dots run along the row.",
-      "params": { "profile": { "shape": "dot", "args": { "width": 0.1, "softness": 0.5, "repeat": 3 } }, "motion": { "shape": "run", "args": {} } },
+      "params": { "profile": { "shape": "dot", "args": { "width": 0.3, "softness": 0.5, "repeat": 3 } }, "motion": { "shape": "run", "args": {} } },
       "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
     },
     {

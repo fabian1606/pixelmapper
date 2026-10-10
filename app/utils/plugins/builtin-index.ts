@@ -1336,7 +1336,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/waveform",
     "name": "Wave",
-    "hash": "sha256:7e87f4b2b9084aac678acc968718f8e3df15daf4272983984880842ec09ea6b1",
+    "hash": "sha256:4ec09da07e3528d04707d6bbc9d989d1da4b46951adf4bb2951493e3b20b216d",
     "signatures": [
       "scalar"
     ],
@@ -1538,7 +1538,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "profile": {
               "shape": "dot",
               "args": {
-                "width": 0.1,
+                "width": 0.3,
                 "softness": 0.5,
                 "repeat": 3
               }

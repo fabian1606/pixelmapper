@@ -67,10 +67,26 @@ function normalizedParams(manifest: ContentPluginManifest, params: ModifierInsta
   return out;
 }
 
-/** The recipe whose params equal the instance's params, or null ("Custom"). */
+/** How well the instance's speed and distribution match a recipe (fields the recipe sets). */
+function setupScore(m: ModifierInstance, p: ManifestPreset): number {
+  let score = 0;
+  if (p.speed?.beatValue !== undefined && p.speed.beatValue === m.speed.beatValue) score++;
+  const d = p.distribution ?? {};
+  for (const k of ['scope', 'mode', 'withinOffset', 'reverse'] as const) if (d[k] !== undefined && d[k] === m.distribution[k]) score++;
+  if (d.order?.mirror !== undefined && !!d.order.mirror === !!m.distribution.order.mirror) score++;
+  return score;
+}
+
+/**
+ * The recipe whose params equal the instance's params, or null ("Custom").
+ * Recipes with the same params (e.g. Ring / Bar Chase) are told apart by
+ * their speed and distribution.
+ */
 export function activePreset(m: ModifierInstance, manifest: ContentPluginManifest): ManifestPreset | null {
   const full = normalizedParams(manifest, m.params);
-  return manifest.presets?.find(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full)) ?? null;
+  const matches = (manifest.presets ?? []).filter(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full));
+  if (matches.length <= 1) return matches[0] ?? null;
+  return matches.reduce((best, p) => (setupScore(m, p) > setupScore(m, best) ? p : best));
 }
 
 /** Context of the recipe choice on add. */

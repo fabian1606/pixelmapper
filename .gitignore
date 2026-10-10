@@ -38,3 +38,4 @@ rs-engine/target
 public/plugins
 public/extensions
 docs/ai/.slots.collected.json
+.nuxt-qa

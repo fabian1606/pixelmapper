@@ -26,6 +26,8 @@ const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !
 const NO_EXTENSIONS = process.env.PM_NO_EXTENSIONS === '1';
 
 export default defineNuxtConfig({
+  // Separate build dir for QA builds next to a running dev server (`.nuxt` is shared otherwise).
+  ...(process.env.PM_BUILD_DIR ? { buildDir: process.env.PM_BUILD_DIR } : {}),
   extends: NO_EXTENSIONS ? [] : [
     ...FIRST_PARTY_EXTENSIONS,
     ...(CATALOG_AS_LAYERS ? CATALOG_EXTENSIONS : []),

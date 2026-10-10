@@ -70,7 +70,7 @@
         "default": false,
         "label": "Floor",
         "group": "Window",
-        "description": "Hold at base \u00d7 floor outside start/end, independent of strength."
+        "description": "Hold at base × floor outside start/end, independent of strength."
       },
       {
         "key": "floor",
@@ -95,7 +95,7 @@
         "max": 180,
         "default": 0,
         "label": "Hue shift",
-        "unit": "\u00b0"
+        "unit": "°"
       },
       {
         "key": "saturation",
@@ -112,7 +112,7 @@
         "max": 180,
         "default": 0,
         "label": "Hue cycle",
-        "unit": "\u00b0",
+        "unit": "°",
         "group": "Cycle"
       },
       {
@@ -250,7 +250,7 @@
         "max": 180,
         "default": 0,
         "label": "Hue shift",
-        "unit": "\u00b0",
+        "unit": "°",
         "tier": "hidden"
       },
       {
@@ -260,7 +260,7 @@
         "max": 180,
         "default": 40,
         "label": "Hue range",
-        "unit": "\u00b0",
+        "unit": "°",
         "tier": "hidden"
       },
       {
@@ -524,6 +524,69 @@
         "max": 1,
         "default": 0,
         "label": "Threshold"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:7e87f4b2b9084aac678acc968718f8e3df15daf4272983984880842ec09ea6b1",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "advanced",
+        "description": "Dark where the profile is lit."
       }
     ]
   }

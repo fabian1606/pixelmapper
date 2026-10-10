@@ -56,4 +56,14 @@ describe('recipes', () => {
     expect(r.origin.x).toBeCloseTo(0.5);
     expect(r.end.x - r.origin.x).toBeCloseTo(0.3);
   });
+
+  it('tells recipes with equal params apart by speed and distribution', () => {
+    const twins = { ...manifest, presets: [
+      { id: 'ring', label: 'Ring', params: { w: 0.25 }, speed: { mode: 'beat', beatValue: 4 }, distribution: { mode: 'radial' } },
+      { id: 'bar', label: 'Bar Chase', params: { w: 0.25 }, speed: { mode: 'beat', beatValue: 2 }, distribution: { scope: 'within' } },
+    ] } as unknown as ContentPluginManifest;
+    const m = applyPreset(inst(), twins, twins.presets![1]!);
+    expect(activePreset(m, twins)?.id).toBe('bar');
+    expect(activePreset(applyPreset(inst(), twins, twins.presets![0]!), twins)?.id).toBe('ring');
+  });
 });

@@ -853,7 +853,7 @@ Reference rigs: 8 PARs in a row, 12 in a ring, 4 LED bars. The tempo column is t
 | **Chase** *(default)* | dot w 0.15 soft 0.5 floor 0 | run | 4 beats | order (auto line) | row, area |
 | **Ping-Pong** | wedge length 0.3 | pingpong | 8 beats | order | — |
 | **Center Out** | dot w 0.2 | run | 4 beats | order, line from center to one end, mirror | — |
-| **Chain** | dot w 0.1 repeat 3 | run | 8 beats | order | — |
+| **Chain** | dot w 0.3 *(impl.: width is per period; 0.1 was narrower than the fixture spacing)* repeat 3 | run | 8 beats | order | — |
 | ~~Every Other~~ | *removed in R1 (duplicate of Pattern Odd/Even)* | | | | |
 | **Build** | edge soft 0.05 | hold pause 0.25 | 8 beats | order | — |
 | **Breathe** | wave floor 0.2 | run | 4 beats | none | single |
