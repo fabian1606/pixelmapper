@@ -139,6 +139,11 @@ export function validateManifest(
     if (!w.type.startsWith(`${id}/`)) errors.push(`live widget type "${w.type}" must be namespaced as "${id}/<name>"`);
   }
 
+  // Curve shape ids are namespaced.
+  for (const s of c.curveShapes ?? []) {
+    if (!String(s.id).startsWith(`${id}/`)) errors.push(`curve shape id "${s.id}" must be namespaced as "${id}/<name>"`);
+  }
+
   // Slot contributions need something to render.
   for (const s of c.slots ?? []) {
     if (!s.slot) errors.push('slot contribution without "slot"');

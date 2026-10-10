@@ -1,22 +1,25 @@
 /**
  * Host side of extension registration (ADR §5.8, D21): an extension's
  * serializable commands join the core command registry (so they replay from
- * the change log and sync to collaborators), and its optional `activate`
- * hook runs once with the extension API.
+ * the change log and sync to collaborators), its curve shapes join the shape
+ * registry (`pm.curve`, param encoding), and its optional `activate` hook
+ * runs once with the extension API.
  */
 import type { Command, ExtensionApi } from '@pixelmapper/extension-api';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { getFixture } from '~/composables/extensions/use-extension-context';
 import { createCoreCommandFactory } from './core-command-factory';
+import { registerShape } from '~/utils/params/curve-shapes';
 import { onExtensionRegistered, type RegisteredExtension } from './registry';
 
 /** Disposers returned by `activate`, by extension id. */
 const disposers = new Map<string, () => void>();
 
-/** Registers commands and runs `activate` for one extension. */
+/** Registers commands and curve shapes, then runs `activate` for one extension. */
 export function activateExtension({ manifest }: RegisteredExtension): void {
   const commands = createCoreCommandFactory(manifest.id);
+  for (const shape of manifest.contributes?.curveShapes ?? []) registerShape(shape);
   for (const def of manifest.contributes?.commands ?? []) {
     registerCommand(def.type, payload => def.fromPayload(payload, {
       extensionId: manifest.id,

@@ -298,7 +298,7 @@ Default input `pm.steps`.
 
 ### Phase M1 — Shape registry & curve v2 (data + sampling)
 
-- [ ] **M1.1 Types.** Extend `CurveParam`/`CurvePoint` as in §1.5 and export `CurveValue`, `CurvePointV2`, `ShapeDef`, `ShapeArgDef` from `@pixelmapper/extension-api` (new file `src/curves.ts`):
+- [x] **M1.1 Types.** Extend `CurveParam`/`CurvePoint` as in §1.5 and export `CurveValue`, `CurvePointV2`, `ShapeDef`, `ShapeArgDef` from `@pixelmapper/extension-api` (new file `src/curves.ts`):
   ```ts
   interface ShapeArgDef { key: string; label: string; min: number; max: number; default: number; step?: number;
     /** Handle on the curve: how the editor draws/drags this arg. */
@@ -317,30 +317,30 @@ Default input `pm.steps`.
     toPoints?: (args: Record<string, number>, ctx: { ticks: number }) => CurvePointV2[] }
   ```
   *Accept:* types compile; `docs/ai` regenerated later (M11).
-- [ ] **M1.2 Registry module.** `packages/plugin-toolchain/src/curve-shapes.ts` (isomorphic, no DOM), exported as `@pixelmapper/plugin-toolchain/curve-shapes`:
+- [x] **M1.2 Registry module.** `packages/plugin-toolchain/src/curve-shapes.ts` (isomorphic, no DOM), exported as `@pixelmapper/plugin-toolchain/curve-shapes`:
   - `registerShape(def)`, `getShape(id)`, `listShapes()`
   - built-in shapes (§3.1)
   - `evaluateCurve(value, x, ctx)`, `sampleCurveLut(value, size, ctx, domain)`
 
   *Accept:* unit tests per shape (values at key x, periodicity, args clamped).
-- [ ] **M1.3 Free-point sampling.** In `params.ts`, replace `sampleCurve` with `evaluatePoints(points, x)`:
+- [x] **M1.3 Free-point sampling.** In `params.ts`, replace `sampleCurve` with `evaluatePoints(points, x)`:
   - per segment by the *left* point's `kind`: `smooth`/`corner` = cubic Bezier with `out` of left and `in` of right (default handles = ⅓ segment, Catmull-Rom tangents); `linear`; `step` = hold the left y.
   - Legacy `CurvePoint[]` (no `kind`) → existing Catmull-Rom (bit-identical).
 
   *Accept:* golden test — legacy LUT unchanged byte for byte; Bezier/linear/step tests.
-- [ ] **M1.4 LUT domain.** `writeParam` for curves:
+- [x] **M1.4 LUT domain.** `writeParam` for curves:
   - `domain:'cycle'` samples `x = i/127`.
   - `domain:'signed'` samples `x = −1 + 2i/127`.
   - Clamp to 0–1.
 
   *Accept:* test for both domains.
-- [ ] **M1.5 Validation.** In `manifest.ts`:
+- [x] **M1.5 Validation.** In `manifest.ts`:
   - `shapes` ids must exist in the toolchain registry, or warn when unknown (extension shapes are only known in the app);
   - curve defaults must be valid `CurveValue`;
   - `domain`/`axis`/`range` enums.
 
   *Accept:* toolchain tests.
-- [ ] **M1.6 App registry + extension shapes.**
+- [x] **M1.6 App registry + extension shapes.**
   - `app/utils/params/curve-shapes.ts` re-exports the toolchain registry.
   - Add `contributes.curveShapes: ShapeDef[]` to the extension API (`packages/extension-api/src/extension.ts`) and register on activation (`app/utils/extensions/activation.ts`).
 

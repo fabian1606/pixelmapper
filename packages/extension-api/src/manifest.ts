@@ -9,6 +9,7 @@ import type { Component, ComputedRef, DeepReadonly } from 'vue';
 import type { Command, CommandDefinition, CoreCommandFactory } from './commands';
 import type { ConnectorDefinition, ControllerDefinition, LiveWidgetDefinition } from './connectors';
 import type { FixtureKindDefinition } from './kinds';
+import type { ShapeDef } from './curves';
 import type { PmInputName, ReplacementContribution } from './replaceables';
 import type { FixtureId } from './model';
 import type { FixtureView, ScopeName, ScopeRef } from './scopes';
@@ -28,6 +29,8 @@ export interface ExtensionContributions {
   controllers?: ControllerDefinition[];
   liveWidgets?: LiveWidgetDefinition[];
   commands?: CommandDefinition[];
+  /** Programmatic curve shapes for `pm.curve` (ids namespaced `<extension id>/<name>`). */
+  curveShapes?: ShapeDef[];
 }
 
 /** API passed to the optional imperative `activate` hook. */
