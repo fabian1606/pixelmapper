@@ -97,6 +97,8 @@ export interface ContentPluginManifest {
   distribution?: ManifestDistribution;
   /** One sentence shown in the Add menu. */
   purpose?: string;
+  /** What one tempo unit means, shown next to the speed (e.g. "per pass", "per step"). */
+  speedUnit?: string;
   /** Composite editors, rendered first, in order. */
   editors?: ManifestEditor[];
   /** Recipes. */

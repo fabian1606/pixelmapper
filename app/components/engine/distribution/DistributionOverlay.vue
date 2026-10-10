@@ -12,6 +12,8 @@ import { resolveDistribution } from '~/utils/engine/distribution/resolve';
 import { hasGrouping, sampleDistribution } from '~/utils/engine/distribution/sample';
 import { beamWorldPx } from '~/utils/kinds/kind-host';
 import { GROUP_COLORS } from './group-colors';
+import { getManifest } from '~/utils/plugins/plugin-store';
+import { rowOf, stepsLayout } from '~/utils/engine/distribution/param-groups';
 
 const props = defineProps<{
   fixtures: Fixture[];
@@ -25,6 +27,11 @@ const props = defineProps<{
 
 const d = computed(() => props.modifier.distribution);
 const resolved = computed(() => resolveDistribution(props.modifier, props.fixtures));
+/** Step-grid rows of the modifier (badge colors), if it has a steps param. */
+const steps = computed(() => {
+  const manifest = getManifest(props.modifier.plugin);
+  return manifest ? stepsLayout(manifest.params, props.modifier.params) : null;
+});
 const showRanks = computed(() => (d.value.scope === 'across' && d.value.mode === 'order') || (d.value.scope === 'within' && d.value.withinOffset === 'order'));
 
 /** Badge per targeted fixture: viewport position, rank label, group color. */
@@ -35,11 +42,13 @@ const badges = computed(() => {
     const fx = f as Fixture;
     const rank = resolved.value.ranks[String(f.id)] ?? -1;
     const s = sampleDistribution(d.value, resolved.value.rankCount, { x: fx.fixturePosition.x, y: fx.fixturePosition.y, fixtureRank: rank, head: 0, headCount: 1 });
+    const row = steps.value ? rowOf(rank, resolved.value.rankCount, steps.value.rows, steps.value.blocks) : -1;
+    const group = s.group >= 0 ? s.group : row;
     const p = props.worldToViewport(fx.fixturePosition.x * props.worldWidth, fx.fixturePosition.y * props.worldHeight);
     return {
       id: String(f.id), x: p.x, y: p.y,
       label: showRanks.value && rank >= 0 ? String(rank + 1) : '',
-      color: s.group >= 0 ? GROUP_COLORS[s.group % GROUP_COLORS.length]! : 'var(--primary)',
+      color: group >= 0 ? GROUP_COLORS[group % GROUP_COLORS.length]! : 'var(--primary)',
     };
   });
 });

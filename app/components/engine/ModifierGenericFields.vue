@@ -8,10 +8,18 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import { Label } from '@/components/ui/label';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 import SpeedControl from './SpeedControl.vue';
+import { computed } from 'vue';
+import { getManifest } from '~/utils/plugins/plugin-store';
 
-defineProps<{
+const props = defineProps<{
   modifier: ModifierInstance;
 }>();
+
+/** "Speed · per step" when the manifest says what a tempo unit means. */
+const speedLabel = computed(() => {
+  const unit = getManifest(props.modifier.plugin)?.speedUnit;
+  return unit ? `Speed · ${unit}` : 'Speed';
+});
 
 const emit = defineEmits<{
   /** One field changed (continuous edits are coalesced by the caller). */
@@ -41,7 +49,7 @@ const emit = defineEmits<{
     </div>
     <div class="space-y-1.5 flex flex-col justify-start">
       <SpeedControl
-        label="Speed"
+        :label="speedLabel"
         :disable-infinite="false"
         :model-value="modifier.speed"
         @update:model-value="emit('update', 'speed', $event); emit('drag-end', 'Update Modifier Speed')"

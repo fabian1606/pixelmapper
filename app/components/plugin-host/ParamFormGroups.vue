@@ -20,6 +20,8 @@ const props = defineProps<{
   ticks?: number;
   beats?: number;
   playhead?: number | null;
+  /** Live time phase (unwrapped) for step grids. */
+  timePhase?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -69,6 +71,8 @@ function inputProps(p: ParamDef): Record<string, unknown> {
         strip: !!slots[`strip:${p.key}`],
       };
     }
+    case 'steps':
+      return { ...base, activeGroups: props.ticks ?? 0, playhead: props.timePhase ?? null };
     default:
       return base;
   }

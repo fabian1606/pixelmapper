@@ -1,94 +1,68 @@
 /**
- * Built-in modifier: Sequencer (port of the former Rust SequencerEffect).
+ * Built-in modifier: Pattern (plan M8). A step grid (rows = groups, columns
+ * = steps) switches groups of fixtures on and off, one step per cycle unit:
  *
- * Output (bipolar): on → 1 (base), off → 1 − 2·base, which the host maps to
- * base × (1 − strength) — the former darkening behavior.
+ *   k = ⌊timePhase⌋ mod steps; f = fract(timePhase)
+ *   group: host group if any, else from the order numbers —
+ *          Alternate: rank mod rows, Blocks: ⌊rank·rows / rankCount⌋
+ *          (without ranks: spatial quantized to 16 ranks)
+ *   v = cell(k, g), crossfading to cell(k+1, g) in the last `transition`
+ *
+ * Output `scale`: on = programmed value, off = dimmed by strength.
+ * Param slots: arrange 0, steps 1–18 (groups, steps, mask[16]),
+ * transition 19, invert 20.
  */
-import { Modifier, Frame, Sample, Out, Params, register, seededRandom, perlin2, fract, clamp, roundAway } from "@pixelmapper/plugin-sdk";
+import { Modifier, Frame, Sample, Out, Params, register, clamp } from "@pixelmapper/plugin-sdk";
 
-const SPLIT: i32 = 0;
-const CHECKERBOARD: i32 = 1;
-const SECTIONS: i32 = 2;
-const SCATTER: i32 = 3;
-
-class Sequencer extends Modifier {
-  pattern: i32 = 0;
-  ox: f32 = 0.5;
-  oy: f32 = 0.5;
-  sin: f32 = 0;
-  cos: f32 = 1;
-  scale: f32 = 0.1;
-  density: f32 = 0.5;
-  variation: f32 = 0;
+class Pattern extends Modifier {
+  blocks: bool = false;
+  rows: i32 = 1;
+  steps: i32 = 1;
+  maskPtr: usize = 0;
+  transition: f32 = 0;
   invert: bool = false;
 
   prepare(p: Params): void {
-    this.pattern = p.int(0);
-    this.ox = p.get(1);
-    this.oy = p.get(2);
-    const angle = p.get(3);
-    this.sin = Mathf.sin(angle);
-    this.cos = Mathf.cos(angle);
-    this.scale = p.get(4);
-    this.density = p.get(5);
-    this.variation = p.get(6);
-    this.invert = p.bool(7);
+    this.blocks = p.int(0) == 1;
+    this.rows = max(1, p.int(1));
+    this.steps = max(1, p.int(2));
+    this.maskPtr = p.lut(3);
+    this.transition = clamp(p.get(19), 0.0, 1.0);
+    this.invert = p.bool(20);
   }
 
-  /** Writes on/off as a bipolar value. */
-  emit(on: bool, s: Sample, out: Out): void {
-    out.set(0, on ? 1.0 : 1.0 - 2.0 * s.base0);
+  /** Cell of step `k`, group `g` (0 or 1). */
+  cell(k: i32, g: i32): f32 {
+    const mask = <i32>load<f32>(this.maskPtr + (<usize>k << 2));
+    return (mask >> g) & 1 ? 1.0 : 0.0;
   }
 
   render(ctx: Frame, s: Sample, out: Out): void {
-    // Frozen speed: the cycle counter stays at 0 (as before).
-    const cycle: u32 = ctx.phaseSpeed > 0.0 ? <u32>Mathf.floor(ctx.timeMs * ctx.phaseSpeed / 1000.0) : 0;
+    let rank = s.rank;
+    let count = ctx.rankCount;
+    if (rank < 0 || count <= 0) {
+      count = 16;
+      rank = min(15, <i32>Mathf.floor(clamp(s.spatial, 0.0, 1.0) * 16.0));
+    }
+    let g: i32;
+    if (s.distGroup >= 0) g = s.distGroup % this.rows;
+    else if (this.blocks) g = min(this.rows - 1, rank * this.rows / max(count, 1));
+    else g = rank % this.rows;
 
-    if (this.pattern == SCATTER) {
-      let density = this.density;
-      if (this.variation > 0.0) {
-        const v = seededRandom(cycle * 1664525 + 1013904223) * 2.0 - 1.0;
-        density = clamp(this.density + v * this.variation, 0.0, 1.0);
-      }
-      const cycleSeed = cycle * 2654435761;
-      const n = max(s.groupCount, 1);
-      const target = <i32>roundAway(density * <f32>n);
-      const mine = seededRandom(<u32>s.groupIndex + cycleSeed);
-      let rank = 0;
-      for (let i = 0; i < s.groupCount; i++) {
-        if (seededRandom(<u32>i + cycleSeed) < mine) rank++;
-      }
-      this.emit((rank < target) != this.invert, s, out);
-      return;
+    const tp = ctx.timePhase;
+    const fk = Mathf.floor(tp);
+    const f = tp - fk;
+    const k = ((<i32>fk % this.steps) + this.steps) % this.steps;
+    const on = this.cell(k, g);
+    let v = on;
+    const w = this.transition;
+    if (w > 0.0 && f > 1.0 - w) {
+      const t = (f - (1.0 - w)) / w;
+      const next = this.cell((k + 1) % this.steps, g);
+      v = on + (next - on) * (t * t * (3.0 - 2.0 * t));
     }
-    if (this.pattern > SCATTER) {
-      // Flow: moving Perlin boundary.
-      const t: f32 = ctx.phaseSpeed > 0.0 ? ctx.timeMs / 1000.0 * ctx.phaseSpeed : 0.0;
-      const cell = Mathf.max(this.scale, 0.01);
-      const noise = perlin2(s.x / cell + t, s.y / cell + t * 0.7);
-      this.emit((noise > this.density * 2.0 - 1.0) != this.invert, s, out);
-      return;
-    }
-
-    const dx = s.x - this.ox;
-    const dy = s.y - this.oy;
-    const u = dx * this.cos + dy * this.sin;
-    const v = -dx * this.sin + dy * this.cos;
-    const cell = this.scale;
-    let on: bool;
-    if (this.pattern == SPLIT) {
-      on = v > 0.0;
-    } else if (this.pattern == CHECKERBOARD) {
-      const gu = cell > 0.0 ? <i32>Mathf.floor(u / cell) : 0;
-      const gv = cell > 0.0 ? <i32>Mathf.floor(v / cell) : 0;
-      on = ((gu + gv) % 2 + 2) % 2 == 0;
-    } else {
-      on = cell > 0.0 ? <i32>Mathf.abs(Mathf.floor(u / cell)) % 2 == 0 : true;
-    }
-    // Flip every half cycle.
-    if (fract(s.phase) >= 0.5) on = !on;
-    this.emit(on != this.invert, s, out);
+    out.set(0, this.invert ? 1.0 - v : v);
   }
 }
 
-register(new Sequencer());
+register(new Pattern());

@@ -700,11 +700,11 @@ Rewrite `plugins/sequencer` (alias kept; display name **"Pattern"**).
   - click toggles a cell; drag paints;
   - playhead column highlight (M5.5);
   - `groups` follows the instance's `distGroupCount` (prop), and rows beyond it are shown disabled.
-- [ ] **M8.3 Manifest:**
+- [x] **M8.3 Manifest:**
   - `signatures: ["scalar"]`, output per M0.2.
   - Params: `steps` (primary, default 2 groups × 2 steps diagonal), `transition` 0–1 (Hard→Soft), `invert` (advanced).
   - Distribution: modes `order`, `linear`, `radial` (grouping on quantized spatial), scopes both, grouping **required**, default `{ mode:'order', grouping:{ kind:'everyN', n:2 } }`.
-- [ ] **M8.4 Plugin math:**
+- [x] **M8.4 Plugin math:**
   ```
   k = floor(timePhase) mod steps; f = fract(timePhase)
   g = distGroup >= 0 ? distGroup mod groups : rank mod groups

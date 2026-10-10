@@ -2,19 +2,404 @@
   "schema": 1,
   "kind": "modifier",
   "alias": "@pixelmapper/sequencer",
-  "name": "Sequencer",
-  "version": "1.0.0",
-  "apiVersion": "^1.0.0",
-  "description": "Switches fixtures on and off in spatial patterns: split (half plane), checkerboard, sections (bands), scatter (random subset per cycle) and flow (moving Perlin boundary). Geometric patterns invert every half cycle. Off fixtures are darkened by the strength.",
-  "signatures": ["scalar"],
-  "output": "bipolar",
+  "name": "Pattern",
+  "version": "2.0.0",
+  "apiVersion": "^1.1.0",
+  "description": "Switches groups of fixtures on and off step by step. The rows of the step grid are groups taken from the order numbers on the canvas: Alternate (1-2-1-2, neighbours differ) or Blocks (1-1-2-2, consecutive runs). One step per tempo unit; Transition crossfades into the next step. Off = dimmed by the strength.",
+  "purpose": "Groups of fixtures switch on and off in steps.",
+  "speedUnit": "per step",
+  "signatures": [
+    "scalar"
+  ],
+  "output": "scale",
+  "distribution": {
+    "modes": [
+      "order",
+      "linear",
+      "radial"
+    ],
+    "scopes": [
+      "across",
+      "within"
+    ],
+    "grouping": false,
+    "default": {
+      "mode": "order"
+    }
+  },
   "params": [
-    { "key": "patternType", "type": "enum", "options": ["split", "checkerboard", "sections", "scatter", "flow"], "optionLabels": ["Split", "Checkerboard", "Sections", "Scatter", "Flow"], "default": "split", "label": "Pattern" },
-    { "key": "origin", "type": "point", "default": { "x": 0.5, "y": 0.5 }, "label": "Origin" },
-    { "key": "angle", "type": "angle", "default": 0, "label": "Angle" },
-    { "key": "scale", "type": "number", "min": 0.01, "max": 1, "default": 0.1, "label": "Cell size" },
-    { "key": "density", "type": "number", "min": 0, "max": 1, "default": 0.5, "label": "Density", "description": "Share of fixtures on (scatter, flow)." },
-    { "key": "densityVariation", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Density variation" },
-    { "key": "invert", "type": "bool", "default": false, "label": "Invert" }
+    {
+      "key": "arrange",
+      "type": "enum",
+      "options": [
+        "alternate",
+        "blocks"
+      ],
+      "optionLabels": [
+        "Alternate",
+        "Blocks"
+      ],
+      "default": "alternate",
+      "label": "Groups",
+      "tier": "primary",
+      "description": "How the numbered fixtures form the grid's rows: alternate (1-2-1-2) or consecutive blocks (1-1-2-2)."
+    },
+    {
+      "key": "steps",
+      "type": "steps",
+      "label": "Steps",
+      "tier": "primary",
+      "default": {
+        "groups": 2,
+        "steps": 2,
+        "cells": [
+          [
+            true,
+            false
+          ],
+          [
+            false,
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "key": "transition",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "label": "Transition",
+      "tier": "primary",
+      "description": "Hard switch (0) to a crossfade over the whole step (1)."
+    },
+    {
+      "key": "invert",
+      "type": "bool",
+      "default": false,
+      "label": "Invert",
+      "tier": "advanced"
+    }
+  ],
+  "presets": [
+    {
+      "id": "odd-even",
+      "label": "Odd/Even",
+      "description": "Every other fixture, swapping on the beat.",
+      "params": {
+        "arrange": "alternate",
+        "steps": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1,
+      "default": true,
+      "when": {
+        "kind": [
+          "row"
+        ]
+      }
+    },
+    {
+      "id": "left-right",
+      "label": "Left/Right",
+      "description": "First half, then second half.",
+      "params": {
+        "arrange": "blocks",
+        "steps": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1
+    },
+    {
+      "id": "blocks",
+      "label": "Blocks",
+      "description": "Four blocks light one after another.",
+      "params": {
+        "arrange": "blocks",
+        "steps": {
+          "groups": 4,
+          "steps": 4,
+          "cells": [
+            [
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              false,
+              true,
+              false,
+              false
+            ],
+            [
+              false,
+              false,
+              true,
+              false
+            ],
+            [
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1
+    },
+    {
+      "id": "outside-in",
+      "label": "Outside-In",
+      "description": "The outer pairs first, then toward the center.",
+      "params": {
+        "arrange": "blocks",
+        "steps": {
+          "groups": 3,
+          "steps": 3,
+          "cells": [
+            [
+              false,
+              false,
+              true
+            ],
+            [
+              false,
+              true,
+              false
+            ],
+            [
+              true,
+              false,
+              false
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": true
+        }
+      },
+      "strength": 1
+    },
+    {
+      "id": "build-up",
+      "label": "Build-Up",
+      "description": "Blocks add up until everything is on.",
+      "params": {
+        "arrange": "blocks",
+        "steps": {
+          "groups": 4,
+          "steps": 4,
+          "cells": [
+            [
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              true,
+              true,
+              false,
+              false
+            ],
+            [
+              true,
+              true,
+              true,
+              false
+            ],
+            [
+              true,
+              true,
+              true,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1
+    },
+    {
+      "id": "checker",
+      "label": "Checker",
+      "description": "Alternating fixtures across the area.",
+      "params": {
+        "arrange": "alternate",
+        "steps": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1,
+      "when": {
+        "kind": [
+          "area"
+        ]
+      }
+    },
+    {
+      "id": "segments",
+      "label": "Segments",
+      "description": "Each bar's segments light in turn.",
+      "params": {
+        "arrange": "blocks",
+        "steps": {
+          "groups": 4,
+          "steps": 4,
+          "cells": [
+            [
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              false,
+              true,
+              false,
+              false
+            ],
+            [
+              false,
+              false,
+              true,
+              false
+            ],
+            [
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        },
+        "transition": 0
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.5
+      },
+      "distribution": {
+        "scope": "within",
+        "withinOffset": "none",
+        "reverse": false
+      },
+      "strength": 1,
+      "when": {
+        "multiHead": true
+      }
+    }
   ]
 }

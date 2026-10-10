@@ -7,6 +7,7 @@
   "apiVersion": "^1.1.0",
   "description": "Brightness shape that moves across the fixtures. The profile curve says what is lit over the distance from the moving position (dot, bar, wave, wedge, edge, flash; peak/floor bound it), the motion curve says where that position is during one pass (run, ping-pong, step, hold, ease). Levels are fractions of the programmed value; the shared distribution decides the order and direction.",
   "purpose": "Brightness runs, swings or breathes across your fixtures.",
+  "speedUnit": "per pass",
   "signatures": ["scalar"],
   "output": "scale",
   "distribution": {

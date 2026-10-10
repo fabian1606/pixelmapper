@@ -55,7 +55,7 @@ const engineStore = useEngineStore();
 const manifest = computed(() => getManifest(props.modifier.plugin));
 const status = computed(() => pluginStatus(props.modifier.plugin));
 const resolved = computed(() => resolveDistribution(props.modifier, engineStore.flatFixtures));
-const { position } = useModifierPhase(() => props.modifier);
+const { position, timePhase } = useModifierPhase(() => props.modifier);
 
 /** Custom panel of the plugin, if it ships one. */
 const panel = computed(() => {
@@ -105,7 +105,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           v-if="panel?.placement !== 'replace-params'"
           :schema="manifest.params" :model-value="modifier.params" :editors="manifest.editors"
           :more-key="manifest.alias" :distribution-mode="modifier.distribution.mode"
-          :ticks="resolved.ticks" :beats="beats" :playhead="position"
+          :ticks="resolved.ticks" :beats="beats" :playhead="position" :time-phase="modifier.speed.mode === 'infinite' ? null : timePhase"
           :editor-context="{ rankCount: resolved.ticks, activeGroups: resolved.ticks, playhead: position, baseHue }"
           @update:model-value="v => emit('update', 'params', v)" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         >

@@ -70,7 +70,7 @@
         "default": false,
         "label": "Floor",
         "group": "Window",
-        "description": "Hold at base \u00d7 floor outside start/end, independent of strength."
+        "description": "Hold at base × floor outside start/end, independent of strength."
       },
       {
         "key": "floor",
@@ -95,7 +95,7 @@
         "max": 180,
         "default": 0,
         "label": "Hue shift",
-        "unit": "\u00b0"
+        "unit": "°"
       },
       {
         "key": "saturation",
@@ -112,7 +112,7 @@
         "max": 180,
         "default": 0,
         "label": "Hue cycle",
-        "unit": "\u00b0",
+        "unit": "°",
         "group": "Cycle"
       },
       {
@@ -157,6 +157,316 @@
         "default": 0.5,
         "label": "Shape amount",
         "group": "Cycle"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:792e8836d580e06fd98ddad53b69af615bc0106009892c1b2d55fde57cc87a6b",
+    "alias": "@pixelmapper/color-adjust",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "options": [
+          "palette",
+          "shift"
+        ],
+        "optionLabels": [
+          "Palette",
+          "Shift"
+        ],
+        "default": "shift",
+        "label": "Mode",
+        "tier": "primary",
+        "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue."
+      },
+      {
+        "key": "palette",
+        "type": "gradient",
+        "label": "Palette",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "default": {
+          "stops": [
+            {
+              "pos": 0,
+              "color": {
+                "r": 1,
+                "g": 0,
+                "b": 0
+              }
+            },
+            {
+              "pos": 0.5,
+              "color": {
+                "r": 0,
+                "g": 0,
+                "b": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "gradient",
+          "alternate"
+        ],
+        "optionLabels": [
+          "Gradient",
+          "Alternate"
+        ],
+        "default": "gradient",
+        "label": "Arrange",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color."
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "when": {
+          "mode": "palette",
+          "arrange": "gradient"
+        },
+        "description": "Hard steps (0) to soft blends (1)."
+      },
+      {
+        "key": "hueShift",
+        "type": "number",
+        "min": -180,
+        "max": 180,
+        "default": 0,
+        "label": "Hue shift",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "hueRange",
+        "type": "number",
+        "min": 0,
+        "max": 180,
+        "default": 40,
+        "label": "Hue range",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "saturation",
+        "type": "number",
+        "min": 0,
+        "max": 2,
+        "default": 1,
+        "label": "Saturation",
+        "tier": "primary",
+        "when": {
+          "mode": "shift"
+        }
+      },
+      {
+        "key": "satDip",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "White dip",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How far the profile's peak fades toward white."
+      },
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How the hue swings over the distance from the moving position.",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "wave",
+          "dot",
+          "bar",
+          "wedge",
+          "flash"
+        ],
+        "default": {
+          "shape": "wave",
+          "args": {}
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the colors are during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      }
+    ]
+  },
+  {
+    "hash": "sha256:0732e43261bb953faf8d1a7d178b55a7a5cdc3a422bc9e8378d55763096b53a1",
+    "alias": "@pixelmapper/sequencer",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "patternType",
+        "type": "enum",
+        "options": [
+          "split",
+          "checkerboard",
+          "sections",
+          "scatter",
+          "flow"
+        ],
+        "optionLabels": [
+          "Split",
+          "Checkerboard",
+          "Sections",
+          "Scatter",
+          "Flow"
+        ],
+        "default": "split",
+        "label": "Pattern"
+      },
+      {
+        "key": "origin",
+        "type": "point",
+        "default": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "label": "Origin"
+      },
+      {
+        "key": "angle",
+        "type": "angle",
+        "default": 0,
+        "label": "Angle"
+      },
+      {
+        "key": "scale",
+        "type": "number",
+        "min": 0.01,
+        "max": 1,
+        "default": 0.1,
+        "label": "Cell size"
+      },
+      {
+        "key": "density",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.5,
+        "label": "Density",
+        "description": "Share of fixtures on (scatter, flow)."
+      },
+      {
+        "key": "densityVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Density variation"
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:50a39fccd9e01a3810ff91f168bdf531b69ab7cee13f1c5138dd78024ffa9b16",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "advanced",
+        "description": "Dark where the profile is lit."
       }
     ]
   }

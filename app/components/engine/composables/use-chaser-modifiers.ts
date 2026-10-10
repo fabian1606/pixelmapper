@@ -66,16 +66,6 @@ export function useChaserModifiers(
     });
   });
 
-  /** Average position of the edited fixtures (default origin). */
-  function averagePosition(): { x: number; y: number } {
-    const n = props.fixtures.length;
-    if (n === 0) return { x: 0.5, y: 0.5 };
-    return {
-      x: props.fixtures.reduce((sum, f) => sum + f.fixturePosition.x, 0) / n,
-      y: props.fixtures.reduce((sum, f) => sum + f.fixturePosition.y, 0) / n,
-    };
-  }
-
   /**
    * Host defaults for a new instance of `plugin` on the edited fixtures:
    * targets, blend mode (absolute outputs override instead of add), a
@@ -83,7 +73,6 @@ export function useChaserModifiers(
    */
   function newInstance(plugin: string, carry?: ModifierInstance): ModifierInstance {
     const manifest = getManifest(plugin);
-    const { x, y } = averagePosition();
     const inst = createModifier(plugin, {
       targetChannels: [...(carry?.targetChannels ?? availableChannelTypes.value)],
       targetFixtureIds: carry?.targetFixtureIds ? [...carry.targetFixtureIds] : props.fixtures.map(f => f.id),
@@ -102,11 +91,6 @@ export function useChaserModifiers(
     if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
       if (!carry) inst.strength = 0.5;
       inst.speed = carry ? inst.speed : { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
-      inst.distribution = { ...inst.distribution, mode: 'none' };
-    }
-    else if (plugin === builtinHash(BUILTIN_ALIASES.sequencer)) {
-      // Vertical split axis through the fixtures — sensible for horizontal rows.
-      inst.params = { ...inst.params, origin: { x, y }, angle: Math.PI / 2 };
       inst.distribution = { ...inst.distribution, mode: 'none' };
     }
     else if (plugin === builtinHash(BUILTIN_ALIASES.colorAdjust)) {

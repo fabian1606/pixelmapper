@@ -36,6 +36,8 @@ const props = withDefaults(defineProps<{
   beats?: number;
   /** Live position in the cycle (0–1) for `cycle` curves' playheads; null = none. */
   playhead?: number | null;
+  /** Live time phase (unwrapped) for step grids. */
+  timePhase?: number | null;
   /** Extra props for composite editors (e.g. rank count, live phase). */
   editorContext?: Record<string, unknown>;
 }>(), { disabled: false, size: 'sm', ticks: 0, beats: 0, playhead: null, editors: () => [] });
@@ -87,7 +89,7 @@ function set(key: string, value: ParamValue) {
 
 const groupProps = computed(() => ({
   schema: props.schema, modelValue: props.modelValue, disabled: props.disabled, size: props.size,
-  ticks: props.ticks, beats: props.beats, playhead: props.playhead,
+  ticks: props.ticks, beats: props.beats, playhead: props.playhead, timePhase: props.timePhase,
 }));
 </script>
 

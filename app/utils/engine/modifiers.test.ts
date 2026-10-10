@@ -53,8 +53,10 @@ describe('modifier instances', () => {
   it('creates instances with manifest param defaults', () => {
     const m = createModifier(builtinHash(BUILTIN_ALIASES.sequencer), { targetChannels: ['DIMMER'] });
     expect(m.signature).toBe('scalar');
-    expect(m.params.patternType).toBe('split');
-    expect(m.params.origin).toEqual({ x: 0.5, y: 0.5 });
+    expect(m.params.arrange).toBe('alternate');
+    expect(m.params.steps).toEqual({ groups: 2, steps: 2, cells: [[true, false], [false, true]] });
+    // Manifest distribution default (plan §1.4).
+    expect(m.distribution.mode).toBe('order');
     expect(m.targetChannels).toEqual(['DIMMER']);
   });
 
@@ -65,13 +67,13 @@ describe('modifier instances', () => {
   it('clones deeply (also reactive proxies)', () => {
     const m = reactive(createModifier(builtinHash(BUILTIN_ALIASES.sequencer)));
     const c = cloneModifier(m);
-    (c.params.origin as { x: number }).x = 0.9;
-    expect((m.params.origin as { x: number }).x).toBe(0.5);
+    (c.params.steps as { cells: boolean[][] }).cells[0]![0] = false;
+    expect((m.params.steps as { cells: boolean[][] }).cells[0]![0]).toBe(true);
   });
 
   it('names instances by manifest name and first enum label', () => {
-    const m = createModifier(builtinHash(BUILTIN_ALIASES.sequencer), { params: { patternType: 'checkerboard' } });
-    expect(modifierName(m)).toBe('Sequencer · Checkerboard');
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.sequencer), { params: { arrange: 'blocks' } });
+    expect(modifierName(m)).toBe('Pattern · Blocks');
   });
 });
 
