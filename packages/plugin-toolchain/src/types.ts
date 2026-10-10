@@ -42,6 +42,40 @@ export interface ManifestDistribution {
   default?: DistributionPatch;
 }
 
+/** A composite editor: one `pm.*` input bound to several params (plan §1.4). */
+export interface ManifestEditor {
+  id: string;
+  /** The `pm.*` input that renders it. */
+  input: string;
+  /** Input prop name → param key. */
+  bind: Record<string, string>;
+  /** Show only when the condition holds. */
+  when?: import('@pixelmapper/extension-api').ParamCondition;
+  /** Optional label above the editor. */
+  label?: string;
+}
+
+/** Selection rule for picking a recipe on add (plan M5.8). */
+export interface PresetWhen {
+  kind?: ('single' | 'row' | 'ring' | 'area')[];
+  multiHead?: boolean;
+  hasColor?: boolean;
+}
+
+/** A recipe: a named, complete look (plan §1.4). */
+export interface ManifestPreset {
+  id: string;
+  label: string;
+  description?: string;
+  params: Record<string, ParamValue>;
+  speed?: { mode: 'time' | 'beat' | 'infinite'; timeMs?: number; beatValue?: number; beatOffset?: number };
+  distribution?: DistributionPatch;
+  strength?: number;
+  /** The recipe used when no `when` rule matches (at most one). */
+  default?: boolean;
+  when?: PresetWhen;
+}
+
 /** `manifest.json` of a content plugin. */
 export interface ContentPluginManifest {
   schema: 1;
@@ -61,6 +95,12 @@ export interface ContentPluginManifest {
   ui?: ContentPluginUi;
   /** Distribution options (plan §1.4). */
   distribution?: ManifestDistribution;
+  /** One sentence shown in the Add menu. */
+  purpose?: string;
+  /** Composite editors, rendered first, in order. */
+  editors?: ManifestEditor[];
+  /** Recipes. */
+  presets?: ManifestPreset[];
 }
 
 /** A built, content-addressed plugin package. */

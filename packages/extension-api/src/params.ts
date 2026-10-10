@@ -33,7 +33,17 @@ export interface ParamBase<T extends string, V> {
   ui?: PmInputName;
   /** Visual group name; params with the same group share a section. */
   group?: string;
+  /**
+   * Where the param renders (plan §1.4): `primary` = card body (default),
+   * `advanced` = under "More", `hidden` = never (recipes and editors set it).
+   */
+  tier?: 'primary' | 'advanced' | 'hidden';
+  /** Show only when every condition holds (other param keys, `distribution.mode`). */
+  when?: ParamCondition;
 }
+
+/** Equality conditions on other param keys and `distribution.mode`; arrays mean "one of". */
+export type ParamCondition = Record<string, string | number | boolean | (string | number | boolean)[]>;
 
 /** Continuous number. Wire: 1 f32. Default input: `pm.fader`. */
 export interface NumberParam extends ParamBase<'number', number> {

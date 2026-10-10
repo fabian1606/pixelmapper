@@ -6,6 +6,7 @@ import semver from 'semver';
 import type { ParamDef } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
 import { validateCurveParam } from './manifest-curve';
+import { validateManifestUx } from './manifest-ux';
 
 /** Plugin ABI/SDK version this toolchain produces. */
 export const PLUGIN_API_VERSION = '1.1.0';
@@ -99,6 +100,8 @@ export function validateManifest(json: unknown): ManifestValidation {
       keys.add(p.key);
     });
   }
+
+  validateManifestUx(m, errors);
 
   if (m.ui !== undefined) {
     if (!m.ui || typeof m.ui.panel !== 'string' || !m.ui.panel.endsWith('.ts')) errors.push('ui.panel must name a .ts file');

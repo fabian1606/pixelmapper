@@ -545,7 +545,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
 
 ### Phase M5 — Card framework (recipes, composite editors, tiers, strip)
 
-- [ ] **M5.1 Manifest fields.** Types + validation for `purpose`, `distribution`, `editors`, `presets`, `tier`, `when` (§1.4) in `packages/plugin-toolchain/src/{types,manifest}.ts`.
+- [x] **M5.1 Manifest fields.** Types + validation for `purpose`, `distribution`, `editors`, `presets`, `tier`, `when` (§1.4) in `packages/plugin-toolchain/src/{types,manifest}.ts`.
 
   Validation:
   - preset params must exist and match types;
