@@ -785,8 +785,8 @@ Rewrite `plugins/noise` (alias and name **"Noise"** kept).
 
 ### Phase M10 — Strength & blend polish
 
-- [ ] **M10.1** Strength in the tempo row (M5.6), shown as %.
-- [ ] **M10.2** Blend mode per card under "More". Remove the category-wide "Stacking" select from `CategoryEffectsManager.vue`, or keep it as "Apply to all" — decide and document.
+- [x] **M10.1** Strength in the tempo row (M5.6), shown as %.
+- [x] **M10.2** Blend mode per card under "More". *Decided (owner): the Stacking select is removed; the card select keeps the established names (Add, Override, Mask, Brighten, Darken) and explanations.* Remove the category-wide "Stacking" select from `CategoryEffectsManager.vue`, or keep it as "Apply to all" — decide and document.
 
 ### Phase M11 — Docs & AI
 

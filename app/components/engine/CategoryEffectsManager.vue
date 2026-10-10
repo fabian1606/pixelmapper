@@ -4,26 +4,11 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { ModifierInstance } from '~/utils/engine/types';
-import { getManifest } from '~/utils/plugins/plugin-store';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import type { BlendMode } from '~/utils/engine/types';
 
-const BLEND_MODE_LABELS: Record<BlendMode, string> = {
-  add: 'Add', override: 'Override', multiply: 'Mask', max: 'Brighten', min: 'Darken',
-};
-
-const BLEND_MODE_DESCRIPTIONS: Record<BlendMode, string> = {
-  add: 'Offsets from all modifiers are summed together. A waveform with strength 50 and another with strength 30 produce a combined swing of ±80 around the base.',
-  override: 'Each modifier fully replaces whatever came before it. Only the last modifier in the list determines the final value — earlier ones have no effect.',
-  multiply: 'The accumulated result is multiplied by each modifier\'s output. Best with a Sequencer: OFF fixtures are dimmed toward black while ON fixtures keep the previous modifiers intact.',
-  max: 'The brighter value wins at each step. Useful for combining two waveforms that should boost brightness without clipping — each one can only add, never subtract.',
-  min: 'The darker value wins at each step. Use to cut brightness or create shadow zones — a waveform can only reduce the result, never push it higher.',
-};
 import ChaserStepsList from './ChaserStepsList.vue';
 import ChaserModifiersList from './ChaserModifiersList.vue';
 
@@ -124,21 +109,6 @@ watch(activeModifiers, (modifiers) => {
   }
 });
 
-/**
- * Stack mode: blend mode applied to every bipolar modifier of this category
- * (absolute outputs such as color adjust keep their own mode). One undo step.
- */
-function setStackMode(mode: BlendMode) {
-  if (!effectEngine) return;
-  const before = historyTools.captureModifiers();
-  effectEngine.stackBlendMode.value = mode;
-  for (const m of activeModifiers.value) {
-    if (getManifest(m.plugin)?.output !== 'absolute') m.blendMode = mode;
-  }
-  if (before) historyTools.commitModifiers(before, `Stacking: ${BLEND_MODE_LABELS[mode]}`);
-  handleChange();
-}
-
 function openModifier(effectId?: string) {
   layerMode.value = 'modifiers';
   if (effectId && effectEngine) {
@@ -202,30 +172,6 @@ defineExpose({
       <!-- Modifiers Level (scrollable) -->
       <ScrollArea v-else-if="layerMode === 'modifiers'" class="flex-1 min-h-0">
         <div class="px-4 pb-3 space-y-4">
-          <!-- Blend mode selector — only when 2+ modifiers active -->
-          <div v-if="activeModifiers.length >= 2" class="flex items-center gap-2">
-            <span class="text-xs text-muted-foreground w-20 shrink-0">Stacking</span>
-            <Select
-              :model-value="effectEngine?.stackBlendMode?.value ?? 'add'"
-              @update:model-value="(v: any) => setStackMode(v as BlendMode)"
-            >
-              <SelectTrigger class="h-7 text-xs flex-1" @click.stop @pointerdown.stop>
-                <span>{{ BLEND_MODE_LABELS[effectEngine?.stackBlendMode?.value ?? 'add'] }}</span>
-              </SelectTrigger>
-              <SelectContent @pointerdown.stop>
-                <TooltipProvider :delay-duration="400">
-                  <Tooltip v-for="(label, mode) in BLEND_MODE_LABELS" :key="mode">
-                    <TooltipTrigger as-child>
-                      <SelectItem :value="mode" class="text-xs">{{ label }}</SelectItem>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" class="max-w-[220px] text-xs bg-popover text-popover-foreground border border-border">
-                      {{ BLEND_MODE_DESCRIPTIONS[mode as BlendMode] }}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </SelectContent>
-            </Select>
-          </div>
           <ChaserModifiersList
             :active-modifiers="activeModifiers"
             :active-modifier="effectEngine?.activeModifier?.value ?? null"

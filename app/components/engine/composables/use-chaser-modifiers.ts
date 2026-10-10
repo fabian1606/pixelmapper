@@ -78,7 +78,7 @@ export function useChaserModifiers(
       targetFixtureIds: carry?.targetFixtureIds ? [...carry.targetFixtureIds] : props.fixtures.map(f => f.id),
       strength: carry?.strength ?? 1,
       speed: carry ? { ...carry.speed } : { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
-      blendMode: manifest?.output === 'absolute' ? 'override' : (effectEngine?.stackBlendMode.value ?? 'add'),
+      blendMode: manifest?.output === 'absolute' ? 'override' : 'add',
       distribution: carry ? carry.distribution : { mode: 'linear', origin: { ...selectionShape.value.axis.a }, end: { ...selectionShape.value.axis.b } },
     });
     // Recipes (plan M5.8): the recipe matching the selection, placed on it.

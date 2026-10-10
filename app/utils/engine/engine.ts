@@ -8,7 +8,7 @@
  */
 import { reactive, ref, shallowRef, type Ref } from 'vue';
 import { Watchdog } from '~/utils/plugins/watchdog';
-import type { BlendMode, ModifierInstance } from './types';
+import type { ModifierInstance } from './types';
 import type { SignatureFrame } from '~/utils/extensions/live-hub';
 
 /** Events reported by the worker's plugin bridge. */
@@ -20,7 +20,6 @@ export class EffectEngine {
   /** The modifier list (shared with the engine store's `modifiers`). */
   public modifiers = reactive<ModifierInstance[]>([]);
   /** Blend mode for new modifiers; the stack-mode selector applies it to all. */
-  public stackBlendMode = ref<BlendMode>('add');
   /** Modifier selected in the UI (spatial handles, editor). */
   public activeModifier: Ref<ModifierInstance | null> = ref(null);
   public globalBpm = ref<number>(120);

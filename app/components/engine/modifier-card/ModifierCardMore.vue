@@ -5,6 +5,7 @@
  */
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { BlendMode } from '~/utils/engine/types';
+import { BLEND_MODE_DESCRIPTIONS, BLEND_MODE_LABELS } from '~/utils/engine/blend-modes';
 
 defineProps<{ blendMode: BlendMode }>();
 
@@ -13,13 +14,7 @@ const emit = defineEmits<{
   'dropdown-open-change': [open: boolean];
 }>();
 
-const MODES: { value: BlendMode; label: string; title: string }[] = [
-  { value: 'add', label: 'Add', title: 'Adds its change to the result above' },
-  { value: 'override', label: 'Override', title: 'Replaces the result above' },
-  { value: 'multiply', label: 'Multiply', title: 'Multiplies the result above' },
-  { value: 'max', label: 'Max', title: 'Keeps the brighter value' },
-  { value: 'min', label: 'Min', title: 'Keeps the darker value' },
-];
+const MODES = (Object.keys(BLEND_MODE_LABELS) as BlendMode[]).map(value => ({ value, label: BLEND_MODE_LABELS[value], title: BLEND_MODE_DESCRIPTIONS[value] }));
 </script>
 
 <template>
