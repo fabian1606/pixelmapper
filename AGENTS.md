@@ -13,7 +13,8 @@ Pixelmapper is a multi-runtime DMX lighting controller with three sub-projects:
 ### Main Frontend
 ```bash
 bun install              # Install deps (runs postinstall: nuxt prepare + setup-ofl.sh)
-bun run dev              # Full dev: Nuxt + concurrent WASM rebuilds
+bun run dev              # Full dev: builds WASM once, then Nuxt + WASM rebuilds on Rust changes
+bun run build:wasm       # Build rs-engine-canvas + rs-engine-core into node_modules
 bun run dev:nuxt         # Nuxt dev only (no WASM watch)
 bun run build            # Production build
 bun run generate         # Static site generation

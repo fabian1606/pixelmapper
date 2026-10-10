@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "bun run build:plugins && bun run build:extensions && nuxt build",
-    "dev": "bun run build:extensions && concurrently -n nuxt,canvas,core,artnet,plugins -c cyan,yellow,green,magenta,blue \"nuxt dev\" \"cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\" \"bun run scripts/build-plugins.ts --watch\"",
+    "dev": "bun run build:wasm && bun run build:extensions && concurrently -n nuxt,canvas,core,artnet,plugins -c cyan,yellow,green,magenta,blue \"nuxt dev\" \"cargo watch --postpone -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch --postpone -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\" \"bun run scripts/build-plugins.ts --watch\"",
     "artnet-bridge": "bun run tools/artnet-bridge/index.ts",
     "dev:nuxt": "bun run build:plugins && bun run build:extensions && nuxt dev",
     "dev:wasm:canvas": "cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'",
@@ -39,7 +39,8 @@
     "build:plugins": "bun run scripts/build-plugins.ts",
     "build:extensions": "bun run scripts/build-extensions.ts",
     "check:zero-extensions": "bun run scripts/check-zero-extensions.ts",
-    "docs:ai": "bun run scripts/generate-ai-docs.ts"
+    "docs:ai": "bun run scripts/generate-ai-docs.ts",
+    "build:wasm": "cd rs-engine/canvas && wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas && cd ../core && wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core"
   },
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",
