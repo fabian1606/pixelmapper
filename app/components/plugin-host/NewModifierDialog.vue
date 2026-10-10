@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { ContentPluginPackage } from '@pixelmapper/plugin-toolchain/types';
 import { buildFromCode, type CreateResult } from '~/utils/plugins/create-plugin';
 import { publish } from '~/utils/plugins/plugin-store';
+import DesignPrinciplesDialog from './DesignPrinciplesDialog.vue';
 import type { PluginVisibility } from '~/utils/plugins/plugin-remote';
 import { createModifier } from '~/utils/engine/modifiers';
 import ModifierPreview from './ModifierPreview.vue';
@@ -107,6 +108,9 @@ async function add(pkg: ContentPluginPackage) {
 
 /** Severity → text color. */
 const SEVERITY_CLASS = { error: 'text-destructive', warning: 'text-amber-500', info: 'text-muted-foreground' } as const;
+
+/** The design principles dialog (plan M11.4). */
+const principlesOpen = ref(false);
 </script>
 
 <template>
@@ -116,8 +120,10 @@ const SEVERITY_CLASS = { error: 'text-destructive', warning: 'text-amber-500', i
         <DialogTitle>New modifier from code</DialogTitle>
         <DialogDescription class="text-xs">
           AssemblyScript content plugin — see architecture/guides/authoring-content-plugins.md.
+          <button type="button" class="ml-1 underline underline-offset-2 hover:text-foreground" data-principles-link @click="principlesOpen = true">Design principles</button>
         </DialogDescription>
       </DialogHeader>
+      <DesignPrinciplesDialog v-model:open="principlesOpen" />
 
       <div class="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4">
         <!-- Sources -->

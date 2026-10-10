@@ -73,20 +73,37 @@ export async function buildFromCode(input: CreateInput): Promise<CreateResult> {
 
 // ── Template ─────────────────────────────────────
 
-/** Starting manifest for new modifiers. */
+/**
+ * Starting manifest for new modifiers (ABI 1.1, plan M11.4): scale output,
+ * the shared distribution, recipes and param tiers — see
+ * architecture/guides/modifier-design-principles.md.
+ */
 export const TEMPLATE_MANIFEST: ContentPluginManifest = {
   schema: 1,
   kind: 'modifier',
   alias: '@me/pulse-train',
   name: 'Pulse Train',
   version: '1.0.0',
-  apiVersion: '^1.0.0',
-  description: 'Short pulses that travel across fixtures. Width sets the pulse length within a cycle.',
+  apiVersion: '^1.1.0',
+  description: 'Short pulses that travel across fixtures along the distribution. Width sets the pulse length within a pass.',
+  purpose: 'Short pulses run across your fixtures.',
+  speedUnit: 'per pass',
   signatures: ['scalar'],
-  output: 'bipolar',
+  output: 'scale',
+  distribution: { modes: ['none', 'linear', 'radial', 'order'], scopes: ['across', 'within'], default: { mode: 'order' } },
   params: [
-    { key: 'width', type: 'number', min: 0.01, max: 1, default: 0.2, label: 'Width' },
-    { key: 'soft', type: 'bool', default: true, label: 'Soft edges' },
+    { key: 'width', type: 'number', min: 0.01, max: 1, default: 0.2, label: 'Width', tier: 'primary' },
+    { key: 'soft', type: 'bool', default: true, label: 'Soft edges', tier: 'advanced' },
+  ],
+  presets: [
+    {
+      id: 'short', label: 'Short', description: 'Quick blips along the row.', default: true,
+      params: { width: 0.1, soft: false }, speed: { mode: 'beat', beatValue: 2 }, distribution: { mode: 'order' }, strength: 1,
+    },
+    {
+      id: 'swell', label: 'Swell', description: 'Slow, soft swells.',
+      params: { width: 0.5, soft: true }, speed: { mode: 'beat', beatValue: 8 }, distribution: { mode: 'linear' }, strength: 1,
+    },
   ],
 };
 
@@ -103,14 +120,16 @@ class PulseTrain extends Modifier {
     this.soft = p.bool(1);
   }
 
-  /** Called per sample per frame. Must be pure. */
+  /**
+   * Called per sample per frame. Must be pure. \`s.spatial\` is the position
+   * along the shared distribution (0 → 1), \`ctx.timePhase\` the time in passes.
+   * Output "scale": 1 = programmed value, 0 = dark.
+   */
   render(ctx: Frame, s: Sample, out: Out): void {
-    const t = fract(s.phase);
-    let v: f32 = t < this.width ? 1.0 : -1.0;
-    if (this.soft && t < this.width) {
-      v = Mathf.sin((t / this.width) * Mathf.PI) * 2.0 - 1.0;
-    }
-    out.setScalar(clamp(v, -1.0, 1.0));
+    const t = fract(s.spatial - fract(ctx.timePhase));
+    let v: f32 = t < this.width ? 1.0 : 0.0;
+    if (this.soft && t < this.width) v = Mathf.sin((t / this.width) * Mathf.PI);
+    out.setScalar(clamp(v, 0.0, 1.0));
   }
 }
 

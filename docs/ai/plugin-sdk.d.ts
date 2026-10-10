@@ -53,7 +53,7 @@ declare module '@pixelmapper/plugin-sdk' {
   /**
    * Per-render-call context (one modifier instance, one frame).
    * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
-   * strength, reserved[8].
+   * strength, timePhase, rankCount, distGroupCount (v1.1), reserved[5].
    */
   export class Frame {
       /** Address of the context buffer (set by the SDK). */
@@ -76,11 +76,18 @@ declare module '@pixelmapper/plugin-sdk' {
       get seed(): u32;
       /** Host-applied strength 0–1 (informational; the host blends the output). */
       get strength(): f32;
+      /** v1.1: speed phase in cycles (unwrapped; 1.0 = one pass). */
+      get timePhase(): f32;
+      /** v1.1: number of distribution ranks (0 when the mode has none). */
+      get rankCount(): i32;
+      /** v1.1: number of distribution groups (0 = no grouping). */
+      get distGroupCount(): i32;
   }
   /**
    * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).
    * Layout (f32): x, y, phase, groupIndex, groupCount, headIndex, headCount,
-   * seed, base0, base1, base2, channelSeedLo, channelSeedHi, reserved[3].
+   * seed, base0, base1, base2, channelSeedLo, channelSeedHi, spatial, rank,
+   * distGroup (v1.1).
    */
   export class Sample {
       /** Address of the sample (set by the SDK). */
@@ -89,7 +96,7 @@ declare module '@pixelmapper/plugin-sdk' {
       get x(): f32;
       /** Normalized world y (0–1). */
       get y(): f32;
-      /** Phase in cycles (1.0 = one full cycle): speed phase + spatial offset. */
+      /** Phase in cycles (1.0 = one full cycle): time phase − spatial (legacy; prefer `spatial`). */
       get phase(): f32;
       /** Index of the fixture among the targeted fixtures. */
       get groupIndex(): i32;
@@ -109,6 +116,12 @@ declare module '@pixelmapper/plugin-sdk' {
       get base2(): f32;
       /** 32-bit seed of the channel type (scalar samples; 0 otherwise). */
       get channelSeed(): u32;
+      /** v1.1: position along the distribution (0 at the origin / first rank, 1 at the end). */
+      get spatial(): f32;
+      /** v1.1: rank of the sample in the distribution order (−1 if none). */
+      get rank(): i32;
+      /** v1.1: distribution group of the sample (−1 without grouping). */
+      get distGroup(): i32;
   }
   /** Output of one sample: `arity` values. */
   export class Out {
@@ -165,6 +178,38 @@ declare module '@pixelmapper/plugin-sdk' {
   export const CURVE_LUT_SIZE: i32;
   /** Samples a LUT at `x` ∈ [0, 1] with linear interpolation. */
   export function sampleLut(lut: usize, x: f32, size?: i32): f32;
+  /** Wraps `x` into [−1, 1) (period 2; signed-domain profiles repeat with it). */
+  export function wrapSigned(x: f32): f32;
+  /**
+   * Samples a `signed`-domain LUT (curve `domain: "signed"`, x ∈ [−1, 1]) at
+   * `x`; values outside [−1, 1] wrap (periodic profiles).
+   */
+  export function sampleSignedLut(lut: usize, x: f32, size?: i32): f32;
+
+  // ── packages/plugin-sdk/assembly/gradient.ts ────────────────────
+  /**
+   * Gradient params (plan §1.5): 33 slots `count, (pos, r, g, b) × 8`, stops
+   * sorted by position. Address a gradient with `params.lut(slot)`. The palette
+   * is periodic in u ∈ [0, 1): stop i holds from its position to the next stop
+   * (the last wraps to the first).
+   *
+   * This module has no imports and no module-level state on purpose: adding
+   * SDK code must not change the binaries (and hashes) of plugins that do not
+   * use it.
+   */
+  /** Number of stops (1–8) of the gradient at address `g`. */
+  export function gradientCount(g: usize): i32;
+  /** Position of stop `i`. */
+  export function gradientPos(g: usize, i: i32): f32;
+  /** Channel `c` (0 = r, 1 = g, 2 = b) of stop `i`. */
+  export function gradientStopChannel(g: usize, i: i32, c: i32): f32;
+  /**
+   * Channel `c` of the periodic palette at `u` (wrapped to [0, 1)).
+   * `transition` 0 = hard (each stop holds until the next), 1 = smooth blend
+   * across the whole segment; in between the blend uses the last `transition`
+   * part of each segment.
+   */
+  export function sampleGradient(g: usize, u: f32, transition: f32, c: i32): f32;
 
   // ── packages/plugin-sdk/assembly/math.ts ────────────────────────
   /**

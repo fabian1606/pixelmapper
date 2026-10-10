@@ -50,7 +50,7 @@ describe('plugin files', () => {
   it('rejects files whose source does not build the declared hash', async () => {
     const built = await buildFromCode({ manifest: { ...TEMPLATE_MANIFEST, name: 'Tampered' }, source: { 'modifier.ts': TEMPLATE_SOURCE } });
     const file = exportPluginFile(built.pkg!.hash)!;
-    file.source = { 'modifier.ts': TEMPLATE_SOURCE.replace('* 2.0 - 1.0', '* 2.0 - 0.9') };
+    file.source = { 'modifier.ts': TEMPLATE_SOURCE.replace('v = Mathf.sin(', 'v = 0.9 * Mathf.sin(') };
     const res = await importPluginFile(JSON.stringify(file));
     expect(res.ok).toBe(false);
     expect(!res.ok && res.error).toMatch(/Hash mismatch/);

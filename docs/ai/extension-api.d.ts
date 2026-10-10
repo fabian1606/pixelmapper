@@ -424,6 +424,176 @@ declare module '@pixelmapper/extension-api' {
       protected pushLog(text: string): void;
   }
 
+  // ── packages/extension-api/src/curves.ts ────────────────────────
+  /**
+   * Curve values and programmatic curve shapes (plan M1.1, ADR A20).
+   *
+   * A curve param holds one of three value forms:
+   * - programmatic `{ shape, args }`: a registered generator with arguments
+   *   (every argument is a handle in `pm.curve`), exact and adjustable;
+   * - free `{ points }`: user-edited points with per-point segment kinds and
+   *   optional Bézier handles;
+   * - legacy `CurvePoint[]`: Catmull-Rom spline through the points.
+   *
+   * Free and legacy points are normalized 0–1 on both axes over the param's
+   * domain (`signed` maps point x 0–1 to −1…1). Shapes evaluate in domain
+   * units. On the wire every form is a 128-value LUT sampled by the host.
+   */
+
+  /** x-range of a curve LUT: `cycle` = [0, 1], `signed` = [−1, 1] (profiles). */
+  export type CurveDomain = 'cycle' | 'signed';
+  /** Tick/snap context of a curve editor. */
+  export type CurveAxis = 'fixtures' | 'beats' | 'none';
+  /** y display of a curve editor (the wire stays 0–1). */
+  export type CurveRange = 'unipolar' | 'bipolar';
+  /** How the segment to the right of a free point is drawn. */
+  export type CurvePointKind = 'smooth' | 'corner' | 'linear' | 'step';
+  /** A Bézier handle offset relative to its point (normalized units). */
+  export interface CurveHandle {
+      dx: number;
+      dy: number;
+  }
+  /** One point of a free curve (normalized 0–1 over the domain). */
+  export interface CurvePointV2 {
+      x: number;
+      y: number;
+      /** Segment kind to the right of this point. Default `smooth`. */
+      kind?: CurvePointKind;
+      /** Incoming Bézier handle (dx ≤ 0). Default: Catmull-Rom tangent, ⅓ segment. */
+      in?: CurveHandle;
+      /** Outgoing Bézier handle (dx ≥ 0). Default: Catmull-Rom tangent, ⅓ segment. */
+      out?: CurveHandle;
+  }
+  /** Programmatic curve: a registered shape with its arguments. */
+  export interface CurveShapeValue {
+      shape: string;
+      args: Record<string, number>;
+  }
+  /** Free curve: user-edited points. */
+  export interface CurveFreeValue {
+      points: CurvePointV2[];
+  }
+  /** Any curve value (programmatic, free, or legacy point list). */
+  export type CurveValue = CurveShapeValue | CurveFreeValue | CurvePoint[];
+  /** Context a shape evaluates in. */
+  export interface ShapeContext {
+      /** Rank count of the instance (fixtures in order), 0 when unknown. */
+      ticks: number;
+  }
+  /** A point in editor space: x in domain units, y in value units (0–1). */
+  export interface ShapePoint {
+      x: number;
+      y: number;
+  }
+  /** How the curve editor draws and drags one shape argument. */
+  export interface ShapeArgHandle {
+      /**
+       * - `edgeX`: double arrow on a flank, dragged horizontally;
+       * - `pointOnEdge`: filled circle on the curve;
+       * - `lineY`: full-width horizontal line with a grip, dragged vertically;
+       * - `none`: no handle (the editor shows a stepper).
+       */
+      kind: 'edgeX' | 'pointOnEdge' | 'lineY' | 'none';
+      /** Where the handle sits for the current args (editor space). */
+      anchor: (args: Record<string, number>) => ShapePoint;
+      /** Pointer position (editor space) → new argument value (clamped by the editor). */
+      drag: (args: Record<string, number>, p: ShapePoint) => number;
+      /** Snap the pointer to ticks (fixtures/beats) when the editor has an axis. */
+      snap?: 'ticks' | 'none';
+  }
+  /** One argument of a shape. */
+  export interface ShapeArgDef {
+      key: string;
+      /** User-facing name (English), e.g. "Width". */
+      label: string;
+      min: number;
+      max: number;
+      default: number;
+      step?: number;
+      handle: ShapeArgHandle;
+  }
+  /** A programmatic curve generator. */
+  export interface ShapeDef {
+      /** Registry id, e.g. `dot`. Extension shapes should be namespaced (`my-ext/zigzag`). */
+      id: string;
+      /** User-facing name (English). */
+      label: string;
+      domain: CurveDomain;
+      /** True when the shape repeats (profiles wrap outside the domain). */
+      periodic: boolean;
+      args: ShapeArgDef[];
+      /** y(x) in 0–1 for x in domain units; `ctx.ticks` = rank count. */
+      evaluate: (x: number, args: Record<string, number>, ctx: ShapeContext) => number;
+      /** Optional exact conversion to free points (else the editor samples). */
+      toPoints?: (args: Record<string, number>, ctx: ShapeContext) => CurvePointV2[];
+  }
+  /** True for a programmatic curve value. */
+  export function isShapeCurve(v: unknown): v is CurveShapeValue;
+  /** True for a free curve value. */
+  export function isFreeCurve(v: unknown): v is CurveFreeValue;
+
+  // ── packages/extension-api/src/distribution.ts ──────────────────
+  /**
+   * Distribution of a modifier instance over fixtures (plan §1.1, ADR A20).
+   *
+   * Shared by every modifier: it produces per sample `spatial` (0 at the
+   * origin / first rank, 1 at the end / after the last rank), `rank` and
+   * `distGroup`. It replaces the former direction/origin/angle/fanning/reverse
+   * fields.
+   */
+
+  /** Over fixtures, or over the heads/pixels inside each fixture. */
+  export type DistributionScope = 'across' | 'within';
+  /** How `spatial` is derived. `none` = all samples equal. */
+  export type DistributionMode = 'none' | 'linear' | 'radial' | 'conical' | 'order';
+  /** Optional mapping of ranks to groups. */
+  export type GroupingKind = 'none' | 'everyN' | 'sections' | 'random';
+  /** Fixture order (mode `order`, and scope `within` with offset `order`). */
+  export interface DistributionOrder {
+      /** Explicit ranks by fixture id (click tool / resolved line). */
+      ranks: Record<string, number>;
+      /** Last drawn line; places fixtures without an explicit rank. */
+      line?: {
+          a: Vec2;
+          b: Vec2;
+      };
+      /** Rank by distance from `line.a` on both sides (symmetric order). */
+      mirror?: boolean;
+      /** Cluster tolerance as a fraction of the median spacing (0–1). */
+      snap: number;
+  }
+  /** Grouping of ranks. `n` = group count (everyN, sections, random). */
+  export interface DistributionGrouping {
+      kind: GroupingKind;
+      n: number;
+      seed: number;
+  }
+  /** How an instance spreads over fixtures (shared by all modifiers). */
+  export interface Distribution {
+      scope: DistributionScope;
+      mode: DistributionMode;
+      /** Gradient handle, normalized world coords (linear/radial/conical). */
+      origin: Vec2;
+      end: Vec2;
+      /** Mirrors spatial: s → 1 − s. */
+      reverse: boolean;
+      order: DistributionOrder;
+      grouping: DistributionGrouping;
+      /** Scope `within`: offset fixtures by their order rank. */
+      withinOffset: 'none' | 'order';
+  }
+  /** A partial distribution (manifest defaults, recipes); nested objects may be partial too. */
+  export interface DistributionPatch {
+      scope?: DistributionScope;
+      mode?: DistributionMode;
+      origin?: Vec2;
+      end?: Vec2;
+      reverse?: boolean;
+      order?: Partial<DistributionOrder>;
+      grouping?: Partial<DistributionGrouping>;
+      withinOffset?: 'none' | 'order';
+  }
+
   // ── packages/extension-api/src/host.ts ──────────────────────────
   /**
    * Bridge to the host implementation.
@@ -742,6 +912,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
   export const API_VERSION = "1.0.0";
   /** Everything an extension can contribute. All lists are optional. */
@@ -753,6 +924,8 @@ declare module '@pixelmapper/extension-api' {
       controllers?: ControllerDefinition[];
       liveWidgets?: LiveWidgetDefinition[];
       commands?: CommandDefinition[];
+      /** Programmatic curve shapes for `pm.curve` (ids namespaced `<extension id>/<name>`). */
+      curveShapes?: ShapeDef[];
   }
   /** API passed to the optional imperative `activate` hook. */
   export interface ExtensionApi {
@@ -916,6 +1089,7 @@ declare module '@pixelmapper/extension-api' {
    */
 
 
+
   /** One control point of a curve param. Both axes are normalized 0–1. */
   export interface CurvePoint {
       /** Position in the cycle, 0–1, monotonically increasing. */
@@ -939,7 +1113,16 @@ declare module '@pixelmapper/extension-api' {
       ui?: PmInputName;
       /** Visual group name; params with the same group share a section. */
       group?: string;
+      /**
+       * Where the param renders (plan §1.4): `primary` = card body (default),
+       * `advanced` = under "More", `hidden` = never (recipes and editors set it).
+       */
+      tier?: 'primary' | 'advanced' | 'hidden';
+      /** Show only when every condition holds (other param keys, `distribution.mode`). */
+      when?: ParamCondition;
   }
+  /** Equality conditions on other param keys and `distribution.mode`; arrays mean "one of". */
+  export type ParamCondition = Record<string, string | number | boolean | (string | number | boolean)[]>;
   /** Continuous number. Wire: 1 f32. Default input: `pm.fader`. */
   export interface NumberParam extends ParamBase<'number', number> {
       min: number;
@@ -967,16 +1150,52 @@ declare module '@pixelmapper/extension-api' {
   export type AngleParam = ParamBase<'angle', number>;
   /** Normalized 2D point. Wire: 2 f32. Default input: `pm.xyInput`. */
   export type PointParam = ParamBase<'point', Vec2>;
-  /** Curve of control points. Wire: 128 f32 host-sampled LUT. Default input: `pm.curve`. */
-  export type CurveParam = ParamBase<'curve', CurvePoint[]>;
+  /**
+   * Curve (v2, plan M1.1). Wire: 128 f32 host-sampled LUT over `domain`.
+   * Default input: `pm.curve`.
+   */
+  export interface CurveParam extends ParamBase<'curve', CurveValue> {
+      /** Offered shapes (registry ids) in UI order; omitted = free editing only. */
+      shapes?: string[];
+      /** Allow converting to free points. Default true. */
+      allowFree?: boolean;
+      /** LUT x-range: `cycle` = [0, 1] (default), `signed` = [−1, 1]. */
+      domain?: CurveDomain;
+      /** Tick/snap context in the editor. Default `none`. */
+      axis?: CurveAxis;
+      /** y display; the wire stays 0–1. Default `unipolar`. */
+      range?: CurveRange;
+  }
+  /** One color stop of a gradient (position 0–1). */
+  export interface GradientStop {
+      pos: number;
+      color: RgbColor;
+  }
+  /** A gradient: 1–8 stops sorted by `pos`. */
+  export interface GradientValue {
+      stops: GradientStop[];
+  }
+  /** Color gradient. Wire: 33 f32 (`count, (pos, r, g, b) × 8`). Default input: `pm.gradient`. */
+  export type GradientParam = ParamBase<'gradient', GradientValue>;
+  /** A step grid: `cells[step][group]` on/off; 1–8 groups, 1–16 steps. */
+  export interface StepsValue {
+      groups: number;
+      steps: number;
+      cells: boolean[][];
+  }
+  /**
+   * Step grid. Wire: 18 f32 (`groups, steps, mask[16]`, `mask[s]` bit `g` =
+   * group `g` on in step `s`). Default input: `pm.steps`.
+   */
+  export type StepsParam = ParamBase<'steps', StepsValue>;
   /** Any param definition. */
-  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam;
+  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam | GradientParam | StepsParam;
   /** Param type discriminator. */
   export type ParamType = ParamDef['type'];
   /** An ordered list of param definitions. Order defines the wire layout. */
   export type ParamSchema = ParamDef[];
   /** Runtime value of any param. */
-  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurvePoint[];
+  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue;
   /** Number of f32 slots each param type occupies in the params block. */
   export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>>;
   /** Default `pm.*` input per param type (D13). */
@@ -994,6 +1213,7 @@ declare module '@pixelmapper/extension-api' {
    * Emits are declared in Vue's named-tuple form and can be passed directly to
    * `defineEmits<FaderEmits>()`.
    */
+
 
 
 
@@ -1136,13 +1356,29 @@ declare module '@pixelmapper/extension-api' {
   export type ToggleEmits = CommonInputEmits<boolean>;
   /** Props of `pm.curve`: editable curve of control points (normalized). */
   export interface CurveProps extends BaseInputProps {
-      /** Current value. */
-      modelValue: CurvePoint[];
+      /** Current value: programmatic `{ shape, args }`, free `{ points }` or legacy points. */
+      modelValue: CurveValue;
+      /** Offered shapes (registry ids) in UI order; omitted = free editing only. */
+      shapes?: string[];
+      /** Allow converting to free points. Default true. */
+      allowFree?: boolean;
+      /** x-range: `cycle` = [0, 1] (default), `signed` = [−1, 1]. */
+      domain?: CurveDomain;
+      /** Tick/snap context. Default `none`. */
+      axis?: CurveAxis;
+      /** Fixtures (axis `fixtures`) or beats per cycle (axis `beats`). */
+      ticks?: number;
+      /** y display; the value stays 0–1. Default `unipolar`. */
+      range?: CurveRange;
+      /** Playhead position in domain units, or null. */
+      playhead?: number | null;
+      /** Show the endless-strip slot (`#strip`) under the editor. */
+      strip?: boolean;
       /** Display scale of the y axis (value 1 is shown as `yMax`). Default 1. */
       yMax?: number;
   }
   /** Emits of `pm.curve`. */
-  export type CurveEmits = CommonInputEmits<CurvePoint[]>;
+  export type CurveEmits = CommonInputEmits<CurveValue>;
   /** Props of `pm.angle`: angle in radians. */
   export interface AngleProps extends BaseInputProps {
       /** Current angle in radians. */
@@ -1178,6 +1414,77 @@ declare module '@pixelmapper/extension-api' {
       press: [];
       release: [];
   }
+  /** Props of `pm.gradient`: color stops on a bar (1–8 stops). */
+  export interface GradientProps extends BaseInputProps {
+      modelValue: GradientValue;
+  }
+  /** Emits of `pm.gradient`. */
+  export type GradientEmits = CommonInputEmits<GradientValue>;
+  /**
+   * Props of `pm.hueRange` (composite editor): a 360° hue strip centered on the
+   * fixtures' hue; `shift` (degrees, −180…180) moves the center, `range`
+   * (degrees, 0…180) the swing on both sides.
+   */
+  export interface HueRangeProps extends BaseInputProps {
+      modelValue: {
+          shift: number;
+          range: number;
+      };
+      /** Current hue of the fixtures (degrees) the strip is centered on. Default 0. */
+      baseHue?: number;
+  }
+  /** Emits of `pm.hueRange`. */
+  export type HueRangeEmits = CommonInputEmits<{
+      shift: number;
+      range: number;
+  }>;
+  /**
+   * Props of `pm.steps`: a grid of groups (rows) × steps (columns). Rows use
+   * the shared group colors; rows at or beyond `activeGroups` are shown
+   * disabled (the rig has fewer groups).
+   */
+  export interface StepsProps extends BaseInputProps {
+      modelValue: StepsValue;
+      /** Groups the rig actually has (0 = unknown, all rows active). */
+      activeGroups?: number;
+      /** Live position in steps (e.g. 2.4 = step 2), or null. */
+      playhead?: number | null;
+  }
+  /** Emits of `pm.steps`. */
+  export type StepsEmits = CommonInputEmits<StepsValue>;
+  /** Value of `pm.noiseHistory`: level range and occasional events. */
+  export interface NoiseHistoryValue {
+      /** Lowest and highest level (0–1). */
+      min: number;
+      max: number;
+      /** Events per step (0 = none) and their length in steps. */
+      rate: number;
+      length: number;
+      dir: 'up' | 'down';
+  }
+  /**
+   * Props of `pm.noiseHistory` (composite editor): sample traces over a few
+   * steps with draggable range lines and event markers.
+   */
+  export interface NoiseHistoryProps extends BaseInputProps {
+      modelValue: NoiseHistoryValue;
+      /** Renders `cycles` steps of `count` virtual fixtures (levels 0–1, per fixture). */
+      traces?: (count: number, points: number, cycles: number) => Float32Array[] | null;
+  }
+  /** Emits of `pm.noiseHistory`. */
+  export type NoiseHistoryEmits = CommonInputEmits<NoiseHistoryValue>;
+  /** Props of `pm.pickCount` (composite editor): "N of M on" (`count` 0 = a third). */
+  export interface PickCountProps extends BaseInputProps {
+      modelValue: {
+          count: number;
+      };
+      /** M: the numbered fixtures. */
+      rankCount?: number;
+  }
+  /** Emits of `pm.pickCount`. */
+  export type PickCountEmits = CommonInputEmits<{
+      count: number;
+  }>;
   /** All replaceable inputs and their contracts. */
   export interface PmInputContracts {
       'pm.fader': {
@@ -1220,6 +1527,26 @@ declare module '@pixelmapper/extension-api' {
           props: TriggerButtonProps;
           emits: TriggerButtonEmits;
       };
+      'pm.gradient': {
+          props: GradientProps;
+          emits: GradientEmits;
+      };
+      'pm.hueRange': {
+          props: HueRangeProps;
+          emits: HueRangeEmits;
+      };
+      'pm.steps': {
+          props: StepsProps;
+          emits: StepsEmits;
+      };
+      'pm.noiseHistory': {
+          props: NoiseHistoryProps;
+          emits: NoiseHistoryEmits;
+      };
+      'pm.pickCount': {
+          props: PickCountProps;
+          emits: PickCountEmits;
+      };
   }
   /** Name of a replaceable input. */
   export type PmInputName = keyof PmInputContracts;
@@ -1246,6 +1573,7 @@ declare module '@pixelmapper/extension-api' {
    * The set of scope names is part of the versioned API contract; extensions
    * MUST NOT add new names.
    */
+
 
 
 
@@ -1413,11 +1741,19 @@ declare module '@pixelmapper/extension-api' {
       /** 0–1. */
       strength: number;
       speed: SpeedConfig;
+      /** How the instance spreads over fixtures (ADR A20). */
+      distribution: Distribution;
+      /** @deprecated Derived from `distribution` (A20): gradient mode as a legacy direction. */
       direction: EffectDirection;
+      /** @deprecated Derived from `distribution.origin.x`. */
       originX: number;
+      /** @deprecated Derived from `distribution.origin.y`. */
       originY: number;
+      /** @deprecated Derived: angle of origin → end in radians. */
       angle: number;
+      /** @deprecated Derived: length of origin → end (0 for modes without a handle). */
       fanning: number;
+      /** @deprecated Derived from `distribution.reverse`. */
       reverse: boolean;
       params: Record<string, ParamValue>;
   }

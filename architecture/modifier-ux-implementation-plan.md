@@ -790,15 +790,15 @@ Rewrite `plugins/noise` (alias and name **"Noise"** kept).
 
 ### Phase M11 — Docs & AI
 
-- [ ] **M11.1** Update `architecture/guides/authoring-content-plugins.md`:
+- [x] **M11.1** Update `architecture/guides/authoring-content-plugins.md`:
   - ABI 1.1 fields;
   - new param types;
   - manifest fields (presets, editors, tiers, distribution);
   - curve shapes;
   - a link to the design principles.
-- [ ] **M11.2** `architecture/engine.md` (distribution, phase), `architecture/binary-protocol.md` (modifiers packet v2), `architecture.md` (map + glossary).
-- [ ] **M11.3** `bun run docs:ai`: verify that `index.json` lists the new param types, inputs and manifest fields.
-- [ ] **M11.4** Extend `NewModifierDialog.vue` with a "Design principles" link that opens the principles doc, and a template manifest containing the new fields.
+- [x] **M11.2** `architecture/engine.md` (distribution, phase), `architecture/binary-protocol.md` (modifiers packet v2), `architecture.md` (map + glossary).
+- [x] **M11.3** `bun run docs:ai`: verify that `index.json` lists the new param types, inputs and manifest fields.
+- [x] **M11.4** Extend `NewModifierDialog.vue` with a "Design principles" link that opens the principles doc, and a template manifest containing the new fields.
 
 ### Phase M12 — Verification
 

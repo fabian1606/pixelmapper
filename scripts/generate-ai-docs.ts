@@ -14,6 +14,8 @@
  * Usage: bun run scripts/generate-ai-docs.ts [--skip-collect]
  */
 import ts from 'typescript';
+import { listShapes } from '../packages/plugin-toolchain/src/curve-shapes';
+import { CTX, SAMPLE } from '../packages/plugin-toolchain/src/runtime';
 import { $ } from 'bun';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -152,6 +154,7 @@ async function main() {
   writeFileSync(join(OUT, 'plugin-sdk.d.ts'), bundle('@pixelmapper/plugin-sdk', sources(join(ROOT, 'packages/plugin-sdk/assembly')), AS_PRELUDE));
 
   const ifs = interfaces(apiFiles);
+  const toolchainIfs = interfaces([join(ROOT, 'packages/plugin-toolchain/src/types.ts')]);
   const contractOf: Record<string, string> = {};
   const contractsIf = ifs.get('PmInputContracts');
   for (const m of contractsIf?.members ?? []) contractOf[m.name] = m.type;
@@ -183,6 +186,24 @@ async function main() {
       defaultInput: api.PARAM_DEFAULT_INPUT[type as keyof typeof api.PARAM_DEFAULT_INPUT],
     })),
     signatures: api.SIGNATURE_ARITY,
+    // Content-plugin manifest (ADR §6.2, A20): fields, recipes, editors, curves.
+    pluginManifest: {
+      fields: allMembers('ContentPluginManifest', toolchainIfs),
+      distribution: allMembers('ManifestDistribution', toolchainIfs),
+      preset: allMembers('ManifestPreset', toolchainIfs),
+      presetWhen: allMembers('PresetWhen', toolchainIfs),
+      editor: allMembers('ManifestEditor', toolchainIfs),
+      paramCommon: allMembers('ParamBase', ifs),
+      curveParam: allMembers('CurveParam', ifs),
+      curveShapes: listShapes().map(s => ({ id: s.id, label: s.label, domain: s.domain, periodic: s.periodic, args: s.args.map(a => ({ key: a.key, label: a.label, min: a.min, max: a.max, default: a.default, handle: a.handle.kind })) })),
+      outputs: ['scale', 'bipolar', 'absolute'],
+      distributionModel: allMembers('Distribution', ifs),
+    },
+    abi: {
+      version: '1.1.0',
+      frame: Object.keys(CTX),
+      sample: Object.keys(SAMPLE),
+    },
     coreCommands: (ifs.get('CoreCommandFactory') ? ts.createSourceFile('x.ts', readFileSync(join(ROOT, 'packages/extension-api/src/commands.ts'), 'utf8'), ts.ScriptTarget.Latest, true) : null)
       ?.statements.filter(ts.isInterfaceDeclaration).find(i => i.name.text === 'CoreCommandFactory')
       ?.members.filter(ts.isMethodSignature).map(m => m.getText().replace(/\s+/g, ' ').trim()) ?? [],

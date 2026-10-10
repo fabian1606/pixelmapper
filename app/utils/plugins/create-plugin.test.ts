@@ -30,7 +30,8 @@ describe('buildFromCode', () => {
 
   it('reports validation errors (out-of-range absolute output)', async () => {
     const manifest = { ...TEMPLATE_MANIFEST, output: 'absolute' as const };
-    const res = await buildFromCode({ manifest, source: { 'modifier.ts': TEMPLATE_SOURCE } });
+    const source = TEMPLATE_SOURCE.replace('out.setScalar(clamp(v, 0.0, 1.0));', 'out.setScalar(v - 0.5);');
+    const res = await buildFromCode({ manifest, source: { 'modifier.ts': source } });
     expect(res.pkg).toBeNull();
     expect(res.diagnostics.some(d => d.stage === 'validate' && d.severity === 'error')).toBe(true);
   }, 60_000);

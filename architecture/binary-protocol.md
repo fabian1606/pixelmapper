@@ -112,22 +112,26 @@ Channels with identical `chaserConfig` objects are grouped into a single entry b
 
 ### TYPE_MODIFIERS_BIN (0x16)
 ```
-[version: u8]              // 1
+[version: u8]              // 2 (version 1 with the direction block is still parsed and mapped)
 [count: u16 LE]
 for each instance:
   [key: u32 LE]            // FNV-1a of the instance id (runtime instance id, seeds)
   [plugin_index: u16 LE]   // index into the plugin table sent with the packet
   [signature: u8]          // 0 = scalar, 1 = rgb, 2 = panTilt
-  [output: u8]             // 0 = bipolar, 1 = absolute (from the manifest)
+  [output: u8]             // 0 = bipolar, 1 = absolute, 2 = scale (from the manifest)
   [blend: u8]              // 0 add, 1 override, 2 multiply, 3 max, 4 min
   [strength: f32 LE]       // 0–1
   [speed: SpeedConfig]
-  [direction: u8]          // 0 None, 1 Linear, 2 Radial, 3 Symmetrical, 4 Angular
-  [origin_x: f32 LE]
-  [origin_y: f32 LE]
-  [angle: f32 LE]          // radians
-  [fanning: f32 LE]
+  [scope: u8]              // 0 across, 1 within
+  [mode: u8]               // 0 none, 1 linear, 2 radial, 3 conical, 4 order
+  [origin_x, origin_y, end_x, end_y: f32 LE]
   [reverse: u8]
+  [grouping_kind: u8]      // 0 none, 1 everyN, 2 sections, 3 random
+  [grouping_n: u8]
+  [grouping_seed: u32 LE]
+  [within_offset: u8]      // 0 none, 1 order
+  [rank_entries: u16 LE]   // only for mode order / within_offset order
+  ([fixture_index: u16 LE][rank: u16 LE]) × rank_entries
   [type_count: u8]
   [channel_type_id: u8] × type_count     // scalar targets (empty = all; rgb/panTilt: none)
   [mask_bytes: u16 LE]                   // 0 = all fixtures
@@ -136,9 +140,9 @@ for each instance:
   [param: f32 LE] × param_count          // manifest params, encoded in schema order
 ```
 
-Instances whose plugin manifest is unknown to the client are skipped until the plugin resolves. Params are encoded by `encodeParams` (`@pixelmapper/plugin-toolchain/params`): number/int/bool/enum(index)/angle 1 slot, point 2, color 3, curve 128 (LUT). Fixed size per instance: 49 bytes + types + mask + 4 × params.
+Instances whose plugin manifest is unknown to the client are skipped until the plugin resolves. Ranks are resolved in TS (`resolveDistribution`) and sent for targeted fixtures only. Params are encoded by `encodeParams(schema, values, { ticks: rankCount })` (`@pixelmapper/plugin-toolchain/params`): number/int/bool/enum(index)/angle 1 slot, point 2, color 3, curve 128 (LUT over its domain), gradient 33, steps 18. Fixed size per instance: 66 bytes + 4 × rank entries + types + mask + 4 × params.
 
-Example: 10 waveform instances (7 param slots, 1 type, all fixtures) = `5 + 3 + 10 × (49 + 1 + 28)` = **788 bytes**.
+**Size budget:** the u16 frame length caps the payload at 64 KB (the encoder throws beyond). Example: 8 ordered Wave instances on 200 fixtures (two curves each) stay below 16 KB.
 
 ## Channel Type IDs
 
