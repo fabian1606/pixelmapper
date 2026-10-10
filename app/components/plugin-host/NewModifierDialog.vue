@@ -52,7 +52,7 @@ const uiPanel = computed(() => {
 /** A preview instance of the built plugin. */
 const previewInstance = computed(() => {
   const pkg = result.value?.pkg;
-  return pkg ? createModifier(pkg.hash, { id: `preview-${pkg.hash}`, direction: 'LINEAR', targetChannels: ['DIMMER'] }) : null;
+  return pkg ? createModifier(pkg.hash, { id: `preview-${pkg.hash}`, distribution: { mode: 'linear' }, targetChannels: ['DIMMER'] }) : null;
 });
 
 /** Builds and validates the draft. */

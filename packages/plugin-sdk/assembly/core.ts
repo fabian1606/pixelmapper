@@ -3,7 +3,7 @@
  * class plus registration (ADR §6.6). Re-exported by `index.ts`.
  */
 
-// ── Buffer layouts (ABI v1) ─────────────────────
+// ── Buffer layouts (ABI v1, v1.1) ───────────────
 
 /** f32 slots per frame context. */
 export const CTX_FIELDS: i32 = 16;
@@ -13,7 +13,7 @@ export const SAMPLE_FIELDS: i32 = 16;
 /**
  * Per-render-call context (one modifier instance, one frame).
  * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
- * strength, reserved[8].
+ * strength, timePhase, rankCount, distGroupCount (v1.1), reserved[5].
  */
 export class Frame {
   /** Address of the context buffer (set by the SDK). */
@@ -37,12 +37,19 @@ export class Frame {
   @inline get seed(): u32 { return (this.seedHi << 16) | this.seedLo; }
   /** Host-applied strength 0–1 (informational; the host blends the output). */
   @inline get strength(): f32 { return load<f32>(this.ptr, 28); }
+  /** v1.1: speed phase in cycles (unwrapped; 1.0 = one pass). */
+  @inline get timePhase(): f32 { return load<f32>(this.ptr, 32); }
+  /** v1.1: number of distribution ranks (0 when the mode has none). */
+  @inline get rankCount(): i32 { return <i32>load<f32>(this.ptr, 36); }
+  /** v1.1: number of distribution groups (0 = no grouping). */
+  @inline get distGroupCount(): i32 { return <i32>load<f32>(this.ptr, 40); }
 }
 
 /**
  * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).
  * Layout (f32): x, y, phase, groupIndex, groupCount, headIndex, headCount,
- * seed, base0, base1, base2, channelSeedLo, channelSeedHi, reserved[3].
+ * seed, base0, base1, base2, channelSeedLo, channelSeedHi, spatial, rank,
+ * distGroup (v1.1).
  */
 export class Sample {
   /** Address of the sample (set by the SDK). */
@@ -52,7 +59,7 @@ export class Sample {
   @inline get x(): f32 { return load<f32>(this.ptr, 0); }
   /** Normalized world y (0–1). */
   @inline get y(): f32 { return load<f32>(this.ptr, 4); }
-  /** Phase in cycles (1.0 = one full cycle): speed phase + spatial offset. */
+  /** Phase in cycles (1.0 = one full cycle): time phase − spatial (legacy; prefer `spatial`). */
   @inline get phase(): f32 { return load<f32>(this.ptr, 8); }
   /** Index of the fixture among the targeted fixtures. */
   @inline get groupIndex(): i32 { return <i32>load<f32>(this.ptr, 12); }
@@ -74,6 +81,12 @@ export class Sample {
   @inline get channelSeed(): u32 {
     return (<u32>load<f32>(this.ptr, 48) << 16) | <u32>load<f32>(this.ptr, 44);
   }
+  /** v1.1: position along the distribution (0 at the origin / first rank, 1 at the end). */
+  @inline get spatial(): f32 { return load<f32>(this.ptr, 52); }
+  /** v1.1: rank of the sample in the distribution order (−1 if none). */
+  @inline get rank(): i32 { return <i32>load<f32>(this.ptr, 56); }
+  /** v1.1: distribution group of the sample (−1 without grouping). */
+  @inline get distGroup(): i32 { return <i32>load<f32>(this.ptr, 60); }
 }
 
 /** Output of one sample: `arity` values. */

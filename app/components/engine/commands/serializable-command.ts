@@ -1,4 +1,5 @@
 import type { Command } from '../composables/use-history'
+import { migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution'
 import type { SceneNode } from '~/utils/engine/core/group'
 import type { Fixture } from '~/utils/engine/core/fixture'
 import type { ModifierInstance } from '~/utils/engine/types'
@@ -47,5 +48,6 @@ export function commandFromPayload(
 ): Command | null {
   const factory = registry.get(commandType)
   if (!factory) return null
-  return factory(payload, ctx)
+  // Payloads recorded before schema 3 carry v2 modifier instances (plan M3.8).
+  return factory(migrateModifiersDeep(payload), ctx)
 }

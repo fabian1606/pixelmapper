@@ -111,6 +111,21 @@ fn modifiers(list: &[Inst]) -> Vec<u8> {
     w.0
 }
 
+/// v2 packet with one scalar instance and an order distribution: `ranks` =
+/// (fixture index, rank); grouping everyN `n` when `n > 0`.
+fn modifiers_v2(ranks: &[(u16, u16)], n: u8, reverse: bool) -> Vec<u8> {
+    let mut w = W::default();
+    w.u8(2).u16(1);
+    w.u32(7).u16(0).u8(0).u8(2).u8(0).f32(1.0); // scalar, scale, add
+    w.u8(1).f32(0.0).f32(2.0).f32(0.0); // speed: beat 2 → time phase = beatTime / 2
+    w.u8(0).u8(4).f32(0.0).f32(0.0).f32(1.0).f32(0.0).u8(reverse as u8); // across, order
+    w.u8(if n > 0 { 1 } else { 0 }).u8(n.max(1)).u32(1).u8(0);
+    w.u16(ranks.len() as u16);
+    for &(f, r) in ranks { w.u16(f).u16(r); }
+    w.u8(0).u16(0).u16(1).f32(0.5);
+    w.0
+}
+
 fn engine(out: Vec<f32>) -> (EffectEngine, Rc<RefCell<MockState>>) {
     let state = Rc::new(RefCell::new(MockState { out, ..Default::default() }));
     (EffectEngine::with_runtime(Box::new(Mock(state.clone()))), state)
@@ -247,7 +262,7 @@ fn scale_output_is_a_fraction_of_the_programmed_value() {
 #[test]
 fn bad_modifier_packets_are_rejected() {
     let (mut e, _) = engine(vec![0.0]);
-    assert_eq!(e.dispatch_bin(0x16, &[2, 0, 0]), -1, "unknown version");
+    assert_eq!(e.dispatch_bin(0x16, &[3, 0, 0]), -1, "unknown version");
     assert_eq!(e.dispatch_bin(0x16, &[1, 1, 0]), -1, "truncated");
 }
 
@@ -270,4 +285,49 @@ fn read_signatures_after_render() {
     assert!((out[3] - 0.2).abs() < 1e-6, "scalar reads DIMMER");
     assert_eq!(&out[6..8], &[1.0, 0.0]);
     assert!(out[9].is_nan());
+}
+
+#[test]
+fn v2_order_distribution_fills_abi_1_1_slots() {
+    let (mut e, state) = engine(vec![1.0]);
+    let three = vec![vec![(0, DIMMER, 0, 1, 0xFFFF)], vec![(1, DIMMER, 0, 1, 0xFFFF)], vec![(2, DIMMER, 0, 1, 0xFFFF)]];
+    e.dispatch_bin(0x14, &layout(&three));
+    assert_eq!(e.dispatch_bin(0x16, &modifiers_v2(&[(0, 2), (1, 0), (2, 1)], 0, false)), 1);
+    e.render(1000.0, 16.0); // 120 BPM: beat time 2 → time phase 1
+    let st = state.borrow();
+    assert!((st.last_ctx.0[ctx::TIME_PHASE] - 1.0).abs() < 1e-5);
+    assert_eq!(st.last_ctx.0[ctx::RANK_COUNT], 3.0);
+    assert_eq!(st.last_ctx.0[ctx::DIST_GROUP_COUNT], 0.0);
+    let s0 = &st.last_samples[0].0;
+    assert!((s0[sample::SPATIAL] - 2.0 / 3.0).abs() < 1e-6);
+    assert_eq!(s0[sample::RANK], 2.0);
+    assert_eq!(s0[sample::DIST_GROUP], -1.0);
+    assert!((s0[sample::PHASE] - (1.0 - 2.0 / 3.0)).abs() < 1e-5, "legacy phase = time phase − spatial");
+}
+
+#[test]
+fn v2_grouping_and_reverse() {
+    let (mut e, state) = engine(vec![1.0]);
+    let four: Vec<_> = (0..4).map(|i| vec![(i as u16, DIMMER, 0, 1, 0xFFFF)]).collect();
+    e.dispatch_bin(0x14, &layout(&four));
+    e.dispatch_bin(0x16, &modifiers_v2(&[(0, 0), (1, 1), (2, 2), (3, 3)], 2, true));
+    e.render(0.0, 16.0);
+    let st = state.borrow();
+    assert_eq!(st.last_ctx.0[ctx::DIST_GROUP_COUNT], 2.0);
+    let groups: Vec<f32> = st.last_samples.iter().map(|s| s.0[sample::DIST_GROUP]).collect();
+    assert_eq!(groups, vec![0.0, 1.0, 0.0, 1.0]);
+    let spatial: Vec<f32> = st.last_samples.iter().map(|s| s.0[sample::SPATIAL]).collect();
+    assert_eq!(spatial, vec![1.0, 0.5, 1.0, 0.5]);
+}
+
+#[test]
+fn v1_packets_map_onto_a_linear_distribution() {
+    let (mut e, state) = engine(vec![1.0]);
+    e.dispatch_bin(0x14, &layout(&[vec![(0, DIMMER, 0, 1, 0xFFFF)], vec![(1, DIMMER, 0, 1, 0xFFFF)]]));
+    e.dispatch_bin(0x16, &modifiers(&[inst(0, 0, 0, 1.0)]));
+    e.render(0.0, 16.0);
+    // v1 builder: linear, origin 0, angle 0, fanning 1 → spatial = x (0, 0.25).
+    let st = state.borrow();
+    assert!((st.last_samples[1].0[sample::SPATIAL] - 0.25).abs() < 1e-6);
+    assert!((st.last_samples[1].0[sample::PHASE] + 0.25).abs() < 1e-6);
 }

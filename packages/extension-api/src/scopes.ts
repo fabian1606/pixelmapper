@@ -23,6 +23,7 @@ import type {
   Vec2,
 } from './model';
 import type { ParamValue } from './params';
+import type { Distribution } from './distribution';
 
 /** A project dependency on an extension (ADR D20). */
 export interface ProjectRequirement {
@@ -201,11 +202,19 @@ export interface ModifierInstanceView {
   /** 0–1. */
   strength: number;
   speed: SpeedConfig;
+  /** How the instance spreads over fixtures (ADR A20). */
+  distribution: Distribution;
+  /** @deprecated Derived from `distribution` (A20): gradient mode as a legacy direction. */
   direction: EffectDirection;
+  /** @deprecated Derived from `distribution.origin.x`. */
   originX: number;
+  /** @deprecated Derived from `distribution.origin.y`. */
   originY: number;
+  /** @deprecated Derived: angle of origin → end in radians. */
   angle: number;
+  /** @deprecated Derived: length of origin → end (0 for modes without a handle). */
   fanning: number;
+  /** @deprecated Derived from `distribution.reverse`. */
   reverse: boolean;
   params: Record<string, ParamValue>;
 }

@@ -4,12 +4,12 @@
 // §6.8). Browser: `JsModifierRuntime` (runtime_js.rs) calls the worker's
 // plugin bridge. Tauri (later): wasmtime with fuel. Tests: closures.
 
-/// f32 slots of a frame context (ABI v1).
+/// f32 slots of a frame context (ABI v1; v1.1 fills reserved slots 8–10).
 pub const CTX_FIELDS: usize = 16;
-/// f32 slots of a sample (ABI v1).
+/// f32 slots of a sample (ABI v1; v1.1 fills reserved slots 13–15).
 pub const SAMPLE_FIELDS: usize = 16;
 
-/// Frame-context field indices (ABI v1, amendment A13).
+/// Frame-context field indices (ABI v1, amendment A13; v1.1, amendment A20).
 pub mod ctx {
     pub const TIME_MS: usize = 0;
     pub const BEAT_TIME: usize = 1;
@@ -19,9 +19,15 @@ pub mod ctx {
     pub const SEED_LO: usize = 5;
     pub const SEED_HI: usize = 6;
     pub const STRENGTH: usize = 7;
+    /// v1.1: speed phase in cycles (unwrapped).
+    pub const TIME_PHASE: usize = 8;
+    /// v1.1: ranks of the instance (0 when the mode has none).
+    pub const RANK_COUNT: usize = 9;
+    /// v1.1: distribution groups (0 = no grouping).
+    pub const DIST_GROUP_COUNT: usize = 10;
 }
 
-/// Sample field indices (ABI v1, amendment A13).
+/// Sample field indices (ABI v1, amendment A13; v1.1, amendment A20).
 pub mod sample {
     pub const X: usize = 0;
     pub const Y: usize = 1;
@@ -34,6 +40,12 @@ pub mod sample {
     pub const BASE0: usize = 8;
     pub const CHANNEL_SEED_LO: usize = 11;
     pub const CHANNEL_SEED_HI: usize = 12;
+    /// v1.1: position along the distribution (0 at origin / first rank).
+    pub const SPATIAL: usize = 13;
+    /// v1.1: rank of the sample (−1 if none).
+    pub const RANK: usize = 14;
+    /// v1.1: distribution group of the sample (−1 if none).
+    pub const DIST_GROUP: usize = 15;
 }
 
 /// Per-render-call context (one instance, one frame).

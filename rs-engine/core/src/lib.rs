@@ -8,6 +8,7 @@ pub mod engine;
 pub mod bin_protocol;
 pub mod signatures;
 pub mod phase;
+pub mod distribution;
 pub mod beat_clock;
 pub mod runtime;
 

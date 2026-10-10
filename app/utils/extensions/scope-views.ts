@@ -195,6 +195,23 @@ export function signatureTargetFor(fixture: Fixture, channelIndex: number): Sign
 
 // ── Modifiers ───────────────────────────────────
 
+/** Deprecated v2 direction fields derived from the distribution (ADR A20). */
+function legacyDirection(m: ModifierInstance): Pick<ModifierInstanceView, 'direction' | 'originX' | 'originY' | 'angle' | 'fanning' | 'reverse'> {
+  const d = m.distribution;
+  const dx = d.end.x - d.origin.x;
+  const dy = d.end.y - d.origin.y;
+  const byMode: Partial<Record<string, ModifierInstanceView['direction']>> = { linear: 'LINEAR', radial: 'RADIAL', conical: 'ANGULAR' };
+  const direction = byMode[d.mode] ?? 'NONE';
+  return {
+    direction,
+    originX: d.origin.x,
+    originY: d.origin.y,
+    angle: Math.atan2(dy, dx),
+    fanning: direction === 'NONE' ? 0 : Math.hypot(dx, dy),
+    reverse: d.reverse,
+  };
+}
+
 /** Projects a modifier instance into its scope view. */
 export function modifierView(m: ModifierInstance): ModifierInstanceView {
   return {
@@ -207,12 +224,8 @@ export function modifierView(m: ModifierInstance): ModifierInstanceView {
     blendMode: m.blendMode,
     strength: m.strength,
     speed: { ...m.speed },
-    direction: m.direction ?? 'NONE',
-    originX: m.originX,
-    originY: m.originY,
-    angle: m.angle,
-    fanning: m.fanning,
-    reverse: m.reverse,
+    distribution: jsonClone(m.distribution) as ModifierInstanceView['distribution'],
+    ...legacyDirection(m),
     params: jsonClone(m.params) as ModifierInstanceView['params'],
   };
 }

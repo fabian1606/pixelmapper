@@ -81,4 +81,36 @@ describe('watchdog', () => {
     wd.check();
     expect(onStall).toHaveBeenCalledTimes(2);
   });
+
+  it('passes the ABI v1.1 frame and sample fields (plan M3.7)', async () => {
+    const v11 = { ...manifest, alias: '@test/v11', apiVersion: '^1.1.0', params: [] };
+    const src = `
+import { Modifier, Frame, Sample, Out, register } from "@pixelmapper/plugin-sdk";
+class Fields extends Modifier {
+  render(ctx: Frame, s: Sample, out: Out): void {
+    out.set(0, s.spatial + <f32>s.rank * 10.0 + <f32>s.distGroup * 100.0
+      + ctx.timePhase * 1000.0 + <f32>ctx.rankCount * 10000.0 + <f32>ctx.distGroupCount * 100000.0);
+  }
+}
+register(new Fields());
+`;
+    const { pkg, diagnostics } = await buildPackage(v11, { 'modifier.ts': src });
+    expect(diagnostics.filter(d => d.severity === 'error')).toEqual([]);
+    const bridge = new WorkerPluginBridge(() => {});
+    bridge.setTable([pkg!.hash]);
+    bridge.load(pkg!.hash, pkg!.wasm);
+    expect(bridge.prepare(3, 0, new Float32Array(0))).toBe(true);
+    const ctx = new Float32Array(16);
+    ctx[4] = 1;
+    ctx[8] = 2; // timePhase
+    ctx[9] = 4; // rankCount
+    ctx[10] = 3; // distGroupCount
+    const samples = new Float32Array(16);
+    samples[13] = 0.5; // spatial
+    samples[14] = 2; // rank
+    samples[15] = 1; // distGroup
+    const out = new Float32Array(1);
+    expect(bridge.render(3, ctx, samples, 1, out)).toBe(true);
+    expect(out[0]).toBeCloseTo(0.5 + 20 + 100 + 2000 + 40000 + 300000, 0);
+  }, 60_000);
 });

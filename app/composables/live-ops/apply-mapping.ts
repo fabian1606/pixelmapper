@@ -190,7 +190,13 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
       } else if (pk === 'speed') {
         if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
       } else if (pk === 'fanning') {
-        effect.fanning = value;
+        // Spread: length of the gradient handle (direction kept), 0–1 of the world width.
+        const d = effect.distribution;
+        const dx = d.end.x - d.origin.x;
+        const dy = d.end.y - d.origin.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const l = Math.max(0.001, value);
+        effect.distribution = { ...d, end: { x: d.origin.x + (dx / len) * l, y: d.origin.y + (dy / len) * l } };
       } else if (pk.startsWith('params.') || pk.startsWith('waveformParams.')) {
         // Plugin param: the 0–1 control value maps onto the param's range.
         const key = pk.slice(pk.indexOf('.') + 1);

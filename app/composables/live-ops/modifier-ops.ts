@@ -1,6 +1,7 @@
 import { triggerRef } from 'vue';
 import { registerLiveOp } from '~/stores/live-bus-store';
 import { cloneModifiers } from '~/utils/engine/modifiers';
+import { migrateLegacyChanges, migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution';
 
 /**
  * Live preview of modifier param changes (during slider scrub or spatial drag).
@@ -23,7 +24,8 @@ registerLiveOp<ModifierUpdatePayload>('modifier.update', {
   apply: ({ effectId, changes, paramChanges }, _userId, ctx) => {
     const modifier = ctx.engineStore.modifiers.find((m: any) => m.id === effectId);
     if (!modifier) return;
-    Object.assign(modifier, changes);
+    // Scrubs persisted before schema 3 carry v2 direction fields (plan M3.8).
+    Object.assign(modifier, migrateLegacyChanges(modifier.distribution, changes ?? {}));
     if (paramChanges) modifier.params = { ...modifier.params, ...paramChanges };
     ctx.engineStore.triggerCanvasSync();
   },
@@ -41,7 +43,7 @@ registerLiveOp<{ modifiers: any[] }>('modifier.sync', {
   persistent: true,
   apply: ({ modifiers }, _userId, ctx) => {
     const active = ctx.engineStore.modifiers;
-    active.splice(0, active.length, ...cloneModifiers(modifiers ?? []));
+    active.splice(0, active.length, ...cloneModifiers(migrateModifiersDeep(modifiers ?? [])));
     ctx.engineStore.engine.modifiers = active;
     ctx.engineStore.triggerCanvasSync();
   },

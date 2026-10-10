@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BUILTIN_ALIASES, builtinHash, createModifier } from '~/utils/engine/modifiers';
-import { previewRevision, renderCycle, renderField } from './preview-pool';
+import { previewRevision, renderCycle, renderField, renderStrip } from './preview-pool';
 
 const DIR = join(__dirname, '../../../public/plugins');
 const built = existsSync(DIR);
@@ -41,7 +41,10 @@ describe.skipIf(!built)('preview pool', () => {
   });
 
   it('renders a field varying along the spatial direction', async () => {
-    const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), { targetChannels: ['DIMMER'], direction: 'LINEAR', fanning: 0.5 });
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), {
+      targetChannels: ['DIMMER'],
+      distribution: { mode: 'linear', origin: { x: 0, y: 0.5 }, end: { x: 0.5, y: 0.5 } },
+    });
     const before = previewRevision.value;
     renderField(m, 8, 2);
     await ready(before);
@@ -58,5 +61,20 @@ describe.skipIf(!built)('preview pool', () => {
     renderCycle(m, 4);
     await ready(before);
     expect(renderCycle(m, 4)!.arity).toBe(3);
+  });
+
+  it('renders an endless strip with grouping (one value per group)', async () => {
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), {
+      targetChannels: ['DIMMER'],
+      distribution: { mode: 'order', grouping: { kind: 'everyN', n: 2 } },
+    });
+    const before = previewRevision.value;
+    renderStrip(m, 8, { rankCount: 4 });
+    await ready(before);
+    const r = renderStrip(m, 8, { rankCount: 4, timeMs: 300 })!;
+    expect(r.values.length).toBe(8);
+    // Ranks 0 and 2 (group 0) equal, ranks 1 and 3 (group 1) equal.
+    expect(r.values[0]).toBeCloseTo(r.values[4]!);
+    expect(r.values[2]).toBeCloseTo(r.values[6]!);
   });
 });

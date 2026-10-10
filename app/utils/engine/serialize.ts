@@ -10,15 +10,17 @@ import { reactive } from 'vue'
 import { cloneModifiers } from './modifiers'
 import { cloneJson, rebuildKindFixture } from '~/utils/kinds/kind-host'
 import type { ProjectRequirement } from '~/utils/extensions/requires'
+import { migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution'
 
 // ─── Schema version ───────────────────────────────────────────────────────────
 
 /**
  * Persisted format version (ADR D24). Version 2 introduced modifier
- * instances backed by content plugins; version-1 projects and presets are
- * not migrated.
+ * instances backed by content plugins; version 3 replaced their direction
+ * fields with a distribution (ADR A20; v2 snapshots are migrated on load).
+ * Version-1 projects and presets are not migrated.
  */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /** Thrown when a snapshot has an incompatible schema version. */
 export class IncompatibleProjectError extends Error {
@@ -300,6 +302,25 @@ function deserializeNode(data: SerializedNode, parent: FixtureGroup | null = nul
   return fixture
 }
 
+/**
+ * Brings a snapshot to `SCHEMA_VERSION`: v2 → v3 migrates every modifier
+ * instance (live list, presets, pinned modifiers). Throws
+ * `IncompatibleProjectError` for other versions.
+ */
+export function migrateSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
+  if (snapshot?.schemaVersion === SCHEMA_VERSION) return snapshot
+  if (snapshot?.schemaVersion === 2) {
+    return {
+      ...snapshot,
+      schemaVersion: SCHEMA_VERSION,
+      modifiers: migrateModifiersDeep(snapshot.modifiers ?? []),
+      savedPresets: migrateModifiersDeep(snapshot.savedPresets ?? []),
+      pinnedModifiers: migrateModifiersDeep(snapshot.pinnedModifiers ?? []),
+    }
+  }
+  throw new IncompatibleProjectError(snapshot?.schemaVersion)
+}
+
 export function deserializeProject(snapshot: ProjectSnapshot): {
   sceneNodes: SceneNode[]
   savedPresets: Preset[]
@@ -315,7 +336,7 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   requires: ProjectRequirement[]
   extensionData: Record<string, Record<string, unknown>> | undefined
 } {
-  if (snapshot?.schemaVersion !== SCHEMA_VERSION) throw new IncompatibleProjectError(snapshot?.schemaVersion)
+  snapshot = migrateSnapshot(snapshot)
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),

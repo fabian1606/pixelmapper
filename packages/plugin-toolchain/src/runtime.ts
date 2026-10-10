@@ -18,11 +18,17 @@ export const MAX_PAGES = 256;
 export const ALLOWED_IMPORTS: readonly string[] = ['env.abort', 'env.memory', 'pm.budget', 'pm.log'];
 
 /** Field offsets of the frame context (f32 index). */
-export const CTX = { timeMs: 0, beatTime: 1, bpm: 2, phaseSpeed: 3, arity: 4, seedLo: 5, seedHi: 6, strength: 7 } as const;
+export const CTX = {
+  timeMs: 0, beatTime: 1, bpm: 2, phaseSpeed: 3, arity: 4, seedLo: 5, seedHi: 6, strength: 7,
+  // ABI v1.1 (ADR A20)
+  timePhase: 8, rankCount: 9, distGroupCount: 10,
+} as const;
 /** Field offsets of a sample (f32 index). */
 export const SAMPLE = {
   x: 0, y: 1, phase: 2, groupIndex: 3, groupCount: 4, headIndex: 5, headCount: 6, seed: 7,
   base0: 8, base1: 9, base2: 10, channelSeedLo: 11, channelSeedHi: 12,
+  // ABI v1.1 (ADR A20)
+  spatial: 13, rank: 14, distGroup: 15,
 } as const;
 
 /** Thrown when a plugin traps, aborts or exceeds its budget. */

@@ -6,13 +6,15 @@
 //   0x15 TYPE_CHAN_BIN       chaser configs
 //   0x16 TYPE_MODIFIERS_BIN  modifier instances (replaces TYPE_FX_BIN)
 
+use crate::distribution::{Distribution, Grouping, Mode, Scope};
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, ModifierInstance};
-use crate::phase::Spatial;
 use crate::signatures::Signature;
 use crate::types::{BlendMode, ChaserConfig, EffectDirection, OutputMode, SpeedConfig, SpeedMode};
 
-/// Version byte of the modifiers packet.
-pub const MODIFIERS_BIN_VERSION: u8 = 1;
+/// Current version byte of the modifiers packet (distribution block, ADR A20).
+pub const MODIFIERS_BIN_VERSION: u8 = 2;
+/// Legacy version byte (direction block); still parsed and mapped.
+pub const MODIFIERS_BIN_VERSION_V1: u8 = 1;
 
 // ── Cursor ───────────────────────────────────────
 
@@ -43,6 +45,54 @@ impl<'a> Cursor<'a> {
             _ => SpeedMode::Infinite,
         };
         Some(SpeedConfig { mode, time_ms: self.f32()?, beat_value: self.f32()?, beat_offset: self.f32()? })
+    }
+
+    /// v1 direction block, mapped onto a distribution:
+    /// `u8 direction; f32 originX, originY, angle, fanning; u8 reverse`.
+    fn legacy_direction(&mut self) -> Option<Distribution> {
+        let direction = EffectDirection::from_id(self.u8()?);
+        let origin = (self.f32()?, self.f32()?);
+        let angle = self.f32()?;
+        let fanning = self.f32()?;
+        let reverse = self.u8()? != 0;
+        // The handle length is the former fanning (one cycle per `fanning`).
+        let len = if direction == EffectDirection::Angular { 0.1 } else { fanning };
+        let end = (origin.0 + angle.cos() * len, origin.1 + angle.sin() * len);
+        let mode = match direction {
+            _ if fanning == 0.0 => Mode::None,
+            EffectDirection::Linear => Mode::Linear,
+            EffectDirection::Radial => Mode::Radial,
+            EffectDirection::Symmetrical => Mode::Mirror,
+            EffectDirection::Angular => Mode::Conical,
+            EffectDirection::None => Mode::None,
+        };
+        Some(Distribution { mode, origin, end, reverse, ..Default::default() })
+    }
+
+    /// v2 distribution block (see `parse_modifiers_bin`); ranks by layout index.
+    fn distribution(&mut self) -> Option<Distribution> {
+        let scope = if self.u8()? == 1 { Scope::Within } else { Scope::Across };
+        let mode = Mode::from_id(self.u8()?);
+        let origin = (self.f32()?, self.f32()?);
+        let end = (self.f32()?, self.f32()?);
+        let reverse = self.u8()? != 0;
+        let grouping = Grouping::from_id(self.u8()?);
+        let grouping_n = (self.u8()? as u32).max(1);
+        let grouping_seed = self.u32()?;
+        let within_order = self.u8()? == 1;
+        let entries = self.u16()? as usize;
+        let mut ranks: Vec<i32> = Vec::new();
+        let mut rank_count = 0u32;
+        for _ in 0..entries {
+            let index = self.u16()? as usize;
+            let rank = self.u16()? as i32;
+            if ranks.len() <= index {
+                ranks.resize(index + 1, -1);
+            }
+            ranks[index] = rank;
+            rank_count = rank_count.max(rank as u32 + 1);
+        }
+        Some(Distribution { scope, mode, origin, end, reverse, grouping, grouping_n, grouping_seed, within_order, ranks, rank_count })
     }
 
     fn chaser(&mut self) -> Option<ChaserConfig> {
@@ -131,13 +181,17 @@ pub fn parse_channels_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
 // ── Modifiers (0x16) ─────────────────────────────
 
 /// Parses modifier instances:
-/// `u8 version(1); u16 count; { u32 key; u16 plugin; u8 signature;
-/// u8 output; u8 blend; f32 strength; speed; u8 direction; f32 originX;
-/// f32 originY; f32 angle; f32 fanning; u8 reverse; u8 nTypes; u8[] types;
-/// u16 maskBytes (0 = all); u8[] mask; u16 nParams; f32[] params }`.
+/// `u8 version(2); u16 count; { u32 key; u16 plugin; u8 signature;
+/// u8 output; u8 blend; f32 strength; speed; distribution; u8 nTypes;
+/// u8[] types; u16 maskBytes (0 = all); u8[] mask; u16 nParams; f32[] params }`
+/// with `distribution = u8 scope; u8 mode; f32 originX, originY, endX, endY;
+/// u8 reverse; u8 groupingKind; u8 groupingN; u32 groupingSeed;
+/// u8 withinOffset; u16 rankEntries; { u16 fixtureIndex; u16 rank }`.
+/// Version 1 (direction block instead of distribution) is mapped.
 pub fn parse_modifiers_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
     fn parse(c: &mut Cursor) -> Option<Vec<ModifierInstance>> {
-        if c.u8()? != MODIFIERS_BIN_VERSION {
+        let version = c.u8()?;
+        if version != MODIFIERS_BIN_VERSION && version != MODIFIERS_BIN_VERSION_V1 {
             return None;
         }
         let count = c.u16()? as usize;
@@ -150,14 +204,7 @@ pub fn parse_modifiers_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             let blend = BlendMode::from_id(c.u8()?);
             let strength = c.f32()?.clamp(0.0, 1.0);
             let speed = c.speed()?;
-            let spatial = Spatial {
-                direction: EffectDirection::from_id(c.u8()?),
-                origin_x: c.f32()?,
-                origin_y: c.f32()?,
-                angle: c.f32()?,
-                fanning: c.f32()?,
-                reverse: c.u8()? != 0,
-            };
+            let distribution = if version == MODIFIERS_BIN_VERSION_V1 { c.legacy_direction()? } else { c.distribution()? };
             let n_types = c.u8()? as usize;
             let mut channel_types = Vec::with_capacity(n_types);
             for _ in 0..n_types {
@@ -182,7 +229,7 @@ pub fn parse_modifiers_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
                 params.push(c.f32()?);
             }
             out.push(ModifierInstance {
-                key, plugin, signature, output, blend, strength, speed, spatial, channel_types, fixture_mask, params,
+                key, plugin, signature, output, blend, strength, speed, distribution, channel_types, fixture_mask, params,
                 disabled: false,
             });
         }

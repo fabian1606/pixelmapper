@@ -1,7 +1,14 @@
 /**
  * Content-plugin package types (ADR §6.1–6.2).
  */
-import type { ParamSchema, ParamValue, Signature } from '@pixelmapper/extension-api';
+import type {
+  DistributionMode,
+  DistributionPatch,
+  DistributionScope,
+  ParamSchema,
+  ParamValue,
+  Signature,
+} from '@pixelmapper/extension-api';
 
 /**
  * How the host combines a modifier's output with the base value:
@@ -23,6 +30,18 @@ export interface ContentPluginUi {
   placement?: 'below-params' | 'above-params' | 'replace-params';
 }
 
+/** Distribution options a modifier offers (plan §1.4); all optional. */
+export interface ManifestDistribution {
+  /** Offered modes in UI order (default: all). */
+  modes?: DistributionMode[];
+  /** Offered scopes (default: both). */
+  scopes?: DistributionScope[];
+  /** Offer grouping (default true). */
+  grouping?: boolean;
+  /** Partial distribution applied to new instances. */
+  default?: DistributionPatch;
+}
+
 /** `manifest.json` of a content plugin. */
 export interface ContentPluginManifest {
   schema: 1;
@@ -40,6 +59,8 @@ export interface ContentPluginManifest {
   output: ModifierOutputMode;
   params: ParamSchema;
   ui?: ContentPluginUi;
+  /** Distribution options (plan §1.4). */
+  distribution?: ManifestDistribution;
 }
 
 /** A built, content-addressed plugin package. */

@@ -44,6 +44,7 @@ export interface ChannelChaserConfig {
   fadeDuration: SpeedConfig;
 }
 
+/** Former spatial direction (schema v2); only read by the v3 migration. */
 export type EffectDirection = 'NONE' | 'LINEAR' | 'RADIAL' | 'SYMMETRICAL' | 'ANGULAR';
 
 /**
@@ -64,6 +65,15 @@ export type BlendMode = 'add' | 'override' | 'multiply' | 'max' | 'min';
 
 /** Value space of a modifier (ADR D4): one channel, linear RGB, or pan/tilt. */
 export type Signature = 'scalar' | 'rgb' | 'panTilt';
+
+/** Distribution of an instance over fixtures (plan §1.1, ADR A20). */
+export type {
+  Distribution,
+  DistributionPatch,
+  DistributionMode,
+  DistributionScope,
+  GroupingKind,
+} from '@pixelmapper/extension-api';
 
 /** Value of one plugin param (see the param schema, ADR §6.2). */
 export type ParamValue = import('@pixelmapper/extension-api').ParamValue;
@@ -90,14 +100,8 @@ export interface ModifierInstance {
   /** 0–1. */
   strength: number;
   speed: SpeedConfig;
-  direction: EffectDirection;
-  originX: number;
-  originY: number;
-  /** Radians. */
-  angle: number;
-  /** World units per cycle of spatial phase offset (0 = in sync). */
-  fanning: number;
-  reverse: boolean;
+  /** How the instance spreads over fixtures (replaces direction/origin/angle/fanning/reverse). */
+  distribution: import('@pixelmapper/extension-api').Distribution;
   /** Plugin params by key (defaults from the manifest). */
   params: Record<string, ParamValue>;
 }

@@ -4,7 +4,9 @@
  */
 import { toRaw } from 'vue';
 import { defaultParams } from '@pixelmapper/plugin-toolchain/params';
+import type { DistributionPatch } from '@pixelmapper/extension-api';
 import type { ChannelType, ModifierInstance, Signature } from './types';
+import { applyDistributionPatch, createDistribution } from './distribution/create';
 import { BUILTIN_BY_ALIAS } from '~/utils/plugins/builtin-index';
 import { getManifest } from '~/utils/plugins/plugin-store';
 
@@ -30,12 +32,16 @@ function newId(): string {
     : Math.random().toString(36).slice(2, 11);
 }
 
-/** Options for `createModifier`. */
-export type ModifierInit = Partial<Omit<ModifierInstance, 'plugin'>> & { targetChannels?: ChannelType[] };
+/** Options for `createModifier`; `distribution` may be partial. */
+export type ModifierInit = Partial<Omit<ModifierInstance, 'plugin' | 'distribution'>> & {
+  targetChannels?: ChannelType[];
+  distribution?: DistributionPatch;
+};
 
 /**
- * Creates an instance of `plugin` with host defaults and the manifest's
- * param defaults. Throws when the plugin is unknown.
+ * Creates an instance of `plugin` with host defaults, the manifest's param
+ * defaults and distribution default (then `init.distribution`). Throws when
+ * the plugin is unknown.
  */
 export function createModifier(plugin: string, init: ModifierInit = {}): ModifierInstance {
   const manifest = getManifest(plugin);
@@ -48,15 +54,15 @@ export function createModifier(plugin: string, init: ModifierInit = {}): Modifie
     blendMode: 'add',
     strength: 1,
     speed: { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
-    direction: 'LINEAR',
-    originX: 0.5,
-    originY: 0.5,
-    angle: 0,
-    fanning: 0.1,
-    reverse: false,
     ...init,
+    distribution: applyDistributionPatch(createDistribution(manifestDistribution(manifest)), init.distribution),
     params: { ...defaultParams(manifest.params), ...(init.params ?? {}) },
   };
+}
+
+/** The manifest's default distribution (plan §1.4), if it declares one. */
+function manifestDistribution(manifest: { distribution?: { default?: DistributionPatch } }): DistributionPatch {
+  return manifest.distribution?.default ?? {};
 }
 
 /** Deep clone (works on reactive proxies). */

@@ -10,7 +10,8 @@
 // Modifiers themselves live in content plugins; the core only orchestrates.
 
 use crate::beat_clock::BeatClock;
-use crate::phase::{phase_speed, sample_phase, speed_phase, Spatial};
+use crate::distribution::Distribution;
+use crate::phase::{phase_speed, speed_phase};
 use crate::runtime::{ctx, sample, FrameCtx, ModifierRuntime, NullRuntime, PluginRef, Sample};
 use crate::signatures::{from_dmx16, remap_range, rgb_read, rgb_write, to_dmx16, ColorSystem, Signature};
 use crate::types::{BlendMode, ChaserConfig, OutputMode, RenderTarget, SpeedConfig, SpeedMode};
@@ -178,7 +179,7 @@ pub struct ModifierInstance {
     /// 0–1.
     pub strength: f32,
     pub speed: SpeedConfig,
-    pub spatial: Spatial,
+    pub distribution: Distribution,
     /// Scalar target channel type ids (empty = all).
     pub channel_types: Vec<u8>,
     /// Targeted fixtures by group index (`None` = all).
@@ -270,6 +271,8 @@ pub struct EffectEngine {
     group_rank: Vec<i32>,
     /// Head index per target (scalar samples' head count lookup).
     target_head: Vec<usize>,
+    /// Random-grouping permutations by rank count (per instance render).
+    perms: std::collections::HashMap<usize, Vec<u32>>,
 }
 
 impl Default for EffectEngine {
@@ -301,6 +304,7 @@ impl EffectEngine {
             out: Vec::new(),
             group_rank: Vec::new(),
             target_head: Vec::new(),
+            perms: std::collections::HashMap::new(),
         }
     }
 
@@ -631,6 +635,9 @@ impl EffectEngine {
         fctx.0[ctx::SEED_LO] = (inst.key & 0xffff) as f32;
         fctx.0[ctx::SEED_HI] = (inst.key >> 16) as f32;
         fctx.0[ctx::STRENGTH] = inst.strength;
+        fctx.0[ctx::TIME_PHASE] = sp;
+        self.perms.clear();
+        let mut max_heads = 1usize;
 
         // Samples (base = working value before this modifier).
         self.samples.clear();
@@ -657,9 +664,15 @@ impl EffectEngine {
                     (head.group, head.head, head.head_count, head.x, head.y)
                 }
             };
+            let d = inst.distribution.sample(x, y, group, head, head_count, &mut self.perms);
+            max_heads = max_heads.max(head_count);
             s.0[sample::X] = x;
             s.0[sample::Y] = y;
-            s.0[sample::PHASE] = sample_phase(sp, &inst.spatial, x, y);
+            // Legacy phase (ABI v1): speed phase minus the distribution position.
+            s.0[sample::PHASE] = sp - d.spatial;
+            s.0[sample::SPATIAL] = d.spatial;
+            s.0[sample::RANK] = d.rank as f32;
+            s.0[sample::DIST_GROUP] = d.group as f32;
             s.0[sample::GROUP_INDEX] = self.group_rank.get(group).copied().unwrap_or(0).max(0) as f32;
             s.0[sample::GROUP_COUNT] = group_count as f32;
             s.0[sample::HEAD_INDEX] = head as f32;
@@ -667,6 +680,10 @@ impl EffectEngine {
             s.0[sample::SEED] = sample_seed(self.fixture_hashes.get(group).copied().unwrap_or(0), head, inst.key) as f32;
             self.samples.push(s);
         }
+
+        let (rank_count, group_count) = inst.distribution.frame_counts(max_heads);
+        fctx.0[ctx::RANK_COUNT] = rank_count as f32;
+        fctx.0[ctx::DIST_GROUP_COUNT] = group_count as f32;
 
         self.out.clear();
         self.out.resize(self.samples.len() * arity, 0.0);

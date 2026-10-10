@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
- * Host-owned fields of a modifier instance (ADR §6.3): strength, speed and
- * the spatial phase distribution (fanning, direction, reverse). The plugin's
- * own params render separately in `ParamForm`.
+ * Host-owned fields of a modifier instance (ADR §6.3): strength and speed.
+ * The distribution has its own section; the plugin's params render in
+ * `ParamForm`.
  */
 import type { ModifierInstance } from '~/utils/engine/types';
 import { Label } from '@/components/ui/label';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
-import ChaserFanningControl from './ChaserFanningControl.vue';
 import SpeedControl from './SpeedControl.vue';
 
 defineProps<{
@@ -47,15 +46,6 @@ const emit = defineEmits<{
         :model-value="modifier.speed"
         @update:model-value="emit('update', 'speed', $event); emit('drag-end', 'Update Modifier Speed')"
         @dropdown-open-change="v => emit('dropdown-open-change', v)"
-      />
-    </div>
-    <div class="col-span-2">
-      <ChaserFanningControl
-        :fanning="modifier.fanning || 0"
-        :direction="modifier.direction"
-        :reverse="modifier.reverse"
-        @update:properties="v => emit('update-properties', v, 'Change Fanning Properties')"
-        @dropdown-open="v => emit('dropdown-open-change', v)"
       />
     </div>
   </div>

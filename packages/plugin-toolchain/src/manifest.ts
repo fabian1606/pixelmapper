@@ -8,7 +8,7 @@ import type { ContentPluginManifest } from './types';
 import { validateCurveParam } from './manifest-curve';
 
 /** Plugin ABI/SDK version this toolchain produces. */
-export const PLUGIN_API_VERSION = '1.0.0';
+export const PLUGIN_API_VERSION = '1.1.0';
 
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];

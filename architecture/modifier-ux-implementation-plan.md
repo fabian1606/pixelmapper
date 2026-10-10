@@ -396,13 +396,13 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
 
 ### Phase M3 — Distribution core (engine, wire, preview, migration)
 
-- [ ] **M3.1 Types & factory.** In `app/utils/engine/types.ts` + `modifiers.ts`:
+- [x] **M3.1 Types & factory.** In `app/utils/engine/types.ts` + `modifiers.ts`:
   - `Distribution` (§1.1), `createDistribution(partial?)`;
   - `ModifierInstance.distribution` replaces `direction/originX/originY/angle/fanning/reverse`.
   - Update every reader (grep `\.fanning\b|\.direction\b|originX|\.angle\b` in `app/`).
 
   *Accept:* typecheck clean.
-- [ ] **M3.2 Rank resolution** (`app/utils/engine/distribution/order.ts`, pure):
+- [x] **M3.2 Rank resolution** (`app/utils/engine/distribution/order.ts`, pure):
   - `projectionRanks(points: {id, x, y}[], a, b, snap): Record<id, number>`:
     1. project onto `b − a`;
     2. sort;
@@ -421,7 +421,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - fixtures jittered by 20 % of spacing with snap 0.5 → same ranks as un-jittered;
   - snap 0 → all distinct;
   - single fixture → rank 0.
-- [ ] **M3.3 Selection analysis** (`app/utils/engine/distribution/selection-shape.ts`, pure):
+- [x] **M3.3 Selection analysis** (`app/utils/engine/distribution/selection-shape.ts`, pure):
   - `analyzeSelection(fixtures)` returns `{ count, centroid, axis: {a, b} /* PCA main axis, spanning min..max projection, oriented +x then +y */, extentMain, extentCross, kind: 'single'|'row'|'ring'|'area', multiHead: boolean }`.
   - Rules:
     - `row` if `extentCross / extentMain < 0.15`;
@@ -430,7 +430,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
     - `multiHead` = every fixture has ≥ 4 heads.
 
   *Accept:* tests for row, ring, area, single, bars.
-- [ ] **M3.4 Wire v2.** `buildModifiersBin` writes version byte **2**. The distribution block replaces the direction block:
+- [x] **M3.4 Wire v2.** `buildModifiersBin` writes version byte **2**. The distribution block replaces the direction block:
   ```
   u8 scope(0 across,1 within); u8 mode(0 none,1 linear,2 radial,3 conical,4 order);
   f32 originX, originY, endX, endY; u8 reverse;
@@ -441,26 +441,26 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   Ranks come from `resolveRanks`. `encodeParams(…, { ticks: rankCount })`.
 
   *Accept:* encoder test (round trip via a TS decoder helper); packet size test for 200 fixtures (< 64 KB budget documented).
-- [ ] **M3.5 Rust.**
+- [x] **M3.5 Rust.**
   - `bin_protocol.rs` parses v1 (map the legacy direction block: Symmetrical → linear on |d| is not representable, so map it to `order` with ranks resolved from |projection| as a fallback; better: keep a legacy `Spatial` path for v1 packets) and v2.
   - New `distribution.rs` implements §1.2: `fn sample_distribution(&Distribution, ranks, x, y, head, head_count, fixture) -> (spatial, rank, group)`.
   - `engine.rs` `render_instance` fills Sample 13–15 and Frame 8–10, and `phase = sp − spatial`.
   - Keep `phase.rs` `speed_phase`/`phase_speed`; delete `Spatial` once v1 support is only the mapping.
 
   *Accept:* `cargo test` — a table test per mode/scope/grouping/reverse against hand-computed values (same table as M3.6).
-- [ ] **M3.6 Preview mirror.**
+- [x] **M3.6 Preview mirror.**
   - `app/utils/plugins/preview-pool.ts`: replace `spatialOffset` with a TS port of `distribution.rs` (`app/utils/engine/distribution/sample.ts`) and fill the new slots.
   - `renderField` gains a *virtual strip* mode: `renderStrip(m, cols, opts)` with samples `spatial = i/cols`, `rank = floor(i·rankCount/cols)`, `distGroup` from grouping. This is used by `EndlessStrip`.
 
   *Accept:* a shared fixture-table test runs the TS port and compares with the values hard-coded from the Rust test (parity).
-- [ ] **M3.7 SDK.** In `packages/plugin-sdk/assembly/core.ts`, add getters:
+- [x] **M3.7 SDK.** In `packages/plugin-sdk/assembly/core.ts`, add getters:
   - `Frame.timePhase`, `Frame.rankCount`, `Frame.distGroupCount`;
   - `Sample.spatial`, `Sample.rank`, `Sample.distGroup`.
 
   Then `bun run gen:sdk`, bump SDK/API versions to 1.1.0, and update `rs-engine/core/src/runtime.rs` constants.
 
   *Accept:* toolchain compiles a test plugin that reads the new fields; worker bridge passes them (`app/utils/plugins/worker-bridge.ts` copies whole buffers, verify).
-- [ ] **M3.8 Migration** (`app/utils/persistence/migrations/v3-distribution.ts`, project schema 2 → 3; wire into `serialize.ts` load path). Per instance:
+- [x] **M3.8 Migration** (`app/utils/persistence/migrations/v3-distribution.ts`, project schema 2 → 3; wire into `serialize.ts` load path). Per instance:
 
   | Old | New |
   |---|---|
@@ -468,7 +468,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   | `LINEAR` | `mode linear`; `origin = (originX, originY)`; `end = origin + fanning·(cos angle, sin angle)` (fanning was world-width units per cycle → normalized) |
   | `RADIAL` | `radial`, same `end` |
   | `ANGULAR` | `conical`, `end` along angle with length 0.1 |
-  | `SYMMETRICAL` | `order`, `order.line = { a: origin − half·dir, b: origin }` and a flag `mirrorLine: true` resolving ranks by `|projection|` (add `order.mirror?: boolean` to the type; `resolveRanks` handles it) |
+  | `SYMMETRICAL` | `order`, `order.line = { a: origin, b: origin + fanning·dir }` with `order.mirror: true`: ranks by `|projection|` from `line.a` (the center), as for the *Center Out* recipe (implemented: `order.mirror?: boolean`; `resolveRanks` handles it) |
   | `reverse` | `reverse` |
 
   Snapshot readers and command payloads (`SetModifiersCommand`) migrate on load/replay.

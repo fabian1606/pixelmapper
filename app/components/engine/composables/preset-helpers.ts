@@ -80,7 +80,7 @@ export function getModifierIdentity(m: ModifierInstance): string {
 export function getModifierFingerprint(m: ModifierInstance): string {
   const channels = [...(m.targetChannels ?? [])].sort().join(',');
   const params = JSON.stringify(Object.keys(m.params ?? {}).sort().map(k => [k, m.params[k]]));
-  return `${m.plugin}|${m.signature}|${channels}|${m.strength}|${m.fanning}|${m.direction}|${m.reverse}|${m.blendMode}|${JSON.stringify(m.speed)}|${m.originX},${m.originY},${m.angle}|${params}`;
+  return `${m.plugin}|${m.signature}|${channels}|${m.strength}|${m.blendMode}|${JSON.stringify(m.speed)}|${JSON.stringify(m.distribution)}|${params}`;
 }
 
 // ─── Modifier serialisation ───────────────────────────────────────────────────

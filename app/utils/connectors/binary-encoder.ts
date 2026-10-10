@@ -5,6 +5,7 @@ import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
 import { modifierKey } from '~/utils/engine/modifiers';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 import { beamWorldPx } from '~/utils/kinds/kind-host';
+import { resolveDistribution, usesRanks } from '~/utils/engine/distribution/resolve';
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
@@ -30,7 +31,9 @@ export const CHANNEL_TYPE_ID: Record<string, number> = {
 };
 
 const SPEED_MODE_ID: Record<string, number> = { time: 0, beat: 1, infinite: 2 };
-const DIRECTION_ID:  Record<string, number> = { NONE: 0, LINEAR: 1, RADIAL: 2, SYMMETRICAL: 3, ANGULAR: 4 };
+/** Distribution ids (rs-engine `distribution::{Mode, Grouping}::from_id`). */
+const DIST_MODE_ID: Record<string, number> = { none: 0, linear: 1, radial: 2, conical: 3, order: 4 };
+const GROUPING_ID: Record<string, number> = { none: 0, everyN: 1, sections: 2, random: 3 };
 
 // ── Low-level buffer writer ───────────────────────────────────────────────────
 
@@ -54,7 +57,12 @@ class BufWriter {
 
   u32(v: number) { this.buf.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff); }
 
+  /** Payload size so far (bytes). */
+  get size(): number { return this.buf.length; }
+
   toPacket(type: number): Uint8Array {
+    // The frame length is u16: larger payloads cannot be framed (plan §5 risk).
+    if (this.buf.length > 0xffff) throw new Error(`packet 0x${type.toString(16)} payload of ${this.buf.length} bytes exceeds 64 KB`);
     const out = new Uint8Array(5 + this.buf.length);
     out[0] = MAGIC0; out[1] = MAGIC1; out[2] = type;
     out[3] = this.buf.length & 0xff;
@@ -163,14 +171,25 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
   return w.toPacket(TYPE_CHAN_BIN);
 }
 
-// ── Modifiers packet (TYPE_MODIFIERS_BIN 0x16) ──────────────────────────────
+// ── Modifiers packet (TYPE_MODIFIERS_BIN 0x16, version 2) ───────────────────
 // Payload (see rs-engine/core/src/bin_protocol.rs):
-//   u8 version(1); u16 count; per instance:
+//   u8 version(2); u16 count; per instance:
 //   u32 key; u16 pluginIndex; u8 signature; u8 output; u8 blend; f32 strength;
-//   speed; u8 direction; f32 originX; f32 originY; f32 angle; f32 fanning;
-//   u8 reverse; u8 nTypes; u8[] types; u16 maskBytes (0 = all); u8[] mask;
-//   u16 nParams; f32[] params.
+//   speed; distribution; u8 nTypes; u8[] types; u16 maskBytes (0 = all);
+//   u8[] mask; u16 nParams; f32[] params.
+// distribution (plan M3.4):
+//   u8 scope(0 across,1 within); u8 mode(0 none,1 linear,2 radial,3 conical,4 order);
+//   f32 originX, originY, endX, endY; u8 reverse;
+//   u8 groupingKind(0 none,1 everyN,2 sections,3 random); u8 groupingN; u32 groupingSeed;
+//   u8 withinOffset(0 none,1 order);
+//   u16 rankEntries; per entry: u16 fixtureLayoutIndex, u16 rank
+//   (targeted fixtures only; mode order or withinOffset order).
+// Size budget: the u16 frame length caps the payload at 64 KB (e.g. 200
+// fixtures cost 800 bytes of ranks per ordered instance, a curve 512 bytes).
 // The plugin table (index → hash) travels next to the packet (worker message).
+
+/** Version byte of the modifiers packet. */
+export const MODIFIERS_BIN_VERSION = 2;
 
 const BLEND_MODE_ID: Record<string, number> = { add: 0, override: 1, multiply: 2, max: 3, min: 4 };
 const SIGNATURE_ID: Record<string, number> = { scalar: 0, rgb: 1, panTilt: 2 };
@@ -196,13 +215,15 @@ export function buildModifiersBin(
 ): ModifiersPacket {
   const idToIndex = new Map<string | number, number>();
   fixtures.forEach((f, i) => idToIndex.set(f.id, i));
+  /** Layout index by stringified id (rank tables are keyed by string). */
+  const indexByKey = new Map(fixtures.map((f, i) => [String(f.id), i]));
   const maskBytes = Math.ceil(fixtures.length / 8);
 
   const plugins: string[] = [];
   const encodable = modifiers.filter(m => getManifest(m.plugin));
 
   const w = new BufWriter();
-  w.u8(1);
+  w.u8(MODIFIERS_BIN_VERSION);
   w.u16(encodable.length);
   for (const m of encodable) {
     const manifest = getManifest(m.plugin)!;
@@ -216,12 +237,29 @@ export function buildModifiersBin(
     w.u8(BLEND_MODE_ID[m.blendMode] ?? 0);
     w.f32(Math.max(0, Math.min(1, m.strength)));
     w.speed(m.speed);
-    w.u8(DIRECTION_ID[m.direction] ?? 0);
-    w.f32(m.originX);
-    w.f32(m.originY);
-    w.f32(m.angle);
-    w.f32(m.fanning);
-    w.u8(m.reverse ? 1 : 0);
+
+    // Distribution block; ranks are resolved here and sent as a table.
+    const d = m.distribution;
+    const resolved = resolveDistribution(m, fixtures);
+    w.u8(d.scope === 'within' ? 1 : 0);
+    w.u8(DIST_MODE_ID[d.mode] ?? 0);
+    w.f32(d.origin.x);
+    w.f32(d.origin.y);
+    w.f32(d.end.x);
+    w.f32(d.end.y);
+    w.u8(d.reverse ? 1 : 0);
+    w.u8(GROUPING_ID[d.grouping.kind] ?? 0);
+    w.u8(Math.max(1, Math.min(255, Math.round(d.grouping.n))));
+    w.u32(d.grouping.seed >>> 0);
+    w.u8(d.withinOffset === 'order' ? 1 : 0);
+    const entries = (usesRanks(d) ? Object.entries(resolved.ranks) : [])
+      .map(([id, rank]) => [indexByKey.get(id), rank] as const)
+      .filter((e): e is readonly [number, number] => e[0] !== undefined);
+    w.u16(entries.length);
+    for (const [index, rank] of entries) {
+      w.u16(index);
+      w.u16(rank);
+    }
 
     // Scalar targets by channel type (rgb/panTilt resolve their channels in the core).
     const types = m.signature === 'scalar' ? m.targetChannels.map(t => CHANNEL_TYPE_ID[t]).filter((v): v is number => v !== undefined) : [];
@@ -242,7 +280,7 @@ export function buildModifiersBin(
       w.u16(0);
     }
 
-    const params = encodeParams(manifest.params, m.params);
+    const params = encodeParams(manifest.params, m.params, { ticks: resolved.ticks });
     w.u16(params.length);
     for (const v of params) w.f32(v);
   }

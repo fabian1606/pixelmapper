@@ -39,26 +39,26 @@ function hasSpatialParams(m: ModifierInstance): boolean {
   return !!o && typeof o === 'object' && 'x' in o;
 }
 
-/** Origin, angle and handle length in normalized world units. */
-function spatialOf(m: ModifierInstance): { ox: number; oy: number; angle: number; magnitude: number } {
+/** Origin and end of the handle in normalized world units. */
+function handleOf(m: ModifierInstance): { origin: Point; end: Point } {
   if (hasSpatialParams(m)) {
     const o = m.params.origin as Point;
-    return { ox: o.x, oy: o.y, angle: Number(m.params.angle ?? 0), magnitude: Number(m.params.scale ?? 0.1) };
+    const angle = Number(m.params.angle ?? 0);
+    const scale = Number(m.params.scale ?? 0.1);
+    return { origin: o, end: { x: o.x + Math.cos(angle) * scale, y: o.y + Math.sin(angle) * scale * props.worldWidth / props.worldHeight } };
   }
-  return { ox: m.originX ?? 0.5, oy: m.originY ?? 0.5, angle: m.angle ?? 0, magnitude: m.fanning ?? 0.1 };
+  return { origin: m.distribution.origin, end: m.distribution.end };
 }
 
 // ─── Gradient handle viewport positions ───────────────────────────────────────
 function getOriginViewportPos(m: ModifierInstance) {
-  const { ox, oy } = spatialOf(m);
-  return props.worldToViewport(ox * props.worldWidth, oy * props.worldHeight);
+  const { origin } = handleOf(m);
+  return props.worldToViewport(origin.x * props.worldWidth, origin.y * props.worldHeight);
 }
 
 function getEndViewportPos(m: ModifierInstance) {
-  const { ox, oy, angle, magnitude } = spatialOf(m);
-  const ex = ox * props.worldWidth  + Math.cos(angle) * magnitude * props.worldWidth;
-  const ey = oy * props.worldHeight + Math.sin(angle) * magnitude * props.worldWidth;
-  return props.worldToViewport(ex, ey);
+  const { end } = handleOf(m);
+  return props.worldToViewport(end.x * props.worldWidth, end.y * props.worldHeight);
 }
 
 // ─── Gradient handle drag (window-global for reliable capture) ─────────────────
@@ -91,9 +91,9 @@ function handleWindowMouseMove(e: MouseEvent) {
   const wx = (vx - props.camera.x) / props.camera.scale;
   const wy = (vy - props.camera.y) / props.camera.scale;
 
-  const { ox, oy } = spatialOf(m);
-  const dx = wx - ox * props.worldWidth;
-  const dy = wy - oy * props.worldHeight;
+  const { origin } = handleOf(m);
+  const dx = wx - origin.x * props.worldWidth;
+  const dy = wy - origin.y * props.worldHeight;
 
   if (hasSpatialParams(m)) {
     // Plugin-owned spatial params (origin point, angle, scale).
@@ -103,10 +103,13 @@ function handleWindowMouseMove(e: MouseEvent) {
     emit('modifierChange', m, { params: { ...m.params, ...paramChanges } as ModifierInstance['params'] });
     liveBus.dispatch('modifier.update', { effectId: m.id, changes: {}, paramChanges });
   } else {
-    // Host phase distribution; fanning = one wavelength = distance origin → endpoint.
-    const changes: Partial<ModifierInstance> = spatialDragType === 'origin'
-      ? { originX: wx / props.worldWidth, originY: wy / props.worldHeight }
-      : { angle: Math.atan2(dy, dx), fanning: Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / props.worldWidth) };
+    // Distribution gradient handle: origin moves the whole handle, end sets direction and length.
+    const p = { x: wx / props.worldWidth, y: wy / props.worldHeight };
+    const d = m.distribution;
+    const distribution = spatialDragType === 'origin'
+      ? { ...d, origin: p, end: { x: d.end.x + p.x - d.origin.x, y: d.end.y + p.y - d.origin.y } }
+      : { ...d, end: p };
+    const changes: Partial<ModifierInstance> = { distribution };
     emit('modifierChange', m, changes);
     liveBus.dispatch('modifier.update', { effectId: m.id, changes });
   }

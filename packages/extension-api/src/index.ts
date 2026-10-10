@@ -11,6 +11,7 @@
 export * from './model';
 export * from './params';
 export * from './curves';
+export * from './distribution';
 export * from './scopes';
 export * from './slots';
 export * from './replaceables';

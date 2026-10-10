@@ -19,6 +19,7 @@ import type { ModifierInstance, SpeedConfig } from '~/utils/engine/types';
 import { modifierKey } from '~/utils/engine/modifiers';
 import { getManifest, loadWasm } from './plugin-store';
 import { mapOutput } from './host-mapping';
+import { frameCounts, groupOf, hasGrouping, QUANTIZED_RANKS, sampleDistribution } from '~/utils/engine/distribution/sample';
 
 // ── Pool state ─────────────────────────────────────
 
@@ -93,7 +94,7 @@ export function releasePreview(id: string): void {
 const ARITY = { scalar: 1, rgb: 3, panTilt: 2 } as const;
 
 /** Phase of the speed setting (cycles). */
-function speedPhase(speed: SpeedConfig, timeMs: number, beatTime: number): number {
+export function speedPhase(speed: SpeedConfig, timeMs: number, beatTime: number): number {
   if (speed.mode === 'time' && speed.timeMs > 0) return timeMs / speed.timeMs;
   if (speed.mode === 'beat' && speed.beatValue > 0) return (beatTime + speed.beatOffset) / speed.beatValue;
   return 0;
@@ -104,28 +105,6 @@ function phaseSpeed(speed: SpeedConfig, bpm: number): number {
   if (speed.mode === 'time' && speed.timeMs > 0) return 1000 / speed.timeMs;
   if (speed.mode === 'beat' && speed.beatValue > 0) return bpm / 60 / speed.beatValue;
   return 0;
-}
-
-/** Spatial phase offset of a normalized position. */
-function spatialOffset(m: ModifierInstance, x: number, y: number): number {
-  if (m.fanning === 0 || m.direction === 'NONE') return 0;
-  const dx = x - m.originX;
-  const dy = y - m.originY;
-  let d = 0;
-  switch (m.direction) {
-    case 'LINEAR': d = dx * Math.cos(m.angle) + dy * Math.sin(m.angle); break;
-    case 'RADIAL': d = Math.hypot(dx, dy); break;
-    case 'SYMMETRICAL': d = Math.abs(dx * Math.cos(m.angle) + dy * Math.sin(m.angle)); break;
-    case 'ANGULAR': {
-      let delta = Math.atan2(dy, dx) - m.angle;
-      if (delta > Math.PI) delta -= 2 * Math.PI;
-      if (delta < -Math.PI) delta += 2 * Math.PI;
-      d = delta / (2 * Math.PI);
-      break;
-    }
-  }
-  const offset = d / Math.max(m.fanning, 0.0001);
-  return m.reverse ? -offset : offset;
 }
 
 /** Murmur3 finalizer (sample seeds). */
@@ -159,6 +138,17 @@ export interface PreviewOptions {
   bpm?: number;
   /** Working values under the modifier (default per signature). */
   base?: number[];
+  /** Order ranks of the instance on the stage (strip / encoding ticks); 0 = unknown. */
+  rankCount?: number;
+}
+
+/** Position and distribution values of one preview sample. */
+interface Placed {
+  x: number;
+  y: number;
+  spatial: number;
+  rank: number;
+  group: number;
 }
 
 /** One rendered preview: `count × arity` values after host blending. */
@@ -175,7 +165,7 @@ export interface PreviewResult {
 function render(
   m: ModifierInstance,
   count: number,
-  place: (i: number, sample: Float32Array, o: number) => void,
+  place: (i: number) => Placed,
   opts: PreviewOptions,
 ): PreviewResult | null {
   const manifest = getManifest(m.plugin);
@@ -197,6 +187,12 @@ function render(
   ctx[CTX.seedLo] = key & 0xffff;
   ctx[CTX.seedHi] = key >>> 16;
   ctx[CTX.strength] = m.strength;
+  const tp = speedPhase(m.speed, timeMs, ctx[CTX.beatTime]!);
+  const rankCount = opts.rankCount ?? 0;
+  const counts = frameCounts(m.distribution, rankCount, 1);
+  ctx[CTX.timePhase] = tp;
+  ctx[CTX.rankCount] = counts.rankCount;
+  ctx[CTX.distGroupCount] = counts.distGroupCount;
 
   const cseed = channelSeed(m.targetChannels[0] ?? 'DIMMER');
   const samples = new Float32Array(count * SAMPLE_FIELDS);
@@ -210,11 +206,17 @@ function render(
     for (let c = 0; c < 3; c++) samples[o + SAMPLE.base0 + c] = base[c] ?? 0;
     samples[o + SAMPLE.channelSeedLo] = cseed & 0xffff;
     samples[o + SAMPLE.channelSeedHi] = cseed >>> 16;
-    place(i, samples, o);
+    const p = place(i);
+    samples[o + SAMPLE.x] = p.x;
+    samples[o + SAMPLE.y] = p.y;
+    samples[o + SAMPLE.phase] = tp - p.spatial;
+    samples[o + SAMPLE.spatial] = p.spatial;
+    samples[o + SAMPLE.rank] = p.rank;
+    samples[o + SAMPLE.distGroup] = p.group;
   }
 
   try {
-    instance.prepare(encodeParams(manifest.params, m.params));
+    instance.prepare(encodeParams(manifest.params, m.params, { ticks: rankCount }));
     const out = instance.render(ctx, samples, count);
     for (let i = 0; i < count; i++) {
       for (let c = 0; c < arity; c++) {
@@ -237,33 +239,48 @@ function render(
 // ── Public renders ─────────────────────────────────
 
 /**
- * One cycle of the modifier over `count` samples (card preview): phase runs
- * 0 → 1 left to right, positions spread along x.
+ * One cycle of the modifier over `count` samples at time 0 (legacy card
+ * preview): spatial runs 0 → −1 left to right, so the legacy phase runs
+ * 0 → 1; positions spread along x.
  */
 export function renderCycle(m: ModifierInstance, count: number, opts: PreviewOptions = {}): PreviewResult | null {
-  return render(m, count, (i, s, o) => {
-    s[o + SAMPLE.x] = count > 1 ? i / (count - 1) : 0.5;
-    s[o + SAMPLE.y] = 0.5;
-    s[o + SAMPLE.phase] = i / count;
-  }, opts);
+  return render(m, count, i => ({ x: count > 1 ? i / (count - 1) : 0.5, y: 0.5, spatial: -i / count, rank: -1, group: -1 }), { ...opts, timeMs: 0 });
 }
 
 /**
  * The modifier over a `cols × rows` grid covering the normalized world at
- * `opts.timeMs` (canvas overlay): phase = speed phase − spatial offset, as in
- * the engine.
+ * `opts.timeMs` (canvas overlay): per-point distribution as in the engine
+ * (grid points carry no fixture rank).
  */
 export function renderField(m: ModifierInstance, cols: number, rows: number, opts: PreviewOptions = {}): PreviewResult | null {
-  const timeMs = opts.timeMs ?? 0;
-  const bpm = opts.bpm ?? 120;
-  const sp = speedPhase(m.speed, timeMs, (timeMs / 60000) * bpm);
-  return render(m, cols * rows, (i, s, o) => {
+  const d = m.distribution;
+  return render(m, cols * rows, (i) => {
     const x = ((i % cols) + 0.5) / cols;
     const y = (Math.floor(i / cols) + 0.5) / rows;
-    s[o + SAMPLE.x] = x;
-    s[o + SAMPLE.y] = y;
-    s[o + SAMPLE.phase] = sp - spatialOffset(m, x, y);
+    return { x, y, ...sampleDistribution(d, 0, { x, y, fixtureRank: -1, head: 0, headCount: 1 }) };
   }, opts);
+}
+
+/**
+ * Endless strip (plan M3.6): `cols` virtual samples with a continuous
+ * `spatial = i / cols` ("infinitely many pixels"). Ranks come from
+ * `opts.rankCount` (16 when unknown); with grouping, every sample takes its
+ * group's position, as on the stage. Reverse applies as in the engine.
+ */
+export function renderStrip(m: ModifierInstance, cols: number, opts: PreviewOptions = {}): PreviewResult | null {
+  const d = m.distribution;
+  const rc = opts.rankCount && opts.rankCount > 0 ? opts.rankCount : QUANTIZED_RANKS;
+  return render(m, cols, (i) => {
+    const rank = Math.min(rc - 1, Math.floor((i * rc) / cols));
+    let spatial = i / cols;
+    let group = -1;
+    if (hasGrouping(d)) {
+      group = groupOf(d, rank, rc);
+      spatial = group / Math.floor(d.grouping.n);
+    }
+    if (d.reverse) spatial = 1 - spatial;
+    return { x: cols > 1 ? i / (cols - 1) : 0.5, y: 0.5, spatial, rank, group };
+  }, { ...opts, rankCount: rc });
 }
 
 /** Converts preview values to CSS-ready RGB bytes (scalar → gray, panTilt → x/y as r/g). */

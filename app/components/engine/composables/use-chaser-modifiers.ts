@@ -66,8 +66,8 @@ export function useChaserModifiers(
 
   /**
    * Host defaults for a new instance of `plugin` on the edited fixtures:
-   * targets, origin, blend mode (absolute outputs override instead of add),
-   * and per-built-in starting values that match the former effects.
+   * targets, blend mode (absolute outputs override instead of add), a
+   * gradient handle along the selection, and per-built-in starting values.
    */
   function newInstance(plugin: string, carry?: ModifierInstance): ModifierInstance {
     const manifest = getManifest(plugin);
@@ -78,22 +78,20 @@ export function useChaserModifiers(
       strength: carry?.strength ?? 1,
       speed: carry ? { ...carry.speed } : { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
       blendMode: manifest?.output === 'absolute' ? 'override' : (effectEngine?.stackBlendMode.value ?? 'add'),
-      originX: x,
-      originY: y,
+      distribution: carry ? carry.distribution : { mode: 'linear', origin: { x, y }, end: { x: x + 0.1, y } },
     });
     if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
       if (!carry) inst.strength = 0.5;
       inst.speed = carry ? inst.speed : { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
-      inst.direction = 'NONE';
+      inst.distribution = { ...inst.distribution, mode: 'none' };
     }
     else if (plugin === builtinHash(BUILTIN_ALIASES.sequencer)) {
       // Vertical split axis through the fixtures — sensible for horizontal rows.
       inst.params = { ...inst.params, origin: { x, y }, angle: Math.PI / 2 };
-      inst.direction = 'NONE';
+      inst.distribution = { ...inst.distribution, mode: 'none' };
     }
     else if (plugin === builtinHash(BUILTIN_ALIASES.colorAdjust)) {
-      inst.direction = 'NONE';
-      inst.fanning = 0;
+      inst.distribution = { ...inst.distribution, mode: 'none' };
     }
     return inst;
   }
@@ -195,8 +193,8 @@ export function useChaserModifiers(
     if (!effectEngine) return;
 
     // Is this a continuous value change? If so, debounce the commit
-    const isContinuous = key === 'speed' || key === 'strength' || key === 'fanning' || key === 'params';
-    const isDirection = key === 'direction';
+    const isContinuous = key === 'speed' || key === 'strength' || key === 'params';
+    const isDirection = key === 'distribution';
 
     let before: ModifierInstance[] | null = null;
 
@@ -225,7 +223,7 @@ export function useChaserModifiers(
     dispatchModifierUpdate(safeEff, { [key]: value }, didSplit);
 
     if (isDirection && before) {
-      commitModifiers(before, 'Change Modifier Direction');
+      commitModifiers(before, 'Change Modifier Distribution');
     }
   }
 
@@ -349,9 +347,9 @@ export function useChaserModifiers(
     if (!effectEngine || !before) return;
     const selectedIds = props.fixtures.map(f => f.id);
     const { eff: safeEff, didSplit } = getSafeEffectToMutate(effect, selectedIds);
-    safeEff.reverse = !safeEff.reverse;
+    safeEff.distribution = { ...safeEff.distribution, reverse: !safeEff.distribution.reverse };
     emit('change');
-    dispatchModifierUpdate(safeEff, { reverse: safeEff.reverse }, didSplit);
+    dispatchModifierUpdate(safeEff, { distribution: safeEff.distribution }, didSplit);
     commitModifiers(before, 'Reverse Modifier Direction');
   }
 
