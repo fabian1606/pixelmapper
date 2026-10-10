@@ -30,10 +30,10 @@ import { mapOutput } from '../app/utils/plugins/host-mapping';
 /** One golden case (ABI v1.1 fields optional). */
 interface GoldenCase {
   params: Record<string, never>;
-  ctx: { timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; ticks?: number };
+  ctx: { timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; ticks?: number; seed?: number };
   samples: {
     x: number; y: number; phase: number; groupIndex?: number; groupCount?: number; base: number[]; channelSeed?: number;
-    spatial?: number; rank?: number; distGroup?: number; headIndex?: number; headCount?: number;
+    spatial?: number; rank?: number; distGroup?: number; headIndex?: number; headCount?: number; seed?: number;
   }[];
   expected: number[][];
   /** `raw` plugin output, or `mapped` through the manifest's output mode. */
@@ -80,6 +80,8 @@ describe.each(PLUGINS)('built-in plugin %s', (name) => {
       ctx[CTX.timePhase] = c.ctx.timePhase ?? 0;
       ctx[CTX.rankCount] = c.ctx.rankCount ?? 0;
       ctx[CTX.distGroupCount] = c.ctx.distGroupCount ?? 0;
+      ctx[CTX.seedLo] = (c.ctx.seed ?? 0) & 0xffff;
+      ctx[CTX.seedHi] = (c.ctx.seed ?? 0) >>> 16;
       const samples = new Float32Array(c.samples.length * SAMPLE_FIELDS);
       c.samples.forEach((s, i) => {
         const o = i * SAMPLE_FIELDS;
@@ -93,6 +95,7 @@ describe.each(PLUGINS)('built-in plugin %s', (name) => {
         samples[o + SAMPLE.spatial] = s.spatial ?? 0;
         samples[o + SAMPLE.rank] = s.rank ?? -1;
         samples[o + SAMPLE.distGroup] = s.distGroup ?? -1;
+        samples[o + SAMPLE.seed] = s.seed ?? 0;
         s.base.forEach((b, k) => { samples[o + SAMPLE.base0 + k] = b; });
         const seed = s.channelSeed ?? 0;
         samples[o + SAMPLE.channelSeedLo] = seed & 0xffff;

@@ -140,6 +140,10 @@ export interface PreviewOptions {
   base?: number[];
   /** Order ranks of the instance on the stage (strip / encoding ticks); 0 = unknown. */
   rankCount?: number;
+  /** Time phase override (cycles) instead of deriving it from the speed. */
+  timePhase?: number;
+  /** Return the plugin's raw output (no host mapping). */
+  raw?: boolean;
 }
 
 /** Position and distribution values of one preview sample. */
@@ -187,7 +191,7 @@ function render(
   ctx[CTX.seedLo] = key & 0xffff;
   ctx[CTX.seedHi] = key >>> 16;
   ctx[CTX.strength] = m.strength;
-  const tp = speedPhase(m.speed, timeMs, ctx[CTX.beatTime]!);
+  const tp = opts.timePhase ?? speedPhase(m.speed, timeMs, ctx[CTX.beatTime]!);
   const rankCount = opts.rankCount ?? 0;
   const counts = frameCounts(m.distribution, rankCount, 1);
   ctx[CTX.timePhase] = tp;
@@ -218,6 +222,7 @@ function render(
   try {
     instance.prepare(encodeParams(manifest.params, m.params, { ticks: rankCount }));
     const out = instance.render(ctx, samples, count);
+    if (opts.raw) return { values: out, arity };
     for (let i = 0; i < count; i++) {
       for (let c = 0; c < arity; c++) {
         out[i * arity + c] = mapOutput(manifest.output, base[c] ?? 0, out[i * arity + c]!, m.strength);
@@ -281,6 +286,20 @@ export function renderStrip(m: ModifierInstance, cols: number, opts: PreviewOpti
     if (d.reverse) spatial = 1 - spatial;
     return { x: cols > 1 ? i / (cols - 1) : 0.5, y: 0.5, spatial, rank, group };
   }, { ...opts, rankCount: rc });
+}
+
+/**
+ * Raw plugin output of `count` virtual fixtures over `cycles` time units
+ * (`points` samples each), one array per fixture (plan M9.4 history editor).
+ */
+export function renderTraces(m: ModifierInstance, count: number, points: number, cycles: number): Float32Array[] | null {
+  const traces = Array.from({ length: count }, () => new Float32Array(points));
+  for (let p = 0; p < points; p++) {
+    const r = render(m, count, i => ({ x: 0.2 + 0.3 * i, y: 0.5, spatial: 0, rank: i, group: -1 }), { timePhase: (p / points) * cycles, raw: true, rankCount: count });
+    if (!r) return null;
+    for (let i = 0; i < count; i++) traces[i]![p] = r.values[i * r.arity]!;
+  }
+  return traces;
 }
 
 /** Converts preview values to CSS-ready RGB bytes (scalar → gray, panTilt → x/y as r/g). */

@@ -126,3 +126,18 @@ export function sampleGradient(buf: Float32Array, offset: number, u: number, tra
   }
   return ch(ki) + (ch(kj) - ch(ki)) * t;
 }
+
+/** SDK `seededRandom` (u32 hash → [0, 1)). */
+export function seededRandom(seed: number): number {
+  let s = (seed ^ 0xdeadbeef) >>> 0;
+  s = (Math.imul(s, 0x45d9f3b) + (s >>> 16)) >>> 0;
+  s = (Math.imul(s, 0x45d9f3b) + (s >>> 16)) >>> 0;
+  s = (s ^ (s >>> 16)) >>> 0;
+  return Math.fround(Math.fround(s) / Math.fround(0xffffffff));
+}
+
+/** SDK `hash01(seed, i)`. */
+export const hash01 = (seed: number, i: number) => seededRandom((seed ^ Math.imul(i >>> 0, 0x9e3779b9)) >>> 0);
+
+/** Stable 24-bit sample seed of a rig sample (as the engine's per fixture/head seeds). */
+export const rigSeed = (fixture: number, head: number) => (Math.imul(fixture + 1, 0x9e3779b1) ^ Math.imul(head + 7, 0x85ebca6b)) >>> 8;

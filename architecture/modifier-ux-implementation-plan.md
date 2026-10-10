@@ -713,13 +713,22 @@ Rewrite `plugins/sequencer` (alias kept; display name **"Pattern"**).
   v  = invert ? 1 − v : v
   ```
   The speed is "per step" (UI label "per step").
-- [ ] **M8.5 Goldens + legacy mapping** (split/checkerboard/sections → order + grouping + grid; scatter → Noise *Random Pick*: create the replacement instance; flow → keep as free noise preset, documented).
+- [x] **M8.5 Goldens + legacy mapping** (split/checkerboard/sections → order + grouping + grid; scatter → Noise *Random Pick*: create the replacement instance; flow → keep as free noise preset, documented).
+
+  *Implemented* (`app/utils/plugins/legacy/sequencer-v1.ts`):
+  - split → Blocks over a linear distribution whose middle is the split line (speed halved: two steps per former cycle);
+  - sections → Alternate over 16 quantized cells;
+  - checkerboard → Alternate over the order (a 2D checkerboard has no order equivalent);
+  - scatter → Noise *Random Pick* (count = density × targeted fixtures);
+  - flow → coherent hard Noise.
+
+  Random sequences differ from the former ones.
 
 ### Phase M9 — Noise
 
 Rewrite `plugins/noise` (alias and name **"Noise"** kept).
 
-- [ ] **M9.1 Manifest params:**
+- [x] **M9.1 Manifest params:**
 
   | Key | Type | Range | Tier | Notes |
   |---|---|---|---|---|
@@ -737,7 +746,7 @@ Rewrite `plugins/noise` (alias and name **"Noise"** kept).
 
   - Editors: `history` (`pm.noiseHistory`, `when mode=level`), `pick` (`pm.pickCount`, `when mode=pick`).
   - Distribution: modes `none`, `linear` (flow direction), `order`; scopes both; grouping false; default `none`.
-- [ ] **M9.2 Plugin math (level):**
+- [x] **M9.2 Plugin math (level):**
   ```
   r  = ctx.timePhase                                  // steps per cycle = 1
   j  = hash01(s.seed) · (1 − sync)                    // per-sample time jitter
@@ -751,18 +760,23 @@ Rewrite `plugins/noise` (alias and name **"Noise"** kept).
   v  = rangeMin + (rangeMax − rangeMin) · v
   colorVariation: decorrelate by channelSeed (as today)
   ```
-- [ ] **M9.3 Pick mode:**
+- [x] **M9.3 Pick mode:**
   ```
   k = floor(timePhase); perm = seededPermutation(rankCount, seed ^ k); on = perm.indexOf(rank) < count
   ```
   with a soft crossfade by `hardness` like Pattern. Requires mode `order` (forced by the preset; the UI shows a hint otherwise).
-- [ ] **M9.4 `PmNoiseHistory.vue`** (composite):
+- [x] **M9.4 `PmNoiseHistory.vue`** (composite):
   - 3 sample traces over 4 cycles, rendered with the preview pool on 3 virtual samples;
   - horizontal handles for `rangeMax` (top) and `rangeMin` (bottom), shaded band between;
   - event markers (small triangles up/down): drag horizontal spacing → `eventRate`, drag the marker width → `eventLength`, click a marker toggles `eventDir`;
   - double-click empty → toggle events on/off (rate 0 ↔ last).
-- [ ] **M9.5 `PmPickCount.vue`:** "N of M on" — a row of M dots (M = rank count) with a draggable divider setting N.
-- [ ] **M9.6 Goldens + legacy mapping:**
+- [x] **M9.5 `PmPickCount.vue`:** "N of M on" — a row of M dots (M = rank count) with a draggable divider setting N.
+- [x] **M9.6 Goldens + legacy mapping:**
+
+  *Implemented:*
+  - Pick `count` 0 = a third of the fixtures (Random Pick works on any rig).
+  - The coherent texture is stretched ×1.4 (Perlin values cluster around the middle) so Fire/Water use their range.
+  - Goldens: TS reference for independent recipes, compiled-plugin snapshots plus property tests for coherent ones.
   - white → coherence 0, sync 0, hardness 1;
   - step → sync 1, hardness 1;
   - perlin → coherence 1, hardness 0, scale → S;

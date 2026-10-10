@@ -282,6 +282,42 @@ export interface StepsProps extends BaseInputProps {
 /** Emits of `pm.steps`. */
 export type StepsEmits = CommonInputEmits<StepsValue>;
 
+// ── pm.noiseHistory ─────────────────────────────
+
+/** Value of `pm.noiseHistory`: level range and occasional events. */
+export interface NoiseHistoryValue {
+  /** Lowest and highest level (0–1). */
+  min: number;
+  max: number;
+  /** Events per step (0 = none) and their length in steps. */
+  rate: number;
+  length: number;
+  dir: 'up' | 'down';
+}
+
+/**
+ * Props of `pm.noiseHistory` (composite editor): sample traces over a few
+ * steps with draggable range lines and event markers.
+ */
+export interface NoiseHistoryProps extends BaseInputProps {
+  modelValue: NoiseHistoryValue;
+  /** Renders `cycles` steps of `count` virtual fixtures (levels 0–1, per fixture). */
+  traces?: (count: number, points: number, cycles: number) => Float32Array[] | null;
+}
+/** Emits of `pm.noiseHistory`. */
+export type NoiseHistoryEmits = CommonInputEmits<NoiseHistoryValue>;
+
+// ── pm.pickCount ────────────────────────────────
+
+/** Props of `pm.pickCount` (composite editor): "N of M on" (`count` 0 = a third). */
+export interface PickCountProps extends BaseInputProps {
+  modelValue: { count: number };
+  /** M: the numbered fixtures. */
+  rankCount?: number;
+}
+/** Emits of `pm.pickCount`. */
+export type PickCountEmits = CommonInputEmits<{ count: number }>;
+
 // ── Contract map ────────────────────────────────
 
 /** All replaceable inputs and their contracts. */
@@ -299,6 +335,8 @@ export interface PmInputContracts {
   'pm.gradient': { props: GradientProps; emits: GradientEmits };
   'pm.hueRange': { props: HueRangeProps; emits: HueRangeEmits };
   'pm.steps': { props: StepsProps; emits: StepsEmits };
+  'pm.noiseHistory': { props: NoiseHistoryProps; emits: NoiseHistoryEmits };
+  'pm.pickCount': { props: PickCountProps; emits: PickCountEmits };
 }
 
 /** Name of a replaceable input. */
@@ -319,6 +357,8 @@ export const PM_INPUT_NAMES: readonly PmInputName[] = [
   'pm.gradient',
   'pm.hueRange',
   'pm.steps',
+  'pm.noiseHistory',
+  'pm.pickCount',
 ];
 
 /**

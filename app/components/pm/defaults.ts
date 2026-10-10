@@ -19,6 +19,8 @@ import PmButton from './PmButton.vue';
 import PmGradient from './PmGradient.vue';
 import PmHueRange from './PmHueRange.vue';
 import PmSteps from './PmSteps.vue';
+import PmNoiseHistory from './PmNoiseHistory.vue';
+import PmPickCount from './PmPickCount.vue';
 
 /** Default component per input name. */
 export const PM_DEFAULTS: Readonly<Record<PmInputName, Component>> = {
@@ -35,4 +37,6 @@ export const PM_DEFAULTS: Readonly<Record<PmInputName, Component>> = {
   'pm.gradient': markRaw(PmGradient),
   'pm.hueRange': markRaw(PmHueRange),
   'pm.steps': markRaw(PmSteps),
+  'pm.noiseHistory': markRaw(PmNoiseHistory),
+  'pm.pickCount': markRaw(PmPickCount),
 };

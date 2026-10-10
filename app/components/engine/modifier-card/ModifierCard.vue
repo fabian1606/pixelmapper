@@ -16,6 +16,7 @@ import { useModifierPhase } from '~/composables/engine/use-modifier-phase';
 import { useEngineStore } from '~/stores/engine-store';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { fixtureBaseColor, hueSat } from '~/utils/engine/fixture-color';
+import { previewRevision, renderTraces } from '~/utils/plugins/preview-pool';
 import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
 import ModifierCardHeader from './ModifierCardHeader.vue';
 import ModifierCardMore from './ModifierCardMore.vue';
@@ -65,6 +66,12 @@ const panel = computed(() => {
 
 /** The first profile curve (signed domain) hosts the endless strip. */
 const stripKey = computed(() => manifest.value?.params.find(p => p.type === 'curve' && p.domain === 'signed')?.key ?? null);
+/** Raw traces of the instance for the noise history editor (preview pool). */
+const traces = (count: number, points: number, cycles: number) => {
+  void previewRevision.value;
+  return renderTraces(props.modifier, count, points, cycles);
+};
+
 /** Hue of the first targeted fixture's programmed color (hue strip center). */
 const baseHue = computed(() => {
   const f = resolved.value.targeted[0];
@@ -106,7 +113,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           :schema="manifest.params" :model-value="modifier.params" :editors="manifest.editors"
           :more-key="manifest.alias" :distribution-mode="modifier.distribution.mode"
           :ticks="resolved.ticks" :beats="beats" :playhead="position" :time-phase="modifier.speed.mode === 'infinite' ? null : timePhase"
-          :editor-context="{ rankCount: resolved.ticks, activeGroups: resolved.ticks, playhead: position, baseHue }"
+          :editor-context="{ rankCount: resolved.ticks, baseHue, traces }"
           @update:model-value="v => emit('update', 'params', v)" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         >
           <template v-if="stripKey" #[`strip:${stripKey}`]><EndlessStrip :modifier="modifier" :rank-count="resolved.ticks" /></template>

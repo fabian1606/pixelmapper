@@ -3,16 +3,373 @@
   "kind": "modifier",
   "alias": "@pixelmapper/noise",
   "name": "Noise",
-  "version": "1.0.0",
-  "apiVersion": "^1.0.0",
-  "description": "Random flicker per fixture: white noise (independent random steps with jittered timing), smooth Perlin noise drifting across space, or synchronized random steps. Speed sets the step duration; color variation decorrelates channel types (RGB → colorful); threshold gates low values for a sparkle effect.",
-  "signatures": ["scalar"],
-  "output": "bipolar",
+  "version": "2.0.0",
+  "apiVersion": "^1.1.0",
+  "description": "Random, organic brightness. Level: each fixture steps between random levels inside a range (drag the range and the events in the history); Coherence goes from independent fixtures to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps; occasional events flash up or dip down. Pick: a random set of the numbered fixtures is on each step.",
+  "purpose": "Fixtures flicker, sparkle or pick at random.",
+  "speedUnit": "per step",
+  "signatures": [
+    "scalar"
+  ],
+  "output": "scale",
+  "distribution": {
+    "modes": [
+      "none",
+      "linear",
+      "order"
+    ],
+    "scopes": [
+      "across",
+      "within"
+    ],
+    "grouping": false,
+    "default": {
+      "mode": "none"
+    }
+  },
+  "editors": [
+    {
+      "id": "history",
+      "input": "pm.noiseHistory",
+      "bind": {
+        "min": "rangeMin",
+        "max": "rangeMax",
+        "rate": "eventRate",
+        "length": "eventLength",
+        "dir": "eventDir"
+      },
+      "when": {
+        "mode": "level"
+      }
+    },
+    {
+      "id": "pick",
+      "input": "pm.pickCount",
+      "bind": {
+        "count": "count"
+      },
+      "when": {
+        "mode": "pick"
+      }
+    }
+  ],
   "params": [
-    { "key": "noiseType", "type": "enum", "options": ["white", "perlin", "step"], "optionLabels": ["White", "Perlin", "Step"], "default": "white", "label": "Type" },
-    { "key": "scale", "type": "number", "min": 0.1, "max": 10, "default": 1, "label": "Scale", "description": "Spatial frequency of Perlin noise." },
-    { "key": "colorVariation", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Color variation" },
-    { "key": "fade", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Fade", "description": "Crossfade between random values as a fraction of the step." },
-    { "key": "threshold", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Threshold" }
+    {
+      "key": "mode",
+      "type": "enum",
+      "options": [
+        "level",
+        "pick"
+      ],
+      "optionLabels": [
+        "Level",
+        "Pick"
+      ],
+      "default": "level",
+      "label": "Mode",
+      "tier": "primary",
+      "description": "Level: random brightness per fixture. Pick: a random set of fixtures is on."
+    },
+    {
+      "key": "rangeMin",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.6,
+      "label": "Lowest level",
+      "tier": "hidden"
+    },
+    {
+      "key": "rangeMax",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "label": "Highest level",
+      "tier": "hidden"
+    },
+    {
+      "key": "eventRate",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "label": "Event rate",
+      "tier": "hidden",
+      "description": "Events per step."
+    },
+    {
+      "key": "eventLength",
+      "type": "number",
+      "min": 0.02,
+      "max": 1,
+      "default": 0.1,
+      "label": "Event length",
+      "tier": "hidden",
+      "description": "Length of an event in steps."
+    },
+    {
+      "key": "eventDir",
+      "type": "enum",
+      "options": [
+        "up",
+        "down"
+      ],
+      "default": "up",
+      "label": "Event direction",
+      "tier": "hidden"
+    },
+    {
+      "key": "coherence",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "label": "Coherence",
+      "tier": "primary",
+      "when": {
+        "mode": "level"
+      },
+      "description": "Independent (0) to flowing patches (1)."
+    },
+    {
+      "key": "sync",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "label": "Sync",
+      "tier": "primary",
+      "when": {
+        "mode": "level"
+      },
+      "description": "Free timing (0) to all fixtures stepping on the beat (1)."
+    },
+    {
+      "key": "hardness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.2,
+      "label": "Hardness",
+      "tier": "primary",
+      "description": "Soft blends (0) to hard jumps (1)."
+    },
+    {
+      "key": "count",
+      "type": "int",
+      "min": 0,
+      "max": 64,
+      "default": 0,
+      "label": "Fixtures on",
+      "tier": "hidden",
+      "description": "0 = a third of the fixtures."
+    },
+    {
+      "key": "colorVariation",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "label": "Color variation",
+      "tier": "advanced",
+      "when": {
+        "mode": "level"
+      },
+      "description": "Color channels flicker independently (colorful)."
+    }
+  ],
+  "presets": [
+    {
+      "id": "candle",
+      "label": "Candle",
+      "description": "A warm, restless glow.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 0.6,
+        "rangeMax": 1,
+        "coherence": 0,
+        "sync": 0,
+        "hardness": 0.2,
+        "colorVariation": 0,
+        "eventRate": 0,
+        "eventLength": 0.1,
+        "eventDir": "up"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.125
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "none",
+        "reverse": false
+      },
+      "strength": 1,
+      "default": true
+    },
+    {
+      "id": "twinkle",
+      "label": "Twinkle",
+      "description": "Dim fixtures with occasional sparkles.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 0.1,
+        "rangeMax": 0.15,
+        "coherence": 0,
+        "sync": 0,
+        "hardness": 0.8,
+        "colorVariation": 0,
+        "eventRate": 0.15,
+        "eventLength": 0.08,
+        "eventDir": "up"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.25
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "none",
+        "reverse": false
+      },
+      "strength": 1
+    },
+    {
+      "id": "fire",
+      "label": "Fire",
+      "description": "Flickering patches that rise along the direction.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 0.3,
+        "rangeMax": 1,
+        "coherence": 0.8,
+        "sync": 0,
+        "hardness": 0.1,
+        "colorVariation": 0,
+        "eventRate": 0,
+        "eventLength": 0.1,
+        "eventDir": "up"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.25
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "linear",
+        "reverse": false
+      },
+      "strength": 1
+    },
+    {
+      "id": "faulty",
+      "label": "Faulty",
+      "description": "Full brightness with occasional dropouts.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 1,
+        "rangeMax": 1,
+        "coherence": 0,
+        "sync": 0,
+        "hardness": 1,
+        "colorVariation": 0,
+        "eventRate": 0.05,
+        "eventLength": 0.2,
+        "eventDir": "down"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.125
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "none",
+        "reverse": false
+      },
+      "strength": 1
+    },
+    {
+      "id": "water",
+      "label": "Water",
+      "description": "Slow, soft waves rolling across the area.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 0.4,
+        "rangeMax": 1,
+        "coherence": 1,
+        "sync": 0,
+        "hardness": 0,
+        "colorVariation": 0,
+        "eventRate": 0,
+        "eventLength": 0.1,
+        "eventDir": "up"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 4
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "linear",
+        "reverse": false
+      },
+      "strength": 1,
+      "when": {
+        "kind": [
+          "area"
+        ]
+      }
+    },
+    {
+      "id": "color-jitter",
+      "label": "Color Jitter",
+      "description": "Colors shimmer independently.",
+      "params": {
+        "mode": "level",
+        "rangeMin": 0.85,
+        "rangeMax": 1,
+        "coherence": 0,
+        "sync": 0,
+        "hardness": 0.3,
+        "colorVariation": 1,
+        "eventRate": 0,
+        "eventLength": 0.1,
+        "eventDir": "up"
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 0.125
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "none",
+        "reverse": false
+      },
+      "strength": 1
+    },
+    {
+      "id": "random-pick",
+      "label": "Random Pick",
+      "description": "A random third of the fixtures is on each beat.",
+      "params": {
+        "mode": "pick",
+        "count": 0,
+        "hardness": 1
+      },
+      "speed": {
+        "mode": "beat",
+        "beatValue": 1
+      },
+      "distribution": {
+        "scope": "across",
+        "mode": "order",
+        "reverse": false,
+        "order": {
+          "mirror": false
+        }
+      },
+      "strength": 1
+    }
   ]
 }

@@ -2,7 +2,7 @@ import { computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { EffectEngine } from '~/utils/engine/engine';
 import type { ModifierInstance, ChannelType } from '~/utils/engine/types';
-import { BUILTIN_ALIASES, builtinHash, cloneModifier, createModifier } from '~/utils/engine/modifiers';
+import { cloneModifier, createModifier } from '~/utils/engine/modifiers';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/composables/use-category-sync';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -87,14 +87,6 @@ export function useChaserModifiers(
       const applied = applyPreset(inst, manifest, preset);
       applied.distribution = selectionDistribution(applied.distribution, selectionShape.value);
       return applied;
-    }
-    if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
-      if (!carry) inst.strength = 0.5;
-      inst.speed = carry ? inst.speed : { mode: 'beat', timeMs: 500, beatValue: 1, beatOffset: 0 };
-      inst.distribution = { ...inst.distribution, mode: 'none' };
-    }
-    else if (plugin === builtinHash(BUILTIN_ALIASES.colorAdjust)) {
-      inst.distribution = { ...inst.distribution, mode: 'none' };
     }
     return inst;
   }
