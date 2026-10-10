@@ -76,10 +76,10 @@ export function analyzeSelection(fixtures: readonly ShapePoint[]): SelectionShap
   }
   const extentMain = max - min;
   const extentCross = cmax - cmin;
-  const axis = {
-    a: { x: centroid.x + u.x * min, y: centroid.y + u.y * min },
-    b: { x: centroid.x + u.x * max, y: centroid.y + u.y * max },
-  };
+  // A single point gets a short horizontal axis so a handle stays grabbable.
+  const axis = max - min < 1e-6
+    ? { a: { x: centroid.x - 0.05, y: centroid.y }, b: { x: centroid.x + 0.05, y: centroid.y } }
+    : { a: { x: centroid.x + u.x * min, y: centroid.y + u.y * min }, b: { x: centroid.x + u.x * max, y: centroid.y + u.y * max } };
 
   const dists = fixtures.map(f => Math.hypot(f.x - centroid.x, f.y - centroid.y));
   const radius = dists.reduce((s, d) => s + d, 0) / count;

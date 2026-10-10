@@ -34,6 +34,8 @@ defineProps<{
   availableChannelTypes: ChannelType[];
   pinnedModifiers: PinnedModifier[];
   pinnedEffectIds: Set<string>;
+  /** Main axis of the edited fixtures (default distribution handle). */
+  selectionAxis?: { a: { x: number; y: number }; b: { x: number; y: number } };
 }>();
 
 const emit = defineEmits<{
@@ -192,7 +194,8 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
         </Button>
       </div>
 
-      <div class="p-3 space-y-4" @click.stop>
+      <!-- Any interaction inside a card makes it the active modifier (plan R1): its canvas handle and tools appear. -->
+      <div class="p-3 space-y-4" @click.stop @pointerdown.capture="activeModifier !== modifier && emit('select-modifier', modifier)">
         <!-- Plugin not known here yet (shared project / live collaboration): resolving by hash -->
         <div v-if="pluginStatus(modifier.plugin).state === 'pending'" class="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 class="h-3.5 w-3.5 animate-spin" /> Loading plugin…
@@ -267,7 +270,9 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
             :modifier-id="modifier.id"
             :distribution="modifier.distribution"
             :options="getManifest(modifier.plugin)?.distribution"
-            @update="(d, desc, cont) => emit('update-modifier-properties', modifier, { distribution: d }, desc, cont)"
+            :selection-axis="selectionAxis"
+            @update="(d, desc) => emit('update-modifier-properties', modifier, { distribution: d }, desc)"
+            @dropdown-open-change="v => emit('dropdown-open-change', v)"
           />
         </div>
       </div>

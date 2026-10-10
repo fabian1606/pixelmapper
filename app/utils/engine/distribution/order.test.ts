@@ -110,3 +110,20 @@ describe('analyzeSelection', () => {
     expect(s.axis.b.y).toBeGreaterThan(s.axis.a.y);
   });
 });
+
+describe('plan R1: robust pairs and center-out detection', () => {
+  it('roughly symmetric pairs share a number (jittered double row)', () => {
+    const rig = Array.from({ length: 6 }, (_, i) => [
+      { id: `l${i}`, x: 0.3, y: 0.1 + i * 0.1 + Math.abs(jitter(i)) * 0.03 },
+      { id: `r${i}`, x: 0.7, y: 0.1 + i * 0.1 },
+    ]).flat();
+    const r = projectionRanks(rig, { x: 0.5, y: 0 }, { x: 0.5, y: 1 }, 0.5);
+    for (let i = 0; i < 6; i++) expect(r[`l${i}`]).toBe(r[`r${i}`]);
+  });
+
+  it('a line starting inside the rig is detected; one starting at an end is not', async () => {
+    const { lineStartsInside } = await import('./order');
+    expect(lineStartsInside(row(8), { x: 0.45, y: 0.5 }, { x: 0.9, y: 0.5 })).toBe(true);
+    expect(lineStartsInside(row(8), { x: 0.05, y: 0.5 }, { x: 0.9, y: 0.5 })).toBe(false);
+  });
+});

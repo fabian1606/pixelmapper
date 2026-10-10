@@ -72,6 +72,7 @@ const {
 } = useChaserSteps(props, effectEngine, historyTools, handleChange);
 
 const {
+  selectionShape,
   activeModifiers,
   availableChannelTypes,
   addModifier,
@@ -231,6 +232,7 @@ defineExpose({
             :available-channel-types="availableChannelTypes"
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
+            :selection-axis="selectionShape.axis"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
             @toggle-target-channel="toggleTargetChannel"

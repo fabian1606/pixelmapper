@@ -181,7 +181,7 @@ export function useSelection(
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
     // A distribution order tool owns the pointer (plan M4.5): no selection or drags.
-    if (useDistributionToolStore().tool) return;
+    if (useDistributionToolStore().modifierId) return;
     if (event.button === 2) {
       const vx = event.clientX - rect.left;
       const vy = event.clientY - rect.top;

@@ -253,8 +253,8 @@ function handleModifierDragEnd(_modifier?: ModifierInstance, description = 'Upda
 
 // ─── Distribution order tools (plan M4.3) ─────────────────────────────────────
 const distributionTool = useDistributionToolStore();
-/** The order tool is on for the active modifier. */
-const orderToolActive = computed(() => !!distributionTool.tool && !!activeModifier.value && distributionTool.modifierId === activeModifier.value.id);
+/** A reassign session is on for the active modifier. */
+const orderToolActive = computed(() => !!activeModifier.value && distributionTool.modifierId === activeModifier.value.id);
 
 /** Live order change from the canvas tool. */
 function handleOrderChange(distribution: ModifierInstance['distribution']) {
@@ -263,8 +263,8 @@ function handleOrderChange(distribution: ModifierInstance['distribution']) {
   liveBus.dispatch('modifier.update', { effectId: activeModifier.value.id, changes: { distribution } });
 }
 
-// A click session commits once when the tool ends (Esc, toggle, other modifier).
-watch(() => [distributionTool.tool, distributionTool.modifierId], () => handleModifierDragEnd(undefined, 'Set Order'));
+// A reassign session commits once when it ends (Esc, Done, line drawn, other modifier).
+watch(() => distributionTool.modifierId, () => handleModifierDragEnd(undefined, 'Reassign Order'));
 // Selecting another modifier ends the tool.
 watch(() => activeModifier.value?.id, (id) => {
   if (distributionTool.modifierId && distributionTool.modifierId !== id) distributionTool.stop();
@@ -485,7 +485,7 @@ function handleMouseUp(e?: MouseEvent) {
 
     <!-- Distribution of the active modifier: rank badges, group colors, head arrows -->
     <DistributionOverlay
-      v-if="activeModifier?.distribution"
+      v-if="activeModifier?.distribution && !orderToolActive"
       :fixtures="fixtures"
       :modifier="activeModifier"
       :world-width="WORLD_WIDTH"
@@ -494,15 +494,15 @@ function handleMouseUp(e?: MouseEvent) {
       :camera="camera"
     />
     <OrderTool
-      v-if="orderToolActive && activeModifier && distributionTool.tool"
-      :tool="distributionTool.tool"
+      v-if="orderToolActive && activeModifier"
       :modifier="activeModifier"
+      :fixtures="fixtures"
       :world-width="WORLD_WIDTH"
       :world-height="WORLD_HEIGHT"
       :viewport-to-world="viewportToWorld"
+      :world-to-viewport="worldToViewport"
       :hit-test="(vx, vy) => fixtureCanvas?.hitTest(vx, vy)"
       @change="handleOrderChange"
-      @commit="d => handleModifierDragEnd(undefined, d)"
       @done="distributionTool.stop()"
     />
 

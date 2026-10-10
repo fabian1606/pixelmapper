@@ -29,13 +29,20 @@ function project(p: Vec2, a: Vec2, b: Vec2, mirror: boolean): number {
   return mirror ? Math.abs(d) : d;
 }
 
-/** Median of the gaps > 1e-6 between sorted values (fallback 1). */
+/**
+ * Typical spacing of sorted values: the median of the gaps that are real
+ * steps (> 1e-6 and ≥ ¼ of the largest gap), fallback 1. Ignoring the tiny
+ * gaps inside roughly aligned pairs keeps imprecise symmetric rigs paired
+ * (principle 7, plan R1).
+ */
 function medianGap(sorted: readonly number[]): number {
-  const gaps: number[] = [];
+  const all: number[] = [];
   for (let i = 1; i < sorted.length; i++) {
     const g = sorted[i]! - sorted[i - 1]!;
-    if (g > 1e-6) gaps.push(g);
+    if (g > 1e-6) all.push(g);
   }
+  const max = Math.max(0, ...all);
+  const gaps = all.filter(g => g >= max * 0.25);
   if (gaps.length === 0) return 1;
   gaps.sort((x, y) => x - y);
   const m = gaps.length >> 1;
@@ -71,6 +78,24 @@ export function projectionRanks(points: readonly OrderPoint[], a: Vec2, b: Vec2,
   const entries = points.map(pt => ({ key: String(pt.id), p: project(pt, a, b, mirror) }));
   const median = medianGap(entries.map(e => e.p).sort((x, y) => x - y));
   return cluster(entries, Math.max(0, snap) * median);
+}
+
+/** Default cluster tolerance as a fraction of the typical spacing (plan R1: no Snap control). */
+export const DEFAULT_SNAP = 0.5;
+
+/**
+ * True when a drawn line starts inside the rig: at least a quarter of the
+ * fixtures lie clearly before its start and a quarter after it. Such a line
+ * means "from here outward" and orders both sides symmetrically (plan R1).
+ */
+export function lineStartsInside(points: readonly OrderPoint[], a: Vec2, b: Vec2): boolean {
+  if (points.length < 3) return false;
+  const proj = points.map(p => project(p, a, b, false));
+  const tolerance = DEFAULT_SNAP * medianGap([...proj].sort((x, y) => x - y));
+  const before = proj.filter(p => p < -tolerance).length;
+  const after = proj.filter(p => p > tolerance).length;
+  const quarter = Math.max(1, Math.ceil(points.length / 4));
+  return before >= quarter && after >= quarter;
 }
 
 /** Renumbers ranks to 0..n−1, preserving order and equality. */

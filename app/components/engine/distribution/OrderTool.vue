@@ -1,28 +1,31 @@
 <script setup lang="ts">
 /**
- * Order tools on the canvas (plan M4.3), active while the Distribution
- * section's tool is on:
- * - **Click**: a click on a targeted fixture assigns the next rank, Shift
- *   the same rank as the previous click; clicking a ranked fixture moves it.
- *   Each click is live; the editor commits the session once when the tool
- *   ends (Esc, the tool button, or another modifier).
- * - **Line**: press–drag–release draws a line (dashed, with an arrow); on
- *   release the order follows the projection on it (one undo step).
- * The root carries `data-overlay-root`, so the properties sidebar stays open.
+ * Reassign session on the canvas (plan M4.3, revision R1). One mode:
+ * - **click** a targeted fixture → next number (Shift: same number as the
+ *   previous click; clicking a numbered fixture moves it). Numbers of the
+ *   session show as they are given; the session ends when every targeted
+ *   fixture has a number, on Esc, or via the Reassign button.
+ * - **drag** a line → the order follows the projection on it (roughly
+ *   symmetric fixtures share a number; a line starting inside the rig
+ *   orders outward on both sides) and the session ends.
+ * The editor commits the session as one undo step when it ends. The root
+ * carries `data-overlay-root`, so the properties sidebar stays open.
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { Distribution, Vec2 } from '@pixelmapper/extension-api';
+import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ModifierInstance } from '~/utils/engine/types';
-import { clickRank } from '~/utils/engine/distribution/order';
-import type { DistributionTool } from '~/stores/distribution-tool-store';
+import { clickRank, lineStartsInside } from '~/utils/engine/distribution/order';
 
 const props = defineProps<{
-  tool: DistributionTool;
   modifier: ModifierInstance;
+  /** Fixtures on the canvas (targeted ones are numbered). */
+  fixtures: Fixture[];
   worldWidth: number;
   worldHeight: number;
-  /** Viewport px → world px. */
+  /** Viewport px → world px and back. */
   viewportToWorld: (vx: number, vy: number) => { x: number; y: number };
+  worldToViewport: (wx: number, wy: number) => { x: number; y: number };
   /** Fixture id under a viewport point (canvas hit test). */
   hitTest: (vx: number, vy: number) => string | null | undefined;
 }>();
@@ -30,23 +33,33 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** Live distribution change. */
   change: [distribution: Distribution];
-  /** Commit the changes since the last commit as one undo step. */
-  commit: [description: string];
-  /** End the tool (Esc). */
+  /** End the session (the editor commits it). */
   done: [];
 }>();
 
-const rootRef = ref<HTMLElement | null>(null);
-/** Rank of the last click (null before the first click of the session). */
-let last: number | null = null;
-/** Line being drawn (viewport px) and its world endpoints. */
-const draft = ref<{ a: Vec2; b: Vec2; wa: Vec2; wb: Vec2 } | null>(null);
+/** Drag distance (px) that turns a press into a line. */
+const LINE_THRESHOLD = 6;
 
-/** True when the instance targets the fixture. */
-function targets(id: string): boolean {
-  const ids = props.modifier.targetFixtureIds;
-  return !ids || ids.some(t => String(t) === id);
-}
+const rootRef = ref<HTMLElement | null>(null);
+/** Numbers given in this session (fixture id → rank). */
+const given = ref<Record<string, number>>({});
+let last: number | null = null;
+/** Current press: start point, fixture under it, and the line being drawn. */
+let press: { start: Vec2; hit: string | null } | null = null;
+const draft = ref<{ a: Vec2; b: Vec2 } | null>(null);
+
+const targeted = computed(() => {
+  const ids = props.modifier.targetFixtureIds?.map(String);
+  return props.fixtures.filter(f => !ids || ids.includes(String(f.id)));
+});
+
+/** Badges of the session's numbers. */
+const badges = computed(() => targeted.value.flatMap((f) => {
+  const r = given.value[String(f.id)];
+  if (r === undefined) return [];
+  const p = props.worldToViewport(f.fixturePosition.x * props.worldWidth, f.fixturePosition.y * props.worldHeight);
+  return [{ id: String(f.id), x: p.x, y: p.y, label: String(r + 1) }];
+}));
 
 /** Viewport point of a pointer event. */
 function local(e: PointerEvent): Vec2 {
@@ -64,36 +77,39 @@ function onDown(e: PointerEvent) {
   if (e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
-  const p = local(e);
-  if (props.tool === 'click') {
-    const id = props.hitTest(p.x, p.y);
-    if (!id || !targets(id)) return;
-    const d = props.modifier.distribution;
-    // The first click of a session starts a fresh order.
-    const res = clickRank(last === null ? {} : d.order.ranks, id, e.shiftKey, last);
-    last = res.last;
-    emit('change', { ...d, order: { ...d.order, ranks: res.ranks } });
-    return;
-  }
-  const w = world(p);
-  draft.value = { a: p, b: p, wa: w, wb: w };
+  const start = local(e);
+  const hit = props.hitTest(start.x, start.y) ?? null;
+  press = { start, hit: hit && targeted.value.some(f => String(f.id) === hit) ? hit : null };
   rootRef.value?.setPointerCapture?.(e.pointerId);
 }
 
 function onMove(e: PointerEvent) {
-  if (!draft.value) return;
+  if (!press) return;
   const p = local(e);
-  draft.value = { ...draft.value, b: p, wb: world(p) };
+  if (draft.value || Math.hypot(p.x - press.start.x, p.y - press.start.y) >= LINE_THRESHOLD) draft.value = { a: press.start, b: p };
 }
 
-function onUp() {
-  const l = draft.value;
+function onUp(e: PointerEvent) {
+  const pr = press;
+  press = null;
+  const line = draft.value;
   draft.value = null;
-  if (!l || Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y) < 6) return;
+  if (!pr) return;
   const d = props.modifier.distribution;
-  // Ranks resolve from the stored line (Snap re-resolves live; new fixtures place themselves).
-  emit('change', { ...d, order: { ...d.order, ranks: {}, line: { a: l.wa, b: l.wb } } });
-  emit('commit', 'Draw Order Line');
+  if (line) {
+    const a = world(line.a);
+    const b = world(line.b);
+    const pts = targeted.value.map(f => ({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y }));
+    emit('change', { ...d, order: { ...d.order, ranks: {}, line: { a, b }, mirror: lineStartsInside(pts, a, b) } });
+    emit('done');
+    return;
+  }
+  if (!pr.hit) return;
+  const res = clickRank(given.value, pr.hit, e.shiftKey, last);
+  last = res.last;
+  given.value = res.ranks;
+  emit('change', { ...d, order: { ...d.order, ranks: { ...res.ranks } } });
+  if (targeted.value.every(f => given.value[String(f.id)] !== undefined)) emit('done');
 }
 
 function onKey(e: KeyboardEvent) {
@@ -123,8 +139,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
       </defs>
       <line :x1="draft.a.x" :y1="draft.a.y" :x2="draft.b.x" :y2="draft.b.y" stroke="var(--primary)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#order-line-arrow)" />
     </svg>
-    <div class="absolute left-1/2 top-2 -translate-x-1/2 rounded-md bg-popover/90 px-2 py-1 text-[11px] text-muted-foreground shadow pointer-events-none">
-      {{ tool === 'click' ? 'Click fixtures in order · Shift-click = same step · Esc to finish' : 'Drag a line through the rig · Esc to finish' }}
+    <div
+      v-for="b in badges" :key="b.id"
+      class="absolute -translate-x-1/2 -translate-y-1/2 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-semibold leading-4 text-center text-white shadow ring-1 ring-black/40 pointer-events-none"
+      :style="{ left: `${b.x}px`, top: `${b.y - 14}px`, background: 'var(--primary)' }"
+      :data-session-badge="b.id"
+    >
+      {{ b.label }}
+    </div>
+    <div class="absolute left-1/2 top-2 -translate-x-1/2 max-w-[90%] truncate rounded-md bg-popover/90 px-2 py-1 text-[11px] text-muted-foreground shadow pointer-events-none">
+      Click fixtures in order · Shift-click = same step · or draw a line · Esc to finish
     </div>
   </div>
 </template>

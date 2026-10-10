@@ -8,6 +8,7 @@ import { findRichestFixture, syncCategoryBeforeEdit } from '~/utils/engine/compo
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import type { useChaserHistory } from './use-chaser-history';
+import { analyzeSelection } from '~/utils/engine/distribution/selection-shape';
 
 export function useChaserModifiers(
   props: { fixtures: Fixture[]; activeTab: string },
@@ -31,6 +32,11 @@ export function useChaserModifiers(
     }
     return Array.from(types);
   });
+
+  /** Shape of the edited fixtures (default handles and recipes, plan M3.3/M5.8). */
+  const selectionShape = computed(() => analyzeSelection(props.fixtures.map(f => ({
+    x: f.fixturePosition.x, y: f.fixturePosition.y, heads: f.beams.length,
+  }))));
 
   const richestFixture = computed(() => {
     return findRichestFixture(props.fixtures, tabChannelFilter, effectEngine);
@@ -78,7 +84,7 @@ export function useChaserModifiers(
       strength: carry?.strength ?? 1,
       speed: carry ? { ...carry.speed } : { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
       blendMode: manifest?.output === 'absolute' ? 'override' : (effectEngine?.stackBlendMode.value ?? 'add'),
-      distribution: carry ? carry.distribution : { mode: 'linear', origin: { x, y }, end: { x: x + 0.1, y } },
+      distribution: carry ? carry.distribution : { mode: 'linear', origin: { ...selectionShape.value.axis.a }, end: { ...selectionShape.value.axis.b } },
     });
     if (plugin === builtinHash(BUILTIN_ALIASES.noise)) {
       if (!carry) inst.strength = 0.5;
@@ -371,6 +377,7 @@ export function useChaserModifiers(
   }
 
   return {
+    selectionShape,
     availableChannelTypes,
     activeModifiers,
     addModifier,

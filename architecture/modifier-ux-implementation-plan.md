@@ -21,6 +21,28 @@ Work phase by phase. Every task has an ID (`M<phase>.<n>`), the files it touches
 
 ---
 
+## Revision R1 (owner review, 2026-10-10) — binding, overrides the tasks below
+
+After trying M4 in the app, the owner simplified the Distribution UI:
+
+1. **One dropdown** instead of Scope + "All same": `All the same` · `Across fixtures` · `Within each fixture`.
+   - *Across fixtures* starts with a direction: mode *Linear*, handle placed along the selection and visible on the canvas.
+   - Modes in the row: `Linear · Radial · Conical · Order`.
+2. **Order = one `Reassign` button** (no tool row).
+   - Pressing it hides the numbers and shows a hint on the canvas: "Click fixtures in order · Shift-click = same step · or draw a line".
+   - Clicks number the fixtures 1, 2, 3 …; a drawn line orders by projection and ends the session.
+3. **Symmetry is detected automatically.**
+   - Fixtures roughly symmetric about the drawn line share a number (robust spacing estimate, fixed tolerance).
+   - A line that starts inside the rig orders outward on both sides (`order.mirror`, set automatically).
+4. **Removed from the UI:**
+   - Grouping, Snap (fixed tolerance 0.5 internally), Mirror, Reverse, Clear.
+   - Gradient modes reverse by dragging the handle the other way.
+   - `reverse`, `order.snap`, `order.mirror` and `grouping` stay in the data model (recipes, migration).
+5. **Groups are always derived from the order numbers.**
+   - The choice *Alternate (1-2-1-2)* / *Blocks (1-1-2-2)* lives only where it is visible: Pattern (grid rows) and the Color Shift palette (`Spread: Gradient / Alternate`).
+   - Random grouping is dropped (Noise *Random Pick* covers it), and so is the Wave recipe *Every Other* (duplicate of Pattern *Odd/Even*).
+6. **Any interaction inside a card makes that modifier active**, so its canvas handle and tools appear.
+
 ## 0. Background
 
 ### 0.1 Why
