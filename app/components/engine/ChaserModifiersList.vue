@@ -16,6 +16,7 @@ import type { PinnedModifier } from '~/stores/pinned-modifiers-store';
 import { getManifest, getPackage, listPlugins, pluginStatus, retryResolve } from '~/utils/plugins/plugin-store';
 import { useEngineStore } from '~/stores/engine-store';
 import ModifierGenericFields from './ModifierGenericFields.vue';
+import DistributionSection from './distribution/DistributionSection.vue';
 import ParamForm from '~/components/plugin-host/ParamForm.vue';
 import PluginIframePanel from '~/components/plugin-host/PluginIframePanel.vue';
 import ModifierPreview from '~/components/plugin-host/ModifierPreview.vue';
@@ -40,7 +41,7 @@ const emit = defineEmits<{
   (e: 'remove-modifier', effect: ModifierInstance): void;
   (e: 'toggle-target-channel', effect: ModifierInstance, type: ChannelType): void;
   (e: 'update-modifier', effect: ModifierInstance, key: string, value: any): void;
-  (e: 'update-modifier-properties', effect: ModifierInstance, updates: Partial<ModifierInstance>, description: string): void;
+  (e: 'update-modifier-properties', effect: ModifierInstance, updates: Partial<ModifierInstance>, description: string, continuous?: boolean): void;
   (e: 'handle-modifier-drag-end', description: string): void;
   /** Adds an instance of the plugin with this content hash. */
   (e: 'add-modifier', plugin: string): void;
@@ -257,6 +258,16 @@ function onDragHandleMousedown(e: MouseEvent, index: number) {
             @update-properties="(u, d) => emit('update-modifier-properties', modifier, u, d)"
             @drag-end="d => emit('handle-modifier-drag-end', d)"
             @dropdown-open-change="v => emit('dropdown-open-change', v)"
+          />
+        </div>
+
+        <!-- Shared distribution (plan M4.1) -->
+        <div class="pt-3 border-t border-border/40">
+          <DistributionSection
+            :modifier-id="modifier.id"
+            :distribution="modifier.distribution"
+            :options="getManifest(modifier.plugin)?.distribution"
+            @update="(d, desc, cont) => emit('update-modifier-properties', modifier, { distribution: d }, desc, cont)"
           />
         </div>
       </div>

@@ -36,8 +36,8 @@ export interface ManifestDistribution {
   modes?: DistributionMode[];
   /** Offered scopes (default: both). */
   scopes?: DistributionScope[];
-  /** Offer grouping (default true). */
-  grouping?: boolean;
+  /** Offer grouping (default true); `'required'` hides "None" (e.g. Pattern). */
+  grouping?: boolean | 'required';
   /** Partial distribution applied to new instances. */
   default?: DistributionPatch;
 }

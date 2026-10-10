@@ -477,7 +477,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
 
 ### Phase M4 — Distribution UI & canvas tools
 
-- [ ] **M4.1 `DistributionSection.vue`** (`app/components/engine/distribution/`, replaces `ChaserFanningControl.vue`). Layout (English):
+- [x] **M4.1 `DistributionSection.vue`** (`app/components/engine/distribution/`, replaces `ChaserFanningControl.vue`). Layout (English):
   ```
   DISTRIBUTION
   Scope   [Across fixtures] [Within each fixture]            (only if manifest scopes > 1)
@@ -491,7 +491,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - The Snap slider only shows after a line was drawn.
 
   *Accept:* component test — offered modes follow the manifest; switching mode keeps the other fields.
-- [ ] **M4.2 Gradient handle.**
+- [x] **M4.2 Gradient handle.**
   - Adapt `FixtureEditorSpatialControls.vue` to `distribution.origin/end`: origin = diamond, end = circle, line between them.
   - Shown for linear/radial/conical.
   - For radial, also draw a circle with radius `L`; for conical, a ray.
@@ -499,7 +499,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - Commits one `SetModifiersCommand` per drag.
 
   *Accept:* drag test updates origin/end; undo restores.
-- [ ] **M4.3 Order tools** (`app/components/engine/distribution/OrderTool.vue` overlay inside the canvas, active only while a tool is on):
+- [x] **M4.3 Order tools** (`app/components/engine/distribution/OrderTool.vue` overlay inside the canvas, active only while a tool is on):
   - **Click:**
     - clicking a targeted fixture assigns the next rank;
     - Shift-click assigns the *same* rank as the previous click;
@@ -513,8 +513,8 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - **Overlays** (while the modifier is active and mode is order): rank numbers on fixtures (badge, same number for clusters); grouping colors (8-color palette, also used by `pm.steps` row colors).
 
   *Accept tests:* click sequence ranks; shift-click shares; line on a symmetric rig gives pairs; snap slider merges or splits clusters.
-- [ ] **M4.4 Within-scope affordance.** When scope is `within`, show small arrows along each multi-head fixture in head order (direction of `spatial`); with offset 'order', also show the rank badges.
-- [ ] **M4.5 Hit-testing & conflicts.**
+- [x] **M4.4 Within-scope affordance.** When scope is `within`, show small arrows along each multi-head fixture in head order (direction of `spatial`); with offset 'order', also show the rank badges.
+- [x] **M4.5 Hit-testing & conflicts.**
   - While a distribution tool is active, the canvas selection/drag handlers are suspended (guard in `use-selection.ts`), and the cursor is a crosshair.
   - Overlay buttons belong to `FLOATING_OVERLAY_SELECTORS` (`app/utils/floating-overlay.ts`), so the sidebar does not close.
 

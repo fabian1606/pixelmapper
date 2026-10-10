@@ -22,6 +22,9 @@ import CollaboratorCursors from './CollaboratorCursors.vue';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import type { ModifierInstance } from '~/utils/engine/types';
+import { useDistributionToolStore } from '~/stores/distribution-tool-store';
+import OrderTool from './distribution/OrderTool.vue';
+import DistributionOverlay from './distribution/DistributionOverlay.vue';
 
 interface Props {
   fixtures: Fixture[];
@@ -239,14 +242,33 @@ function handleSpatialDragStart() {
   isSpatialDragging.value = true;
 }
 
-function handleModifierDragEnd(_modifier: ModifierInstance) {
+function handleModifierDragEnd(_modifier?: ModifierInstance, description = 'Update Spatial Handle') {
   isSpatialDragging.value = false;
   if (modifierDragBeforeEffects && effectEngine) {
     const afterEffects = cloneModifiers(effectEngine.modifiers);
-    history.execute(new SetModifiersCommand(effectEngine, modifierDragBeforeEffects, afterEffects, 'Update Spatial Handle'));
+    history.execute(new SetModifiersCommand(effectEngine, modifierDragBeforeEffects, afterEffects, description));
     modifierDragBeforeEffects = null;
   }
 }
+
+// ─── Distribution order tools (plan M4.3) ─────────────────────────────────────
+const distributionTool = useDistributionToolStore();
+/** The order tool is on for the active modifier. */
+const orderToolActive = computed(() => !!distributionTool.tool && !!activeModifier.value && distributionTool.modifierId === activeModifier.value.id);
+
+/** Live order change from the canvas tool. */
+function handleOrderChange(distribution: ModifierInstance['distribution']) {
+  if (!activeModifier.value) return;
+  handleModifierChange(activeModifier.value, { distribution });
+  liveBus.dispatch('modifier.update', { effectId: activeModifier.value.id, changes: { distribution } });
+}
+
+// A click session commits once when the tool ends (Esc, toggle, other modifier).
+watch(() => [distributionTool.tool, distributionTool.modifierId], () => handleModifierDragEnd(undefined, 'Set Order'));
+// Selecting another modifier ends the tool.
+watch(() => activeModifier.value?.id, (id) => {
+  if (distributionTool.modifierId && distributionTool.modifierId !== id) distributionTool.stop();
+});
 
 function rect(): DOMRect {
   return viewportEl.value!.getBoundingClientRect();
@@ -461,6 +483,29 @@ function handleMouseUp(e?: MouseEvent) {
       </g>
     </svg>
 
+    <!-- Distribution of the active modifier: rank badges, group colors, head arrows -->
+    <DistributionOverlay
+      v-if="activeModifier?.distribution"
+      :fixtures="fixtures"
+      :modifier="activeModifier"
+      :world-width="WORLD_WIDTH"
+      :world-height="WORLD_HEIGHT"
+      :world-to-viewport="worldToViewport"
+      :camera="camera"
+    />
+    <OrderTool
+      v-if="orderToolActive && activeModifier && distributionTool.tool"
+      :tool="distributionTool.tool"
+      :modifier="activeModifier"
+      :world-width="WORLD_WIDTH"
+      :world-height="WORLD_HEIGHT"
+      :viewport-to-world="viewportToWorld"
+      :hit-test="(vx, vy) => fixtureCanvas?.hitTest(vx, vy)"
+      @change="handleOrderChange"
+      @commit="d => handleModifierDragEnd(undefined, d)"
+      @done="distributionTool.stop()"
+    />
+
     <!-- Collaborator cursors + remote selections -->
     <CollaboratorCursors :camera="camera" />
 
@@ -479,7 +524,7 @@ function handleMouseUp(e?: MouseEvent) {
     </div>
 
     <FixtureEditorSpatialControls
-      v-if="activeModifier && (['linear', 'radial', 'conical'].includes(activeModifier.distribution?.mode) || !!activeModifier.params?.origin)"
+      v-if="activeModifier && !orderToolActive && ((activeModifier.distribution?.scope === 'across' && ['linear', 'radial', 'conical'].includes(activeModifier.distribution.mode)) || !!activeModifier.params?.origin)"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"

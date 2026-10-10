@@ -61,6 +61,25 @@ function getEndViewportPos(m: ModifierInstance) {
   return props.worldToViewport(end.x * props.worldWidth, end.y * props.worldHeight);
 }
 
+/** Mode guide: radial circle (radius |end − origin|) or conical ray. */
+const guide = computed(() => {
+  const m = props.activeModifier;
+  if (!m || hasSpatialParams(m)) return null;
+  const { origin, end } = handleOf(m);
+  const c = props.worldToViewport(origin.x * props.worldWidth, origin.y * props.worldHeight);
+  const e = props.worldToViewport(end.x * props.worldWidth, end.y * props.worldHeight);
+  const len = Math.hypot(end.x - origin.x, end.y - origin.y);
+  const scale = props.camera.scale;
+  if (m.distribution.mode === 'radial') {
+    return { kind: 'radial' as const, cx: c.x, cy: c.y, rx: len * props.worldWidth * scale, ry: len * props.worldHeight * scale };
+  }
+  if (m.distribution.mode === 'conical') {
+    const k = 4;
+    return { kind: 'conical' as const, cx: c.x, cy: c.y, x2: c.x + (e.x - c.x) * k, y2: c.y + (e.y - c.y) * k };
+  }
+  return null;
+});
+
 // ─── Gradient handle drag (window-global for reliable capture) ─────────────────
 type HandleDragType = 'origin' | 'endpoint' | null;
 let spatialDragType: HandleDragType = null;
@@ -131,6 +150,20 @@ function handleWindowMouseUp() {
   <template v-if="activeModifier">
     <!-- SVG line connects origin to endpoint -->
     <svg class="gradient-svg" :width="editorWidth" :height="editorHeight">
+      <!-- Radial: the circle where spatial = 1 (normalized space → ellipse in world px) -->
+      <ellipse
+        v-if="guide?.kind === 'radial'"
+        :cx="guide.cx" :cy="guide.cy" :rx="guide.rx" :ry="guide.ry"
+        fill="none" stroke="var(--primary)" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="4 4"
+        data-guide="radial"
+      />
+      <!-- Conical: the ray where the sweep starts -->
+      <line
+        v-if="guide?.kind === 'conical'"
+        :x1="guide.cx" :y1="guide.cy" :x2="guide.x2" :y2="guide.y2"
+        stroke="var(--primary)" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="4 4"
+        data-guide="conical"
+      />
       <line
         :x1="getOriginViewportPos(activeModifier).x"
         :y1="getOriginViewportPos(activeModifier).y"
