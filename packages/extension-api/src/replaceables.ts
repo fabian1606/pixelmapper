@@ -11,7 +11,7 @@
  */
 import type { Component } from 'vue';
 import type { RgbColor, Vec2 } from './model';
-import type { CurvePoint } from './params';
+import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
 
 /** Visual size of an input. */
 export type InputSize = 'sm' | 'md' | 'lg';
@@ -172,13 +172,29 @@ export type ToggleEmits = CommonInputEmits<boolean>;
 
 /** Props of `pm.curve`: editable curve of control points (normalized). */
 export interface CurveProps extends BaseInputProps {
-  /** Current value. */
-  modelValue: CurvePoint[];
+  /** Current value: programmatic `{ shape, args }`, free `{ points }` or legacy points. */
+  modelValue: CurveValue;
+  /** Offered shapes (registry ids) in UI order; omitted = free editing only. */
+  shapes?: string[];
+  /** Allow converting to free points. Default true. */
+  allowFree?: boolean;
+  /** x-range: `cycle` = [0, 1] (default), `signed` = [−1, 1]. */
+  domain?: CurveDomain;
+  /** Tick/snap context. Default `none`. */
+  axis?: CurveAxis;
+  /** Fixtures (axis `fixtures`) or beats per cycle (axis `beats`). */
+  ticks?: number;
+  /** y display; the value stays 0–1. Default `unipolar`. */
+  range?: CurveRange;
+  /** Playhead position in domain units, or null. */
+  playhead?: number | null;
+  /** Show the endless-strip slot (`#strip`) under the editor. */
+  strip?: boolean;
   /** Display scale of the y axis (value 1 is shown as `yMax`). Default 1. */
   yMax?: number;
 }
 /** Emits of `pm.curve`. */
-export type CurveEmits = CommonInputEmits<CurvePoint[]>;
+export type CurveEmits = CommonInputEmits<CurveValue>;
 
 // ── pm.angle ────────────────────────────────────
 

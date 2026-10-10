@@ -350,7 +350,7 @@ Default input `pm.steps`.
 
 File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/components/pm/curve/` to stay < 200 lines per file per AGENTS.md).
 
-- [ ] **M2.1 Contract.** In `packages/extension-api/src/replaceables.ts`, `CurveProps` becomes:
+- [x] **M2.1 Contract.** In `packages/extension-api/src/replaceables.ts`, `CurveProps` becomes:
   ```ts
   { modelValue: CurveValue; shapes?: string[]; allowFree?: boolean; domain?: 'cycle'|'signed';
     axis?: 'fixtures'|'beats'|'none'; ticks?: number /* fixtures or beats per cycle */;
@@ -358,20 +358,20 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
     strip?: boolean /* show endless strip slot */; yMax?: number }
   ```
   Emits are unchanged.
-- [ ] **M2.2 Shape bar.**
+- [x] **M2.2 Shape bar.**
   - Thumbnails (44×18 SVG) rendered from `evaluate` for each offered shape, plus "Free" when `allowFree`.
   - Active shape highlighted.
   - Clicking a shape sets `{ shape, args: defaults }`, keeping `peak`/`floor` and any arg with the same key.
 
   *Accept:* clicking each shape emits a valid value; keyboard focusable buttons with `aria-pressed`.
-- [ ] **M2.3 Canvas & polyline.**
+- [x] **M2.3 Canvas & polyline.**
   - SVG 240×72 (`preserveAspectRatio="none"`), height 56/80/120 by size.
   - Midline for bipolar.
   - Tick marks: `axis:'fixtures'` → one tick per fixture (`ticks`); `axis:'beats'` → 8 per beat (same as the old WaveformEditor).
   - Inactive zones for `hold`-like shapes.
   - 120-sample polyline from `evaluateCurve`.
   - Playhead line when `playhead != null`.
-- [ ] **M2.4 Arg handles (programmatic mode).**
+- [x] **M2.4 Arg handles (programmatic mode).**
   - For every arg with `handle.kind !== 'none'`, draw at `anchor(args)`:
     - `edgeX` = double-arrow on the flank, `ew-resize`
     - `pointOnEdge` = filled circle
@@ -381,7 +381,7 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - Double-click a handle resets the arg to its default.
 
   *Accept:* component tests per handle kind (synthetic pointer events) assert the emitted args and the snapping.
-- [ ] **M2.5 Free mode.** "Free" (or "Edit points" in the shape menu) converts the current shape via `toPoints` (or 16-point sampling) → `{ points }`. Then:
+- [x] **M2.5 Free mode.** "Free" (or "Edit points" in the shape menu) converts the current shape via `toPoints` (or 16-point sampling) → `{ points }`. Then:
   - drag points (end points: y only);
   - click on the polyline inserts a point (kind `smooth`);
   - Del/Backspace or double-click removes the selected inner point;
@@ -391,8 +391,8 @@ File: `app/components/pm/PmCurve.vue` (rewrite; split helpers into `app/componen
   - "Back to shape" restores the last programmatic value (kept in component state for the session).
 
   *Accept:* tests for insert/delete/kind change/tangent drag; LUT of the converted shape equals the shape LUT ± 1e-2.
-- [ ] **M2.6 Endless strip slot.** When `strip`, render a `<slot name="strip">` under the SVG. The card fills it with `EndlessStrip` (M5.4).
-- [ ] **M2.7 ParamForm wiring.** Pass `shapes`, `allowFree`, `domain`, `axis`, `range` from the param def; pass `ticks` from the instance's resolved rank count (prop from the card) and `playhead` from the live phase (M5.5).
+- [x] **M2.6 Endless strip slot.** When `strip`, render a `<slot name="strip">` under the SVG. The card fills it with `EndlessStrip` (M5.4).
+- [x] **M2.7 ParamForm wiring.** Pass `shapes`, `allowFree`, `domain`, `axis`, `range` from the param def; pass `ticks` from the instance's resolved rank count (prop from the card) and `playhead` from the live phase (M5.5).
 
 ### Phase M3 — Distribution core (engine, wire, preview, migration)
 

@@ -76,7 +76,7 @@ describe('deep migration', () => {
     const m = migrateModifier(v2());
     expect(m).not.toHaveProperty('fanning');
     expect(m).not.toHaveProperty('direction');
-    expect((m as { distribution: { mode: string } }).distribution.mode).toBe('linear');
+    expect((m as unknown as { distribution: { mode: string } }).distribution.mode).toBe('linear');
     expect(migrateModifier(m)).toBe(m);
   });
 

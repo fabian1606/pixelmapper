@@ -24,7 +24,13 @@ const props = withDefaults(defineProps<{
   modelValue: Record<string, ParamValue>;
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
-}>(), { disabled: false, size: 'sm' });
+  /** Fixtures in order (curve axis `fixtures`): the instance's resolved rank count. */
+  ticks?: number;
+  /** Beats per cycle (curve axis `beats`). */
+  beats?: number;
+  /** Live position in the cycle (0–1) for `cycle` curves' playheads; null = none. */
+  playhead?: number | null;
+}>(), { disabled: false, size: 'sm', ticks: 0, beats: 0, playhead: null });
 
 const emit = defineEmits<{
   'update:modelValue': [values: Record<string, ParamValue>];
@@ -72,6 +78,19 @@ function inputProps(p: ParamDef): Record<string, unknown> {
       return { ...base, options: p.options.map((o, i) => ({ value: o, label: p.optionLabels?.[i] ?? o })) };
     case 'point':
       return { ...base, axisLabels: ['X', 'Y'] };
+    case 'curve': {
+      const domain = p.domain ?? 'cycle';
+      return {
+        ...base,
+        shapes: p.shapes,
+        allowFree: p.allowFree ?? true,
+        domain,
+        axis: p.axis ?? 'none',
+        range: p.range ?? 'unipolar',
+        ticks: p.axis === 'beats' ? props.beats : props.ticks,
+        playhead: domain === 'cycle' ? props.playhead : null,
+      };
+    }
     default:
       return base;
   }

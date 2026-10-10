@@ -15,6 +15,8 @@ import {
   type ShapeDef,
 } from '@pixelmapper/extension-api';
 import { evaluatePoints } from './curve-points';
+
+export { evaluatePoints, inHandle, isLegacyPoints, outHandle } from './curve-points';
 import { PROFILE_SHAPES } from './shapes/profile';
 import { MOTION_SHAPES } from './shapes/motion';
 import { toPointsBySampling } from './shapes/sampling';
