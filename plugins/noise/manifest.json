@@ -3,9 +3,9 @@
   "kind": "modifier",
   "alias": "@pixelmapper/noise",
   "name": "Noise",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "apiVersion": "^1.2.0",
-  "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how much of the time it is bright (low: mostly dark with an occasional flash, high: mostly bright with occasional dips), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
+  "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how much of the time it is bright (low: mostly dark with an occasional flash, high: mostly bright with occasional dips), Variation how deep the values leave the top of the range (0: all at the top), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
   "purpose": "Fixtures flicker, sparkle or pick at random.",
   "speedUnit": "per step",
   "signatures": ["scalar"],
@@ -29,6 +29,11 @@
       "default": 0.5
     },
     {
+      "key": "variation", "type": "number", "min": 0, "max": 1, "label": "Variation", "tier": "primary",
+      "description": "How different the values are: all at the top of the range (0) to anywhere in the range (1).",
+      "default": 1
+    },
+    {
       "key": "coherence", "type": "number", "min": 0, "max": 1, "label": "Coherence", "tier": "primary",
       "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
       "default": 0
@@ -40,43 +45,43 @@
   "presets": [
     {
       "id": "candle", "label": "Candle", "description": "A warm, restless glow, fixture by fixture.", "default": true,
-      "params": { "rangeMin": 0.6, "rangeMax": 1, "frequency": 0.5, "coherence": 0, "sync": 0, "hardness": 0.2, "colorVariation": 0 },
+      "params": { "rangeMin": 0.6, "rangeMax": 1, "frequency": 0.5, "variation": 1, "coherence": 0, "sync": 0, "hardness": 0.2, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 0.125 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
     },
     {
       "id": "twinkle", "label": "Twinkle", "description": "Dim pixels, now and then one sparkles.",
-      "params": { "rangeMin": 0.05, "rangeMax": 1, "frequency": 0.08, "coherence": 0, "sync": 0, "hardness": 0.8, "colorVariation": 0 },
+      "params": { "rangeMin": 0.05, "rangeMax": 1, "frequency": 0.08, "variation": 1, "coherence": 0, "sync": 0, "hardness": 0.8, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 0.25 }, "distribution": { "scope": "within", "withinOffset": "none", "reverse": false }, "strength": 1
     },
     {
       "id": "random-pick", "label": "Random Pick", "description": "Mostly dark; on each beat a few random fixtures light up.",
-      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.2, "coherence": 0, "sync": 1, "hardness": 1, "colorVariation": 0 },
+      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.2, "variation": 1, "coherence": 0, "sync": 1, "hardness": 1, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
     },
     {
       "id": "fire", "label": "Fire", "description": "Flickering patches that rise along the handle.",
-      "params": { "rangeMin": 0.3, "rangeMax": 1, "frequency": 0.5, "coherence": 0.8, "sync": 0, "hardness": 0.1, "colorVariation": 0 },
+      "params": { "rangeMin": 0.3, "rangeMax": 1, "frequency": 0.5, "variation": 1, "coherence": 0.8, "sync": 0, "hardness": 0.1, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 0.25 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
     },
     {
       "id": "water", "label": "Water", "description": "Slow, soft waves rolling across the area.",
-      "params": { "rangeMin": 0.4, "rangeMax": 1, "frequency": 0.5, "coherence": 1, "sync": 0, "hardness": 0, "colorVariation": 0 },
+      "params": { "rangeMin": 0.4, "rangeMax": 1, "frequency": 0.5, "variation": 1, "coherence": 1, "sync": 0, "hardness": 0, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1,
       "when": { "kind": ["area"] }
     },
     {
       "id": "faulty", "label": "Faulty", "description": "Full brightness with occasional dropouts.",
-      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.95, "coherence": 0, "sync": 0, "hardness": 1, "colorVariation": 0 },
+      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.95, "variation": 1, "coherence": 0, "sync": 0, "hardness": 1, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 0.125 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
     },
     {
       "id": "lightning", "label": "Lightning", "description": "The whole rig stays dark and flashes now and then.",
-      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.04, "coherence": 0, "sync": 0, "hardness": 0.9, "colorVariation": 0 },
+      "params": { "rangeMin": 0, "rangeMax": 1, "frequency": 0.04, "variation": 1, "coherence": 0, "sync": 0, "hardness": 0.9, "colorVariation": 0 },
       "speed": { "mode": "beat", "beatValue": 0.25 }, "distribution": { "scope": "across", "mode": "none", "reverse": false }, "strength": 1
     },
     {
       "id": "color-jitter", "label": "Color Jitter", "description": "Colors shimmer independently.",
-      "params": { "rangeMin": 0.85, "rangeMax": 1, "frequency": 0.5, "coherence": 0, "sync": 0, "hardness": 0.3, "colorVariation": 1 },
+      "params": { "rangeMin": 0.85, "rangeMax": 1, "frequency": 0.5, "variation": 1, "coherence": 0, "sync": 0, "hardness": 0.3, "colorVariation": 1 },
       "speed": { "mode": "beat", "beatValue": 0.125 }, "distribution": { "scope": "within", "withinOffset": "none", "reverse": false }, "strength": 1
     }
   ]

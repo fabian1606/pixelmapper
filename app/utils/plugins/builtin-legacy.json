@@ -1269,5 +1269,80 @@
         "description": "Color channels flicker independently (colorful)."
       }
     ]
+  },
+  {
+    "hash": "sha256:d9fe066c644484c63b9d90040614ce7797be13bf4c2eac3fa467a3d281194141",
+    "alias": "@pixelmapper/noise",
+    "version": "3.1.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How much of the time it is bright: rarely (0) to almost always (1); 0.5 = even.",
+        "default": 0.5
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
   }
 ]

@@ -11,10 +11,12 @@
  *   (neighbours along the spread form patches that flow along it), bent by
  *   `frequency` (the share of the time it is bright: u^(1/f − 1) below one
  *   half, 1 − (1 − u)^(1/(1 − f) − 1) above; the mean level is f, 0.5 keeps
- *   the levels even), mapped into [rangeMin, rangeMax].
+ *   the levels even), deepened by `variation` (0 = every unit sits at the
+ *   top of the range, 1 = the whole range: d = 1 − variation · (1 − level)),
+ *   mapped into [rangeMin, rangeMax].
  *
- * Param slots: rangeMin 0, rangeMax 1, frequency 2, coherence 3, sync 4,
- * hardness 5, colorVariation 6.
+ * Param slots: rangeMin 0, rangeMax 1, frequency 2, variation 3,
+ * coherence 4, sync 5, hardness 6, colorVariation 7.
  */
 import { Modifier, Frame, Sample, Out, Params, register, hash01, noise3, clamp, lerp, SPREAD_SAME, SPREAD_ORDER, SPREAD_SPATIAL } from "@pixelmapper/plugin-sdk";
 
@@ -28,6 +30,7 @@ class Noise extends Modifier {
   rangeMin: f32 = 0;
   rangeMax: f32 = 1;
   frequency: f32 = 0.5;
+  variation: f32 = 1;
   coherence: f32 = 0;
   sync: f32 = 0;
   hardness: f32 = 0;
@@ -37,10 +40,11 @@ class Noise extends Modifier {
     this.rangeMin = clamp(p.get(0), 0.0, 1.0);
     this.rangeMax = clamp(p.get(1), 0.0, 1.0);
     this.frequency = clamp(p.get(2), 0.01, 0.99);
-    this.coherence = clamp(p.get(3), 0.0, 1.0);
-    this.sync = clamp(p.get(4), 0.0, 1.0);
-    this.hardness = clamp(p.get(5), 0.0, 1.0);
-    this.cv = clamp(p.get(6), 0.0, 1.0);
+    this.variation = clamp(p.get(3), 0.0, 1.0);
+    this.coherence = clamp(p.get(4), 0.0, 1.0);
+    this.sync = clamp(p.get(5), 0.0, 1.0);
+    this.hardness = clamp(p.get(6), 0.0, 1.0);
+    this.cv = clamp(p.get(7), 0.0, 1.0);
   }
 
   /** Random steps of one key at (jittered) time t, 0–1. */
@@ -62,7 +66,7 @@ class Noise extends Modifier {
     return <f32>1.0 - Mathf.pow(<f32>1.0 - u, <f32>1.0 / (<f32>1.0 - f) - 1.0);
   }
 
-  /** Level of one key (steps → coherence → frequency → range), 0–1. */
+  /** Level of one key (steps → coherence → frequency → variation → range), 0–1. */
   level(key: u32, texSeed: u32, ctx: Frame, s: Sample, t: f32, r: f32): f32 {
     let v = this.steps(key, t);
     if (this.coherence > 0.0) {
@@ -75,7 +79,8 @@ class Noise extends Modifier {
       const coh = noise3(px * S + o, py * S + o, s.spatial * S - r) * 0.7 + 0.5;
       v = lerp(v, clamp(coh, 0.0, 1.0), this.coherence);
     }
-    return this.rangeMin + (this.rangeMax - this.rangeMin) * this.bend(clamp(v, 0.0, 1.0));
+    const d: f32 = <f32>1.0 - this.variation * (<f32>1.0 - this.bend(clamp(v, 0.0, 1.0)));
+    return this.rangeMin + (this.rangeMax - this.rangeMin) * d;
   }
 
   render(ctx: Frame, s: Sample, out: Out): void {

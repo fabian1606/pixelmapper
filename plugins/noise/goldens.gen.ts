@@ -22,7 +22,7 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
   const params = presetParams(manifest, preset);
   const rig = rigSamples(preset, isMultiHead(preset));
   const b = encodeParams(manifest.params, params, { ticks: rig.ticks });
-  const [rmin, rmax, freqRaw, coh, sync, hard, cv] = Array.from(b.slice(0, 7));
+  const [rmin, rmax, freqRaw, variation, coh, sync, hard, cv] = Array.from(b.slice(0, 8));
   const freq = Math.max(0.01, Math.min(0.99, freqRaw!));
   const samples = rig.samples.map(s => ({ x: s.x, y: s.y, phase: 0, base: [1], spatial: s.spatial, rank: s.rank, distGroup: s.distGroup, headIndex: s.head, headCount: s.headCount, seed: rigSeed(s.fixture, s.head), groupIndex: s.fixture, groupCount: 8 }));
 
@@ -41,7 +41,8 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
     const w = 1 - hard!;
     const a = hash01(key, kf * 2 + 7);
     const st = f < 1 - w ? a : lerp(a, hash01(key, (kf + 1) * 2 + 7), smooth((f - (1 - w)) / Math.max(w, 1e-3)));
-    return Math.max(0, Math.min(1, rmin! + (rmax! - rmin!) * bend(Math.max(0, Math.min(1, st)))));
+    const d = 1 - variation! * (1 - bend(Math.max(0, Math.min(1, st))));
+    return Math.max(0, Math.min(1, rmin! + (rmax! - rmin!) * d));
   };
 
   return Array.from({ length: 8 }, (_, i) => i * 0.37 + 0.05).map((tp) => {

@@ -43,3 +43,25 @@ describe('noise golden properties', () => {
     }
   });
 });
+
+describe('noise variation (compiled plugin)', () => {
+  it('Variation 0 puts every unit at the top of the range; 1 uses the whole range', async () => {
+    const { buildPackage, CTX, CTX_FIELDS, encodeParams, PluginInstance, SAMPLE, SAMPLE_FIELDS } = await import('@pixelmapper/plugin-toolchain');
+    const manifest = JSON.parse(readFileSync(join(import.meta.dirname, 'manifest.json'), 'utf8'));
+    const { pkg } = await buildPackage(manifest, { 'modifier.ts': readFileSync(join(import.meta.dirname, 'modifier.ts'), 'utf8') });
+    const inst = PluginInstance.createSync(new WebAssembly.Module(new Uint8Array(pkg!.wasm)));
+    const render = (variation: number) => {
+      inst.prepare(encodeParams(manifest.params, { rangeMin: 0.2, rangeMax: 0.9, frequency: 0.5, variation, hardness: 1 }, { ticks: 8 }));
+      const ctx = new Float32Array(CTX_FIELDS);
+      ctx[CTX.arity] = 1; ctx[CTX.timePhase] = 3.3; ctx[CTX.spread] = 1; ctx[CTX.seedLo] = 0x1234;
+      const samples = new Float32Array(8 * SAMPLE_FIELDS);
+      for (let i = 0; i < 8; i++) { samples[i * SAMPLE_FIELDS + SAMPLE.seed] = 1000 + i * 77; samples[i * SAMPLE_FIELDS + SAMPLE.spatial] = i / 8; }
+      return Array.from(inst.render(ctx, samples, 8));
+    };
+    for (const v of render(0)) expect(v).toBeCloseTo(0.9, 4);
+    const full = render(1);
+    expect(Math.max(...full) - Math.min(...full)).toBeGreaterThan(0.2);
+    const half = render(0.5);
+    for (const v of half) expect(v).toBeGreaterThanOrEqual(0.9 - 0.5 * 0.7 - 1e-4);
+  }, 120_000);
+});

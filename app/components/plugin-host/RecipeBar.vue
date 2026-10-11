@@ -5,8 +5,8 @@
  * shows every recipe with a thin animated strip and a "2D" badge when it
  * spreads on the stage. Hovering or arrowing through the list previews the
  * recipe (live strip and fixtures, nothing saved); click / Enter applies it
- * as one undo step, Esc or leaving restores. After an edit the row reads
- * "Name · modified" with ↺ back to the recipe.
+ * as one undo step, Esc or leaving restores. After an edit the name gets a
+ * dot ("modified") and ↺ goes back to the recipe.
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { Check, ChevronDown, RotateCcw } from 'lucide-vue-next';
@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
           aria-label="Preset" data-recipe-trigger
         >
           <span class="truncate" data-recipe-active>{{ base?.label ?? 'Custom' }}</span>
-          <span v-if="modified" class="shrink-0 text-[10px] text-muted-foreground" data-recipe-modified>· modified</span>
+          <span v-if="modified" class="shrink-0 h-1.5 w-1.5 rounded-full bg-primary" title="Modified from the preset" aria-label="modified" data-recipe-modified />
           <ChevronDown class="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
