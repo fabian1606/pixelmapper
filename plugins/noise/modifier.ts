@@ -14,8 +14,9 @@
  *   - `variation` pushes b away from the middle, c = ½ + (b − ½) / variation
  *     (clamped): 0 = on/off (above half → high, below → low), 1 = soft levels.
  *   Steps crossfade by 1 − hardness, timing is jittered by 1 − sync,
- *   `coherence` blends toward the texture (neighbours form patches, even in
- *   every direction, that change over time); the result maps into
+ *   `coherence` blends toward a Perlin texture (neighbours form patches,
+ *   even in every direction; Spatial 2D: the handle length sets their size,
+ *   its direction the drift — radial: outward); the result maps into
  *   [rangeMin, rangeMax].
  *
  * Param slots: rangeMin 0, rangeMax 1, frequency 2, variation 3,
@@ -76,14 +77,38 @@ class Noise extends Modifier {
   level(key: u32, texSeed: u32, ctx: Frame, s: Sample, t: f32, r: f32): f32 {
     let v = this.steps(key, t);
     if (this.coherence > 0.0) {
-      const S = lerp(8.0, 2.5, this.coherence);
       const o = <f32>(texSeed & 0xff) * 0.37;
-      // Spatial 2D: patches on the stage; otherwise along the spread only (whole fixtures share it).
-      const px: f32 = ctx.spread == SPREAD_SPATIAL ? s.x : s.spatial;
-      const py: f32 = ctx.spread == SPREAD_SPATIAL ? s.y : 0.0;
-      // Time is the third axis only: tying it to `spatial` drew bands across the handle.
+      let S = lerp(8.0, 2.5, this.coherence);
+      let qx: f32 = s.spatial * S + o;
+      let qy: f32 = o;
+      let qz: f32 = r;
+      if (ctx.spread == SPREAD_SPATIAL) {
+        // Patches on the stage: the handle length scales them (0.5 = the base
+        // size), its direction is where they drift (radial: away from the origin).
+        const dx = ctx.handleEndX - ctx.handleOriginX;
+        const dy = ctx.handleEndY - ctx.handleOriginY;
+        const len = Mathf.max(Mathf.sqrt(dx * dx + dy * dy), 0.02);
+        S = S * 0.5 / len;
+        const rx = s.x - ctx.handleOriginX;
+        const ry = s.y - ctx.handleOriginY;
+        const dist = Mathf.sqrt(rx * rx + ry * ry);
+        // Linear and radial give different spatial values: the closer one is the mode.
+        const along = (rx * dx + ry * dy) / (len * len);
+        const radial = Mathf.abs(s.spatial - dist / len) < Mathf.abs(s.spatial - along);
+        let ux: f32 = dx / len;
+        let uy: f32 = dy / len;
+        if (radial) {
+          ux = dist > 1e-4 ? rx / dist : 0.0;
+          uy = dist > 1e-4 ? ry / dist : 0.0;
+        }
+        // Drift half a patch per step; the texture itself changes slower so the drift reads.
+        qx = s.x * S + o - ux * r * 0.5;
+        qy = s.y * S + o - uy * r * 0.5;
+        qz = r * 0.35;
+      }
+      // Time is the only third axis: tying it to `spatial` drew bands across the handle.
       // Perlin values cluster around 0: stretch so coherent looks use their range.
-      const coh = noise3(px * S + o, py * S + o, r) * 0.7 + 0.5;
+      const coh = noise3(qx, qy, qz) * 0.7 + 0.5;
       v = lerp(v, this.shape(coh), this.coherence);
     }
     return this.rangeMin + (this.rangeMax - this.rangeMin) * v;

@@ -299,6 +299,9 @@ fn v2_order_distribution_fills_abi_1_1_slots() {
     assert_eq!(st.last_ctx.0[ctx::RANK_COUNT], 3.0);
     assert_eq!(st.last_ctx.0[ctx::DIST_GROUP_COUNT], 0.0);
     assert_eq!(st.last_ctx.0[ctx::SPREAD], 2.0);
+    // v1.2 handle slots carry the distribution's origin (0, 0) / end (1, 0).
+    assert_eq!((st.last_ctx.0[ctx::HANDLE_ORIGIN_X], st.last_ctx.0[ctx::HANDLE_ORIGIN_Y]), (0.0, 0.0));
+    assert_eq!((st.last_ctx.0[ctx::HANDLE_END_X], st.last_ctx.0[ctx::HANDLE_END_Y]), (1.0, 0.0));
     let s0 = &st.last_samples[0].0;
     assert!((s0[sample::SPATIAL] - 2.0 / 3.0).abs() < 1e-6);
     assert_eq!(s0[sample::RANK], 2.0);

@@ -49,13 +49,13 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
   };
 
   return Array.from({ length: 8 }, (_, i) => i * 0.37 + 0.05).map((tp) => {
-    const ctx = { timeMs: 0, beatTime: 0, bpm: 120, phaseSpeed: 1, strength: 1, timePhase: tp, rankCount: rig.rankCount, distGroupCount: rig.distGroupCount, spread: rig.spread, ticks: rig.ticks, seed: INSTANCE_SEED };
+    const ctx = { timeMs: 0, beatTime: 0, bpm: 120, phaseSpeed: 1, strength: 1, timePhase: tp, rankCount: rig.rankCount, distGroupCount: rig.distGroupCount, spread: rig.spread, handle: rig.handle, ticks: rig.ticks, seed: INSTANCE_SEED };
     let expected: number[][];
     if (coh! > 0 || cv! > 0) {
       // Snapshot of the compiled plugin (Perlin texture / color variation).
       plugin.prepare(b);
       const c = new Float32Array(CTX_FIELDS);
-      c[CTX.arity] = 1; c[CTX.timePhase] = tp; c[CTX.rankCount] = ctx.rankCount; c[CTX.spread] = ctx.spread; c[CTX.seedLo] = INSTANCE_SEED & 0xffff; c[CTX.seedHi] = INSTANCE_SEED >>> 16;
+      c[CTX.arity] = 1; c[CTX.timePhase] = tp; c[CTX.rankCount] = ctx.rankCount; c[CTX.spread] = ctx.spread; [c[CTX.handleOriginX], c[CTX.handleOriginY], c[CTX.handleEndX], c[CTX.handleEndY]] = ctx.handle; c[CTX.seedLo] = INSTANCE_SEED & 0xffff; c[CTX.seedHi] = INSTANCE_SEED >>> 16;
       const buf = new Float32Array(samples.length * SAMPLE_FIELDS);
       samples.forEach((s, k) => {
         const o = k * SAMPLE_FIELDS;

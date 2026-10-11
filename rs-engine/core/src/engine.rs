@@ -685,6 +685,10 @@ impl EffectEngine {
         fctx.0[ctx::RANK_COUNT] = rank_count as f32;
         fctx.0[ctx::DIST_GROUP_COUNT] = group_count as f32;
         fctx.0[ctx::SPREAD] = inst.distribution.spread_kind() as f32;
+        fctx.0[ctx::HANDLE_ORIGIN_X] = inst.distribution.origin.0;
+        fctx.0[ctx::HANDLE_ORIGIN_Y] = inst.distribution.origin.1;
+        fctx.0[ctx::HANDLE_END_X] = inst.distribution.end.0;
+        fctx.0[ctx::HANDLE_END_Y] = inst.distribution.end.1;
 
         self.out.clear();
         self.out.resize(self.samples.len() * arity, 0.0);

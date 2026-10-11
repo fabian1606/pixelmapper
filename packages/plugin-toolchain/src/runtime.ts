@@ -24,6 +24,8 @@ export const CTX = {
   timePhase: 8, rankCount: 9, distGroupCount: 10,
   // ABI v1.2: 0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture
   spread: 11,
+  // ABI v1.2: the Spatial 2D handle (normalized world coordinates)
+  handleOriginX: 12, handleOriginY: 13, handleEndX: 14, handleEndY: 15,
 } as const;
 /** Field offsets of a sample (f32 index). */
 export const SAMPLE = {

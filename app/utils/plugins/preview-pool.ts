@@ -198,6 +198,10 @@ function render(
   ctx[CTX.rankCount] = counts.rankCount;
   ctx[CTX.distGroupCount] = counts.distGroupCount;
   ctx[CTX.spread] = spreadKind(m.distribution);
+  ctx[CTX.handleOriginX] = m.distribution.origin.x;
+  ctx[CTX.handleOriginY] = m.distribution.origin.y;
+  ctx[CTX.handleEndX] = m.distribution.end.x;
+  ctx[CTX.handleEndY] = m.distribution.end.y;
 
   const cseed = channelSeed(m.targetChannels[0] ?? 'DIMMER');
   const samples = new Float32Array(count * SAMPLE_FIELDS);

@@ -13,8 +13,8 @@ export const SAMPLE_FIELDS: i32 = 16;
 /**
  * Per-render-call context (one modifier instance, one frame).
  * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
- * strength, timePhase, rankCount, distGroupCount (v1.1), spread (v1.2),
- * reserved[4].
+ * strength, timePhase, rankCount, distGroupCount (v1.1), spread and the
+ * Spatial 2D handle origin x/y, end x/y (v1.2).
  */
 export class Frame {
   /** Address of the context buffer (set by the SDK). */
@@ -46,6 +46,14 @@ export class Frame {
   @inline get distGroupCount(): i32 { return <i32>load<f32>(this.ptr, 40); }
   /** v1.2: the spread — `SPREAD_SAME`, `SPREAD_SPATIAL`, `SPREAD_ORDER` or `SPREAD_WITHIN`. */
   @inline get spread(): i32 { return <i32>load<f32>(this.ptr, 44); }
+  /** v1.2: Spatial 2D handle origin x (normalized world, like `Sample.x`). */
+  @inline get handleOriginX(): f32 { return load<f32>(this.ptr, 48); }
+  /** v1.2: Spatial 2D handle origin y. */
+  @inline get handleOriginY(): f32 { return load<f32>(this.ptr, 52); }
+  /** v1.2: Spatial 2D handle end x. */
+  @inline get handleEndX(): f32 { return load<f32>(this.ptr, 56); }
+  /** v1.2: Spatial 2D handle end y. */
+  @inline get handleEndY(): f32 { return load<f32>(this.ptr, 60); }
 }
 
 /** v1.2 `Frame.spread`: every fixture the same (spatial 0). */

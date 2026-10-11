@@ -677,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:571cece0a42154e00fcf8e57ffb6e5c184632f880884116e92119bb82cc02beb",
+    "hash": "sha256:244885290110355479c0836f48e35aaad906465b4ba5c4a385259bbd11acc219",
     "signatures": [
       "scalar"
     ],
@@ -686,9 +686,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/noise",
       "name": "Noise",
-      "version": "3.3.1",
+      "version": "3.4.0",
       "apiVersion": "^1.2.0",
-      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how often a value is bright (the share above half: low = mostly dark with an occasional flash, high = mostly bright with dips), Variation how soft the values are (0 = on/off: above half → highest, below → lowest; 1 = soft levels), Coherence goes from independent units to soft patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
+      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how often a value is bright (the share above half: low = mostly dark with an occasional flash, high = mostly bright with dips), Variation how soft the values are (0 = on/off: above half → highest, below → lowest; 1 = soft levels), Coherence goes from independent units to soft patches (Spatial 2D: the handle length sets their size, its direction where they drift), Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
       "purpose": "Fixtures flicker, sparkle or pick at random.",
       "speedUnit": "per step",
       "signatures": [
@@ -889,7 +889,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "fire",
           "label": "Fire",
-          "description": "Flickering patches of light.",
+          "description": "Flickering patches of light drifting along the handle.",
           "params": {
             "rangeMin": 0.3,
             "rangeMax": 1,

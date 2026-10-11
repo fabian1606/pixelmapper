@@ -4,7 +4,7 @@
 // §6.8). Browser: `JsModifierRuntime` (runtime_js.rs) calls the worker's
 // plugin bridge. Tauri (later): wasmtime with fuel. Tests: closures.
 
-/// f32 slots of a frame context (ABI v1; v1.1 fills reserved slots 8–10, v1.2 slot 11).
+/// f32 slots of a frame context (ABI v1; v1.1 fills reserved slots 8–10, v1.2 slots 11–15).
 pub const CTX_FIELDS: usize = 16;
 /// f32 slots of a sample (ABI v1; v1.1 fills reserved slots 13–15).
 pub const SAMPLE_FIELDS: usize = 16;
@@ -27,6 +27,11 @@ pub mod ctx {
     pub const DIST_GROUP_COUNT: usize = 10;
     /// v1.2: the spread (0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture).
     pub const SPREAD: usize = 11;
+    /// v1.2: the Spatial 2D handle in normalized world coordinates (origin, end).
+    pub const HANDLE_ORIGIN_X: usize = 12;
+    pub const HANDLE_ORIGIN_Y: usize = 13;
+    pub const HANDLE_END_X: usize = 14;
+    pub const HANDLE_END_Y: usize = 15;
 }
 
 /// Sample field indices (ABI v1, amendment A13; v1.1, amendment A20).

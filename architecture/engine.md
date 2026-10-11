@@ -47,7 +47,7 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 1. **Base values** — every target's chaser value (0–255) into `base_buffer` and `render_buffer`.
 2. **Modifiers, in list order** — for each enabled instance:
    1. *Collect samples* by signature: `scalar` → one sample per targeted channel (filtered by channel types and fixture mask); `rgb` → one per head with a color system; `panTilt` → one per head with pan + tilt.
-   2. *Fill `FrameCtx`*: time, beat time, BPM, phase speed, arity, instance seed, strength, and (v1.1) `timePhase`, `rankCount`, `distGroupCount`, (v1.2) `spread`.
+   2. *Fill `FrameCtx`*: time, beat time, BPM, phase speed, arity, instance seed, strength, and (v1.1) `timePhase`, `rankCount`, `distGroupCount`, (v1.2) `spread` and the handle.
    3. *Fill samples*:
       - world x/y;
       - the distribution values (`spatial`, `rank`, `distGroup`, see below) and the legacy `phase = timePhase − spatial`;
@@ -101,7 +101,7 @@ Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(params
 | 9 | rankCount (v1.1) | 14 | rank (v1.1, −1 = none) |
 | 10 | distGroupCount (v1.1) | 15 | distGroup (v1.1, −1 = none) |
 | 11 | spread (v1.2: 0 same, 1 spatial 2D, 2 fixture by fixture, 3 within) | | |
-| 12–15 | reserved | | |
+| 12–15 | Spatial 2D handle origin x/y, end x/y (v1.2, normalized world) | | |
 
 v1.1 and v1.2 are additive: older plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
 

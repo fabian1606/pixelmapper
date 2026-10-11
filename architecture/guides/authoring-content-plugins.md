@@ -200,7 +200,7 @@ Rules:
 - `timeMs` (shared clock, identical on all clients), `beatTime` (beats since epoch, continuous across tempo changes), `bpm`;
 - `phaseSpeed` (cycles/s; 0 when frozen), `arity`, `seed` (instance), `strength` (informational — the host applies it);
 - v1.1: `timePhase` (speed phase in cycles, unwrapped: one pass/step per unit), `rankCount` (numbered fixtures of the instance, the largest head count for scope within, 0 without ranks), `distGroupCount` (groups set by a recipe, 0 = none).
-- v1.2: `spread` — the user's Spread choice: `SPREAD_SAME` (every fixture the same, `spatial` 0), `SPREAD_SPATIAL` (Spatial 2D handle), `SPREAD_ORDER` (Fixture by fixture: `rank` = number − 1, all heads of a fixture share it), `SPREAD_WITHIN` (Within each fixture: `rank` = head). Use it to decide who shares a random value (Noise) or how groups form (Pattern: alternate along numbers, bands along the handle). Declare `"apiVersion": "^1.2.0"` when you read it.
+- v1.2: `spread` — the user's Spread choice: `SPREAD_SAME` (every fixture the same, `spatial` 0), `SPREAD_SPATIAL` (Spatial 2D handle), `SPREAD_ORDER` (Fixture by fixture: `rank` = number − 1, all heads of a fixture share it), `SPREAD_WITHIN` (Within each fixture: `rank` = head). Use it to decide who shares a random value (Noise) or how groups form (Pattern: alternate along numbers, bands along the handle). Also v1.2: `handleOriginX/Y`, `handleEndX/Y` — the Spatial 2D handle in the same normalized coordinates as `Sample.x/y` (e.g. scale or move a texture with it, as Noise does). Declare `"apiVersion": "^1.2.0"` when you read them.
 
 `Sample` (per target):
 
