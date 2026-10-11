@@ -8,7 +8,7 @@
  */
 import type { ParamSchema, ParamValue } from '@pixelmapper/extension-api';
 import legacy from './builtin-legacy.json';
-import { BUILTIN_BY_ALIAS } from './builtin-index';
+import { BUILTIN_BY_ALIAS, BUILTIN_PLUGINS } from './builtin-index';
 import { migrateWaveformV1, type WaveformV1Params } from './legacy/waveform-v1';
 import { migrateColorAdjustV1, type ColorAdjustV1Params } from './legacy/color-adjust-v1';
 import { migrateNoiseV1, type NoiseV1Params } from './legacy/noise-v1';
@@ -58,6 +58,17 @@ const MIGRATIONS: Record<string, (params: Record<string, ParamValue>, m: Migrata
   '@pixelmapper/sequencer@2': (p, m) => migrateSequencerV2(p, m.distribution),
 };
 
+/**
+ * Params limited to the keys the built-in still has (a minor release may
+ * drop params; leftovers would make every recipe look "modified").
+ */
+function knownParams(hash: string, params: Record<string, ParamValue>): Record<string, ParamValue> {
+  const schema = BUILTIN_PLUGINS.find(p => p.hash === hash)?.manifest.params;
+  if (!schema) return params;
+  const keys = new Set(schema.map(p => p.key));
+  return Object.fromEntries(Object.entries(params).filter(([k]) => keys.has(k)));
+}
+
 /** The former built-in a hash belongs to, if any. */
 export function legacyBuiltin(hash: string): LegacyBuiltin | undefined {
   return LEGACY.get(hash);
@@ -72,13 +83,16 @@ export function migrateLegacyPlugin<T extends MigratableInstance>(m: T): T {
   const old = LEGACY.get(m.plugin);
   if (!old || !BUILTIN_BY_ALIAS[old.alias]) return m;
   const migrate = MIGRATIONS[`${old.alias}@${old.version.split('.')[0]}`];
-  if (!migrate) return { ...m, plugin: BUILTIN_BY_ALIAS[old.alias]! };
+  if (!migrate) {
+    const plugin = BUILTIN_BY_ALIAS[old.alias]!;
+    return { ...m, plugin, params: knownParams(plugin, m.params ?? {}) };
+  }
   const patch = migrate(m.params ?? {}, m);
   const plugin = BUILTIN_BY_ALIAS[patch.alias ?? old.alias] ?? BUILTIN_BY_ALIAS[old.alias]!;
   return {
     ...m,
     plugin,
-    params: patch.params,
+    params: knownParams(plugin, patch.params),
     ...(patch.distribution ? { distribution: patch.distribution } : {}),
     ...(patch.speed ? { speed: patch.speed } : {}),
   };

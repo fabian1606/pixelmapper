@@ -2,7 +2,7 @@
  * Generates `goldens.json` for Noise (plan M9.6, review): every recipe on the
  * reference rig at 8 times (seeded samples). Recipes without coherence or
  * color variation are computed by a TS reference of the plugin math (keys by
- * spread, peaks, exact pick); the others are snapshots of the compiled
+ * spread, frequency bend); the others are snapshots of the compiled
  * plugin, checked for range and sharing by `noise-properties.test.ts`.
  * Run: `bun run plugins/noise/goldens.gen.ts`
  */
@@ -22,22 +22,16 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
   const params = presetParams(manifest, preset);
   const rig = rigSamples(preset, isMultiHead(preset));
   const b = encodeParams(manifest.params, params, { ticks: rig.ticks });
-  const [rmin, rmax, freq, lenRaw, dir, coh, sync, hard, cv] = Array.from(b.slice(0, 9));
-  const len = Math.max(0.02, Math.min(1, lenRaw!));
+  const [rmin, rmax, freqRaw, coh, sync, hard, cv] = Array.from(b.slice(0, 7));
+  const freq = Math.max(0.01, Math.min(0.99, freqRaw!));
   const samples = rig.samples.map(s => ({ x: s.x, y: s.y, phase: 0, base: [1], spatial: s.spatial, rank: s.rank, distGroup: s.distGroup, headIndex: s.head, headCount: s.headCount, seed: rigSeed(s.fixture, s.head), groupIndex: s.fixture, groupCount: 8 }));
 
   /** Who shares a value (ABI v1.2 spread): the rig, a number, or a pixel. */
   const keyOf = (seed: number, rank: number) => rig.spread === 0
     ? INSTANCE_SEED & 0xffffff
     : rig.spread === 2 && rank >= 0 ? Math.trunc(Math.fround(hash01(INSTANCE_SEED, rank + 977) * 16777215)) : seed;
-  /** Exact pick of slot e (fixture by fixture). */
-  const picked = (e: number, rank: number, ranks: number, n: number) => {
-    const ps = (INSTANCE_SEED ^ Math.imul(e, 0x9e3779b9)) >>> 0;
-    const mine = hash01(ps, rank);
-    let below = 0;
-    for (let i = 0; i < ranks; i++) if (hash01(ps, i) < mine) below++;
-    return below < n;
-  };
+  /** Frequency bends the even level so its mean is the frequency. */
+  const bend = (u: number) => (freq <= 0.5 ? u ** (1 / freq - 1) : 1 - (1 - u) ** (1 / (1 - freq) - 1));
   /** TS reference (no coherence, no color variation). */
   const value = (seed: number, rank: number, r: number) => {
     const key = keyOf(seed, rank);
@@ -47,21 +41,7 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
     const w = 1 - hard!;
     const a = hash01(key, kf * 2 + 7);
     const st = f < 1 - w ? a : lerp(a, hash01(key, (kf + 1) * 2 + 7), smooth((f - (1 - w)) / Math.max(w, 1e-3)));
-    let v = rmin! + (rmax! - rmin!) * st;
-    if (freq! > 0) {
-      const ef = Math.floor(t / len);
-      const p = freq! * len;
-      const ranks = rig.rankCount;
-      const on = rig.spread === 2 && rank >= 0 && ranks * p >= 1 ? picked(ef, rank, ranks, Math.round(ranks * p)) : hash01(key, ef * 3 + 101) < p;
-      if (on) {
-        const local = t / len - ef;
-        const attack = 0.1 * w;
-        const decay = 0.9 * w;
-        const pulse = local < attack ? local / attack : local > 1 - decay ? (1 - local) / decay : 1;
-        v = Math.round(dir!) === 0 ? Math.max(v, pulse) : v * (1 - pulse);
-      }
-    }
-    return Math.max(0, Math.min(1, v));
+    return Math.max(0, Math.min(1, rmin! + (rmax! - rmin!) * bend(Math.max(0, Math.min(1, st)))));
   };
 
   return Array.from({ length: 8 }, (_, i) => i * 0.37 + 0.05).map((tp) => {

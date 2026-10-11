@@ -2,9 +2,10 @@
 /**
  * Core default of `pm.gradient` (plan M7.2): a gradient bar with stops.
  * Drag a stop to move it; click the bar to add a stop (color interpolated);
- * Delete/Backspace removes the selected stop (at least one stays); clicking a
- * stop opens `pm.colorInput` in a popover (replaceable, so the color picker
- * extension applies). One drag or edit is one undo step.
+ * Delete/Backspace removes the selected stop (at least one stays), as does
+ * "Remove stop" in its popover; clicking a stop opens `pm.colorInput` in a
+ * popover (replaceable, so the color picker extension applies). One drag or
+ * edit is one undo step.
  */
 import { computed, defineAsyncComponent, ref } from 'vue';
 import type { GradientEmits, GradientProps, GradientStop, RgbColor } from '@pixelmapper/extension-api';
@@ -17,6 +18,7 @@ const emit = defineEmits<GradientEmits>();
 
 const MAX_STOPS = 8;
 const barRef = ref<HTMLElement | null>(null);
+const rootRef = ref<HTMLElement | null>(null);
 const selected = ref<number | null>(null);
 const editing = ref<number | null>(null);
 
@@ -71,6 +73,8 @@ function onStopDown(e: PointerEvent, i: number) {
   e.preventDefault();
   e.stopPropagation();
   selected.value = i;
+  // preventDefault keeps the focus away: focus the editor so Delete/Backspace reach it.
+  rootRef.value?.focus({ preventScroll: true });
   const x0 = e.clientX;
   let moved = false;
   const move = (me: PointerEvent) => {
@@ -90,11 +94,20 @@ function onStopDown(e: PointerEvent, i: number) {
   window.addEventListener('pointerup', up);
 }
 
+/** Removes stop i (at least one stays) as one undo step. */
+function removeStop(i: number) {
+  if (stops.value.length <= 1) return;
+  commit(stops.value.filter((_, k) => k !== i));
+  selected.value = null;
+  editing.value = null;
+}
+
 function onKey(e: KeyboardEvent) {
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selected.value !== null && stops.value.length > 1) {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selected.value !== null) {
     e.preventDefault();
-    commit(stops.value.filter((_, k) => k !== selected.value));
-    selected.value = null;
+    // Global shortcuts (delete fixtures) must not see this key.
+    e.stopPropagation();
+    removeStop(selected.value);
   }
 }
 
@@ -108,7 +121,7 @@ function setColor(c: RgbColor) {
 <template>
   <div class="flex flex-col gap-1" :class="disabled && 'opacity-50 pointer-events-none'">
     <span v-if="label" class="text-xs text-muted-foreground truncate">{{ label }}</span>
-    <div class="relative pb-3 outline-none" tabindex="0" aria-label="Gradient" @keydown="onKey">
+    <div ref="rootRef" class="relative pb-3 outline-none" tabindex="0" aria-label="Gradient" @keydown="onKey">
       <div ref="barRef" class="h-6 rounded border border-border/60 cursor-copy" :style="barStyle" data-gradient-bar @pointerdown="onBarDown" />
       <Popover v-for="(s, i) in stops" :key="i" :open="editing === i" @update:open="v => { if (!v) editing = null; }">
         <PopoverAnchor as-child>
@@ -122,11 +135,11 @@ function setColor(c: RgbColor) {
             @pointerdown="e => onStopDown(e, i)"
           />
         </PopoverAnchor>
-        <PopoverContent class="w-56 p-2" data-overlay-root @pointerdown.stop>
+        <PopoverContent class="w-56 p-2" data-overlay-root @pointerdown.stop @keydown.stop>
           <Replaceable name="pm.colorInput" :model-value="s.color" label="Stop color" @update:model-value="setColor" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')" />
           <button
             v-if="stops.length > 1" type="button" class="mt-2 text-[11px] text-muted-foreground hover:text-destructive"
-            @click="commit(stops.filter((_, k) => k !== i)); editing = null"
+            data-remove-stop @click="removeStop(i)"
           >
             Remove stop
           </button>

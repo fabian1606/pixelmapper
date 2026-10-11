@@ -55,3 +55,20 @@ describe('preset row', () => {
     w.unmount();
   });
 });
+
+describe('preset row preview lifecycle', () => {
+  it('no preview survives closing the list (late pointer events are ignored)', async () => {
+    const w = mount(RecipeBar, { props: { modifier: wave(), manifest }, attachTo: document.body });
+    await w.find('[data-recipe-trigger]').trigger('click');
+    await flushPromises();
+    const items = () => Array.from(document.querySelectorAll<HTMLElement>('[data-recipe]'));
+    const sweep = items().find(e => e.dataset.recipe === 'sweep')!;
+    const chase = items().find(e => e.dataset.recipe === 'chase')!;
+    sweep.dispatchEvent(new Event('pointerenter'));
+    sweep.click();
+    chase.dispatchEvent(new Event('pointerenter'));
+    await flushPromises();
+    expect(w.emitted('preview')!.at(-1)![0]).toBeNull();
+    w.unmount();
+  });
+});

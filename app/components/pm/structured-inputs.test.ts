@@ -37,6 +37,20 @@ describe('pm.gradient', () => {
     await w.find('[aria-label="Gradient"]').trigger('keydown', { key: 'Delete' });
     expect(last<GradientValue>(w).stops).toHaveLength(2);
   });
+
+  it('pressing a stop focuses the editor, so Delete reaches it (and goes no further)', async () => {
+    const w = mount(PmGradient, { props: { modelValue: { stops: [{ pos: 0, color: red }, { pos: 0.5, color: blue }, { pos: 1, color: red }] } }, attachTo: document.body });
+    await w.find('[data-stop="1"]').trigger('pointerdown', { button: 0, clientX: 100 });
+    window.dispatchEvent(new PointerEvent('pointerup'));
+    expect(document.activeElement).toBe(w.find('[aria-label="Gradient"]').element);
+    const outer = vi.fn();
+    window.addEventListener('keydown', outer);
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    window.removeEventListener('keydown', outer);
+    expect(last<GradientValue>(w).stops.map(s => s.pos)).toEqual([0, 1]);
+    expect(outer).not.toHaveBeenCalled();
+    w.unmount();
+  });
 });
 
 describe('pm.hueRange', () => {

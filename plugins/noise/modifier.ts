@@ -8,16 +8,13 @@
  *   fixture, symmetric pairs); Spatial 2D / Within each fixture: every pixel.
  * level: random steps of the key (timing jittered by 1 − sync, crossfade by
  *   1 − hardness), blended toward a coherent noise texture by `coherence`
- *   (neighbours along the spread form patches that flow along it), mapped
- *   into [rangeMin, rangeMax].
- * peaks: each slot of `eventLength` steps holds a peak with probability
- *   frequency · length (fixture by fixture with enough numbers: exactly that
- *   share of the numbers, so a step is never empty); a peak rises to full
- *   (up) or dips to dark (down); hardness squares its edges.
+ *   (neighbours along the spread form patches that flow along it), bent by
+ *   `frequency` (the share of the time it is bright: u^(1/f − 1) below one
+ *   half, 1 − (1 − u)^(1/(1 − f) − 1) above; the mean level is f, 0.5 keeps
+ *   the levels even), mapped into [rangeMin, rangeMax].
  *
- * Param slots: rangeMin 0, rangeMax 1, frequency (eventRate) 2,
- * eventLength 3, eventDir 4, coherence 5, sync 6, hardness 7,
- * colorVariation 8.
+ * Param slots: rangeMin 0, rangeMax 1, frequency 2, coherence 3, sync 4,
+ * hardness 5, colorVariation 6.
  */
 import { Modifier, Frame, Sample, Out, Params, register, hash01, noise3, clamp, lerp, SPREAD_SAME, SPREAD_ORDER, SPREAD_SPATIAL } from "@pixelmapper/plugin-sdk";
 
@@ -30,9 +27,7 @@ import { Modifier, Frame, Sample, Out, Params, register, hash01, noise3, clamp, 
 class Noise extends Modifier {
   rangeMin: f32 = 0;
   rangeMax: f32 = 1;
-  frequency: f32 = 0;
-  eventLength: f32 = 0.1;
-  eventUp: bool = true;
+  frequency: f32 = 0.5;
   coherence: f32 = 0;
   sync: f32 = 0;
   hardness: f32 = 0;
@@ -41,13 +36,11 @@ class Noise extends Modifier {
   prepare(p: Params): void {
     this.rangeMin = clamp(p.get(0), 0.0, 1.0);
     this.rangeMax = clamp(p.get(1), 0.0, 1.0);
-    this.frequency = clamp(p.get(2), 0.0, 1.0);
-    this.eventLength = clamp(p.get(3), 0.02, 1.0);
-    this.eventUp = p.int(4) == 0;
-    this.coherence = clamp(p.get(5), 0.0, 1.0);
-    this.sync = clamp(p.get(6), 0.0, 1.0);
-    this.hardness = clamp(p.get(7), 0.0, 1.0);
-    this.cv = clamp(p.get(8), 0.0, 1.0);
+    this.frequency = clamp(p.get(2), 0.01, 0.99);
+    this.coherence = clamp(p.get(3), 0.0, 1.0);
+    this.sync = clamp(p.get(4), 0.0, 1.0);
+    this.hardness = clamp(p.get(5), 0.0, 1.0);
+    this.cv = clamp(p.get(6), 0.0, 1.0);
   }
 
   /** Random steps of one key at (jittered) time t, 0–1. */
@@ -62,7 +55,14 @@ class Noise extends Modifier {
     return lerp(a, b, smooth((f - (1.0 - w)) / Mathf.max(w, 1e-3)));
   }
 
-  /** Level of one key (steps → coherence → range), 0–1. */
+  /** Bends an even 0–1 level so that its mean is the frequency. */
+  bend(u: f32): f32 {
+    const f = this.frequency;
+    if (f <= 0.5) return Mathf.pow(u, <f32>1.0 / f - 1.0);
+    return <f32>1.0 - Mathf.pow(<f32>1.0 - u, <f32>1.0 / (<f32>1.0 - f) - 1.0);
+  }
+
+  /** Level of one key (steps → coherence → frequency → range), 0–1. */
   level(key: u32, texSeed: u32, ctx: Frame, s: Sample, t: f32, r: f32): f32 {
     let v = this.steps(key, t);
     if (this.coherence > 0.0) {
@@ -75,42 +75,7 @@ class Noise extends Modifier {
       const coh = noise3(px * S + o, py * S + o, s.spatial * S - r) * 0.7 + 0.5;
       v = lerp(v, clamp(coh, 0.0, 1.0), this.coherence);
     }
-    return this.rangeMin + (this.rangeMax - this.rangeMin) * v;
-  }
-
-  /** On (1) / off (0) of a number in the exact pick of slot e. */
-  picked(seed: u32, e: u32, rank: i32, ranks: i32, n: i32): f32 {
-    const pickSeed = seed ^ (e * 0x9e3779b9);
-    const mine = hash01(pickSeed, <u32>rank);
-    let below = 0;
-    for (let i = 0; i < ranks; i++) {
-      if (hash01(pickSeed, <u32>i) < mine) below++;
-    }
-    return below < n ? 1.0 : 0.0;
-  }
-
-  /** Peak envelope (0–1) of a key at time t, 0 outside peaks. */
-  peak(key: u32, ctx: Frame, s: Sample, t: f32): f32 {
-    if (this.frequency <= 0.0) return 0.0;
-    const len = this.eventLength;
-    const ef = Mathf.floor(t / len);
-    const e = <u32>(<i32>ef);
-    const p = this.frequency * len;
-    let on = false;
-    const ranks = ctx.rankCount;
-    if (ctx.spread == SPREAD_ORDER && s.rank >= 0 && <f32>ranks * p >= 1.0) {
-      on = this.picked(ctx.seed, e, s.rank, ranks, <i32>Mathf.round(<f32>ranks * p)) > 0.5;
-    } else {
-      on = hash01(key, e * 3 + 101) < p;
-    }
-    if (!on) return 0.0;
-    const local = t / len - ef;
-    const soft: f32 = <f32>1.0 - this.hardness;
-    const attack: f32 = 0.1 * soft;
-    const decay: f32 = 0.9 * soft;
-    if (local < attack) return local / attack;
-    if (local > 1.0 - decay) return (1.0 - local) / decay;
-    return 1.0;
+    return this.rangeMin + (this.rangeMax - this.rangeMin) * this.bend(clamp(v, 0.0, 1.0));
   }
 
   render(ctx: Frame, s: Sample, out: Out): void {
@@ -125,8 +90,6 @@ class Noise extends Modifier {
       const ck = key ^ (s.channelSeed * 0x9e3779b9);
       v = lerp(v, this.level(ck, s.channelSeed, ctx, s, r + hash01(ck, 1) * (1.0 - this.sync), r), this.cv);
     }
-    const pulse = this.peak(key, ctx, s, t);
-    if (pulse > 0.0) v = this.eventUp ? Mathf.max(v, pulse) : v * (1.0 - pulse);
     out.set(0, clamp(v, 0.0, 1.0));
   }
 }

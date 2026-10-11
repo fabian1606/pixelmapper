@@ -4,9 +4,10 @@
  * gradient param (when visible) is drawn on the Spatial 2D handle line,
  * stop `pos` 0 at the origin and 1 at the end. Dragging a stop along the
  * line moves it (one undo step per drag); a click opens its color in a
- * popover (`pm.colorInput`, replaceable).
+ * popover (`pm.colorInput`, replaceable) with "Remove stop" (also Delete /
+ * Backspace while it is open).
  */
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { GradientValue, RgbColor } from '@pixelmapper/extension-api';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { getManifest } from '~/utils/plugins/plugin-store';
@@ -31,6 +32,13 @@ const emit = defineEmits<{
 }>();
 
 const editing = ref<number | null>(null);
+const popoverRef = ref<HTMLElement | null>(null);
+// Focus the open popover so Delete / Backspace reach it (and not the canvas).
+watch(editing, async (i) => {
+  if (i === null) return;
+  await nextTick();
+  popoverRef.value?.focus({ preventScroll: true });
+});
 
 /** The visible gradient param of the modifier, if any. */
 const param = computed(() => {
@@ -71,6 +79,26 @@ function setStopColor(c: RgbColor) {
   if (editing.value === null) return;
   lastStops = null;
   patch(editing.value, { color: c });
+}
+
+/** Removes the edited stop (at least one stays) as one undo step. */
+function removeEdited() {
+  const i = editing.value;
+  if (i === null || !param.value || !value.value || value.value.stops.length <= 1) return;
+  editing.value = null;
+  emit('change', { ...props.modifier.params, [param.value.key]: { stops: value.value.stops.filter((_, k) => k !== i) } });
+  emit('commit', 'Remove Palette Stop');
+}
+
+/** Delete / Backspace while a stop's popover is open removes it. */
+function onKey(e: KeyboardEvent) {
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  e.preventDefault();
+  // The canvas deletes fixtures on Delete: this key belongs to the stop.
+  e.stopPropagation();
+  removeEdited();
 }
 
 /** Drag along the line; a press without movement opens the color. */
@@ -124,15 +152,18 @@ function onDown(e: MouseEvent, i: number) {
       v-if="editing !== null && stops[editing]"
       class="absolute z-30 w-56 rounded-md border bg-popover p-2 shadow-md"
       :style="{ left: `${stops[editing]!.x + 12}px`, top: `${stops[editing]!.y + 12}px` }"
-      data-overlay-root
-      @mousedown.stop
+      ref="popoverRef" data-overlay-root tabindex="-1"
+      @mousedown.stop @keydown="onKey"
     >
       <Replaceable
         name="pm.colorInput" label="Stop color" :model-value="value.stops[editing]!.color"
         @update:model-value="setStopColor"
         @scrub-end="emit('commit', 'Change Palette Color')"
       />
-      <button type="button" class="mt-2 text-[11px] text-muted-foreground hover:text-foreground" @click="editing = null; emit('commit', 'Change Palette Color')">Done</button>
+      <div class="mt-2 flex items-center justify-between">
+        <button v-if="value.stops.length > 1" type="button" class="text-[11px] text-muted-foreground hover:text-destructive" data-remove-stop @click="removeEdited">Remove stop</button>
+        <button type="button" class="ml-auto text-[11px] text-muted-foreground hover:text-foreground" @click="editing = null; emit('commit', 'Change Palette Color')">Done</button>
+      </div>
     </div>
   </template>
 </template>

@@ -8,7 +8,7 @@
  *   the bands (8 cells of the old width);
  * - checkerboard: Pattern alternating over the order (approximation: a 2D
  *   checkerboard has no order equivalent);
- * - scatter: Noise *Random Pick* (peaks on the beat; the density is the share on);
+ * - scatter: Noise *Random Pick* (hard levels on the beat; the density is the Frequency);
  * - flow: Noise with coherence 1, hard (moving coherent boundary).
  * Residual differences are documented in the plan (M8.5).
  */
@@ -48,14 +48,14 @@ export function migrateSequencerV1(p: SequencerV1Params, m: { speed?: SpeedConfi
     const share = Math.max(0.01, Math.min(1, Number(p.density ?? 0.5)));
     return {
       alias: '@pixelmapper/noise',
-      params: { hardness: 1, rangeMin: 0, rangeMax: 0, eventRate: share, eventLength: 1, eventDir: 'up', coherence: 0, sync: 1, colorVariation: 0 },
+      params: { hardness: 1, rangeMin: 0, rangeMax: 1, frequency: share, coherence: 0, sync: 1, colorVariation: 0 },
       distribution: createDistribution({ mode: 'order' }),
     };
   }
   if (type === 'flow') {
     return {
       alias: '@pixelmapper/noise',
-      params: { coherence: 1, hardness: 1, sync: 0, rangeMin: 0, rangeMax: 1, eventRate: 0, eventLength: 0.1, eventDir: 'up', colorVariation: 0 },
+      params: { coherence: 1, hardness: 1, sync: 0, rangeMin: 0, rangeMax: 1, frequency: 0.5, colorVariation: 0 },
       distribution: createDistribution({ mode: 'linear' }),
     };
   }

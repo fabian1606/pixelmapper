@@ -4,9 +4,7 @@
  * neighbouring fixtures along the spread over four steps. Coherent noise
  * makes the traces follow each other; drag up/down on the traces for the
  * coherence. Drag the top/bottom line for the highest/lowest level (band
- * shaded). The peaks lane below shows where peaks can fall (one per
- * 1/frequency steps): drag a marker sideways for the frequency, its end for
- * the length, click it to flip up/down; "+ Peaks" turns them on.
+ * shaded). Frequency (how often it is bright) shows in the traces.
  */
 import { computed, ref } from 'vue';
 import type { NoiseHistoryEmits, NoiseHistoryProps, NoiseHistoryValue } from '@pixelmapper/extension-api';
@@ -19,29 +17,11 @@ const CYCLES = 4;
 const POINTS = 96;
 const TRACE_COLORS = ['#eab308', '#38bdf8', '#f472b6', '#a3e635'];
 const boxRef = ref<HTMLElement | null>(null);
-const laneRef = ref<HTMLElement | null>(null);
-/** Frequency restored by "+ Peaks". */
-const lastRate = ref(props.modelValue.rate > 0 ? props.modelValue.rate : 0.15);
 
 const v = computed<NoiseHistoryValue>(() => props.modelValue);
 const traces = computed(() => props.traces?.(TRACE_COLORS.length, POINTS, CYCLES) ?? null);
 const polylines = computed(() => (traces.value ?? []).map(t => Array.from(t, (y, i) => `${((i / (POINTS - 1)) * SVG_W).toFixed(1)},${svgY(y).toFixed(1)}`).join(' ')));
 const hasCoherence = computed(() => v.value.coherence !== undefined);
-
-/** Peak markers: x positions (fraction of the lane) and width. */
-const markers = computed(() => {
-  if (v.value.rate <= 0) return [];
-  const spacing = 1 / v.value.rate;
-  const out: { k: number; left: number; width: number }[] = [];
-  for (let k = 1; k * spacing <= CYCLES; k++) out.push({ k, left: (k * spacing) / CYCLES, width: v.value.length / CYCLES });
-  return out;
-});
-/** "about 1 peak every N steps". */
-const peakText = computed(() => {
-  if (v.value.rate <= 0) return '';
-  const n = 1 / v.value.rate;
-  return n <= 1.05 ? 'about 1 peak per step' : `about 1 peak every ${n < 10 ? n.toFixed(1).replace(/\.0$/, '') : Math.round(n)} steps`;
-});
 
 const pct = (y: number) => `${(svgY(y) / SVG_H) * 100}%`;
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -83,14 +63,6 @@ function drag(e: PointerEvent, el: HTMLElement | null, onMove: (p: { steps: numb
   window.addEventListener('pointerup', up);
 }
 
-/** One discrete change as its own step. */
-function commit(patch: Partial<NoiseHistoryValue>) {
-  if (props.disabled) return;
-  emit('scrubStart');
-  set(patch);
-  emit('scrubEnd');
-}
-
 const onMax = (e: PointerEvent) => drag(e, boxRef.value, p => set({ max: r3(Math.max(p.level, v.value.min)) }));
 const onMin = (e: PointerEvent) => drag(e, boxRef.value, p => set({ min: r3(Math.min(p.level, v.value.max)) }));
 /** Up/down on the traces: 80 px from incoherent to fully coherent. */
@@ -99,21 +71,6 @@ function onTraces(e: PointerEvent) {
   const start = v.value.coherence ?? 0;
   const y0 = e.clientY;
   drag(e, boxRef.value, p => set({ coherence: r3(Math.max(0, Math.min(1, start + (y0 - p.dy) / 80))) }));
-}
-const onMarker = (e: PointerEvent, k: number) => drag(
-  e, laneRef.value,
-  p => set({ rate: r3(Math.max(0.01, Math.min(1, k / Math.max(p.steps, 0.05)))) }),
-  () => commit({ dir: v.value.dir === 'up' ? 'down' : 'up' }),
-);
-const onLength = (e: PointerEvent, k: number) => drag(e, laneRef.value, p => set({ length: r3(Math.max(0.02, Math.min(1, p.steps - k / v.value.rate))) }));
-
-/** Turns the peaks on (last frequency) or off. */
-function togglePeaks() {
-  if (v.value.rate > 0) {
-    lastRate.value = v.value.rate;
-    commit({ rate: 0 });
-  }
-  else commit({ rate: lastRate.value });
 }
 </script>
 
@@ -140,31 +97,6 @@ function togglePeaks() {
         <div class="absolute inset-x-0 top-1/2 border-t border-dashed" :style="{ borderColor: ACCENT }" />
       </div>
     </div>
-    <!-- Peaks lane -->
-    <div ref="laneRef" class="relative h-5 rounded-sm bg-muted/10 select-none" data-peaks-lane>
-      <template v-for="m in markers" :key="m.k">
-        <div class="absolute bottom-0.5 h-1.5 rounded-sm opacity-70" :style="{ left: `${m.left * 100}%`, width: `${m.width * 100}%`, background: ACCENT }" />
-        <div
-          class="absolute bottom-0 w-1.5 h-2 cursor-ew-resize" :style="{ left: `calc(${(m.left + m.width) * 100}% - 3px)` }"
-          title="Peak length" :data-event-length="m.k" @pointerdown="e => onLength(e, m.k)"
-        />
-        <div
-          class="absolute top-0 -translate-x-1/2 text-[10px] leading-none cursor-pointer" :style="{ left: `${m.left * 100}%`, color: ACCENT }"
-          :title="`Peak (${v.dir}) — drag for the frequency, click to flip`" :data-event="m.k" @pointerdown="e => onMarker(e, m.k)"
-        >
-          {{ v.dir === 'up' ? '▲' : '▼' }}
-        </div>
-      </template>
-      <button
-        v-if="v.rate <= 0" type="button" class="absolute inset-y-0 left-1 my-auto h-4 px-1.5 rounded text-[10px] text-muted-foreground border border-border/60 hover:text-foreground hover:bg-muted/50"
-        data-peaks-add @click.stop="togglePeaks"
-      >
-        + Peaks
-      </button>
-    </div>
-    <div class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-      <span class="truncate">{{ v.rate > 0 ? peakText : 'Drag the lines for the range' }}</span>
-      <button v-if="v.rate > 0" type="button" class="shrink-0 hover:text-foreground" data-peaks-remove @click.stop="togglePeaks">Remove peaks</button>
-    </div>
+    <p class="text-[10px] text-muted-foreground">Drag the lines for the range<template v-if="hasCoherence"> · drag the curves up/down for coherence</template></p>
   </div>
 </template>

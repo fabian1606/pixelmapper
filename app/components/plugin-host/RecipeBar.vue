@@ -77,8 +77,13 @@ function frame(now: number) {
   });
 }
 
-/** Previews the recipe at index i (−1 ends the preview). */
+/**
+ * Previews the recipe at index i (−1 ends the preview). Only while the list
+ * is open: focus moves and late pointer events while it closes must not
+ * leave a preview on the fixtures.
+ */
 function highlight(i: number) {
+  if (!open.value && i >= 0) return;
   highlighted.value = i;
   const p = presets.value[i];
   emit('preview', p ? applied(p) : null);
@@ -87,9 +92,9 @@ function highlight(i: number) {
 /** Applies a recipe (one undo step) and closes the list. */
 function choose(p: ManifestPreset) {
   lastApplied.value = p.id;
+  open.value = false;
   emit('preview', null);
   emit('apply', applied(p), p);
-  open.value = false;
 }
 
 /** ↺: back to the recipe the edits started from. */
@@ -157,7 +162,6 @@ onBeforeUnmount(() => {
             :title="p.description ?? p.label"
             :data-recipe="p.id"
             @pointerenter="highlight(i)"
-            @focus="highlight(i)"
             @click.stop="choose(p)"
           >
             <canvas :ref="el => { if (el) canvases[i] = el as HTMLCanvasElement }" :width="COLS" height="1" class="block w-14 h-3 shrink-0 rounded-sm bg-black" style="image-rendering: pixelated" aria-hidden="true" />

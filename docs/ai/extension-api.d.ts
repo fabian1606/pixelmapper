@@ -1464,16 +1464,12 @@ declare module '@pixelmapper/extension-api' {
       /** Lowest and highest level (0–1). */
       min: number;
       max: number;
-      /** Peaks per step (frequency, 0 = none) and their length in steps. */
-      rate: number;
-      length: number;
-      dir: 'up' | 'down';
       /** Coherence 0–1 (optional binding: dragging the traces up/down sets it). */
       coherence?: number;
   }
   /**
    * Props of `pm.noiseHistory` (composite editor): neighbouring traces over
-   * a few steps with draggable range lines, a coherence drag and a peaks lane.
+   * a few steps with draggable range lines and a coherence drag.
    */
   export interface NoiseHistoryProps extends BaseInputProps {
       modelValue: NoiseHistoryValue;

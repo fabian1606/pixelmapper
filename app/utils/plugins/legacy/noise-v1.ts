@@ -29,9 +29,7 @@ export function migrateNoiseV1(p: NoiseV1Params): Record<string, ParamValue> {
   return {
     rangeMin: 0,
     rangeMax: Math.round((1 - Math.max(0, Math.min(1, Number(p.threshold ?? 0)))) * 1000) / 1000,
-    eventRate: 0,
-    eventLength: 0.1,
-    eventDir: 'up',
+    frequency: 0.5,
     ...axes,
     colorVariation: Math.max(0, Math.min(1, Number(p.colorVariation ?? 0))),
   };

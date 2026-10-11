@@ -677,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:4790927f5c253ae4240b02b1d1ff2c4770e1fbe83fa0068ecc70e054223a283d",
+    "hash": "sha256:d9fe066c644484c63b9d90040614ce7797be13bf4c2eac3fa467a3d281194141",
     "signatures": [
       "scalar"
     ],
@@ -686,9 +686,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/noise",
       "name": "Noise",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "apiVersion": "^1.2.0",
-      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps; Frequency sets how often peaks flash up or dip down.",
+      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how much of the time it is bright (low: mostly dark with an occasional flash, high: mostly bright with occasional dips), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
       "purpose": "Fixtures flicker, sparkle or pick at random.",
       "speedUnit": "per step",
       "signatures": [
@@ -719,9 +719,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "bind": {
             "min": "rangeMin",
             "max": "rangeMax",
-            "rate": "eventRate",
-            "length": "eventLength",
-            "dir": "eventDir",
             "coherence": "coherence"
           }
         }
@@ -746,35 +743,14 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "tier": "hidden"
         },
         {
-          "key": "eventRate",
+          "key": "frequency",
           "type": "number",
           "min": 0,
           "max": 1,
           "label": "Frequency",
           "tier": "primary",
-          "description": "How often peaks happen: rare (0) to often (1, about one per step).",
-          "default": 0
-        },
-        {
-          "key": "eventLength",
-          "type": "number",
-          "min": 0.02,
-          "max": 1,
-          "default": 0.1,
-          "label": "Peak length",
-          "tier": "hidden",
-          "description": "Length of a peak in steps."
-        },
-        {
-          "key": "eventDir",
-          "type": "enum",
-          "options": [
-            "up",
-            "down"
-          ],
-          "default": "up",
-          "label": "Peak direction",
-          "tier": "hidden"
+          "description": "How much of the time it is bright: rarely (0) to almost always (1); 0.5 = even.",
+          "default": 0.5
         },
         {
           "key": "coherence",
@@ -826,9 +802,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "params": {
             "rangeMin": 0.6,
             "rangeMax": 1,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up",
+            "frequency": 0.5,
             "coherence": 0,
             "sync": 0,
             "hardness": 0.2,
@@ -851,13 +825,11 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "twinkle",
           "label": "Twinkle",
-          "description": "Dim pixels with occasional sparkles.",
+          "description": "Dim pixels, now and then one sparkles.",
           "params": {
             "rangeMin": 0.05,
-            "rangeMax": 0.15,
-            "eventRate": 0.15,
-            "eventLength": 0.1,
-            "eventDir": "up",
+            "rangeMax": 1,
+            "frequency": 0.08,
             "coherence": 0,
             "sync": 0,
             "hardness": 0.8,
@@ -877,13 +849,11 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "random-pick",
           "label": "Random Pick",
-          "description": "A random third of the fixtures is on each beat.",
+          "description": "Mostly dark; on each beat a few random fixtures light up.",
           "params": {
             "rangeMin": 0,
-            "rangeMax": 0,
-            "eventRate": 0.33,
-            "eventLength": 1,
-            "eventDir": "up",
+            "rangeMax": 1,
+            "frequency": 0.2,
             "coherence": 0,
             "sync": 1,
             "hardness": 1,
@@ -910,9 +880,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "params": {
             "rangeMin": 0.3,
             "rangeMax": 1,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up",
+            "frequency": 0.5,
             "coherence": 0.8,
             "sync": 0,
             "hardness": 0.1,
@@ -936,9 +904,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "params": {
             "rangeMin": 0.4,
             "rangeMax": 1,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up",
+            "frequency": 0.5,
             "coherence": 1,
             "sync": 0,
             "hardness": 0,
@@ -965,11 +931,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "label": "Faulty",
           "description": "Full brightness with occasional dropouts.",
           "params": {
-            "rangeMin": 1,
+            "rangeMin": 0,
             "rangeMax": 1,
-            "eventRate": 0.05,
-            "eventLength": 0.2,
-            "eventDir": "down",
+            "frequency": 0.95,
             "coherence": 0,
             "sync": 0,
             "hardness": 1,
@@ -992,13 +956,11 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "lightning",
           "label": "Lightning",
-          "description": "The whole rig flashes together now and then.",
+          "description": "The whole rig stays dark and flashes now and then.",
           "params": {
             "rangeMin": 0,
-            "rangeMax": 0,
-            "eventRate": 0.1,
-            "eventLength": 0.15,
-            "eventDir": "up",
+            "rangeMax": 1,
+            "frequency": 0.04,
             "coherence": 0,
             "sync": 0,
             "hardness": 0.9,
@@ -1022,9 +984,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "params": {
             "rangeMin": 0.85,
             "rangeMax": 1,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up",
+            "frequency": 0.5,
             "coherence": 0,
             "sync": 0,
             "hardness": 0.3,
