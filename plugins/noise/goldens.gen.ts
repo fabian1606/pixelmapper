@@ -2,7 +2,7 @@
  * Generates `goldens.json` for Noise (plan M9.6, review): every recipe on the
  * reference rig at 8 times (seeded samples). Recipes without coherence or
  * color variation are computed by a TS reference of the plugin math (keys by
- * spread, frequency bend); the others are snapshots of the compiled
+ * spread, frequency bend, variation); the others are snapshots of the compiled
  * plugin, checked for range and sharing by `noise-properties.test.ts`.
  * Run: `bun run plugins/noise/goldens.gen.ts`
  */
@@ -30,8 +30,12 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
   const keyOf = (seed: number, rank: number) => rig.spread === 0
     ? INSTANCE_SEED & 0xffffff
     : rig.spread === 2 && rank >= 0 ? Math.trunc(Math.fround(hash01(INSTANCE_SEED, rank + 977) * 16777215)) : seed;
-  /** Frequency bends the even level so its mean is the frequency. */
-  const bend = (u: number) => (freq <= 0.5 ? u ** (1 / freq - 1) : 1 - (1 - u) ** (1 / (1 - freq) - 1));
+  /** Frequency bend (share above half = f), then variation contrast. */
+  const k = Math.fround(Math.log(0.5) / Math.log(1 - freq));
+  const shape = (u: number) => {
+    const b = Math.max(0, Math.min(1, u)) ** k;
+    return variation! >= 1 ? b : Math.max(0, Math.min(1, 0.5 + (b - 0.5) / Math.max(variation!, 1e-3)));
+  };
   /** TS reference (no coherence, no color variation). */
   const value = (seed: number, rank: number, r: number) => {
     const key = keyOf(seed, rank);
@@ -39,10 +43,9 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
     const kf = Math.floor(t);
     const f = t - kf;
     const w = 1 - hard!;
-    const a = hash01(key, kf * 2 + 7);
-    const st = f < 1 - w ? a : lerp(a, hash01(key, (kf + 1) * 2 + 7), smooth((f - (1 - w)) / Math.max(w, 1e-3)));
-    const d = 1 - variation! * (1 - bend(Math.max(0, Math.min(1, st))));
-    return Math.max(0, Math.min(1, rmin! + (rmax! - rmin!) * d));
+    const a = shape(hash01(key, kf * 2 + 7));
+    const st = f < 1 - w ? a : lerp(a, shape(hash01(key, (kf + 1) * 2 + 7)), smooth((f - (1 - w)) / Math.max(w, 1e-3)));
+    return Math.max(0, Math.min(1, rmin! + (rmax! - rmin!) * st));
   };
 
   return Array.from({ length: 8 }, (_, i) => i * 0.37 + 0.05).map((tp) => {

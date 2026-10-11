@@ -677,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:e28dba37fb7b2f427b7f8183787a050ebf064b7253dd92cbebddb6956ca336d2",
+    "hash": "sha256:fdf8eaa82bc1c3fc035ba0fe71e7574d569f9a260d3a73fc3f2aeb8de791d208",
     "signatures": [
       "scalar"
     ],
@@ -686,9 +686,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/noise",
       "name": "Noise",
-      "version": "3.2.0",
+      "version": "3.3.0",
       "apiVersion": "^1.2.0",
-      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how much of the time it is bright (low: mostly dark with an occasional flash, high: mostly bright with occasional dips), Variation how deep the values leave the top of the range (0: all at the top), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
+      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how often a value is bright (the share above half: low = mostly dark with an occasional flash, high = mostly bright with dips), Variation how soft the values are (0 = on/off: above half → highest, below → lowest; 1 = soft levels), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
       "purpose": "Fixtures flicker, sparkle or pick at random.",
       "speedUnit": "per step",
       "signatures": [
@@ -749,7 +749,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "max": 1,
           "label": "Frequency",
           "tier": "primary",
-          "description": "How much of the time it is bright: rarely (0) to almost always (1); 0.5 = even.",
+          "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
           "default": 0.5
         },
         {
@@ -759,7 +759,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "max": 1,
           "label": "Variation",
           "tier": "primary",
-          "description": "How different the values are: all at the top of the range (0) to anywhere in the range (1).",
+          "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
           "default": 1
         },
         {
@@ -861,12 +861,12 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "random-pick",
           "label": "Random Pick",
-          "description": "Mostly dark; on each beat a few random fixtures light up.",
+          "description": "Mostly dark; on each beat about a quarter of the fixtures is on.",
           "params": {
             "rangeMin": 0,
             "rangeMax": 1,
-            "frequency": 0.2,
-            "variation": 1,
+            "frequency": 0.25,
+            "variation": 0,
             "coherence": 0,
             "sync": 1,
             "hardness": 1,
@@ -944,12 +944,12 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "faulty",
           "label": "Faulty",
-          "description": "Full brightness with occasional dropouts.",
+          "description": "Full brightness, now and then a fixture drops out.",
           "params": {
             "rangeMin": 0,
             "rangeMax": 1,
             "frequency": 0.95,
-            "variation": 1,
+            "variation": 0,
             "coherence": 0,
             "sync": 0,
             "hardness": 1,
@@ -977,7 +977,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "rangeMin": 0,
             "rangeMax": 1,
             "frequency": 0.04,
-            "variation": 1,
+            "variation": 0,
             "coherence": 0,
             "sync": 0,
             "hardness": 0.9,

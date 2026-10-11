@@ -44,24 +44,29 @@ describe('noise golden properties', () => {
   });
 });
 
-describe('noise variation (compiled plugin)', () => {
-  it('Variation 0 puts every unit at the top of the range; 1 uses the whole range', async () => {
+describe('noise frequency and variation (compiled plugin)', () => {
+  it('Frequency is the share above half; Variation 0 is on/off (high / low), 1 soft levels', async () => {
     const { buildPackage, CTX, CTX_FIELDS, encodeParams, PluginInstance, SAMPLE, SAMPLE_FIELDS } = await import('@pixelmapper/plugin-toolchain');
     const manifest = JSON.parse(readFileSync(join(import.meta.dirname, 'manifest.json'), 'utf8'));
     const { pkg } = await buildPackage(manifest, { 'modifier.ts': readFileSync(join(import.meta.dirname, 'modifier.ts'), 'utf8') });
     const inst = PluginInstance.createSync(new WebAssembly.Module(new Uint8Array(pkg!.wasm)));
-    const render = (variation: number) => {
-      inst.prepare(encodeParams(manifest.params, { rangeMin: 0.2, rangeMax: 0.9, frequency: 0.5, variation, hardness: 1 }, { ticks: 8 }));
+    const N = 400;
+    /** Levels of N pixels at one moment (range 0.2–0.9, hard steps). */
+    const render = (frequency: number, variation: number) => {
+      inst.prepare(encodeParams(manifest.params, { rangeMin: 0.2, rangeMax: 0.9, frequency, variation, hardness: 1 }, { ticks: 8 }));
       const ctx = new Float32Array(CTX_FIELDS);
       ctx[CTX.arity] = 1; ctx[CTX.timePhase] = 3.3; ctx[CTX.spread] = 1; ctx[CTX.seedLo] = 0x1234;
-      const samples = new Float32Array(8 * SAMPLE_FIELDS);
-      for (let i = 0; i < 8; i++) { samples[i * SAMPLE_FIELDS + SAMPLE.seed] = 1000 + i * 77; samples[i * SAMPLE_FIELDS + SAMPLE.spatial] = i / 8; }
-      return Array.from(inst.render(ctx, samples, 8));
+      const samples = new Float32Array(N * SAMPLE_FIELDS);
+      for (let i = 0; i < N; i++) { samples[i * SAMPLE_FIELDS + SAMPLE.seed] = 1000 + i * 7919; samples[i * SAMPLE_FIELDS + SAMPLE.spatial] = i / N; }
+      return Array.from(inst.render(ctx, samples, N));
     };
-    for (const v of render(0)) expect(v).toBeCloseTo(0.9, 4);
-    const full = render(1);
-    expect(Math.max(...full) - Math.min(...full)).toBeGreaterThan(0.2);
-    const half = render(0.5);
-    for (const v of half) expect(v).toBeGreaterThanOrEqual(0.9 - 0.5 * 0.7 - 1e-4);
+    const onOff = render(0.25, 0);
+    for (const v of onOff) expect(Math.min(Math.abs(v - 0.2), Math.abs(v - 0.9))).toBeLessThan(1e-4);
+    const share = onOff.filter(v => v > 0.55).length / N;
+    expect(share).toBeGreaterThan(0.18);
+    expect(share).toBeLessThan(0.32);
+    const soft = render(0.25, 1);
+    expect(soft.filter(v => v > 0.21 && v < 0.89).length).toBeGreaterThan(N / 2);
+    expect(soft.filter(v => v > 0.55).length / N).toBeCloseTo(share, 1);
   }, 120_000);
 });
