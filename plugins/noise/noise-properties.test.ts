@@ -70,3 +70,38 @@ describe('noise frequency and variation (compiled plugin)', () => {
     expect(soft.filter(v => v > 0.55).length / N).toBeCloseTo(share, 1);
   }, 120_000);
 });
+
+describe('noise coherence texture (compiled plugin)', () => {
+  it('is even in all directions (no bands across the handle)', async () => {
+    const { buildPackage, CTX, CTX_FIELDS, encodeParams, PluginInstance, SAMPLE, SAMPLE_FIELDS } = await import('@pixelmapper/plugin-toolchain');
+    const manifest = JSON.parse(readFileSync(join(import.meta.dirname, 'manifest.json'), 'utf8'));
+    const { pkg } = await buildPackage(manifest, { 'modifier.ts': readFileSync(join(import.meta.dirname, 'modifier.ts'), 'utf8') });
+    const inst = PluginInstance.createSync(new WebAssembly.Module(new Uint8Array(pkg!.wasm)));
+    const G = 48;
+    inst.prepare(encodeParams(manifest.params, { rangeMin: 0, rangeMax: 1, coherence: 1, hardness: 0 }, { ticks: 8 }));
+    let dx = 0;
+    let dy = 0;
+    for (const tp of [0.3, 1.7, 2.45, 5.1]) {
+      const ctx = new Float32Array(CTX_FIELDS);
+      ctx[CTX.arity] = 1; ctx[CTX.timePhase] = tp; ctx[CTX.spread] = 1; ctx[CTX.seedLo] = 0x1234;
+      const samples = new Float32Array(G * G * SAMPLE_FIELDS);
+      for (let j = 0; j < G; j++) {
+        for (let i = 0; i < G; i++) {
+          const o = (j * G + i) * SAMPLE_FIELDS;
+          // Handle along x: spatial = x.
+          samples[o + SAMPLE.x] = i / G; samples[o + SAMPLE.y] = j / G; samples[o + SAMPLE.spatial] = i / G; samples[o + SAMPLE.seed] = j * G + i;
+        }
+      }
+      const v = inst.render(ctx, samples, G * G);
+      for (let j = 0; j < G - 1; j++) {
+        for (let i = 0; i < G - 1; i++) {
+          dx += Math.abs(v[j * G + i + 1]! - v[j * G + i]!);
+          dy += Math.abs(v[(j + 1) * G + i]! - v[j * G + i]!);
+        }
+      }
+    }
+    // Same roughness along and across the handle (±25 %).
+    expect(dx / dy).toBeGreaterThan(0.8);
+    expect(dx / dy).toBeLessThan(1.25);
+  }, 120_000);
+});

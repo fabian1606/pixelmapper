@@ -14,8 +14,9 @@
  *   - `variation` pushes b away from the middle, c = ½ + (b − ½) / variation
  *     (clamped): 0 = on/off (above half → high, below → low), 1 = soft levels.
  *   Steps crossfade by 1 − hardness, timing is jittered by 1 − sync,
- *   `coherence` blends toward the texture (neighbours along the spread form
- *   patches that flow along it); the result maps into [rangeMin, rangeMax].
+ *   `coherence` blends toward the texture (neighbours form patches, even in
+ *   every direction, that change over time); the result maps into
+ *   [rangeMin, rangeMax].
  *
  * Param slots: rangeMin 0, rangeMax 1, frequency 2, variation 3,
  * coherence 4, sync 5, hardness 6, colorVariation 7.
@@ -75,13 +76,14 @@ class Noise extends Modifier {
   level(key: u32, texSeed: u32, ctx: Frame, s: Sample, t: f32, r: f32): f32 {
     let v = this.steps(key, t);
     if (this.coherence > 0.0) {
-      const S = lerp(8.0, 0.6, this.coherence);
+      const S = lerp(8.0, 2.5, this.coherence);
       const o = <f32>(texSeed & 0xff) * 0.37;
       // Spatial 2D: patches on the stage; otherwise along the spread only (whole fixtures share it).
       const px: f32 = ctx.spread == SPREAD_SPATIAL ? s.x : s.spatial;
       const py: f32 = ctx.spread == SPREAD_SPATIAL ? s.y : 0.0;
+      // Time is the third axis only: tying it to `spatial` drew bands across the handle.
       // Perlin values cluster around 0: stretch so coherent looks use their range.
-      const coh = noise3(px * S + o, py * S + o, s.spatial * S - r) * 0.7 + 0.5;
+      const coh = noise3(px * S + o, py * S + o, r) * 0.7 + 0.5;
       v = lerp(v, this.shape(coh), this.coherence);
     }
     return this.rangeMin + (this.rangeMax - this.rangeMin) * v;

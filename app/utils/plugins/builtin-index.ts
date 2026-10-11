@@ -677,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:fdf8eaa82bc1c3fc035ba0fe71e7574d569f9a260d3a73fc3f2aeb8de791d208",
+    "hash": "sha256:571cece0a42154e00fcf8e57ffb6e5c184632f880884116e92119bb82cc02beb",
     "signatures": [
       "scalar"
     ],
@@ -686,9 +686,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/noise",
       "name": "Noise",
-      "version": "3.3.0",
+      "version": "3.3.1",
       "apiVersion": "^1.2.0",
-      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how often a value is bright (the share above half: low = mostly dark with an occasional flash, high = mostly bright with dips), Variation how soft the values are (0 = on/off: above half → highest, below → lowest; 1 = soft levels), Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
+      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Frequency sets how often a value is bright (the share above half: low = mostly dark with an occasional flash, high = mostly bright with dips), Variation how soft the values are (0 = on/off: above half → highest, below → lowest; 1 = soft levels), Coherence goes from independent units to soft patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps.",
       "purpose": "Fixtures flicker, sparkle or pick at random.",
       "speedUnit": "per step",
       "signatures": [
@@ -769,7 +769,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "max": 1,
           "label": "Coherence",
           "tier": "primary",
-          "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+          "description": "Independent (0) to soft patches (1): neighbours follow each other, evenly in every direction.",
           "default": 0
         },
         {
@@ -889,7 +889,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "fire",
           "label": "Fire",
-          "description": "Flickering patches that rise along the handle.",
+          "description": "Flickering patches of light.",
           "params": {
             "rangeMin": 0.3,
             "rangeMax": 1,
@@ -914,7 +914,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "water",
           "label": "Water",
-          "description": "Slow, soft waves rolling across the area.",
+          "description": "Slow, soft patches drifting over the area.",
           "params": {
             "rangeMin": 0.4,
             "rangeMax": 1,
