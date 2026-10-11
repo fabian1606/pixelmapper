@@ -2,9 +2,10 @@
 /**
  * Renders a param schema (ADR §6.2) with the replaceable `pm.*` inputs —
  * v2 (plan M5.3): composite editors first (bound to several params, filtered
- * by `when`), then primary params not bound to an editor, then "More"
- * (collapsed by default, remembered per plugin) with advanced params and the
- * caller's `#more` slot. Hidden params never render.
+ * by `when`), then primary params not bound to an editor, the caller's
+ * `#after-primary` slot, then "More" (collapsed by default, remembered per
+ * plugin) with advanced params and the caller's `#more` slot. Hidden params
+ * never render.
  *
  * Used for content-plugin params (modifier cards) and fixture-kind configs.
  * `scrub-start` / `scrub-end` pass through so the caller can coalesce one
@@ -116,6 +117,8 @@ const groupProps = computed(() => ({
     >
       <template v-for="(_, name) in $slots" #[name]="slotProps" :key="name"><slot :name="name" v-bind="slotProps ?? {}" /></template>
     </ParamFormGroups>
+    <!-- Host fields shown with the primary params (e.g. the modifier's Strength). -->
+    <slot name="after-primary" />
     <div v-if="hasMore" class="flex flex-col gap-2">
       <button type="button" class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground self-start" :aria-expanded="moreOpen" data-more @click.stop="toggleMore">
         <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="moreOpen && 'rotate-90'" /> More

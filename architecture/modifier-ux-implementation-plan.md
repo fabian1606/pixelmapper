@@ -54,7 +54,7 @@ After trying M4 in the app, the owner simplified the Distribution UI:
 
 After trying the built-ins, the owner curated every modifier (one review per modifier) and changed the card frame:
 
-1. **Card order (every modifier):** live strip (very top) · Preset row · editors and params · More · Distribution · Channels · Strength + Speed (very bottom).
+1. **Card order (every modifier):** live strip (very top) · Preset row · editors and params, then **Strength** with them · More · Distribution · Channels · Speed (very bottom).
 2. **Presets are a general component.** Every card has the Preset row; a plugin without presets gets one *Default* recipe (the schema defaults, `cardPresets`).
    - Presentation follows effect-preset menus (Resolume, Ableton, Figma): one row `Preset ▾ Name`, `· modified` after an edit with ↺ back to the recipe.
    - The list shows each recipe with a thin animated strip and a `2D` badge when it spreads on the stage.
@@ -68,7 +68,7 @@ After trying the built-ins, the owner curated every modifier (one review per mod
    - **Pattern:** the *Groups* param is removed — the spread decides the rows: Fixture by fixture alternates (1-2-1-2), Spatial 2D cuts bands along the handle (1-1-2-2), Within each fixture cuts bands of heads. Presets Odd/Even · Chase 3 · Sweep (2D) · Halves (2D) · Build-Up (2D) · Center-Out (2D radial) · Segments. Within *Offset* hidden.
    - **Noise:** *Pick* mode and *Fixtures on* are removed; **Frequency** (how often peaks happen) is a primary control and a lane in the graph. The spread decides who shares a random value: All the same = the whole rig, Fixture by fixture = every fixture (all its pixels), Spatial 2D / Within = every pixel. Peaks rise to full / dip to dark after the range; hardness also squares their edges; fixture by fixture with enough numbers picks exactly that share (Random Pick never goes dark). Coherence forms real patches along the spread; the graph shows four neighbours that follow each other as coherence rises (drag up/down on them). Presets Candle · Twinkle · Random Pick · Fire · Water · Faulty · Lightning (new) · Color Jitter.
    - **Color Shift:** Rainbow rebuilt as a palette (works on white fixtures); new Ripple (2D radial) and Color Wheel (2D conical); Palette Run is the default without color; Two Colors removed; White Accent only with color; Saturation under More, White dip primary; *Alternate* switches to Fixture by fixture.
-8. **Earlier deviations kept** (owner, 2026-10-11): Flash Chain and White Accent use motion Run (Flash Chain 4 beats), the white dip blends toward white, Checker stays removed, Color Shift's option is named *Arrange*; Chain and Noise *Pick count* are gone with this revision.
+8. **Earlier deviations kept** (owner approved, 2026-10-11): Flash Chain and White Accent use motion Run (Flash Chain 4 beats), the white dip blends toward white, Checker stays removed, Color Shift's option is named *Arrange*; Chain and Noise *Pick count* are gone with this revision.
 9. **Migration:** Pattern 2 → 3 drops *Groups* (Blocks over the order become bands along the order line; mirrored → radial). Noise 2 → 3 maps Pick to peaks on the beat (share = count / fixtures, 0 = a third) and moves Level instances that used *All the same* to *Fixture by fixture* (they were per fixture before). Sequencer 1.x *sections* become 8 alternating bands; *scatter* becomes Noise peaks with the density as the share.
 
 ## 0. Background

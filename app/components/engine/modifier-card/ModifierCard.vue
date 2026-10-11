@@ -2,8 +2,8 @@
 /**
  * One modifier card (plan M5.6, revised after review). Order: header ·
  * live strip (every modifier) · recipes (every modifier) · editors and
- * primary params · "More" (advanced params, blend mode) · distribution ·
- * channels (only with several channel types) · strength and speed last.
+ * primary params with Strength · "More" (advanced params, blend mode) ·
+ * distribution · channels (only with several channel types) · speed last.
  */
 import { computed, onBeforeUnmount, shallowRef } from 'vue';
 import { AlertTriangle, Loader2 } from 'lucide-vue-next';
@@ -28,6 +28,7 @@ import ParamForm from '~/components/plugin-host/ParamForm.vue';
 import RecipeBar from '~/components/plugin-host/RecipeBar.vue';
 import EndlessStrip from '~/components/plugin-host/EndlessStrip.vue';
 import PluginIframePanel from '~/components/plugin-host/PluginIframePanel.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
   modifier: ModifierInstance;
@@ -136,10 +137,26 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           :editor-context="{ rankCount: resolved.ticks, baseHue, traces }"
           @update:model-value="onParams" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         >
+          <template #after-primary>
+            <Replaceable
+              name="pm.fader" label="Strength" unit="%" :min="0" :max="1" show-value size="sm"
+              title="How strongly this modifier acts on the fixtures" :model-value="modifier.strength" data-card-strength
+              @update:model-value="(v: number) => emit('update', 'strength', v)" @scrub-end="emit('dragEnd', 'Update Modifier Strength')"
+            />
+          </template>
           <template #more>
             <ModifierCardMore :blend-mode="modifier.blendMode" @update="(b: BlendMode) => emit('patch', { blendMode: b }, 'Change Blend Mode')" @dropdown-open-change="v => emit('dropdown-open-change', v)" />
           </template>
         </ParamForm>
+        <!-- A panel that replaces the params still gets the Strength field. -->
+        <template v-if="panel?.placement === 'replace-params'">
+          <Replaceable
+            name="pm.fader" label="Strength" unit="%" :min="0" :max="1" show-value size="sm"
+            title="How strongly this modifier acts on the fixtures" :model-value="modifier.strength" data-card-strength
+            @update:model-value="(v: number) => emit('update', 'strength', v)" @scrub-end="emit('dragEnd', 'Update Modifier Strength')"
+          />
+          
+        </template>
         <PluginIframePanel
           v-if="panel && panel.placement !== 'above-params'"
           :modifier="modifier" :manifest="panel.manifest" :ui-js="panel.uiJs"

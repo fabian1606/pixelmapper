@@ -1308,7 +1308,8 @@ export const useEngineStore = defineStore('engine', () => {
             headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
             body: changesBody,
             keepalive: true,
-          });
+            // Best effort (64 KB keepalive cap); the WAL recovery covers a dropped push.
+          }).catch(err => console.warn('[engine] beforeunload push failed:', err));
         }
 
         // (b) Final snapshot — but ONLY if there are no pending entries left.
@@ -1338,7 +1339,8 @@ export const useEngineStore = defineStore('engine', () => {
               headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
               body: snapBody,
               keepalive: true,
-            });
+              // Best effort: keepalive bodies are capped at 64 KB, so big projects are rejected here.
+            }).catch(err => console.warn('[engine] beforeunload snapshot failed:', err));
           } catch (err) {
             console.warn('[engine] beforeunload snapshot failed:', err);
           }
