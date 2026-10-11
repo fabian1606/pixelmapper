@@ -53,7 +53,6 @@ describe('modifier instances', () => {
   it('creates instances with manifest param defaults', () => {
     const m = createModifier(builtinHash(BUILTIN_ALIASES.sequencer), { targetChannels: ['DIMMER'] });
     expect(m.signature).toBe('scalar');
-    expect(m.params.arrange).toBe('alternate');
     expect(m.params.steps).toEqual({ groups: 2, steps: 2, cells: [[true, false], [false, true]] });
     // Manifest distribution default (plan §1.4).
     expect(m.distribution.mode).toBe('order');
@@ -72,8 +71,8 @@ describe('modifier instances', () => {
   });
 
   it('names instances by manifest name and first enum label', () => {
-    const m = createModifier(builtinHash(BUILTIN_ALIASES.sequencer), { params: { arrange: 'blocks' } });
-    expect(modifierName(m)).toBe('Pattern · Blocks');
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.colorAdjust), { params: { mode: 'palette' } });
+    expect(modifierName(m)).toBe('Color Shift · Palette');
   });
 });
 

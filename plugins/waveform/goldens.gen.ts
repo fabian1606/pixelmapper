@@ -20,7 +20,7 @@ const cases = (manifest.presets ?? []).flatMap((preset) => {
       name: `${preset.id} @ ${tp.toFixed(3)}`,
       compare: 'raw',
       params,
-      ctx: { timeMs: 0, beatTime: 0, bpm: 120, phaseSpeed: 1, strength: 1, timePhase: tp, rankCount: rig.rankCount, distGroupCount: rig.distGroupCount, ticks: rig.ticks },
+      ctx: { timeMs: 0, beatTime: 0, bpm: 120, phaseSpeed: 1, strength: 1, timePhase: tp, rankCount: rig.rankCount, distGroupCount: rig.distGroupCount, spread: rig.spread, ticks: rig.ticks },
       samples: rig.samples.map(s => ({ x: s.x, y: s.y, phase: tp - s.spatial, base: [1], spatial: s.spatial, rank: s.rank, distGroup: s.distGroup, headIndex: s.head, headCount: s.headCount })),
       expected: rig.samples.map((s) => {
         const v = Math.max(0, Math.min(1, sampleSignedLut(lut, 0, s.spatial - m)));

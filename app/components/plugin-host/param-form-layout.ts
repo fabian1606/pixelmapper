@@ -1,8 +1,8 @@
 /**
  * Layout of a param form (plan M5.3, pure): which composite editors and
  * params show where. Order: editors (filtered by `when`), primary params not
- * bound to a shown editor, then advanced params under "More". Hidden params
- * never render.
+ * bound to an editor (or bound with an explicit tier: field and editor
+ * both), then advanced params under "More". Hidden params never render.
  */
 import type { ParamCondition, ParamDef, ParamSchema, ParamValue } from '@pixelmapper/extension-api';
 import type { ManifestEditor } from '@pixelmapper/plugin-toolchain/types';
@@ -58,7 +58,8 @@ export interface ParamFormLayout {
 export function layoutParams(schema: ParamSchema, editors: readonly ManifestEditor[] = [], ctx: WhenContext): ParamFormLayout {
   const shownEditors = editors.filter(e => matchWhen(e.when, schema, ctx));
   const bound = new Set(editors.flatMap(e => Object.values(e.bind)));
-  const visible = schema.filter(p => (p.tier ?? 'primary') !== 'hidden' && !bound.has(p.key) && matchWhen(p.when, schema, ctx));
+  // Bound params live in their editor, unless the manifest also asks for a field (explicit tier).
+  const visible = schema.filter(p => (p.tier ?? 'primary') !== 'hidden' && !(bound.has(p.key) && p.tier === undefined) && matchWhen(p.when, schema, ctx));
   return {
     editors: shownEditors,
     primary: groupParams(visible.filter(p => (p.tier ?? 'primary') === 'primary')),

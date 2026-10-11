@@ -298,6 +298,7 @@ fn v2_order_distribution_fills_abi_1_1_slots() {
     assert!((st.last_ctx.0[ctx::TIME_PHASE] - 1.0).abs() < 1e-5);
     assert_eq!(st.last_ctx.0[ctx::RANK_COUNT], 3.0);
     assert_eq!(st.last_ctx.0[ctx::DIST_GROUP_COUNT], 0.0);
+    assert_eq!(st.last_ctx.0[ctx::SPREAD], 2.0);
     let s0 = &st.last_samples[0].0;
     assert!((s0[sample::SPATIAL] - 2.0 / 3.0).abs() < 1e-6);
     assert_eq!(s0[sample::RANK], 2.0);

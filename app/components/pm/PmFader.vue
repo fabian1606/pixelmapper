@@ -70,7 +70,9 @@ const fillColor = computed(() => props.color ?? 'var(--primary)');
 /** Formatted value readout. */
 const valueText = computed(() => {
   if (props.unit === '%') return `${Math.round(norm.value * 100)}%`;
-  const decimals = props.step && props.step < 1 ? String(props.step).split('.')[1]?.length ?? 0 : 0;
+  // Without a step, small ranges need decimals (0–1 params would all read "0" or "1").
+  const range = Math.abs(props.max - props.min);
+  const decimals = props.step ? (props.step < 1 ? String(props.step).split('.')[1]?.length ?? 0 : 0) : range <= 2 ? 2 : range <= 20 ? 1 : 0;
   return `${props.modelValue.toFixed(decimals)}${props.unit ?? ''}`;
 });
 

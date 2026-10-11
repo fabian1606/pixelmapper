@@ -134,6 +134,12 @@ export function sampleDistribution(d: Distribution, rankCount: number, s: Distri
   return { spatial, rank, group };
 }
 
+/** The spread (ABI v1.2 frame slot 11): 0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture. */
+export function spreadKind(d: Distribution): number {
+  if (d.scope === 'within') return 3;
+  return d.mode === 'none' ? 0 : d.mode === 'order' ? 2 : 1;
+}
+
 /**
  * Frame-level counts (ABI v1.1 frame slots 9–10): `rankCount` (order ranks,
  * the largest head count for scope within, 16 when gradient modes are

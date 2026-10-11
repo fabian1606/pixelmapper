@@ -53,14 +53,16 @@ describe('modifier card plugin status', () => {
     expect(w.text()).toContain('Profile');
   });
 
-  it('card order: header, params, tempo, distribution; extension slots render (plan M5.6)', async () => {
+  it('card order: header, live strip, recipes, params, distribution, tempo last', async () => {
     const w = await mountWith(builtinHash(BUILTIN_ALIASES.waveform));
     const html = w.html();
     const pos = (sel: string) => html.indexOf(sel);
     expect(pos('data-card-title')).toBeGreaterThan(-1);
-    expect(pos('data-param=')).toBeGreaterThan(pos('data-card-title'));
-    expect(pos('data-card-tempo')).toBeGreaterThan(pos('data-param='));
-    expect(pos('data-distribution-section')).toBeGreaterThan(pos('data-card-tempo'));
+    expect(pos('data-endless-strip')).toBeGreaterThan(pos('data-card-title'));
+    expect(pos('data-recipe-bar')).toBeGreaterThan(pos('data-endless-strip'));
+    expect(pos('data-param=')).toBeGreaterThan(pos('data-recipe-bar'));
+    expect(pos('data-distribution-section')).toBeGreaterThan(pos('data-param='));
+    expect(pos('data-card-tempo')).toBeGreaterThan(pos('data-distribution-section'));
     // One channel type → no channel chips.
     expect(pos('data-card-channels')).toBe(-1);
   });

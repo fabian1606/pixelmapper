@@ -10,7 +10,7 @@ import { validateManifestUx } from './manifest-ux';
 import { checkGradient, checkSteps } from './param-structs';
 
 /** Plugin ABI/SDK version this toolchain produces. */
-export const PLUGIN_API_VERSION = '1.1.0';
+export const PLUGIN_API_VERSION = '1.2.0';
 
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];
@@ -56,6 +56,7 @@ function validateParam(p: ParamDef, i: number, errors: string[], warnings: strin
       if (!Array.isArray(p.options) || p.options.length === 0) errors.push(`${where}: options must be a non-empty array`);
       else if (!p.options.includes(p.default)) errors.push(`${where}: default must be one of the options`);
       if (p.optionLabels && p.optionLabels.length !== p.options?.length) errors.push(`${where}: optionLabels must match options`);
+      for (const o of Object.keys(p.optionDistribution ?? {})) if (!p.options?.includes(o)) errors.push(`${where}: optionDistribution names unknown option "${o}"`);
       break;
     case 'color':
       if (!p.default || !isUnit(p.default.r) || !isUnit(p.default.g) || !isUnit(p.default.b)) errors.push(`${where}: default must be { r, g, b } in 0–1`);

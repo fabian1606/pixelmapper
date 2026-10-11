@@ -202,6 +202,20 @@ impl Distribution {
         DistSample { spatial, rank, group }
     }
 
+    /// The spread (ABI v1.2 frame slot 11): 0 all the same, 1 spatial 2D,
+    /// 2 fixture by fixture, 3 within each fixture.
+    pub fn spread_kind(&self) -> u32 {
+        if self.scope == Scope::Within {
+            3
+        } else {
+            match self.mode {
+                Mode::None => 0,
+                Mode::Order => 2,
+                _ => 1,
+            }
+        }
+    }
+
     /// Frame-level counts (ABI v1.1 frame slots 9–10).
     pub fn frame_counts(&self, max_heads: usize) -> (u32, u32) {
         let rc = if self.scope == Scope::Within {

@@ -38,6 +38,8 @@ export interface ManifestDistribution {
   scopes?: DistributionScope[];
   /** Offer grouping (default true); `'required'` hides "None" (e.g. Pattern). */
   grouping?: boolean | 'required';
+  /** Offer the "Offset" choice of "Within each fixture" (default true); false when the plugin ignores it. */
+  withinOffset?: boolean;
   /** Partial distribution applied to new instances. */
   default?: DistributionPatch;
 }

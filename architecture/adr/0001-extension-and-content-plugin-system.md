@@ -800,4 +800,9 @@ Deviations found while implementing the plan. Each names the plan task.
     - Grouping, Snap, Mirror, Reverse and Clear are not offered in the UI.
     - Symmetry is detected from the drawn line, and groups are derived from the order numbers (Pattern rows, Color Shift *Alternate*).
     - Distribution is generic: plugins read `spatial`/`rank`, never `x`/`y` for layout (except noise textures).
+  - *Owner revision R2 (plan, 2026-10-11):*
+    - ABI **v1.2** (additive): Frame `[11] spread` (0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture); SDK constants `SPREAD_SAME/SPATIAL/ORDER/WITHIN`. `API_VERSION`/SDK = `1.2.0`; Noise 3 and Pattern 3 declare `^1.2.0`.
+    - Manifest: `distribution.withinOffset` (false hides the Within *Offset* choice); enum params may declare `optionDistribution` (option → distribution patch applied when picked). A bound param shows a field too when its `tier` is set explicitly.
+    - Every card has a Preset row (a plugin without presets gets a *Default* recipe); presets never set a direction. Recipe previews replace the instance in the engine packet only (`engineStore.setModifierPreview`).
+    - `pm.pickCount` is removed (Noise has no pick mode); `pm.noiseHistory` gains an optional `coherence` binding.
   - *Category stacking (plan M10.2):* the category-wide "Stacking" blend select is removed; each card sets its own blend mode under "More". New instances still default to `add` (bipolar/scale) or `override` (absolute).

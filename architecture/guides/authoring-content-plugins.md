@@ -83,7 +83,7 @@ Identity is the content hash `sha256:<hex>` over canonical(manifest) ‖ wasm �
 | `params` | ordered param list; **order defines the wire layout** |
 | `purpose` *(optional)* | one sentence shown in the Add menu |
 | `speedUnit` *(optional)* | what one tempo unit means, shown next to the speed (`per pass`, `per step`) |
-| `distribution` *(optional)* | offered `modes` (`none`, `linear`, `radial`, `conical`, `order`), `scopes` (`across`, `within`) and a partial `default` |
+| `distribution` *(optional)* | offered `modes` (`none`, `linear`, `radial`, `conical`, `order`), `scopes` (`across`, `within`), `withinOffset` (false hides the Within *Offset* choice when your plugin ignores it) and a partial `default`. Offer only the spreads that make sense for your modifier |
 | `presets` *(optional)* | recipes: complete looks (see below) |
 | `editors` *(optional)* | composite editors bound to several params (see below) |
 
@@ -112,6 +112,7 @@ Common fields:
 - `key` (camelCase, unique), `label`, `default`;
 - optional `description` (tooltip), `group` (section title), `ui` (override the input, e.g. `"pm.numberInput"`);
 - `tier`: `primary` (card body, default), `advanced` (under "More"), `hidden` (never rendered; recipes and editors set it);
+- `optionDistribution` (enum only): option → distribution patch applied when the user picks that option, e.g. `{ "alternate": { "mode": "order" } }` when the option only works fixture by fixture;
 - `when`: show only when the condition holds, e.g. `{ "mode": "palette" }` or `{ "distribution.mode": ["order", "linear"] }`.
 
 `i` is the **slot index**: the sum of the slot counts of all preceding params, not the param index.
@@ -151,11 +152,11 @@ Each recipe is a **complete look**:
 - at most one `default: true`;
 - optional `when: { kind?: ["single" | "row" | "ring" | "area"], multiHead?, hasColor? }` picks the recipe for a new instance on the current selection.
 
-Clicking a recipe applies everything as one undo step. When the recipe changes the distribution mode, the distribution is placed on the selection (handle along its axis, radial from its centroid, order along the axis).
+Every card shows a Preset row (`Preset ▾ Name`); a plugin without presets gets one *Default* recipe (the schema defaults). Hovering a recipe in the list previews it on the fixtures without saving; clicking applies everything as one undo step. When the recipe changes the distribution mode, the distribution is placed on the selection (handle along its axis, radial from its centroid, order along the axis). Recipes never set a direction: the user turns the handle on the canvas, so do not ship variants that only differ in direction.
 
 ### Composite editors (`editors`)
 
-`{ "id": "hue", "input": "pm.hueRange", "bind": { "shift": "hueShift", "range": "hueRange" }, "when": { "mode": "shift" } }` renders one input for several params (usually `tier: "hidden"`). The input receives `modelValue` = `{ prop: value }` built from `bind` and emits the same shape; only bound keys are written. Core inputs: `pm.hueRange`, `pm.noiseHistory`, `pm.pickCount`, plus every single-param input.
+`{ "id": "hue", "input": "pm.hueRange", "bind": { "shift": "hueShift", "range": "hueRange" }, "when": { "mode": "shift" } }` renders one input for several params (usually `tier: "hidden"`; a bound param with an explicit `tier: "primary"`/`"advanced"` also gets its own field). The input receives `modelValue` = `{ prop: value }` built from `bind` and emits the same shape; only bound keys are written. Core inputs: `pm.hueRange`, `pm.noiseHistory`, plus every single-param input.
 
 ## modifier.ts
 
@@ -199,6 +200,7 @@ Rules:
 - `timeMs` (shared clock, identical on all clients), `beatTime` (beats since epoch, continuous across tempo changes), `bpm`;
 - `phaseSpeed` (cycles/s; 0 when frozen), `arity`, `seed` (instance), `strength` (informational — the host applies it);
 - v1.1: `timePhase` (speed phase in cycles, unwrapped: one pass/step per unit), `rankCount` (numbered fixtures of the instance, the largest head count for scope within, 0 without ranks), `distGroupCount` (groups set by a recipe, 0 = none).
+- v1.2: `spread` — the user's Spread choice: `SPREAD_SAME` (every fixture the same, `spatial` 0), `SPREAD_SPATIAL` (Spatial 2D handle), `SPREAD_ORDER` (Fixture by fixture: `rank` = number − 1, all heads of a fixture share it), `SPREAD_WITHIN` (Within each fixture: `rank` = head). Use it to decide who shares a random value (Noise) or how groups form (Pattern: alternate along numbers, bands along the handle). Declare `"apiVersion": "^1.2.0"` when you read it.
 
 `Sample` (per target):
 

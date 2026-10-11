@@ -53,7 +53,8 @@ declare module '@pixelmapper/plugin-sdk' {
   /**
    * Per-render-call context (one modifier instance, one frame).
    * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
-   * strength, timePhase, rankCount, distGroupCount (v1.1), reserved[5].
+   * strength, timePhase, rankCount, distGroupCount (v1.1), spread (v1.2),
+   * reserved[4].
    */
   export class Frame {
       /** Address of the context buffer (set by the SDK). */
@@ -82,7 +83,17 @@ declare module '@pixelmapper/plugin-sdk' {
       get rankCount(): i32;
       /** v1.1: number of distribution groups (0 = no grouping). */
       get distGroupCount(): i32;
+      /** v1.2: the spread — `SPREAD_SAME`, `SPREAD_SPATIAL`, `SPREAD_ORDER` or `SPREAD_WITHIN`. */
+      get spread(): i32;
   }
+  /** v1.2 `Frame.spread`: every fixture the same (spatial 0). */
+  export const SPREAD_SAME: i32;
+  /** v1.2 `Frame.spread`: Spatial 2D (linear / radial / conical handle). */
+  export const SPREAD_SPATIAL: i32;
+  /** v1.2 `Frame.spread`: fixture by fixture (`Sample.rank` = number − 1). */
+  export const SPREAD_ORDER: i32;
+  /** v1.2 `Frame.spread`: within each fixture (`Sample.rank` = head). */
+  export const SPREAD_WITHIN: i32;
   /**
    * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).
    * Layout (f32): x, y, phase, groupIndex, groupCount, headIndex, headCount,

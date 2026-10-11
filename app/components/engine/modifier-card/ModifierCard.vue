@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * One modifier card (plan M5.6). Order: header · recipes · editors and
- * primary params (with the endless strip under the first profile curve) ·
- * tempo and strength · distribution · channels (only with several channel
- * types) · "More" (advanced params, blend mode).
+ * One modifier card (plan M5.6, revised after review). Order: header ·
+ * live strip (every modifier) · recipes (every modifier) · editors and
+ * primary params · "More" (advanced params, blend mode) · distribution ·
+ * channels (only with several channel types) · strength and speed last.
  */
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, shallowRef } from 'vue';
 import { AlertTriangle, Loader2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import type { Component } from 'vue';
@@ -18,6 +18,8 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { fixtureBaseColor, hueSat } from '~/utils/engine/fixture-color';
 import { previewRevision, renderTraces } from '~/utils/plugins/preview-pool';
 import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
+import { distributionForParams } from '~/utils/engine/option-distribution';
+import type { ParamValue } from '@pixelmapper/extension-api';
 import ModifierCardHeader from './ModifierCardHeader.vue';
 import ModifierCardMore from './ModifierCardMore.vue';
 import ModifierGenericFields from '../ModifierGenericFields.vue';
@@ -64,8 +66,6 @@ const panel = computed(() => {
   return manifest.value?.ui && uiJs ? { manifest: manifest.value, uiJs, placement: manifest.value.ui.placement ?? 'below-params' } : null;
 });
 
-/** The first profile curve (signed domain) hosts the endless strip. */
-const stripKey = computed(() => manifest.value?.params.find(p => p.type === 'curve' && p.domain === 'signed')?.key ?? null);
 /** Raw traces of the instance for the noise history editor (preview pool). */
 const traces = (count: number, points: number, cycles: number) => {
   void previewRevision.value;
@@ -78,6 +78,24 @@ const baseHue = computed(() => {
   const c = f ? fixtureBaseColor(f as Fixture) : null;
   return c ? Math.round(hueSat(c).hue) : 0;
 });
+/** Recipe under the pointer in the preset list: shown in the live strip and on the fixtures, never saved. */
+const recipePreview = shallowRef<ModifierInstance | null>(null);
+function onRecipePreview(m: ModifierInstance | null) {
+  recipePreview.value = m;
+  engineStore.setModifierPreview(m);
+}
+onBeforeUnmount(() => { if (recipePreview.value) engineStore.setModifierPreview(null); });
+
+/**
+ * A param edit; when it picks an option that needs another distribution
+ * (manifest `optionDistribution`), both change as one step.
+ */
+function onParams(v: Record<string, ParamValue>) {
+  const d = manifest.value && distributionForParams(manifest.value, props.modifier.params, v, props.modifier.distribution, props.selectionShape);
+  if (d) emit('patch', { params: v, distribution: d }, 'Update Modifier Params');
+  else emit('update', 'params', v);
+}
+
 const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modifier.speed.beatValue : 0));
 </script>
 
@@ -99,8 +117,10 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
         <Button variant="outline" size="sm" class="h-6 text-[11px]" @click="emit('retry')">Retry</Button>
       </div>
       <template v-if="manifest">
+        <EndlessStrip :modifier="recipePreview ?? modifier" :rank-count="resolved.ticks" />
         <RecipeBar
           :modifier="modifier" :manifest="manifest" :rank-count="resolved.ticks" :selection-shape="selectionShape"
+          @preview="onRecipePreview" @dropdown-open-change="v => emit('dropdown-open-change', v)"
           @apply="(next, p) => emit('patch', { params: next.params, speed: next.speed, distribution: next.distribution, strength: next.strength }, `Recipe: ${p.label}`)"
         />
         <PluginIframePanel
@@ -114,29 +134,18 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           :more-key="manifest.alias" :distribution-mode="modifier.distribution.mode"
           :ticks="resolved.ticks" :beats="beats" :playhead="position" :time-phase="modifier.speed.mode === 'infinite' ? null : timePhase"
           :editor-context="{ rankCount: resolved.ticks, baseHue, traces }"
-          @update:model-value="v => emit('update', 'params', v)" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
+          @update:model-value="onParams" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         >
-          <template v-if="stripKey" #[`strip:${stripKey}`]><EndlessStrip :modifier="modifier" :rank-count="resolved.ticks" /></template>
           <template #more>
             <ModifierCardMore :blend-mode="modifier.blendMode" @update="(b: BlendMode) => emit('patch', { blendMode: b }, 'Change Blend Mode')" @dropdown-open-change="v => emit('dropdown-open-change', v)" />
           </template>
         </ParamForm>
-        <EndlessStrip v-if="!stripKey" :modifier="modifier" :rank-count="resolved.ticks" />
         <PluginIframePanel
           v-if="panel && panel.placement !== 'above-params'"
           :modifier="modifier" :manifest="panel.manifest" :ui-js="panel.uiJs"
           @update:params="v => emit('update', 'params', v)" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
         />
       </template>
-      <div class="pt-3 border-t border-border/40" data-card-tempo>
-        <ModifierGenericFields
-          :modifier="modifier"
-          @update="(k, v) => emit('update', k, v)"
-          @update-properties="(u, d) => emit('patch', u, d)"
-          @drag-end="d => emit('dragEnd', d)"
-          @dropdown-open-change="v => emit('dropdown-open-change', v)"
-        />
-      </div>
       <div class="pt-3 border-t border-border/40">
         <DistributionSection
           :modifier-id="modifier.id" :distribution="modifier.distribution" :options="manifest?.distribution" :selection-axis="selectionShape?.axis"
@@ -160,6 +169,15 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
             {{ type }}
           </button>
         </div>
+      </div>
+      <div class="pt-3 border-t border-border/40" data-card-tempo>
+        <ModifierGenericFields
+          :modifier="modifier"
+          @update="(k, v) => emit('update', k, v)"
+          @update-properties="(u, d) => emit('patch', u, d)"
+          @drag-end="d => emit('dragEnd', d)"
+          @dropdown-open-change="v => emit('dropdown-open-change', v)"
+        />
       </div>
     </div>
   </div>

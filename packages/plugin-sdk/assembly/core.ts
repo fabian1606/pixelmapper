@@ -13,7 +13,8 @@ export const SAMPLE_FIELDS: i32 = 16;
 /**
  * Per-render-call context (one modifier instance, one frame).
  * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
- * strength, timePhase, rankCount, distGroupCount (v1.1), reserved[5].
+ * strength, timePhase, rankCount, distGroupCount (v1.1), spread (v1.2),
+ * reserved[4].
  */
 export class Frame {
   /** Address of the context buffer (set by the SDK). */
@@ -43,7 +44,18 @@ export class Frame {
   @inline get rankCount(): i32 { return <i32>load<f32>(this.ptr, 36); }
   /** v1.1: number of distribution groups (0 = no grouping). */
   @inline get distGroupCount(): i32 { return <i32>load<f32>(this.ptr, 40); }
+  /** v1.2: the spread — `SPREAD_SAME`, `SPREAD_SPATIAL`, `SPREAD_ORDER` or `SPREAD_WITHIN`. */
+  @inline get spread(): i32 { return <i32>load<f32>(this.ptr, 44); }
 }
+
+/** v1.2 `Frame.spread`: every fixture the same (spatial 0). */
+export const SPREAD_SAME: i32 = 0;
+/** v1.2 `Frame.spread`: Spatial 2D (linear / radial / conical handle). */
+export const SPREAD_SPATIAL: i32 = 1;
+/** v1.2 `Frame.spread`: fixture by fixture (`Sample.rank` = number − 1). */
+export const SPREAD_ORDER: i32 = 2;
+/** v1.2 `Frame.spread`: within each fixture (`Sample.rank` = head). */
+export const SPREAD_WITHIN: i32 = 3;
 
 /**
  * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).

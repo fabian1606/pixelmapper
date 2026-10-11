@@ -19,7 +19,7 @@ import type { ModifierInstance, SpeedConfig } from '~/utils/engine/types';
 import { modifierKey } from '~/utils/engine/modifiers';
 import { getManifest, loadWasm } from './plugin-store';
 import { mapOutput } from './host-mapping';
-import { frameCounts, groupOf, hasGrouping, QUANTIZED_RANKS, sampleDistribution } from '~/utils/engine/distribution/sample';
+import { frameCounts, groupOf, hasGrouping, QUANTIZED_RANKS, sampleDistribution, spreadKind } from '~/utils/engine/distribution/sample';
 
 // ── Pool state ─────────────────────────────────────
 
@@ -197,6 +197,7 @@ function render(
   ctx[CTX.timePhase] = tp;
   ctx[CTX.rankCount] = counts.rankCount;
   ctx[CTX.distGroupCount] = counts.distGroupCount;
+  ctx[CTX.spread] = spreadKind(m.distribution);
 
   const cseed = channelSeed(m.targetChannels[0] ?? 'DIMMER');
   const samples = new Float32Array(count * SAMPLE_FIELDS);
@@ -289,13 +290,15 @@ export function renderStrip(m: ModifierInstance, cols: number, opts: PreviewOpti
 }
 
 /**
- * Raw plugin output of `count` virtual fixtures over `cycles` time units
- * (`points` samples each), one array per fixture (plan M9.4 history editor).
+ * Raw plugin output of `count` neighbouring virtual fixtures (one 16th
+ * apart along the spread) over `cycles` time units (`points` samples each),
+ * one array per fixture (noise history editor: coherent neighbours follow
+ * each other).
  */
 export function renderTraces(m: ModifierInstance, count: number, points: number, cycles: number): Float32Array[] | null {
   const traces = Array.from({ length: count }, () => new Float32Array(points));
   for (let p = 0; p < points; p++) {
-    const r = render(m, count, i => ({ x: 0.2 + 0.3 * i, y: 0.5, spatial: 0, rank: i, group: -1 }), { timePhase: (p / points) * cycles, raw: true, rankCount: count });
+    const r = render(m, count, i => ({ x: 0.3 + 0.05 * i, y: 0.5, spatial: i / QUANTIZED_RANKS, rank: i, group: -1 }), { timePhase: (p / points) * cycles, raw: true, rankCount: QUANTIZED_RANKS });
     if (!r) return null;
     for (let i = 0; i < count; i++) traces[i]![p] = r.values[i * r.arity]!;
   }

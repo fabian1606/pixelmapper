@@ -30,7 +30,7 @@ import { mapOutput } from '../app/utils/plugins/host-mapping';
 /** One golden case (ABI v1.1 fields optional). */
 interface GoldenCase {
   params: Record<string, never>;
-  ctx: { timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; ticks?: number; seed?: number };
+  ctx: { timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; spread?: number; ticks?: number; seed?: number };
   samples: {
     x: number; y: number; phase: number; groupIndex?: number; groupCount?: number; base: number[]; channelSeed?: number;
     spatial?: number; rank?: number; distGroup?: number; headIndex?: number; headCount?: number; seed?: number;
@@ -80,6 +80,7 @@ describe.each(PLUGINS)('built-in plugin %s', (name) => {
       ctx[CTX.timePhase] = c.ctx.timePhase ?? 0;
       ctx[CTX.rankCount] = c.ctx.rankCount ?? 0;
       ctx[CTX.distGroupCount] = c.ctx.distGroupCount ?? 0;
+      ctx[CTX.spread] = c.ctx.spread ?? 0;
       ctx[CTX.seedLo] = (c.ctx.seed ?? 0) & 0xffff;
       ctx[CTX.seedHi] = (c.ctx.seed ?? 0) >>> 16;
       const samples = new Float32Array(c.samples.length * SAMPLE_FIELDS);

@@ -8,6 +8,7 @@
 import type { PmInputName } from './replaceables';
 import type { RgbColor, Vec2 } from './model';
 import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
+import type { DistributionPatch } from './distribution';
 
 /** One control point of a curve param. Both axes are normalized 0–1. */
 export interface CurvePoint {
@@ -68,6 +69,12 @@ export interface EnumParam extends ParamBase<'enum', string> {
   options: string[];
   /** Optional display labels, parallel to `options`. */
   optionLabels?: string[];
+  /**
+   * Distribution an option needs (option → patch). Picking the option in the
+   * card also applies the patch, e.g. Color Shift's "Alternate" switches the
+   * spread to Fixture by fixture because it alternates along the numbers.
+   */
+  optionDistribution?: Record<string, DistributionPatch>;
 }
 
 /** Linear RGB color. Wire: 3 f32. Default input: `pm.colorInput`. */

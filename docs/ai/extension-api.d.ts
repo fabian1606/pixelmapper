@@ -1090,6 +1090,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** One control point of a curve param. Both axes are normalized 0–1. */
   export interface CurvePoint {
       /** Position in the cycle, 0–1, monotonically increasing. */
@@ -1143,6 +1144,12 @@ declare module '@pixelmapper/extension-api' {
       options: string[];
       /** Optional display labels, parallel to `options`. */
       optionLabels?: string[];
+      /**
+       * Distribution an option needs (option → patch). Picking the option in the
+       * card also applies the patch, e.g. Color Shift's "Alternate" switches the
+       * spread to Fixture by fixture because it alternates along the numbers.
+       */
+      optionDistribution?: Record<string, DistributionPatch>;
   }
   /** Linear RGB color. Wire: 3 f32. Default input: `pm.colorInput`. */
   export type ColorParam = ParamBase<'color', RgbColor>;
@@ -1457,34 +1464,24 @@ declare module '@pixelmapper/extension-api' {
       /** Lowest and highest level (0–1). */
       min: number;
       max: number;
-      /** Events per step (0 = none) and their length in steps. */
+      /** Peaks per step (frequency, 0 = none) and their length in steps. */
       rate: number;
       length: number;
       dir: 'up' | 'down';
+      /** Coherence 0–1 (optional binding: dragging the traces up/down sets it). */
+      coherence?: number;
   }
   /**
-   * Props of `pm.noiseHistory` (composite editor): sample traces over a few
-   * steps with draggable range lines and event markers.
+   * Props of `pm.noiseHistory` (composite editor): neighbouring traces over
+   * a few steps with draggable range lines, a coherence drag and a peaks lane.
    */
   export interface NoiseHistoryProps extends BaseInputProps {
       modelValue: NoiseHistoryValue;
-      /** Renders `cycles` steps of `count` virtual fixtures (levels 0–1, per fixture). */
+      /** Renders `cycles` steps of `count` neighbouring virtual fixtures along the spread (levels 0–1). */
       traces?: (count: number, points: number, cycles: number) => Float32Array[] | null;
   }
   /** Emits of `pm.noiseHistory`. */
   export type NoiseHistoryEmits = CommonInputEmits<NoiseHistoryValue>;
-  /** Props of `pm.pickCount` (composite editor): "N of M on" (`count` 0 = a third). */
-  export interface PickCountProps extends BaseInputProps {
-      modelValue: {
-          count: number;
-      };
-      /** M: the numbered fixtures. */
-      rankCount?: number;
-  }
-  /** Emits of `pm.pickCount`. */
-  export type PickCountEmits = CommonInputEmits<{
-      count: number;
-  }>;
   /** All replaceable inputs and their contracts. */
   export interface PmInputContracts {
       'pm.fader': {
@@ -1542,10 +1539,6 @@ declare module '@pixelmapper/extension-api' {
       'pm.noiseHistory': {
           props: NoiseHistoryProps;
           emits: NoiseHistoryEmits;
-      };
-      'pm.pickCount': {
-          props: PickCountProps;
-          emits: PickCountEmits;
       };
   }
   /** Name of a replaceable input. */

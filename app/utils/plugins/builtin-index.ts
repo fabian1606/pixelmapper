@@ -20,7 +20,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/color-adjust",
     "name": "Color Shift",
-    "hash": "sha256:5a79e76d9b358cc2691149f858533df9c9c253fd3c96f211476d9c355945fc9f",
+    "hash": "sha256:456d51310d2fe975531ff76cc6e0fbae6bd9cf5fd47e5fea587e2f97ba82274b",
     "signatures": [
       "rgb"
     ],
@@ -29,7 +29,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/color-adjust",
       "name": "Color Shift",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "apiVersion": "^1.1.0",
       "description": "Colors that move across the fixtures. Palette: colors from a gradient run along the distribution (Arrange Gradient) or alternate fixture by fixture (Arrange Alternate); Transition goes from hard steps to soft blends. Shift: the fixtures' own hue swings around a center (hue strip) following the profile curve, optionally dipping to white. The motion curve moves the colors during one pass.",
       "purpose": "Colors drift, alternate or run across your fixtures.",
@@ -80,10 +80,10 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "Palette",
             "Shift"
           ],
-          "default": "shift",
           "label": "Mode",
           "tier": "primary",
-          "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue."
+          "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue.",
+          "default": "shift"
         },
         {
           "key": "palette",
@@ -125,27 +125,33 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "Gradient",
             "Alternate"
           ],
-          "default": "gradient",
           "label": "Arrange",
           "tier": "primary",
           "when": {
             "mode": "palette"
           },
-          "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color."
+          "optionDistribution": {
+            "alternate": {
+              "scope": "across",
+              "mode": "order"
+            }
+          },
+          "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color (switches the spread to Fixture by fixture).",
+          "default": "gradient"
         },
         {
           "key": "transition",
           "type": "number",
           "min": 0,
           "max": 1,
-          "default": 0,
           "label": "Transition",
           "tier": "primary",
           "when": {
             "mode": "palette",
             "arrange": "gradient"
           },
-          "description": "Hard steps (0) to soft blends (1)."
+          "description": "Hard steps (0) to soft blends (1).",
+          "default": 0
         },
         {
           "key": "hueShift",
@@ -174,7 +180,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "max": 2,
           "default": 1,
           "label": "Saturation",
-          "tier": "primary",
+          "tier": "advanced",
           "when": {
             "mode": "shift"
           }
@@ -184,13 +190,13 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "type": "number",
           "min": 0,
           "max": 1,
-          "default": 0,
           "label": "White dip",
-          "tier": "advanced",
+          "tier": "primary",
           "when": {
             "mode": "shift"
           },
-          "description": "How far the profile's peak fades toward white."
+          "description": "How far the profile's peak fades toward white.",
+          "default": 0
         },
         {
           "key": "profile",
@@ -200,7 +206,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "when": {
             "mode": "shift"
           },
-          "description": "How the hue swings over the distance from the moving position.",
+          "description": "Shape of the color swing across the fixtures.",
           "domain": "signed",
           "axis": "fixtures",
           "range": "unipolar",
@@ -273,17 +279,63 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "rainbow",
           "label": "Rainbow",
-          "description": "The full color wheel runs across the fixtures.",
+          "description": "The full color wheel sweeps across the rig.",
           "params": {
-            "mode": "shift",
-            "hueShift": 0,
-            "hueRange": 180,
-            "profile": {
-              "shape": "wedge",
-              "args": {
-                "length": 1
-              }
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.167,
+                  "color": {
+                    "r": 1,
+                    "g": 1,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 0,
+                    "g": 1,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.5,
+                  "color": {
+                    "r": 0,
+                    "g": 1,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 0,
+                    "g": 0,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.833,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 1
+                  }
+                }
+              ]
             },
+            "arrange": "gradient",
+            "transition": 1,
             "motion": {
               "shape": "run",
               "args": {}
@@ -301,9 +353,116 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "strength": 1
         },
         {
-          "id": "two-colors",
-          "label": "Two Colors",
-          "description": "Everything switches between two colors on the beat.",
+          "id": "palette-run",
+          "label": "Palette Run",
+          "description": "A soft three-color gradient runs across the fixtures.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0.4
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 1,
+                    "g": 0.6,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 0.2,
+                    "g": 0,
+                    "b": 1
+                  }
+                }
+              ]
+            },
+            "arrange": "gradient",
+            "transition": 1,
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "hasColor": false
+          }
+        },
+        {
+          "id": "ripple",
+          "label": "Ripple",
+          "description": "Colors pulse outward from the center.",
+          "params": {
+            "mode": "palette",
+            "palette": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 0.6,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 1,
+                    "g": 0,
+                    "b": 0.6
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 0,
+                    "g": 0.2,
+                    "b": 1
+                  }
+                }
+              ]
+            },
+            "arrange": "gradient",
+            "transition": 1,
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "radial",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "color-wheel",
+          "label": "Color Wheel",
+          "description": "The rainbow turns around the center.",
           "params": {
             "mode": "palette",
             "palette": {
@@ -317,9 +476,41 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
                   }
                 },
                 {
+                  "pos": 0.167,
+                  "color": {
+                    "r": 1,
+                    "g": 1,
+                    "b": 0
+                  }
+                },
+                {
+                  "pos": 0.333,
+                  "color": {
+                    "r": 0,
+                    "g": 1,
+                    "b": 0
+                  }
+                },
+                {
                   "pos": 0.5,
                   "color": {
                     "r": 0,
+                    "g": 1,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.667,
+                  "color": {
+                    "r": 0,
+                    "g": 0,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.833,
+                  "color": {
+                    "r": 1,
                     "g": 0,
                     "b": 1
                   }
@@ -327,27 +518,22 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
               ]
             },
             "arrange": "gradient",
-            "transition": 0,
+            "transition": 1,
             "motion": {
-              "shape": "step",
-              "args": {
-                "count": 2
-              }
+              "shape": "run",
+              "args": {}
             }
           },
           "speed": {
             "mode": "beat",
-            "beatValue": 1
+            "beatValue": 16
           },
           "distribution": {
             "scope": "across",
-            "mode": "none",
+            "mode": "conical",
             "reverse": false
           },
-          "strength": 1,
-          "when": {
-            "hasColor": false
-          }
+          "strength": 1
         },
         {
           "id": "spread-colors",
@@ -407,58 +593,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "strength": 1
         },
         {
-          "id": "palette-run",
-          "label": "Palette Run",
-          "description": "A soft three-color gradient runs across the fixtures.",
-          "params": {
-            "mode": "palette",
-            "palette": {
-              "stops": [
-                {
-                  "pos": 0,
-                  "color": {
-                    "r": 1,
-                    "g": 0,
-                    "b": 0.4
-                  }
-                },
-                {
-                  "pos": 0.333,
-                  "color": {
-                    "r": 1,
-                    "g": 0.6,
-                    "b": 0
-                  }
-                },
-                {
-                  "pos": 0.667,
-                  "color": {
-                    "r": 0.2,
-                    "g": 0,
-                    "b": 1
-                  }
-                }
-              ]
-            },
-            "arrange": "gradient",
-            "transition": 1,
-            "motion": {
-              "shape": "run",
-              "args": {}
-            }
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 8
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "linear",
-            "reverse": false
-          },
-          "strength": 1
-        },
-        {
           "id": "white-accent",
           "label": "White Accent",
           "description": "The color flashes toward white once per pass.",
@@ -485,7 +619,10 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "mode": "none",
             "reverse": false
           },
-          "strength": 1
+          "strength": 1,
+          "when": {
+            "hasColor": true
+          }
         },
         {
           "id": "bar-gradient",
@@ -540,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:766a9e87bc0eda6d0bb67e37cfbec3ffbcfbe9aebcd993d5703adc06e5475ed8",
+    "hash": "sha256:4790927f5c253ae4240b02b1d1ff2c4770e1fbe83fa0068ecc70e054223a283d",
     "signatures": [
       "scalar"
     ],
@@ -549,9 +686,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/noise",
       "name": "Noise",
-      "version": "2.0.0",
-      "apiVersion": "^1.1.0",
-      "description": "Random, organic brightness. Level: each fixture steps between random levels inside a range (drag the range and the events in the history); Coherence goes from independent fixtures to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps; occasional events flash up or dip down. Pick: a random set of the numbered fixtures is on each step.",
+      "version": "3.0.0",
+      "apiVersion": "^1.2.0",
+      "description": "Random, organic brightness. Each unit steps between random levels inside a range (drag the range in the history); the spread decides who shares a value (All the same: the whole rig, Fixture by fixture: every fixture, Spatial 2D / Within: every pixel). Coherence goes from independent units to flowing patches, Sync from free timing to on the beat, Hardness from soft blends to hard jumps; Frequency sets how often peaks flash up or dip down.",
       "purpose": "Fixtures flicker, sparkle or pick at random.",
       "speedUnit": "per step",
       "signatures": [
@@ -562,6 +699,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         "modes": [
           "none",
           "linear",
+          "radial",
           "order"
         ],
         "scopes": [
@@ -570,8 +708,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         ],
         "grouping": false,
         "default": {
-          "mode": "none"
-        }
+          "mode": "order"
+        },
+        "withinOffset": false
       },
       "editors": [
         {
@@ -582,40 +721,12 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "max": "rangeMax",
             "rate": "eventRate",
             "length": "eventLength",
-            "dir": "eventDir"
-          },
-          "when": {
-            "mode": "level"
-          }
-        },
-        {
-          "id": "pick",
-          "input": "pm.pickCount",
-          "bind": {
-            "count": "count"
-          },
-          "when": {
-            "mode": "pick"
+            "dir": "eventDir",
+            "coherence": "coherence"
           }
         }
       ],
       "params": [
-        {
-          "key": "mode",
-          "type": "enum",
-          "options": [
-            "level",
-            "pick"
-          ],
-          "optionLabels": [
-            "Level",
-            "Pick"
-          ],
-          "default": "level",
-          "label": "Mode",
-          "tier": "primary",
-          "description": "Level: random brightness per fixture. Pick: a random set of fixtures is on."
-        },
         {
           "key": "rangeMin",
           "type": "number",
@@ -639,10 +750,10 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "type": "number",
           "min": 0,
           "max": 1,
-          "default": 0,
-          "label": "Event rate",
-          "tier": "hidden",
-          "description": "Events per step."
+          "label": "Frequency",
+          "tier": "primary",
+          "description": "How often peaks happen: rare (0) to often (1, about one per step).",
+          "default": 0
         },
         {
           "key": "eventLength",
@@ -650,9 +761,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "min": 0.02,
           "max": 1,
           "default": 0.1,
-          "label": "Event length",
+          "label": "Peak length",
           "tier": "hidden",
-          "description": "Length of an event in steps."
+          "description": "Length of a peak in steps."
         },
         {
           "key": "eventDir",
@@ -662,7 +773,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             "down"
           ],
           "default": "up",
-          "label": "Event direction",
+          "label": "Peak direction",
           "tier": "hidden"
         },
         {
@@ -670,13 +781,10 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "type": "number",
           "min": 0,
           "max": 1,
-          "default": 0,
           "label": "Coherence",
           "tier": "primary",
-          "when": {
-            "mode": "level"
-          },
-          "description": "Independent (0) to flowing patches (1)."
+          "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+          "default": 0
         },
         {
           "key": "sync",
@@ -686,10 +794,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "default": 0,
           "label": "Sync",
           "tier": "primary",
-          "when": {
-            "mode": "level"
-          },
-          "description": "Free timing (0) to all fixtures stepping on the beat (1)."
+          "description": "Free timing (0) to everything stepping on the beat (1)."
         },
         {
           "key": "hardness",
@@ -699,17 +804,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "default": 0.2,
           "label": "Hardness",
           "tier": "primary",
-          "description": "Soft blends (0) to hard jumps (1)."
-        },
-        {
-          "key": "count",
-          "type": "int",
-          "min": 0,
-          "max": 64,
-          "default": 0,
-          "label": "Fixtures on",
-          "tier": "hidden",
-          "description": "0 = a third of the fixtures."
+          "description": "Soft blends (0) to hard jumps (1), also for the peaks."
         },
         {
           "key": "colorVariation",
@@ -719,9 +814,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "default": 0,
           "label": "Color variation",
           "tier": "advanced",
-          "when": {
-            "mode": "level"
-          },
           "description": "Color channels flicker independently (colorful)."
         }
       ],
@@ -729,18 +821,18 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "candle",
           "label": "Candle",
-          "description": "A warm, restless glow.",
+          "description": "A warm, restless glow, fixture by fixture.",
+          "default": true,
           "params": {
-            "mode": "level",
             "rangeMin": 0.6,
             "rangeMax": 1,
+            "eventRate": 0,
+            "eventLength": 0.1,
+            "eventDir": "up",
             "coherence": 0,
             "sync": 0,
             "hardness": 0.2,
-            "colorVariation": 0,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up"
+            "colorVariation": 0
           },
           "speed": {
             "mode": "beat",
@@ -748,54 +840,83 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           },
           "distribution": {
             "scope": "across",
-            "mode": "none",
-            "reverse": false
+            "mode": "order",
+            "reverse": false,
+            "order": {
+              "mirror": false
+            }
           },
-          "strength": 1,
-          "default": true
+          "strength": 1
         },
         {
           "id": "twinkle",
           "label": "Twinkle",
-          "description": "Dim fixtures with occasional sparkles.",
+          "description": "Dim pixels with occasional sparkles.",
           "params": {
-            "mode": "level",
-            "rangeMin": 0.1,
+            "rangeMin": 0.05,
             "rangeMax": 0.15,
+            "eventRate": 0.15,
+            "eventLength": 0.1,
+            "eventDir": "up",
             "coherence": 0,
             "sync": 0,
             "hardness": 0.8,
-            "colorVariation": 0,
-            "eventRate": 0.15,
-            "eventLength": 0.08,
-            "eventDir": "up"
+            "colorVariation": 0
           },
           "speed": {
             "mode": "beat",
             "beatValue": 0.25
           },
           "distribution": {
-            "scope": "across",
-            "mode": "none",
+            "scope": "within",
+            "withinOffset": "none",
             "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "random-pick",
+          "label": "Random Pick",
+          "description": "A random third of the fixtures is on each beat.",
+          "params": {
+            "rangeMin": 0,
+            "rangeMax": 0,
+            "eventRate": 0.33,
+            "eventLength": 1,
+            "eventDir": "up",
+            "coherence": 0,
+            "sync": 1,
+            "hardness": 1,
+            "colorVariation": 0
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "order",
+            "reverse": false,
+            "order": {
+              "mirror": false
+            }
           },
           "strength": 1
         },
         {
           "id": "fire",
           "label": "Fire",
-          "description": "Flickering patches that rise along the direction.",
+          "description": "Flickering patches that rise along the handle.",
           "params": {
-            "mode": "level",
             "rangeMin": 0.3,
             "rangeMax": 1,
+            "eventRate": 0,
+            "eventLength": 0.1,
+            "eventDir": "up",
             "coherence": 0.8,
             "sync": 0,
             "hardness": 0.1,
-            "colorVariation": 0,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up"
+            "colorVariation": 0
           },
           "speed": {
             "mode": "beat",
@@ -809,47 +930,19 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "strength": 1
         },
         {
-          "id": "faulty",
-          "label": "Faulty",
-          "description": "Full brightness with occasional dropouts.",
-          "params": {
-            "mode": "level",
-            "rangeMin": 1,
-            "rangeMax": 1,
-            "coherence": 0,
-            "sync": 0,
-            "hardness": 1,
-            "colorVariation": 0,
-            "eventRate": 0.05,
-            "eventLength": 0.2,
-            "eventDir": "down"
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 0.125
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "none",
-            "reverse": false
-          },
-          "strength": 1
-        },
-        {
           "id": "water",
           "label": "Water",
           "description": "Slow, soft waves rolling across the area.",
           "params": {
-            "mode": "level",
             "rangeMin": 0.4,
             "rangeMax": 1,
+            "eventRate": 0,
+            "eventLength": 0.1,
+            "eventDir": "up",
             "coherence": 1,
             "sync": 0,
             "hardness": 0,
-            "colorVariation": 0,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up"
+            "colorVariation": 0
           },
           "speed": {
             "mode": "beat",
@@ -868,44 +961,23 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           }
         },
         {
-          "id": "color-jitter",
-          "label": "Color Jitter",
-          "description": "Colors shimmer independently.",
+          "id": "faulty",
+          "label": "Faulty",
+          "description": "Full brightness with occasional dropouts.",
           "params": {
-            "mode": "level",
-            "rangeMin": 0.85,
+            "rangeMin": 1,
             "rangeMax": 1,
+            "eventRate": 0.05,
+            "eventLength": 0.2,
+            "eventDir": "down",
             "coherence": 0,
             "sync": 0,
-            "hardness": 0.3,
-            "colorVariation": 1,
-            "eventRate": 0,
-            "eventLength": 0.1,
-            "eventDir": "up"
+            "hardness": 1,
+            "colorVariation": 0
           },
           "speed": {
             "mode": "beat",
             "beatValue": 0.125
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "none",
-            "reverse": false
-          },
-          "strength": 1
-        },
-        {
-          "id": "random-pick",
-          "label": "Random Pick",
-          "description": "A random third of the fixtures is on each beat.",
-          "params": {
-            "mode": "pick",
-            "count": 0,
-            "hardness": 1
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 1
           },
           "distribution": {
             "scope": "across",
@@ -916,6 +988,58 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             }
           },
           "strength": 1
+        },
+        {
+          "id": "lightning",
+          "label": "Lightning",
+          "description": "The whole rig flashes together now and then.",
+          "params": {
+            "rangeMin": 0,
+            "rangeMax": 0,
+            "eventRate": 0.1,
+            "eventLength": 0.15,
+            "eventDir": "up",
+            "coherence": 0,
+            "sync": 0,
+            "hardness": 0.9,
+            "colorVariation": 0
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 0.25
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "color-jitter",
+          "label": "Color Jitter",
+          "description": "Colors shimmer independently.",
+          "params": {
+            "rangeMin": 0.85,
+            "rangeMax": 1,
+            "eventRate": 0,
+            "eventLength": 0.1,
+            "eventDir": "up",
+            "coherence": 0,
+            "sync": 0,
+            "hardness": 0.3,
+            "colorVariation": 1
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 0.125
+          },
+          "distribution": {
+            "scope": "within",
+            "withinOffset": "none",
+            "reverse": false
+          },
+          "strength": 1
         }
       ]
     }
@@ -923,7 +1047,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/sequencer",
     "name": "Pattern",
-    "hash": "sha256:69707d139884cfa5ec4a2e19f486ccd04b2a725c7640e7c4896cd4f7ed49cc65",
+    "hash": "sha256:7dd892a6a83e3ded51db840a42276768039673707f35c836fff0938231672046",
     "signatures": [
       "scalar"
     ],
@@ -932,9 +1056,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/sequencer",
       "name": "Pattern",
-      "version": "2.0.0",
-      "apiVersion": "^1.1.0",
-      "description": "Switches groups of fixtures on and off step by step. The rows of the step grid are groups taken from the order numbers on the canvas: Alternate (1-2-1-2, neighbours differ) or Blocks (1-1-2-2, consecutive runs). One step per tempo unit; Transition crossfades into the next step. Off = dimmed by the strength.",
+      "version": "3.0.0",
+      "apiVersion": "^1.2.0",
+      "description": "Switches groups of fixtures on and off step by step. The rows of the step grid are groups chosen by the spread: Fixture by fixture alternates along the numbers (1-2-1-2), Spatial 2D cuts bands along the handle (1-1-2-2), Within each fixture cuts bands of heads. One step per tempo unit; Transition crossfades into the next step. Off = dimmed by the strength.",
       "purpose": "Groups of fixtures switch on and off in steps.",
       "speedUnit": "per step",
       "signatures": [
@@ -954,25 +1078,10 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         "grouping": false,
         "default": {
           "mode": "order"
-        }
+        },
+        "withinOffset": false
       },
       "params": [
-        {
-          "key": "arrange",
-          "type": "enum",
-          "options": [
-            "alternate",
-            "blocks"
-          ],
-          "optionLabels": [
-            "Alternate",
-            "Blocks"
-          ],
-          "default": "alternate",
-          "label": "Groups",
-          "tier": "primary",
-          "description": "How the numbered fixtures form the grid's rows: alternate (1-2-1-2) or consecutive blocks (1-1-2-2)."
-        },
         {
           "key": "steps",
           "type": "steps",
@@ -1001,7 +1110,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "default": 0,
           "label": "Transition",
           "tier": "primary",
-          "description": "Hard switch (0) to a crossfade over the whole step (1)."
+          "description": "Hard (0) ↔ soft: a crossfade over the whole step (1)."
         },
         {
           "key": "invert",
@@ -1016,8 +1125,8 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "id": "odd-even",
           "label": "Odd/Even",
           "description": "Every other fixture, swapping on the beat.",
+          "default": true,
           "params": {
-            "arrange": "alternate",
             "steps": {
               "groups": 2,
               "steps": 2,
@@ -1047,7 +1156,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
             }
           },
           "strength": 1,
-          "default": true,
           "when": {
             "kind": [
               "row",
@@ -1056,11 +1164,100 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           }
         },
         {
-          "id": "left-right",
-          "label": "Left/Right",
-          "description": "First half, then second half.",
+          "id": "chase-3",
+          "label": "Chase 3",
+          "description": "Every third fixture, running along (A-B-C).",
           "params": {
-            "arrange": "blocks",
+            "steps": {
+              "groups": 3,
+              "steps": 3,
+              "cells": [
+                [
+                  true,
+                  false,
+                  false
+                ],
+                [
+                  false,
+                  true,
+                  false
+                ],
+                [
+                  false,
+                  false,
+                  true
+                ]
+              ]
+            },
+            "transition": 0
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "order",
+            "reverse": false,
+            "order": {
+              "mirror": false
+            }
+          },
+          "strength": 1
+        },
+        {
+          "id": "sweep",
+          "label": "Sweep",
+          "description": "Four bands light one after another along the handle.",
+          "params": {
+            "steps": {
+              "groups": 4,
+              "steps": 4,
+              "cells": [
+                [
+                  true,
+                  false,
+                  false,
+                  false
+                ],
+                [
+                  false,
+                  true,
+                  false,
+                  false
+                ],
+                [
+                  false,
+                  false,
+                  true,
+                  false
+                ],
+                [
+                  false,
+                  false,
+                  false,
+                  true
+                ]
+              ]
+            },
+            "transition": 0
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "halves",
+          "label": "Halves",
+          "description": "First half, then second half (along the handle).",
+          "params": {
             "steps": {
               "groups": 2,
               "steps": 2,
@@ -1083,115 +1280,16 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           },
           "distribution": {
             "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
-          },
-          "strength": 1
-        },
-        {
-          "id": "blocks",
-          "label": "Blocks",
-          "description": "Four blocks light one after another.",
-          "params": {
-            "arrange": "blocks",
-            "steps": {
-              "groups": 4,
-              "steps": 4,
-              "cells": [
-                [
-                  true,
-                  false,
-                  false,
-                  false
-                ],
-                [
-                  false,
-                  true,
-                  false,
-                  false
-                ],
-                [
-                  false,
-                  false,
-                  true,
-                  false
-                ],
-                [
-                  false,
-                  false,
-                  false,
-                  true
-                ]
-              ]
-            },
-            "transition": 0
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 1
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
-          },
-          "strength": 1
-        },
-        {
-          "id": "outside-in",
-          "label": "Outside-In",
-          "description": "The outer pairs first, then toward the center.",
-          "params": {
-            "arrange": "blocks",
-            "steps": {
-              "groups": 3,
-              "steps": 3,
-              "cells": [
-                [
-                  false,
-                  false,
-                  true
-                ],
-                [
-                  false,
-                  true,
-                  false
-                ],
-                [
-                  true,
-                  false,
-                  false
-                ]
-              ]
-            },
-            "transition": 0
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 1
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": true
-            }
+            "mode": "linear",
+            "reverse": false
           },
           "strength": 1
         },
         {
           "id": "build-up",
           "label": "Build-Up",
-          "description": "Blocks add up until everything is on.",
+          "description": "Bands add up along the handle until everything is on.",
           "params": {
-            "arrange": "blocks",
             "steps": {
               "groups": 4,
               "steps": 4,
@@ -1230,11 +1328,47 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           },
           "distribution": {
             "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "center-out",
+          "label": "Center-Out",
+          "description": "Rings step outward from the center.",
+          "params": {
+            "steps": {
+              "groups": 3,
+              "steps": 3,
+              "cells": [
+                [
+                  true,
+                  false,
+                  false
+                ],
+                [
+                  false,
+                  true,
+                  false
+                ],
+                [
+                  false,
+                  false,
+                  true
+                ]
+              ]
+            },
+            "transition": 0
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 0.5
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "radial",
+            "reverse": false
           },
           "strength": 1
         },
@@ -1243,7 +1377,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "label": "Segments",
           "description": "Each bar's segments light in turn.",
           "params": {
-            "arrange": "blocks",
             "steps": {
               "groups": 4,
               "steps": 4,
@@ -1296,7 +1429,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/waveform",
     "name": "Wave",
-    "hash": "sha256:4ec09da07e3528d04707d6bbc9d989d1da4b46951adf4bb2951493e3b20b216d",
+    "hash": "sha256:5906660f915f700bb4809d14bc40fa63028d4bb8743d1dbae3e2c59f16d5265e",
     "signatures": [
       "scalar"
     ],
@@ -1305,7 +1438,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "kind": "modifier",
       "alias": "@pixelmapper/waveform",
       "name": "Wave",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "apiVersion": "^1.1.0",
       "description": "Brightness shape that moves across the fixtures. The profile curve says what is lit over the distance from the moving position (dot, bar, wave, wedge, edge, flash; peak/floor bound it), the motion curve says where that position is during one pass (run, ping-pong, step, hold, ease). Levels are fractions of the programmed value; the shared distribution decides the order and direction.",
       "purpose": "Brightness runs, swings or breathes across your fixtures.",
@@ -1326,7 +1459,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "across",
           "within"
         ],
-        "grouping": true,
+        "grouping": false,
         "default": {
           "mode": "order"
         }
@@ -1385,7 +1518,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "type": "bool",
           "label": "Invert",
           "default": false,
-          "tier": "advanced",
+          "tier": "hidden",
           "description": "Dark where the profile is lit."
         }
       ],
@@ -1400,8 +1533,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
               "shape": "dot",
               "args": {
                 "width": 0.15,
-                "softness": 0.5,
-                "floor": 0
+                "softness": 0.5
               }
             },
             "motion": {
@@ -1424,7 +1556,39 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "strength": 1,
           "when": {
             "kind": [
-              "row",
+              "row"
+            ]
+          }
+        },
+        {
+          "id": "sweep",
+          "label": "Sweep",
+          "description": "A soft band crosses the rig along the handle.",
+          "params": {
+            "profile": {
+              "shape": "bar",
+              "args": {
+                "width": 0.3,
+                "softness": 0.5
+              }
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "kind": [
               "area"
             ]
           }
@@ -1432,7 +1596,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
         {
           "id": "ping-pong",
           "label": "Ping-Pong",
-          "description": "A comet swings back and forth.",
+          "description": "A comet swings back and forth across the rig.",
           "params": {
             "profile": {
               "shape": "wedge",
@@ -1451,11 +1615,8 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           },
           "distribution": {
             "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
+            "mode": "linear",
+            "reverse": false
           },
           "strength": 1
         },
@@ -1491,41 +1652,9 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "strength": 1
         },
         {
-          "id": "chain",
-          "label": "Chain",
-          "description": "Three dots run along the row.",
-          "params": {
-            "profile": {
-              "shape": "dot",
-              "args": {
-                "width": 0.3,
-                "softness": 0.5,
-                "repeat": 3
-              }
-            },
-            "motion": {
-              "shape": "run",
-              "args": {}
-            }
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 8
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
-          },
-          "strength": 1
-        },
-        {
           "id": "build",
           "label": "Build",
-          "description": "Fixtures fill up one after another, then hold.",
+          "description": "The rig fills up along the handle, then holds.",
           "params": {
             "profile": {
               "shape": "edge",
@@ -1543,6 +1672,93 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
           "speed": {
             "mode": "beat",
             "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "linear",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "ripple",
+          "label": "Ripple",
+          "description": "Rings roll outward from the center.",
+          "params": {
+            "profile": {
+              "shape": "wave",
+              "args": {
+                "repeat": 2
+              }
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "radial",
+            "reverse": false
+          },
+          "strength": 1
+        },
+        {
+          "id": "orbit",
+          "label": "Orbit",
+          "description": "A comet circles around the center.",
+          "params": {
+            "profile": {
+              "shape": "wedge",
+              "args": {
+                "length": 0.3
+              }
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "conical",
+            "reverse": false
+          },
+          "strength": 1,
+          "when": {
+            "kind": [
+              "ring"
+            ]
+          }
+        },
+        {
+          "id": "flash-chain",
+          "label": "Flash Chain",
+          "description": "Fixtures flash one after another.",
+          "params": {
+            "profile": {
+              "shape": "flash",
+              "args": {
+                "attack": 0.05,
+                "decay": 0.3
+              }
+            },
+            "motion": {
+              "shape": "run",
+              "args": {}
+            }
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
           },
           "distribution": {
             "scope": "across",
@@ -1585,70 +1801,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
               "single"
             ]
           }
-        },
-        {
-          "id": "ring",
-          "label": "Ring",
-          "description": "A ring of light expands from the center.",
-          "params": {
-            "profile": {
-              "shape": "dot",
-              "args": {
-                "width": 0.25,
-                "softness": 0.5
-              }
-            },
-            "motion": {
-              "shape": "run",
-              "args": {}
-            }
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 4
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "radial",
-            "reverse": false
-          },
-          "strength": 1,
-          "when": {
-            "kind": [
-              "ring"
-            ]
-          }
-        },
-        {
-          "id": "flash-chain",
-          "label": "Flash Chain",
-          "description": "Fixtures flash one after another.",
-          "params": {
-            "profile": {
-              "shape": "flash",
-              "args": {
-                "attack": 0.05,
-                "decay": 0.3
-              }
-            },
-            "motion": {
-              "shape": "run",
-              "args": {}
-            }
-          },
-          "speed": {
-            "mode": "beat",
-            "beatValue": 4
-          },
-          "distribution": {
-            "scope": "across",
-            "mode": "order",
-            "reverse": false,
-            "order": {
-              "mirror": false
-            }
-          },
-          "strength": 1
         },
         {
           "id": "bar-chase",

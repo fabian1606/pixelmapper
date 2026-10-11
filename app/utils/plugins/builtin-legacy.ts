@@ -12,7 +12,9 @@ import { BUILTIN_BY_ALIAS } from './builtin-index';
 import { migrateWaveformV1, type WaveformV1Params } from './legacy/waveform-v1';
 import { migrateColorAdjustV1, type ColorAdjustV1Params } from './legacy/color-adjust-v1';
 import { migrateNoiseV1, type NoiseV1Params } from './legacy/noise-v1';
+import { migrateNoiseV2 } from './legacy/noise-v2';
 import { migrateSequencerV1, type SequencerV1Params } from './legacy/sequencer-v1';
+import { migrateSequencerV2 } from './legacy/sequencer-v2';
 import type { Distribution } from '@pixelmapper/extension-api';
 import type { SpeedConfig } from '~/utils/engine/types';
 
@@ -49,8 +51,11 @@ export interface LegacyPatch {
 const MIGRATIONS: Record<string, (params: Record<string, ParamValue>, m: MigratableInstance) => LegacyPatch> = {
   '@pixelmapper/waveform@1': (p, m) => ({ params: migrateWaveformV1(p as WaveformV1Params, m.strength ?? 1) }),
   '@pixelmapper/color-adjust@1': p => ({ params: migrateColorAdjustV1(p as ColorAdjustV1Params) }),
-  '@pixelmapper/noise@1': p => ({ params: migrateNoiseV1(p as NoiseV1Params) }),
+  // Noise 1 → 3 also moves "All the same" to Fixture by fixture (see noise-v2).
+  '@pixelmapper/noise@1': (p, m) => migrateNoiseV2(migrateNoiseV1(p as NoiseV1Params), m.distribution),
+  '@pixelmapper/noise@2': (p, m) => migrateNoiseV2(p, m.distribution, m.targetFixtureIds?.length ?? 0),
   '@pixelmapper/sequencer@1': (p, m) => migrateSequencerV1(p as SequencerV1Params, m),
+  '@pixelmapper/sequencer@2': (p, m) => migrateSequencerV2(p, m.distribution),
 };
 
 /** The former built-in a hash belongs to, if any. */

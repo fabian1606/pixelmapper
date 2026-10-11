@@ -1,11 +1,10 @@
 /**
- * Noise editors (plan M9.4, M9.5): range lines, events, "N of M on".
+ * Noise history editor (plan M9.4, review): range lines, coherence drag, peaks lane.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import type { NoiseHistoryValue } from '@pixelmapper/extension-api';
 import PmNoiseHistory from './PmNoiseHistory.vue';
-import PmPickCount from './PmPickCount.vue';
 
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 240, height: 72, right: 240, bottom: 72, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
@@ -34,7 +33,7 @@ describe('pm.noiseHistory', () => {
     expect(last<NoiseHistoryValue>(w).min).toBeCloseTo(0.1, 2);
   });
 
-  it('events: drag sets the rate, click flips, double-click toggles', async () => {
+  it('peaks: drag sets the frequency, click flips, buttons remove and add', async () => {
     const w = mount(PmNoiseHistory, { props: { modelValue: value } });
     // Marker 1 sits at 2 steps (rate 0.5); dragging it to 1 step → rate 1.
     await drag(w, '[data-event="1"]', 60, 60);
@@ -42,17 +41,18 @@ describe('pm.noiseHistory', () => {
     await w.find('[data-event="1"]').trigger('pointerdown', { button: 0, clientX: 120, clientY: 60 });
     window.dispatchEvent(new PointerEvent('pointerup'));
     expect(last<NoiseHistoryValue>(w).dir).toBe('down');
-    await w.find('[data-noise-history]').trigger('dblclick');
+    await w.find('[data-peaks-remove]').trigger('click');
     expect(last<NoiseHistoryValue>(w).rate).toBe(0);
+    await w.setProps({ modelValue: { ...value, rate: 0 } });
+    await w.find('[data-peaks-add]').trigger('click');
+    expect(last<NoiseHistoryValue>(w).rate).toBe(0.5);
   });
-});
 
-describe('pm.pickCount', () => {
-  it('shows N of M; Auto is a third; dragging sets N', async () => {
-    const w = mount(PmPickCount, { props: { modelValue: { count: 0 }, rankCount: 9 } });
-    expect(w.find('[data-pick-label]').text()).toBe('3 of 9 on');
-    await w.find('[data-pick-row]').trigger('pointerdown', { button: 0, clientX: 160 });
+  it('dragging the traces up raises the coherence', async () => {
+    const w = mount(PmNoiseHistory, { props: { modelValue: { ...value, coherence: 0.2 } } });
+    await w.find('[data-noise-history]').trigger('pointerdown', { button: 0, clientX: 50, clientY: 60 });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 20 }));
     window.dispatchEvent(new PointerEvent('pointerup'));
-    expect(last<{ count: number }>(w).count).toBe(6);
+    expect(last<NoiseHistoryValue>(w).coherence).toBeCloseTo(0.7);
   });
 });

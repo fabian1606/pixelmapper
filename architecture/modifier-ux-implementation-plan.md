@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Implemented (M0–M12, with owner revision R1) |
+| **Status** | Implemented (M0–M12, with owner revisions R1 and R2) |
 | **Date** | 2026-10-10 |
 | **Builds on** | [ADR 0001](adr/0001-extension-and-content-plugin-system.md) (content plugins, ABI v1, `pm.*` inputs) |
 | **Design rules for new modifiers** | [Modifier design principles](guides/modifier-design-principles.md) |
@@ -49,6 +49,27 @@ After trying M4 in the app, the owner simplified the Distribution UI:
    - Built-in plugins MUST NOT derive their spatial layout from `s.x/s.y` or own origin/angle params; position-based noise textures are the only exception (Noise *Coherence*).
    - Fixture by fixture and Within each fixture never depend on the handle (core test `order_and_within_ignore_the_handle`).
    - The old Sequencer/Noise violate this until M8/M9 replace them.
+
+## Revision R2 (owner review, 2026-10-11) — binding, overrides R1 and the tasks below
+
+After trying the built-ins, the owner curated every modifier (one review per modifier) and changed the card frame:
+
+1. **Card order (every modifier):** live strip (very top) · Preset row · editors and params · More · Distribution · Channels · Strength + Speed (very bottom).
+2. **Presets are a general component.** Every card has the Preset row; a plugin without presets gets one *Default* recipe (the schema defaults, `cardPresets`).
+   - Presentation follows effect-preset menus (Resolume, Ableton, Figma): one row `Preset ▾ Name`, `· modified` after an edit with ↺ back to the recipe.
+   - The list shows each recipe with a thin animated strip and a `2D` badge when it spreads on the stage.
+   - Hover / arrow keys preview the recipe in the live strip and on the fixtures (engine-only override, not saved, not synced, no history); click / Enter applies it as one step, Esc restores.
+3. **Presets never set a direction.** A recipe that uses Spatial 2D lays the handle along the selection; top→bottom or diagonal is a drag of the handle on the canvas. The radial radius is the handle length (no automatic change).
+4. **Not every distribution option shows for every modifier.** Manifests declare `distribution.modes/scopes` and the new `withinOffset: false` (hides the Within *Offset* choice when the plugin ignores it).
+5. **ABI v1.2:** Frame slot `[11] spread` (0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture), so plugins can decide *who shares a value* and *how rows form* without guessing from `rank`.
+6. **Enum options can need a distribution:** `optionDistribution` (option → distribution patch) is applied when the option is picked (Color Shift *Alternate* → Fixture by fixture).
+7. **Per modifier:**
+   - **Wave:** presets Chase · Sweep (2D) · Ping-Pong (2D) · Center Out · Build (2D) · Ripple (2D radial) · Orbit (2D conical, replaces the broken Ring) · Flash Chain · Breathe · Bar Chase. Chain removed (Chase + Repeat). Invert hidden. All four spreads offered.
+   - **Pattern:** the *Groups* param is removed — the spread decides the rows: Fixture by fixture alternates (1-2-1-2), Spatial 2D cuts bands along the handle (1-1-2-2), Within each fixture cuts bands of heads. Presets Odd/Even · Chase 3 · Sweep (2D) · Halves (2D) · Build-Up (2D) · Center-Out (2D radial) · Segments. Within *Offset* hidden.
+   - **Noise:** *Pick* mode and *Fixtures on* are removed; **Frequency** (how often peaks happen) is a primary control and a lane in the graph. The spread decides who shares a random value: All the same = the whole rig, Fixture by fixture = every fixture (all its pixels), Spatial 2D / Within = every pixel. Peaks rise to full / dip to dark after the range; hardness also squares their edges; fixture by fixture with enough numbers picks exactly that share (Random Pick never goes dark). Coherence forms real patches along the spread; the graph shows four neighbours that follow each other as coherence rises (drag up/down on them). Presets Candle · Twinkle · Random Pick · Fire · Water · Faulty · Lightning (new) · Color Jitter.
+   - **Color Shift:** Rainbow rebuilt as a palette (works on white fixtures); new Ripple (2D radial) and Color Wheel (2D conical); Palette Run is the default without color; Two Colors removed; White Accent only with color; Saturation under More, White dip primary; *Alternate* switches to Fixture by fixture.
+8. **Earlier deviations kept** (owner, 2026-10-11): Flash Chain and White Accent use motion Run (Flash Chain 4 beats), the white dip blends toward white, Checker stays removed, Color Shift's option is named *Arrange*; Chain and Noise *Pick count* are gone with this revision.
+9. **Migration:** Pattern 2 → 3 drops *Groups* (Blocks over the order become bands along the order line; mirrored → radial). Noise 2 → 3 maps Pick to peaks on the beat (share = count / fixtures, 0 = a third) and moves Level instances that used *All the same* to *Fixture by fixture* (they were per fixture before). Sequencer 1.x *sections* become 8 alternating bands; *scatter* becomes Noise peaks with the density as the share.
 
 ## 0. Background
 

@@ -102,7 +102,7 @@ defineExpose({ setSpread });
       <span class="w-14 shrink-0 text-[11px] text-muted-foreground">Mode</span>
       <SegmentedControl class="flex-1" aria-label="Mode" :options="modes" :model-value="d.mode" @update:model-value="v => emit('update', { ...d, mode: v }, 'Change Distribution Mode')" />
     </div>
-    <div v-if="spread === 'within'" class="flex items-center gap-2">
+    <div v-if="spread === 'within' && options?.withinOffset !== false" class="flex items-center gap-2">
       <span class="w-14 shrink-0 text-[11px] text-muted-foreground leading-tight">Offset</span>
       <SegmentedControl class="flex-1" aria-label="Offset per fixture" :options="OFFSETS" :model-value="d.withinOffset" @update:model-value="v => emit('update', { ...d, withinOffset: v }, 'Change Within Offset')" />
     </div>

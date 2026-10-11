@@ -22,6 +22,8 @@ export const CTX = {
   timeMs: 0, beatTime: 1, bpm: 2, phaseSpeed: 3, arity: 4, seedLo: 5, seedHi: 6, strength: 7,
   // ABI v1.1 (ADR A20)
   timePhase: 8, rankCount: 9, distGroupCount: 10,
+  // ABI v1.2: 0 all the same, 1 spatial 2D, 2 fixture by fixture, 3 within each fixture
+  spread: 11,
 } as const;
 /** Field offsets of a sample (f32 index). */
 export const SAMPLE = {

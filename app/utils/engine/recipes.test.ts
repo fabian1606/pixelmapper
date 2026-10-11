@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
-import { activePreset, applyPreset, pickPreset } from './recipes';
+import { activePreset, applyPreset, cardPresets, pickPreset } from './recipes';
+import { distributionForParams } from './option-distribution';
 import { analyzeSelection } from './distribution/selection-shape';
 import { selectionDistribution } from './distribution/selection-defaults';
 import { createDistribution } from './distribution/create';
@@ -65,5 +66,48 @@ describe('recipes', () => {
     const m = applyPreset(inst(), twins, twins.presets![1]!);
     expect(activePreset(m, twins)?.id).toBe('bar');
     expect(activePreset(applyPreset(inst(), twins, twins.presets![0]!), twins)?.id).toBe('ring');
+  });
+});
+
+describe('every modifier has recipes', () => {
+  it('a manifest without presets gets one Default recipe (the schema defaults), active on a fresh instance', () => {
+    const bare = { params: manifest.params } as unknown as ContentPluginManifest;
+    expect(cardPresets(bare).map(p => p.label)).toEqual(['Default']);
+    expect(activePreset(inst(), bare)?.id).toBe('default');
+    expect(cardPresets(manifest)).toBe(manifest.presets);
+  });
+});
+
+describe('option distribution (manifest optionDistribution)', () => {
+  const m = {
+    params: [{ key: 'arrange', type: 'enum', options: ['gradient', 'alternate'], default: 'gradient', label: 'Arrange', optionDistribution: { alternate: { mode: 'order' } } }],
+  } as unknown as ContentPluginManifest;
+
+  it('picking the option switches the spread and places it on the selection', () => {
+    const d = createDistribution({ mode: 'linear' });
+    const next = distributionForParams(m, { arrange: 'gradient' }, { arrange: 'alternate' }, d, analyzeSelection(row(4)));
+    expect(next?.mode).toBe('order');
+    expect(next?.order.line).toBeTruthy();
+  });
+
+  it('no change when the option stays, has no patch, or the spread already matches', () => {
+    const d = createDistribution({ mode: 'linear' });
+    expect(distributionForParams(m, { arrange: 'alternate' }, { arrange: 'alternate' }, d)).toBeNull();
+    expect(distributionForParams(m, { arrange: 'alternate' }, { arrange: 'gradient' }, d)).toBeNull();
+    expect(distributionForParams(m, { arrange: 'gradient' }, { arrange: 'alternate' }, createDistribution({ mode: 'order' }))).toBeNull();
+  });
+});
+
+describe('twin recipes (same params, other spread)', () => {
+  it('the spread decides between recipes with equal params', () => {
+    const twins = {
+      params: manifest.params,
+      presets: [
+        { id: 'odd', label: 'Odd/Even', params: { w: 0.5 }, distribution: { scope: 'across', mode: 'order', reverse: false, order: { mirror: false } } },
+        { id: 'halves', label: 'Halves', params: { w: 0.5 }, distribution: { scope: 'across', mode: 'linear', reverse: false } },
+      ],
+    } as unknown as ContentPluginManifest;
+    expect(activePreset(applyPreset(inst(), twins, twins.presets![1]!), twins)?.id).toBe('halves');
+    expect(activePreset(applyPreset(inst(), twins, twins.presets![0]!), twins)?.id).toBe('odd');
   });
 });

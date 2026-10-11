@@ -47,7 +47,7 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 1. **Base values** — every target's chaser value (0–255) into `base_buffer` and `render_buffer`.
 2. **Modifiers, in list order** — for each enabled instance:
    1. *Collect samples* by signature: `scalar` → one sample per targeted channel (filtered by channel types and fixture mask); `rgb` → one per head with a color system; `panTilt` → one per head with pan + tilt.
-   2. *Fill `FrameCtx`*: time, beat time, BPM, phase speed, arity, instance seed, strength, and (v1.1) `timePhase`, `rankCount`, `distGroupCount`.
+   2. *Fill `FrameCtx`*: time, beat time, BPM, phase speed, arity, instance seed, strength, and (v1.1) `timePhase`, `rankCount`, `distGroupCount`, (v1.2) `spread`.
    3. *Fill samples*:
       - world x/y;
       - the distribution values (`spatial`, `rank`, `distGroup`, see below) and the legacy `phase = timePhase − spatial`;
@@ -84,7 +84,7 @@ Plugins are content-addressed packages (`sha256:` over manifest ‖ wasm ‖ ui)
 
 Safety (ADR §6.7): modules may only import `env.memory`, `env.abort`, `pm.budget`, `pm.log`; the toolchain instruments every loop and call with a budget counter (`pm.budget`), so an infinite loop traps instead of hanging; memory is capped at 256 pages. Traps, aborts and budget overruns post `plugin-error` to the main thread (toast) and disable that instance only. A worker that stops producing frames altogether is killed by the watchdog (above).
 
-## ABI v1 / v1.1
+## ABI v1 / v1.1 / v1.2
 
 Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
 
@@ -100,9 +100,10 @@ Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(params
 | 8 | timePhase (v1.1) | 13 | spatial (v1.1) |
 | 9 | rankCount (v1.1) | 14 | rank (v1.1, −1 = none) |
 | 10 | distGroupCount (v1.1) | 15 | distGroup (v1.1, −1 = none) |
-| 11–15 | reserved | | |
+| 11 | spread (v1.2: 0 same, 1 spatial 2D, 2 fixture by fixture, 3 within) | | |
+| 12–15 | reserved | | |
 
-v1.1 is additive: v1 plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
+v1.1 and v1.2 are additive: older plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
 
 ## Main-thread previews
 

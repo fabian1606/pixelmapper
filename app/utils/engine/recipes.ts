@@ -23,6 +23,14 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
   return ka.every(k => jsonEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
+/**
+ * The recipes a card shows: the manifest's presets, or one "Default" recipe
+ * (the schema defaults) so every modifier has a preset bar.
+ */
+export function cardPresets(manifest: ContentPluginManifest): ManifestPreset[] {
+  return manifest.presets?.length ? manifest.presets : [{ id: 'default', label: 'Default', params: {} }];
+}
+
 /** Params of a recipe: manifest defaults overlaid with the recipe's params. */
 export function presetParams(manifest: ContentPluginManifest, preset: ManifestPreset): ModifierInstance['params'] {
   return { ...defaultParams(manifest.params), ...(JSON.parse(JSON.stringify(preset.params)) as ModifierInstance['params']) };
@@ -67,12 +75,18 @@ function normalizedParams(manifest: ContentPluginManifest, params: ModifierInsta
   return out;
 }
 
-/** How well the instance's speed and distribution match a recipe (fields the recipe sets). */
+/**
+ * How well the instance's speed and distribution match a recipe (fields the
+ * recipe sets). The spread (scope, mode) outweighs the minor fields, so
+ * recipes with the same params but another spread (Odd/Even vs Halves) are
+ * told apart.
+ */
 function setupScore(m: ModifierInstance, p: ManifestPreset): number {
   let score = 0;
   if (p.speed?.beatValue !== undefined && p.speed.beatValue === m.speed.beatValue) score++;
   const d = p.distribution ?? {};
-  for (const k of ['scope', 'mode', 'withinOffset', 'reverse'] as const) if (d[k] !== undefined && d[k] === m.distribution[k]) score++;
+  for (const k of ['scope', 'mode'] as const) if (d[k] !== undefined && d[k] === m.distribution[k]) score += 10;
+  for (const k of ['withinOffset', 'reverse'] as const) if (d[k] !== undefined && d[k] === m.distribution[k]) score++;
   if (d.order?.mirror !== undefined && !!d.order.mirror === !!m.distribution.order.mirror) score++;
   return score;
 }
@@ -84,7 +98,7 @@ function setupScore(m: ModifierInstance, p: ManifestPreset): number {
  */
 export function activePreset(m: ModifierInstance, manifest: ContentPluginManifest): ManifestPreset | null {
   const full = normalizedParams(manifest, m.params);
-  const matches = (manifest.presets ?? []).filter(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full));
+  const matches = cardPresets(manifest).filter(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full));
   if (matches.length <= 1) return matches[0] ?? null;
   return matches.reduce((best, p) => (setupScore(m, p) > setupScore(m, best) ? p : best));
 }

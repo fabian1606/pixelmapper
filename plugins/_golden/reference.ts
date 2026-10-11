@@ -6,7 +6,7 @@
 import type { ContentPluginManifest, ManifestPreset } from '@pixelmapper/plugin-toolchain/types';
 import { createDistribution } from '../../app/utils/engine/distribution/create';
 import { resolveRanks } from '../../app/utils/engine/distribution/order';
-import { frameCounts, sampleDistribution } from '../../app/utils/engine/distribution/sample';
+import { frameCounts, sampleDistribution, spreadKind } from '../../app/utils/engine/distribution/sample';
 import { analyzeSelection } from '../../app/utils/engine/distribution/selection-shape';
 import { selectionDistribution } from '../../app/utils/engine/distribution/selection-defaults';
 
@@ -24,7 +24,7 @@ export function referenceRig(multiHead: boolean): { x: number; y: number; heads:
 }
 
 /** Samples of a preset's distribution placed on a rig (as on add). */
-export function rigSamples(preset: ManifestPreset, multiHead: boolean): { samples: RigSample[]; rankCount: number; distGroupCount: number; ticks: number } {
+export function rigSamples(preset: ManifestPreset, multiHead: boolean): { samples: RigSample[]; rankCount: number; distGroupCount: number; ticks: number; spread: number } {
   const rig = referenceRig(multiHead);
   const shape = analyzeSelection(rig);
   const d = selectionDistribution(createDistribution(preset.distribution), shape);
@@ -40,7 +40,7 @@ export function rigSamples(preset: ManifestPreset, multiHead: boolean): { sample
   });
   const counts = frameCounts(d, rankCount, Math.max(...rig.map(f => f.heads)));
   const ticks = d.scope === 'within' ? Math.max(...rig.map(f => f.heads)) : d.mode === 'order' ? rankCount : rig.length;
-  return { samples, ...counts, ticks };
+  return { samples, ...counts, ticks, spread: spreadKind(d) };
 }
 
 /** SDK `sampleLut` (linear interpolation, x clamped to [0, 1]). */

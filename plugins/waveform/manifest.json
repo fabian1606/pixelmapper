@@ -3,7 +3,7 @@
   "kind": "modifier",
   "alias": "@pixelmapper/waveform",
   "name": "Wave",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "apiVersion": "^1.1.0",
   "description": "Brightness shape that moves across the fixtures. The profile curve says what is lit over the distance from the moving position (dot, bar, wave, wedge, edge, flash; peak/floor bound it), the motion curve says where that position is during one pass (run, ping-pong, step, hold, ease). Levels are fractions of the programmed value; the shared distribution decides the order and direction.",
   "purpose": "Brightness runs, swings or breathes across your fixtures.",
@@ -13,37 +13,41 @@
   "distribution": {
     "modes": ["none", "linear", "radial", "conical", "order"],
     "scopes": ["across", "within"],
-    "grouping": true,
+    "grouping": false,
     "default": { "mode": "order" }
   },
   "params": [
     {
       "key": "profile", "type": "curve", "label": "Profile", "tier": "primary",
       "description": "What is lit around the moving position (x = distance along the distribution).",
-      "domain": "signed", "axis": "fixtures", "range": "unipolar",
-      "shapes": ["dot", "bar", "wave", "wedge", "edge", "flash"],
+      "domain": "signed", "axis": "fixtures", "range": "unipolar", "shapes": ["dot", "bar", "wave", "wedge", "edge", "flash"],
       "default": { "shape": "dot", "args": { "width": 0.15, "softness": 0.5, "repeat": 1, "peak": 1, "floor": 0 } }
     },
     {
       "key": "motion", "type": "curve", "label": "Motion", "tier": "primary",
       "description": "Where the profile is during one pass.",
-      "domain": "cycle", "axis": "beats",
-      "shapes": ["run", "pingpong", "step", "hold", "ease"],
+      "domain": "cycle", "axis": "beats", "shapes": ["run", "pingpong", "step", "hold", "ease"],
       "default": { "shape": "run", "args": {} }
     },
-    { "key": "invert", "type": "bool", "label": "Invert", "default": false, "tier": "advanced", "description": "Dark where the profile is lit." }
+    { "key": "invert", "type": "bool", "label": "Invert", "default": false, "tier": "hidden", "description": "Dark where the profile is lit." }
   ],
   "presets": [
     {
       "id": "chase", "label": "Chase", "description": "One dot runs along the row.", "default": true,
-      "params": { "profile": { "shape": "dot", "args": { "width": 0.15, "softness": 0.5, "floor": 0 } }, "motion": { "shape": "run", "args": {} } },
+      "params": { "profile": { "shape": "dot", "args": { "width": 0.15, "softness": 0.5 } }, "motion": { "shape": "run", "args": {} } },
       "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1,
-      "when": { "kind": ["row", "area"] }
+      "when": { "kind": ["row"] }
     },
     {
-      "id": "ping-pong", "label": "Ping-Pong", "description": "A comet swings back and forth.",
+      "id": "sweep", "label": "Sweep", "description": "A soft band crosses the rig along the handle.",
+      "params": { "profile": { "shape": "bar", "args": { "width": 0.3, "softness": 0.5 } }, "motion": { "shape": "run", "args": {} } },
+      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1,
+      "when": { "kind": ["area"] }
+    },
+    {
+      "id": "ping-pong", "label": "Ping-Pong", "description": "A comet swings back and forth across the rig.",
       "params": { "profile": { "shape": "wedge", "args": { "length": 0.3 } }, "motion": { "shape": "pingpong", "args": {} } },
-      "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
+      "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
     },
     {
       "id": "center-out", "label": "Center Out", "description": "Light starts in the middle and runs to both ends.",
@@ -51,31 +55,31 @@
       "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": true } }, "strength": 1
     },
     {
-      "id": "chain", "label": "Chain", "description": "Three dots run along the row.",
-      "params": { "profile": { "shape": "dot", "args": { "width": 0.3, "softness": 0.5, "repeat": 3 } }, "motion": { "shape": "run", "args": {} } },
-      "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
-    },
-    {
-      "id": "build", "label": "Build", "description": "Fixtures fill up one after another, then hold.",
+      "id": "build", "label": "Build", "description": "The rig fills up along the handle, then holds.",
       "params": { "profile": { "shape": "edge", "args": { "softness": 0.05 } }, "motion": { "shape": "hold", "args": { "pause": 0.25 } } },
-      "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
+      "speed": { "mode": "beat", "beatValue": 8 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
     },
     {
-      "id": "breathe", "label": "Breathe", "description": "All fixtures breathe together.",
-      "params": { "profile": { "shape": "wave", "args": { "floor": 0.2 } }, "motion": { "shape": "run", "args": {} } },
-      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "none", "reverse": false }, "strength": 1,
-      "when": { "kind": ["single"] }
+      "id": "ripple", "label": "Ripple", "description": "Rings roll outward from the center.",
+      "params": { "profile": { "shape": "wave", "args": { "repeat": 2 } }, "motion": { "shape": "run", "args": {} } },
+      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "radial", "reverse": false }, "strength": 1
     },
     {
-      "id": "ring", "label": "Ring", "description": "A ring of light expands from the center.",
-      "params": { "profile": { "shape": "dot", "args": { "width": 0.25, "softness": 0.5 } }, "motion": { "shape": "run", "args": {} } },
-      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "radial", "reverse": false }, "strength": 1,
+      "id": "orbit", "label": "Orbit", "description": "A comet circles around the center.",
+      "params": { "profile": { "shape": "wedge", "args": { "length": 0.3 } }, "motion": { "shape": "run", "args": {} } },
+      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "conical", "reverse": false }, "strength": 1,
       "when": { "kind": ["ring"] }
     },
     {
       "id": "flash-chain", "label": "Flash Chain", "description": "Fixtures flash one after another.",
       "params": { "profile": { "shape": "flash", "args": { "attack": 0.05, "decay": 0.3 } }, "motion": { "shape": "run", "args": {} } },
       "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
+    },
+    {
+      "id": "breathe", "label": "Breathe", "description": "All fixtures breathe together.",
+      "params": { "profile": { "shape": "wave", "args": { "floor": 0.2 } }, "motion": { "shape": "run", "args": {} } },
+      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "none", "reverse": false }, "strength": 1,
+      "when": { "kind": ["single"] }
     },
     {
       "id": "bar-chase", "label": "Bar Chase", "description": "A dot runs through every bar, bar after bar.",

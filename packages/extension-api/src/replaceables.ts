@@ -289,34 +289,25 @@ export interface NoiseHistoryValue {
   /** Lowest and highest level (0–1). */
   min: number;
   max: number;
-  /** Events per step (0 = none) and their length in steps. */
+  /** Peaks per step (frequency, 0 = none) and their length in steps. */
   rate: number;
   length: number;
   dir: 'up' | 'down';
+  /** Coherence 0–1 (optional binding: dragging the traces up/down sets it). */
+  coherence?: number;
 }
 
 /**
- * Props of `pm.noiseHistory` (composite editor): sample traces over a few
- * steps with draggable range lines and event markers.
+ * Props of `pm.noiseHistory` (composite editor): neighbouring traces over
+ * a few steps with draggable range lines, a coherence drag and a peaks lane.
  */
 export interface NoiseHistoryProps extends BaseInputProps {
   modelValue: NoiseHistoryValue;
-  /** Renders `cycles` steps of `count` virtual fixtures (levels 0–1, per fixture). */
+  /** Renders `cycles` steps of `count` neighbouring virtual fixtures along the spread (levels 0–1). */
   traces?: (count: number, points: number, cycles: number) => Float32Array[] | null;
 }
 /** Emits of `pm.noiseHistory`. */
 export type NoiseHistoryEmits = CommonInputEmits<NoiseHistoryValue>;
-
-// ── pm.pickCount ────────────────────────────────
-
-/** Props of `pm.pickCount` (composite editor): "N of M on" (`count` 0 = a third). */
-export interface PickCountProps extends BaseInputProps {
-  modelValue: { count: number };
-  /** M: the numbered fixtures. */
-  rankCount?: number;
-}
-/** Emits of `pm.pickCount`. */
-export type PickCountEmits = CommonInputEmits<{ count: number }>;
 
 // ── Contract map ────────────────────────────────
 
@@ -336,7 +327,6 @@ export interface PmInputContracts {
   'pm.hueRange': { props: HueRangeProps; emits: HueRangeEmits };
   'pm.steps': { props: StepsProps; emits: StepsEmits };
   'pm.noiseHistory': { props: NoiseHistoryProps; emits: NoiseHistoryEmits };
-  'pm.pickCount': { props: PickCountProps; emits: PickCountEmits };
 }
 
 /** Name of a replaceable input. */
@@ -358,7 +348,6 @@ export const PM_INPUT_NAMES: readonly PmInputName[] = [
   'pm.hueRange',
   'pm.steps',
   'pm.noiseHistory',
-  'pm.pickCount',
 ];
 
 /**

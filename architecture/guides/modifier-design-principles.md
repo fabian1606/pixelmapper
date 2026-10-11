@@ -110,9 +110,11 @@ The principles are derived from the owner's requirements. Each one names the und
 
 **Need:** Users want to start from something finished and adjust it, not assemble from zero.
 
-**Rule:** Every modifier offers named looks (recipes) that set *all* of its settings at once, including spatial distribution and tempo. Applying one is a single, undoable action. Fine-tuning afterwards uses the same controls as always.
+**Rule:** Every modifier offers named looks (recipes) that set *all* of its settings at once, including spatial distribution and tempo. Applying one is a single, undoable action. Fine-tuning afterwards uses the same controls as always. Every card has the same Preset row (a one-line menu with preview on hover), even a plugin without recipes (*Default*).
 
-**Red flag:** A recipe changes only some settings and leaves a mismatched rest.
+Recipes place the distribution on the selection but never pick a direction: top→bottom, diagonal or a larger radius are a drag of the handle on the canvas (owner decision R2). A recipe that differs from another only in direction is a duplicate.
+
+**Red flag:** A recipe changes only some settings and leaves a mismatched rest, or two recipes differ only in the handle's direction.
 
 ## 12. Shared concepts look and behave the same everywhere
 

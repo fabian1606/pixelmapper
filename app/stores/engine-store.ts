@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, reactive, shallowRef, computed, watch, watchEffect, markRaw, triggerRef } from 'vue';
 import type { Preset } from '~/utils/engine/preset-types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
@@ -418,6 +419,32 @@ export const useEngineStore = defineStore('engine', () => {
   const channelsRevision = ref(0);
   const effectsRevision  = ref(0);
 
+  /**
+   * Recipe preview (preset picker hover): one instance replaced in the engine
+   * packet only — not saved, not synced to collaborators, no history.
+   */
+  let modifierPreview: ModifierInstance | null = null;
+
+  /** The modifiers the engine renders (with the preview swapped in). */
+  function engineModifiers(): ModifierInstance[] {
+    const p = modifierPreview;
+    return p ? modifiers.value.map(m => (m.id === p.id ? p : m)) : modifiers.value;
+  }
+
+  /** Rebuilds the modifiers packet (the render loop dispatches it). */
+  function rebuildModifiersPacket(): void {
+    ({ packet: modifiersPacket, plugins: modifierPlugins } = trace('packet.modifiers', () =>
+      buildModifiersBin(engineModifiers(), flatFixtures.value, getManifest)));
+    effectsRevision.value++;
+  }
+
+  /** Shows `m` on the fixtures in place of the instance with its id (null ends the preview). */
+  function setModifierPreview(m: ModifierInstance | null): void {
+    if (!m && !modifierPreview) return;
+    modifierPreview = m ? JSON.parse(JSON.stringify(m)) as ModifierInstance : null;
+    rebuildModifiersPacket();
+  }
+
   // ── Override layer ────────────────────────────────────────────────────────
 
   /**
@@ -586,7 +613,7 @@ export const useEngineStore = defineStore('engine', () => {
     channelsPacket = trace('packet.channels', () => buildChannelsBin(flatFixtures.value));
     channelsRevision.value++;
     ({ packet: modifiersPacket, plugins: modifierPlugins } = trace('packet.modifiers', () =>
-      buildModifiersBin(modifiers.value, flatFixtures.value, getManifest)));
+      buildModifiersBin(engineModifiers(), flatFixtures.value, getManifest)));
     ensurePluginsLoaded(modifierPlugins);
     resolveUnknownPlugins(modifiers.value);
     effectsRevision.value++;
@@ -1321,6 +1348,7 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   return {
+    setModifierPreview,
     savedPresets,
     selectedPresetId,
     flashStack,
