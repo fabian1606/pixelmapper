@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
@@ -24,8 +25,17 @@ const CATALOG_AS_LAYERS = process.env.NODE_ENV !== 'production' && process.env.P
 const DEBUG_SLOTS = process.env.PM_DEBUG_SLOTS === '1' && process.env.NODE_ENV !== 'production';
 /** Zero-extension build (ADR D17 check, plan P6.9): the core alone must build and run. */
 const NO_EXTENSIONS = process.env.PM_NO_EXTENSIONS === '1';
+/**
+ * Platform implementation behind `#platform` (ADR 0003 D3): the Tauri CLI
+ * sets `TAURI_ENV_PLATFORM` while it drives the build, everything else is
+ * the web platform. Web bundles therefore never contain Tauri code.
+ */
+const PLATFORM_DIR = process.env.TAURI_ENV_PLATFORM ? 'tauri' : 'web';
 
 export default defineNuxtConfig({
+  alias: {
+    '#platform': fileURLToPath(new URL(`./app/platform/${PLATFORM_DIR}/index.ts`, import.meta.url)),
+  },
   // Separate build dir for QA builds next to a running dev server (`.nuxt` is shared otherwise).
   ...(process.env.PM_BUILD_DIR ? { buildDir: process.env.PM_BUILD_DIR } : {}),
   extends: NO_EXTENSIONS ? [] : [

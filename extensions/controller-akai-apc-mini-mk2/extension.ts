@@ -11,8 +11,8 @@ import { driverFactory } from './driver';
 
 export default defineExtension({
   id: 'controller-akai-apc-mini-mk2',
-  version: '1.0.0',
-  apiVersion: '^1.0.0',
+  version: '1.1.0',
+  apiVersion: '^1.1.0',
   displayName: 'AKAI APC Mini mk2',
   description: 'MIDI grid controller: 64 RGB pads, track/scene buttons and 9 faders, with LED feedback and a live-mode twin.',
   contributes: {

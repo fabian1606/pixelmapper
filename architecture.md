@@ -7,7 +7,8 @@ Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript fron
 - **Rendering runs in the browser** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`). Modifiers are sandboxed content plugins (AssemblyScript → WASM) executed by the worker's plugin bridge.
 - **Everything specific is an extension** — controls (color picker, pan/tilt), fixture kinds (NeoPixel strip), outputs (ArtNet, ESP nodes) and hardware controllers (AKAI APC Mini mk2) are extensions. The core runs with zero extensions (`PM_NO_EXTENSIONS=1`, checked in CI).
 - **Outputs are rendered frames** — connectors receive rendered universes/pixels; ESP32 devices are pure output devices. (This replaces the former principle "browser and ESP32 run the same engine".)
-- **Planned targets:** a **Tauri** desktop app (native Rust engine, `wasmtime` modifier runtime, direct ArtNet) and a backend render engine for generated visuals (both out of scope of ADR 0001).
+- **Web first, native where it pays off** ([ADR 0003](architecture/adr/0003-native-platform-layer.md)) — the web app stays a first-class target. Platform-dependent I/O (UDP, serial, MIDI; later raw touch and the engine) goes through the `Platform` contract: host code imports `#platform` (resolved to `app/platform/web` or `app/platform/tauri` at build time), extensions call `getPlatform()`. Missing capabilities are `null` and degrade visibly (Art-Net falls back to the local bridge).
+- **Planned targets:** a **Tauri 2** desktop app (native Rust engine, `wasmtime` modifier runtime, direct ArtNet; migration steps in ADR 0003 §4) and a backend render engine for generated visuals.
 
 ## Architectural Principles
 
@@ -90,6 +91,7 @@ pixelmapper/
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - **Decisions:** [ADR 0002 — Operations, Observation & Agent Layer](architecture/adr/0002-agent-and-operations-layer.md)
 - **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the plugin plan)
+- **Decisions:** [ADR 0003 — Platform Layer: Web First, Native Where It Pays Off](architecture/adr/0003-native-platform-layer.md) (Tauri 2, `#platform`, `getPlatform()`, migration steps)
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign

@@ -1,24 +1,41 @@
 /**
- * ArtNet output via a small local bridge (ADR D17: every connector is an
- * extension). Frames go to the bridge over WebSocket as
- * `[universe u16 LE][512 bytes]`; the bridge emits ArtDMX UDP packets to
- * the configured target. Universes are configured with outputs/mapping.
+ * ArtNet output (ADR D17: every connector is an extension). Universes are
+ * configured with outputs/mapping.
+ *
+ * Two transports (ADR 0003): when the platform can send UDP (desktop app),
+ * ArtDMX packets go straight to the target. In the browser, frames go to a
+ * small local bridge over WebSocket as `[universe u16 LE][512 bytes]` and
+ * the bridge emits the UDP packets.
  */
 import { ref } from 'vue';
-import { ConnectorBase, type ConnectorStatus } from '@pixelmapper/extension-api';
+import { ConnectorBase, getPlatform, type ConnectorStatus, type UdpApi, type UdpSocket } from '@pixelmapper/extension-api';
+import { ARTNET_PORT, ArtDmxSequencer, encodeArtDmx, toArtNetUniverse } from './art-dmx';
 
 /** Connect timeout and retry interval. */
 const CONNECT_TIMEOUT_MS = 5000;
 const RETRY_INTERVAL_MS = 2000;
 
+/** The platform's UDP access, or `null` (browser, or no host in tests). */
+function platformUdp(): UdpApi | null {
+  try {
+    return getPlatform().udp;
+  }
+  catch {
+    return null;
+  }
+}
+
 export class ArtNetConnector extends ConnectorBase {
-  readonly meta = { type: 'artnet', label: 'ArtNet (local bridge)', icon: 'network' };
+  readonly meta = { type: 'artnet', label: 'ArtNet', icon: 'network' };
 
   bridgeUrl = ref('ws://localhost:7777');
   targetIp = ref('255.255.255.255');
-  artnetPort = ref(6454);
+  artnetPort = ref(ARTNET_PORT);
 
   private ws: WebSocket | null = null;
+  /** Direct UDP socket (desktop app); `null` in bridge mode. */
+  private udpSocket: UdpSocket | null = null;
+  private sequencer = new ArtDmxSequencer();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private connectWatchdog: ReturnType<typeof setTimeout> | null = null;
 
@@ -27,10 +44,18 @@ export class ArtNetConnector extends ConnectorBase {
     this.initOutputs(1);
   }
 
+  /** True when packets go out directly over UDP (no bridge needed). */
+  get directUdp(): boolean {
+    return !!platformUdp();
+  }
+
   /** Connects (idempotent; also used by the retry loop). */
   async connect(): Promise<void> {
     this.clearTimers();
     this.teardownSocket();
+    await this.closeUdp();
+    const udp = platformUdp();
+    if (udp) return this.connectDirect(udp);
     if (!this.bridgeUrl.value) return this.failTo('error', 'Bridge URL missing');
 
     this.status.value = 'connecting';
@@ -58,16 +83,18 @@ export class ArtNetConnector extends ConnectorBase {
     this.autoReconnect.value = false;
     this.clearTimers();
     this.teardownSocket();
+    await this.closeUdp();
     this.status.value = 'disconnected';
     this.errorMessage.value = null;
   }
 
   override canAutoConnect(): boolean {
-    return !!this.bridgeUrl.value;
+    return this.directUdp || !!this.bridgeUrl.value;
   }
 
-  /** Sends one universe to the bridge. */
+  /** Sends one universe (1-based) directly or to the bridge. */
   override sendFrame(dmxBuffer: Uint8Array, universe?: number): void {
+    if (this.udpSocket) return this.sendDirect(dmxBuffer, universe);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !universe || universe < 1) return;
     const packet = new Uint8Array(2 + dmxBuffer.length);
     packet[0] = universe & 0xff;
@@ -101,7 +128,44 @@ export class ArtNetConnector extends ConnectorBase {
     return c;
   }
 
-  // ── Socket plumbing ────────────────────────────
+  // ── Direct UDP ─────────────────────────────────
+
+  /** Opens a broadcast-capable UDP socket; no retry loop needed (UDP has no peer). */
+  private async connectDirect(udp: UdpApi) {
+    this.status.value = 'connecting';
+    this.errorMessage.value = null;
+    try {
+      this.udpSocket = await udp.bind({ broadcast: true });
+    }
+    catch (e) {
+      return this.handleFailure(e as Error);
+    }
+    this.sequencer.reset();
+    this.status.value = 'connected';
+    this.autoReconnect.value = true;
+    this.pushLog(`[artnet] direct UDP — target ${this.targetIp.value}:${this.artnetPort.value}`);
+  }
+
+  /** Encodes one ArtDMX packet and sends it to the target. */
+  private sendDirect(dmxBuffer: Uint8Array, universe?: number) {
+    const artUniverse = toArtNetUniverse(universe ?? 0);
+    if (artUniverse === null || !this.udpSocket) return;
+    const packet = encodeArtDmx(artUniverse, dmxBuffer, this.sequencer.next(artUniverse));
+    try {
+      this.udpSocket.send(packet, this.targetIp.value, this.artnetPort.value);
+    }
+    catch (e) {
+      this.pushLog(`[artnet] send failed: ${(e as Error).message ?? e}`);
+    }
+  }
+
+  private async closeUdp() {
+    const socket = this.udpSocket;
+    this.udpSocket = null;
+    await socket?.close().catch(() => {});
+  }
+
+  // ── Bridge socket plumbing ─────────────────────
 
   private handleOpen() {
     this.clearConnectWatchdog();

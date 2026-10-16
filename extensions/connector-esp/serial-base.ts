@@ -1,12 +1,13 @@
 /**
- * Web Serial plumbing shared by the ESP serial connectors: port open/close,
+ * Serial plumbing shared by the ESP serial connectors: port open/close,
  * line-based read loop, boot wait, retry after drops, writes.
  *
- * Web Serial needs a user gesture for the first `requestPort()`; reopening
- * the same port within a session does not, so drops retry until the device
- * disappears (then the user has to click Connect again).
+ * Ports come from the platform (ADR 0003): Web Serial in Chromium, native
+ * serial in the desktop app. On the web the first `requestPort()` needs a
+ * user gesture; reopening the same port within a session does not, so drops
+ * retry until the device disappears (then the user has to click Connect again).
  */
-import { ConnectorBase } from '@pixelmapper/extension-api';
+import { ConnectorBase, getPlatform, type SerialConnection, type SerialPortHandle } from '@pixelmapper/extension-api';
 
 /** Retry interval after a drop. */
 const RETRY_INTERVAL_MS = 2000;
@@ -14,12 +15,13 @@ const RETRY_INTERVAL_MS = 2000;
 export abstract class SerialPortConnector extends ConnectorBase {
   baudRate: number;
 
-  private port: SerialPort | null = null;
-  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private readAbort: AbortController | null = null;
-  private readLoopDone: Promise<void> = Promise.resolve();
+  private port: SerialPortHandle | null = null;
+  private connection: SerialConnection | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private lineWaiters: ((line: string) => void)[] = [];
+  /** Text decoder and unterminated rest of the current line. */
+  private decoder = new TextDecoder();
+  private partial = '';
 
   /** Log tag, e.g. `serial`. */
   protected abstract readonly tag: string;
@@ -44,13 +46,16 @@ export abstract class SerialPortConnector extends ConnectorBase {
     this.status.value = 'connecting';
     this.errorMessage.value = null;
     try {
-      const serial = (navigator as Navigator & { serial?: Serial }).serial;
-      if (!serial) throw new Error('Web Serial is not supported in this browser');
+      const serial = getPlatform().serial;
+      if (!serial) throw new Error('Serial ports need Chrome/Edge or the desktop app');
       if (!this.port) this.port = await serial.requestPort();
-      await this.port.open({ baudRate: this.baudRate });
-      this.writer = this.port.writable!.getWriter();
+      this.decoder = new TextDecoder();
+      this.partial = '';
+      this.connection = await this.port.open({ baudRate: this.baudRate }, {
+        onData: chunk => this.handleChunk(chunk),
+        onDrop: error => this.handleDrop(error),
+      });
       this.onOpen();
-      this.startReadLoop();
       await this.waitForLine(l => this.bootMarkers.some(m => l.startsWith(m)), 3000).catch(() => {
         this.pushLog(`[${this.tag}] boot wait timed out — proceeding`);
       });
@@ -76,14 +81,14 @@ export abstract class SerialPortConnector extends ConnectorBase {
 
   /** True while the port is writable. */
   protected get writable(): boolean {
-    return !!this.writer;
+    return !!this.connection;
   }
 
   /** Writes a packet (fire-and-forget; a failed write disconnects). */
   protected send(packet: Uint8Array): void {
-    if (!this.writer) return;
+    if (!this.connection) return;
     try {
-      this.writer.write(packet).catch(() => this.disconnect());
+      this.connection.write(packet).catch(() => this.disconnect());
     }
     catch {
       void this.disconnect();
@@ -131,58 +136,31 @@ export abstract class SerialPortConnector extends ConnectorBase {
   }
 
   private async teardownHandles() {
-    this.readAbort?.abort();
-    this.readAbort = null;
-    try { await this.readLoopDone; } catch { /* loop already failed */ }
-    try { this.writer?.releaseLock(); } catch { /* not locked */ }
-    this.writer = null;
-    try { await this.port?.close(); } catch { /* already closed */ }
+    const connection = this.connection;
+    this.connection = null;
+    try { await connection?.close(); } catch { /* already closed */ }
   }
 
   private clearRetryTimer() {
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
   }
 
-  /** Reads text lines until aborted; an unexpected end triggers a retry. */
-  private startReadLoop() {
-    const ctrl = new AbortController();
-    this.readAbort = ctrl;
-    const port = this.port!;
-    const run = async () => {
-      const decoder = new TextDecoder();
-      const reader = port.readable!.getReader();
-      const onAbort = () => reader.cancel().catch(() => {});
-      ctrl.signal.addEventListener('abort', onAbort);
-      let partial = '';
-      let dropError: unknown = null;
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            if (!ctrl.signal.aborted) dropError = new Error('Serial port closed');
-            break;
-          }
-          partial += decoder.decode(value, { stream: true });
-          const lines = partial.split('\n');
-          partial = lines.pop() ?? '';
-          for (const raw of lines) {
-            const line = raw.trimEnd();
-            if (!line) continue;
-            this.pushLog(line);
-            this.onLine(line);
-            for (const w of [...this.lineWaiters]) w(line);
-          }
-        }
-      }
-      catch (e) {
-        if (!ctrl.signal.aborted) dropError = e;
-      }
-      finally {
-        ctrl.signal.removeEventListener('abort', onAbort);
-        try { reader.releaseLock(); } catch { /* released */ }
-      }
-      if (dropError && this.status.value === 'connected') this.handleFailure(dropError as Error);
-    };
-    this.readLoopDone = run();
+  /** Splits received bytes into lines; logs them and feeds the hooks and waiters. */
+  private handleChunk(chunk: Uint8Array) {
+    this.partial += this.decoder.decode(chunk, { stream: true });
+    const lines = this.partial.split('\n');
+    this.partial = lines.pop() ?? '';
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      if (!line) continue;
+      this.pushLog(line);
+      this.onLine(line);
+      for (const w of [...this.lineWaiters]) w(line);
+    }
+  }
+
+  /** The port went away while open: retry (only once connected, like before). */
+  private handleDrop(error: Error) {
+    if (this.status.value === 'connected') this.handleFailure(error);
   }
 }

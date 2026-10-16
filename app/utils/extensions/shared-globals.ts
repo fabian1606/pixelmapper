@@ -19,9 +19,10 @@ import { useLiveValue } from '~/composables/extensions/use-live-value';
 import { onFrame } from '~/composables/extensions/on-frame';
 import { registerExtension as hostRegisterExtension, ExtensionValidationError } from './registry';
 import { installActivation } from './activation';
+import { createPlatform } from '#platform';
 
 /** Optional host implementation overrides (tests). */
-type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable'>>;
+type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable' | 'platform'>>;
 
 /** Registers a manifest, logging (not throwing) validation errors so one bad extension cannot stop boot. */
 function safeRegister(manifest: ExtensionManifest): void {
@@ -50,6 +51,8 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     useReplaceable: overrides.useReplaceable ?? useReplaceable,
     getFixture,
     registerExtension: safeRegister,
+    // Web or Tauri implementation, chosen at build time (ADR 0003 D3).
+    platform: overrides.platform ?? createPlatform(),
   };
 
   globalThis.__PIXELMAPPER_SHARED__ = {

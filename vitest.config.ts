@@ -23,6 +23,8 @@ export default defineConfig({
       '@@': r('./'),
       '~': r('./app'),
       '@': r('./app'),
+      // Tests always run against the web platform (ADR 0003 D3).
+      '#platform': r('./app/platform/web/index.ts'),
     },
   },
   test: {

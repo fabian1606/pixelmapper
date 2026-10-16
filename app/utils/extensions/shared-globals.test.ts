@@ -35,7 +35,7 @@ describe('shared globals', () => {
     const shared = globalThis.__PIXELMAPPER_SHARED__!;
     expect(shared.vue).toBe(vue);
     expect(typeof shared.api.defineExtension).toBe('function');
-    expect(shared.api.apiVersion).toBe('1.0.0');
+    expect(shared.api.apiVersion).toBe('1.1.0');
     // Declared composables resolve through the globals.
     const scope = vue.effectScope();
     scope.run(() => {
