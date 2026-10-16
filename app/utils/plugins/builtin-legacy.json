@@ -1,0 +1,1858 @@
+[
+  {
+    "hash": "sha256:ba72269469df1be8318d4e2d924dcc23c2a09f6a5efe60a2c00f2e4d1f5392df",
+    "alias": "@pixelmapper/waveform",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "shape",
+        "type": "enum",
+        "options": [
+          "sine",
+          "square",
+          "triangle",
+          "sawtooth",
+          "bounce",
+          "ramp",
+          "smooth"
+        ],
+        "optionLabels": [
+          "Sine",
+          "Square",
+          "Triangle",
+          "Sawtooth",
+          "Bounce",
+          "Ramp",
+          "Smooth"
+        ],
+        "default": "sine",
+        "label": "Shape"
+      },
+      {
+        "key": "param",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.5,
+        "label": "Shape amount",
+        "description": "Duty cycle (square), peak position (triangle/smooth), direction (sawtooth), bounce count, ramp softness."
+      },
+      {
+        "key": "start",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Start",
+        "group": "Window"
+      },
+      {
+        "key": "end",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "End",
+        "group": "Window"
+      },
+      {
+        "key": "offset",
+        "type": "number",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "label": "Offset",
+        "description": "Vertical baseline shift of the wave; also the hold value outside start/end."
+      },
+      {
+        "key": "useFloor",
+        "type": "bool",
+        "default": false,
+        "label": "Floor",
+        "group": "Window",
+        "description": "Hold at base × floor outside start/end, independent of strength."
+      },
+      {
+        "key": "floor",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Floor level",
+        "group": "Window"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:090e2bc0a1a59f3aa152be198af698453918ca331ad99f1a3d7d7fb19446e793",
+    "alias": "@pixelmapper/color-adjust",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "hueShift",
+        "type": "number",
+        "min": -180,
+        "max": 180,
+        "default": 0,
+        "label": "Hue shift",
+        "unit": "°"
+      },
+      {
+        "key": "saturation",
+        "type": "number",
+        "min": 0,
+        "max": 2,
+        "default": 1,
+        "label": "Saturation"
+      },
+      {
+        "key": "hueRange",
+        "type": "number",
+        "min": 0,
+        "max": 180,
+        "default": 0,
+        "label": "Hue cycle",
+        "unit": "°",
+        "group": "Cycle"
+      },
+      {
+        "key": "satRange",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Saturation cycle",
+        "group": "Cycle"
+      },
+      {
+        "key": "shape",
+        "type": "enum",
+        "options": [
+          "sine",
+          "square",
+          "triangle",
+          "sawtooth",
+          "bounce",
+          "ramp",
+          "smooth"
+        ],
+        "optionLabels": [
+          "Sine",
+          "Square",
+          "Triangle",
+          "Sawtooth",
+          "Bounce",
+          "Ramp",
+          "Smooth"
+        ],
+        "default": "sine",
+        "label": "Cycle shape",
+        "group": "Cycle"
+      },
+      {
+        "key": "shapeParam",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.5,
+        "label": "Shape amount",
+        "group": "Cycle"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:792e8836d580e06fd98ddad53b69af615bc0106009892c1b2d55fde57cc87a6b",
+    "alias": "@pixelmapper/color-adjust",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "options": [
+          "palette",
+          "shift"
+        ],
+        "optionLabels": [
+          "Palette",
+          "Shift"
+        ],
+        "default": "shift",
+        "label": "Mode",
+        "tier": "primary",
+        "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue."
+      },
+      {
+        "key": "palette",
+        "type": "gradient",
+        "label": "Palette",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "default": {
+          "stops": [
+            {
+              "pos": 0,
+              "color": {
+                "r": 1,
+                "g": 0,
+                "b": 0
+              }
+            },
+            {
+              "pos": 0.5,
+              "color": {
+                "r": 0,
+                "g": 0,
+                "b": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "gradient",
+          "alternate"
+        ],
+        "optionLabels": [
+          "Gradient",
+          "Alternate"
+        ],
+        "default": "gradient",
+        "label": "Arrange",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color."
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "when": {
+          "mode": "palette",
+          "arrange": "gradient"
+        },
+        "description": "Hard steps (0) to soft blends (1)."
+      },
+      {
+        "key": "hueShift",
+        "type": "number",
+        "min": -180,
+        "max": 180,
+        "default": 0,
+        "label": "Hue shift",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "hueRange",
+        "type": "number",
+        "min": 0,
+        "max": 180,
+        "default": 40,
+        "label": "Hue range",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "saturation",
+        "type": "number",
+        "min": 0,
+        "max": 2,
+        "default": 1,
+        "label": "Saturation",
+        "tier": "primary",
+        "when": {
+          "mode": "shift"
+        }
+      },
+      {
+        "key": "satDip",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "White dip",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How far the profile's peak fades toward white."
+      },
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How the hue swings over the distance from the moving position.",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "wave",
+          "dot",
+          "bar",
+          "wedge",
+          "flash"
+        ],
+        "default": {
+          "shape": "wave",
+          "args": {}
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the colors are during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      }
+    ]
+  },
+  {
+    "hash": "sha256:0732e43261bb953faf8d1a7d178b55a7a5cdc3a422bc9e8378d55763096b53a1",
+    "alias": "@pixelmapper/sequencer",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "patternType",
+        "type": "enum",
+        "options": [
+          "split",
+          "checkerboard",
+          "sections",
+          "scatter",
+          "flow"
+        ],
+        "optionLabels": [
+          "Split",
+          "Checkerboard",
+          "Sections",
+          "Scatter",
+          "Flow"
+        ],
+        "default": "split",
+        "label": "Pattern"
+      },
+      {
+        "key": "origin",
+        "type": "point",
+        "default": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "label": "Origin"
+      },
+      {
+        "key": "angle",
+        "type": "angle",
+        "default": 0,
+        "label": "Angle"
+      },
+      {
+        "key": "scale",
+        "type": "number",
+        "min": 0.01,
+        "max": 1,
+        "default": 0.1,
+        "label": "Cell size"
+      },
+      {
+        "key": "density",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.5,
+        "label": "Density",
+        "description": "Share of fixtures on (scatter, flow)."
+      },
+      {
+        "key": "densityVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Density variation"
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:50a39fccd9e01a3810ff91f168bdf531b69ab7cee13f1c5138dd78024ffa9b16",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "advanced",
+        "description": "Dark where the profile is lit."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:60bd1fc341d8d1363ddbadd7a382f13d6956d31428d3200e707b06836d26934a",
+    "alias": "@pixelmapper/noise",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "noiseType",
+        "type": "enum",
+        "options": [
+          "white",
+          "perlin",
+          "step"
+        ],
+        "optionLabels": [
+          "White",
+          "Perlin",
+          "Step"
+        ],
+        "default": "white",
+        "label": "Type"
+      },
+      {
+        "key": "scale",
+        "type": "number",
+        "min": 0.1,
+        "max": 10,
+        "default": 1,
+        "label": "Scale",
+        "description": "Spatial frequency of Perlin noise."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation"
+      },
+      {
+        "key": "fade",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Fade",
+        "description": "Crossfade between random values as a fraction of the step."
+      },
+      {
+        "key": "threshold",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Threshold"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:7e87f4b2b9084aac678acc968718f8e3df15daf4272983984880842ec09ea6b1",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "advanced",
+        "description": "Dark where the profile is lit."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:9f90af8d6ab3cca30a463eefe52eb910e952434d951f36bbc2bd4d096b9091cf",
+    "alias": "@pixelmapper/sequencer",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "alternate",
+          "blocks"
+        ],
+        "optionLabels": [
+          "Alternate",
+          "Blocks"
+        ],
+        "default": "alternate",
+        "label": "Groups",
+        "tier": "primary",
+        "description": "How the numbered fixtures form the grid's rows: alternate (1-2-1-2) or consecutive blocks (1-1-2-2)."
+      },
+      {
+        "key": "steps",
+        "type": "steps",
+        "label": "Steps",
+        "tier": "primary",
+        "default": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "description": "Hard switch (0) to a crossfade over the whole step (1)."
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert",
+        "tier": "advanced"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:5a79e76d9b358cc2691149f858533df9c9c253fd3c96f211476d9c355945fc9f",
+    "alias": "@pixelmapper/color-adjust",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "options": [
+          "palette",
+          "shift"
+        ],
+        "optionLabels": [
+          "Palette",
+          "Shift"
+        ],
+        "default": "shift",
+        "label": "Mode",
+        "tier": "primary",
+        "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue."
+      },
+      {
+        "key": "palette",
+        "type": "gradient",
+        "label": "Palette",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "default": {
+          "stops": [
+            {
+              "pos": 0,
+              "color": {
+                "r": 1,
+                "g": 0,
+                "b": 0
+              }
+            },
+            {
+              "pos": 0.5,
+              "color": {
+                "r": 0,
+                "g": 0,
+                "b": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "gradient",
+          "alternate"
+        ],
+        "optionLabels": [
+          "Gradient",
+          "Alternate"
+        ],
+        "default": "gradient",
+        "label": "Arrange",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color."
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "when": {
+          "mode": "palette",
+          "arrange": "gradient"
+        },
+        "description": "Hard steps (0) to soft blends (1)."
+      },
+      {
+        "key": "hueShift",
+        "type": "number",
+        "min": -180,
+        "max": 180,
+        "default": 0,
+        "label": "Hue shift",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "hueRange",
+        "type": "number",
+        "min": 0,
+        "max": 180,
+        "default": 40,
+        "label": "Hue range",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "saturation",
+        "type": "number",
+        "min": 0,
+        "max": 2,
+        "default": 1,
+        "label": "Saturation",
+        "tier": "primary",
+        "when": {
+          "mode": "shift"
+        }
+      },
+      {
+        "key": "satDip",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "White dip",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How far the profile's peak fades toward white."
+      },
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How the hue swings over the distance from the moving position.",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "wave",
+          "dot",
+          "bar",
+          "wedge",
+          "flash"
+        ],
+        "default": {
+          "shape": "wave",
+          "args": {}
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the colors are during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      }
+    ]
+  },
+  {
+    "hash": "sha256:766a9e87bc0eda6d0bb67e37cfbec3ffbcfbe9aebcd993d5703adc06e5475ed8",
+    "alias": "@pixelmapper/noise",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "options": [
+          "level",
+          "pick"
+        ],
+        "optionLabels": [
+          "Level",
+          "Pick"
+        ],
+        "default": "level",
+        "label": "Mode",
+        "tier": "primary",
+        "description": "Level: random brightness per fixture. Pick: a random set of fixtures is on."
+      },
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "eventRate",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Event rate",
+        "tier": "hidden",
+        "description": "Events per step."
+      },
+      {
+        "key": "eventLength",
+        "type": "number",
+        "min": 0.02,
+        "max": 1,
+        "default": 0.1,
+        "label": "Event length",
+        "tier": "hidden",
+        "description": "Length of an event in steps."
+      },
+      {
+        "key": "eventDir",
+        "type": "enum",
+        "options": [
+          "up",
+          "down"
+        ],
+        "default": "up",
+        "label": "Event direction",
+        "tier": "hidden"
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Coherence",
+        "tier": "primary",
+        "when": {
+          "mode": "level"
+        },
+        "description": "Independent (0) to flowing patches (1)."
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "when": {
+          "mode": "level"
+        },
+        "description": "Free timing (0) to all fixtures stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1)."
+      },
+      {
+        "key": "count",
+        "type": "int",
+        "min": 0,
+        "max": 64,
+        "default": 0,
+        "label": "Fixtures on",
+        "tier": "hidden",
+        "description": "0 = a third of the fixtures."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "when": {
+          "mode": "level"
+        },
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:69707d139884cfa5ec4a2e19f486ccd04b2a725c7640e7c4896cd4f7ed49cc65",
+    "alias": "@pixelmapper/sequencer",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "alternate",
+          "blocks"
+        ],
+        "optionLabels": [
+          "Alternate",
+          "Blocks"
+        ],
+        "default": "alternate",
+        "label": "Groups",
+        "tier": "primary",
+        "description": "How the numbered fixtures form the grid's rows: alternate (1-2-1-2) or consecutive blocks (1-1-2-2)."
+      },
+      {
+        "key": "steps",
+        "type": "steps",
+        "label": "Steps",
+        "tier": "primary",
+        "default": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "description": "Hard switch (0) to a crossfade over the whole step (1)."
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert",
+        "tier": "advanced"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:4ec09da07e3528d04707d6bbc9d989d1da4b46951adf4bb2951493e3b20b216d",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.0.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "advanced",
+        "description": "Dark where the profile is lit."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:4790927f5c253ae4240b02b1d1ff2c4770e1fbe83fa0068ecc70e054223a283d",
+    "alias": "@pixelmapper/noise",
+    "version": "3.0.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "eventRate",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often peaks happen: rare (0) to often (1, about one per step).",
+        "default": 0
+      },
+      {
+        "key": "eventLength",
+        "type": "number",
+        "min": 0.02,
+        "max": 1,
+        "default": 0.1,
+        "label": "Peak length",
+        "tier": "hidden",
+        "description": "Length of a peak in steps."
+      },
+      {
+        "key": "eventDir",
+        "type": "enum",
+        "options": [
+          "up",
+          "down"
+        ],
+        "default": "up",
+        "label": "Peak direction",
+        "tier": "hidden"
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:40841ae4b06057978b264c5af297a7ee943679ee14279fe4ba40e163e7a14003",
+    "alias": "@pixelmapper/noise",
+    "version": "3.0.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "eventRate",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often peaks happen: rare (0) to often (1, about one per step).",
+        "default": 0
+      },
+      {
+        "key": "eventLength",
+        "type": "number",
+        "min": 0.02,
+        "max": 1,
+        "default": 0.1,
+        "label": "Peak length",
+        "tier": "hidden",
+        "description": "Length of a peak in steps."
+      },
+      {
+        "key": "eventDir",
+        "type": "enum",
+        "options": [
+          "up",
+          "down"
+        ],
+        "default": "up",
+        "label": "Peak direction",
+        "tier": "hidden"
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:d9fe066c644484c63b9d90040614ce7797be13bf4c2eac3fa467a3d281194141",
+    "alias": "@pixelmapper/noise",
+    "version": "3.1.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How much of the time it is bright: rarely (0) to almost always (1); 0.5 = even.",
+        "default": 0.5
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:e28dba37fb7b2f427b7f8183787a050ebf064b7253dd92cbebddb6956ca336d2",
+    "alias": "@pixelmapper/noise",
+    "version": "3.2.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How much of the time it is bright: rarely (0) to almost always (1); 0.5 = even.",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "How different the values are: all at the top of the range (0) to anywhere in the range (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:fdf8eaa82bc1c3fc035ba0fe71e7574d569f9a260d3a73fc3f2aeb8de791d208",
+    "alias": "@pixelmapper/noise",
+    "version": "3.3.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:bffd55f7f0937c1c22caa2518f3a50e1885ac9b8e4d23bf268a53d07be69a4ca",
+    "alias": "@pixelmapper/noise",
+    "version": "3.3.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to flowing patches (1): neighbours along the spread follow each other.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:8b73e6ed4de9dd8bcda1f95f40db11753ee9eff486ef35865ba50e02ca9312b4",
+    "alias": "@pixelmapper/noise",
+    "version": "3.3.1",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to soft patches (1): neighbours follow each other, evenly in every direction.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:571cece0a42154e00fcf8e57ffb6e5c184632f880884116e92119bb82cc02beb",
+    "alias": "@pixelmapper/noise",
+    "version": "3.3.1",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to soft patches (1): neighbours follow each other, evenly in every direction.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:908fe6d851e25bae06998942e3bfaa4add26326d6be8b108995d531d6361da92",
+    "alias": "@pixelmapper/noise",
+    "version": "3.3.1",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to soft patches (1): neighbours follow each other, evenly in every direction.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  }
+]

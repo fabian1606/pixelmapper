@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-noise",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (noise). Built by scripts/build-plugins.ts.",
+  "private": true
+}

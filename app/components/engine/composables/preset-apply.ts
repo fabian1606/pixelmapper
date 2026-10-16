@@ -1,12 +1,8 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
-import type { Preset, PresetModifierSnapshot } from '~/utils/engine/preset-types';
-import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
-import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
-import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
-import { ColorEffect } from '~/utils/engine/effects/color-effect';
-import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
-import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
+import type { ModifierInstance } from '~/utils/engine/types';
+import type { Preset } from '~/utils/engine/preset-types';
+import { cloneModifier } from '~/utils/engine/modifiers';
+import { getManifest } from '~/utils/plugins/plugin-store';
 import type { RGB } from '~/utils/live/color-utils';
 import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
@@ -28,90 +24,22 @@ export function resetFixtureChannels(fixtures: Fixture[]): void {
 
 // ─── Effect reconstruction ────────────────────────────────────────────────────
 
-/** Reconstructs a live Effect instance from a saved PresetModifierSnapshot. */
-export function reconstructEffect(snap: PresetModifierSnapshot): Effect | null {
-  // Support both legacy 'SineEffect' and new 'WaveformEffect' snapshot types
-  if (snap.effectType === 'SineEffect' || snap.effectType === 'WaveformEffect') {
-    const eff = new WaveformEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    eff.strength = snap.strength;
-    eff.fanning = snap.fanning;
-    eff.speed = { ...snap.speed };
-    eff.direction = snap.direction ?? 'LINEAR';
-    eff.reverse = snap.reverse ?? false;
-    eff.originX = snap.originX ?? 0.5;
-    eff.originY = snap.originY ?? 0.5;
-    eff.angle = snap.angle ?? 0;
-    eff.waveformShape = snap.waveformShape ?? 'sine';
-    eff.waveformParams = snap.waveformParams ? { ...snap.waveformParams } : { param: 0.5, start: 0, end: 1 };
-    return eff;
-  }
-
-  if (snap.effectType === 'NoiseEffect') {
-    const eff = new NoiseEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    eff.strength = snap.strength;
-    eff.speed = { ...snap.speed };
-    if (snap.noiseParams) eff.noiseParams = { ...snap.noiseParams };
-    return eff;
-  }
-
-  if (snap.effectType === 'SequencerEffect') {
-    const eff = new SequencerEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    eff.strength = snap.strength;
-    if (snap.sequencerParams) eff.sequencerParams = { ...snap.sequencerParams };
-    return eff;
-  }
-
-  if (snap.effectType === 'ColorEffect') {
-    const eff = new ColorEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    eff.strength = snap.strength;
-    if (snap.colorParams) eff.colorParams = { ...snap.colorParams };
-    return eff;
-  }
-
-  if (snap.effectType === 'DisplacementEffect') {
-    const eff = new DisplacementEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    eff.strength = snap.strength;
-    eff.speed = { ...snap.speed };
-    if (snap.displacementParams) eff.displacementParams = { ...snap.displacementParams };
-    return eff;
-  }
-
-  if (snap.effectType === 'SpeedCurveEffect') {
-    const eff = new SpeedCurveEffect();
-    eff.id = snap.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-    eff.targetChannels = [...snap.targetChannels];
-    eff.targetFixtureIds = [...snap.targetFixtureIds];
-    if (snap.speedCurveParams) {
-      eff.speedCurveParams = {
-        ...snap.speedCurveParams,
-        points: snap.speedCurveParams.points.map(p => ({ ...p })),
-      };
-    }
-    return eff;
-  }
-
-  return null;
+/**
+ * Recreates a live modifier from a preset/pinned snapshot (deep copy; a new
+ * id when the snapshot has none). Returns null for unknown plugins.
+ */
+export function reconstructEffect(snap: ModifierInstance): ModifierInstance | null {
+  if (!snap?.plugin || !getManifest(snap.plugin)) return null;
+  const m = cloneModifier(snap);
+  if (!m.id) m.id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
+  m.targetFixtureIds = [...(snap.targetFixtureIds ?? [])];
+  return m;
 }
 
 // ─── Internal apply helpers ───────────────────────────────────────────────────
 
 /** Removes all effects that target any fixture that the preset controls. */
-function clearPresetEffects(preset: Preset, effects: Effect[]): void {
+function clearPresetEffects(preset: Preset, effects: ModifierInstance[]): void {
   const allPresetFixtureIds = new Set(preset.categories.flatMap((c) => c.fixtureIds));
   for (let i = effects.length - 1; i >= 0; i--) {
     const eff = effects[i];
@@ -242,7 +170,7 @@ function rotateCategorySteps(
 }
 
 /** Applies channel snapshots and reconstructs modifier effects from a preset. */
-function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: ModifierInstance[]): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
 
   clearPresetEffects(preset, effects);
@@ -325,7 +253,7 @@ export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB |
  * Applies a preset: clears relevant channels/effects for the preset's
  * fixture-category pairs, then restores values and modifier effects.
  */
-export function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+export function applyPreset(preset: Preset, fixtures: Fixture[], effects: ModifierInstance[]): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
 
   // Clear only the category/fixture pairs this preset controls
@@ -365,7 +293,7 @@ export function applyPreset(preset: Preset, fixtures: Fixture[], effects: Effect
  * Stops a preset: reverts channels to default and removes modifier effects
  * that were applied by this preset.
  */
-export function stopPreset(preset: Preset, fixtures: Fixture[], effects: Effect[]): void {
+export function stopPreset(preset: Preset, fixtures: Fixture[], effects: ModifierInstance[]): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
 
   for (const category of preset.categories) {

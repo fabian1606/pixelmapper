@@ -7,7 +7,7 @@ import { AddFixturesCommand } from '../commands/add-fixture-command';
 import { MoveFixtureCommand } from '../commands/move-fixture-command';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import { syncStripBounds } from '~/utils/engine/neopixel-strip-factory';
+import { assignIdsAndAddresses } from '~/utils/engine/addressing';
 
 export function useWorkspaceOperations(
   sceneNodes: Ref<SceneNode[]>,
@@ -17,67 +17,13 @@ export function useWorkspaceOperations(
   const history = useHistory();
 
   let nextGroupId = 1;
-  let nextFixtureId = 1000;
 
   function handleAddOflFixtures(fixtures: Fixture[]) {
-    let maxAddress = 0;
-    // Sync nextFixtureId past any existing `ofl-N` id. Without this, fixtures
-    // restored from a persisted snapshot can collide with newly assigned ids
-    // (counter resets to 1000 each page load), causing two fixtures to share
-    // the same id — selection and drag then affect both as if they were one.
-    for (const f of flatFixtures.value) {
-      const fMax = f.startAddress + f.channels.length - 1;
-      if (fMax > maxAddress) maxAddress = fMax;
-      const m = /^ofl-(\d+)$/.exec(String(f.id));
-      if (m) {
-        const n = parseInt(m[1]!, 10);
-        if (Number.isFinite(n) && n >= nextFixtureId) nextFixtureId = n + 1;
-      }
-    }
-
-    // currentAddress is the next free 1-based global address.
-    let currentAddress = maxAddress + 1;
-
+    assignIdsAndAddresses(fixtures, flatFixtures.value);
+    // Cascade initial positions so several added fixtures don't overlap.
+    // Kind geometry is relative to fixturePosition, so this works for all.
     fixtures.forEach((f, i) => {
-      f.id = `ofl-${nextFixtureId++}`;
-
-      const channelCount = f.channels.length;
-
-      // Strip fixtures are driven via WebSocket buffer — their channels are all in
-      // one contiguous buffer regardless of DMX universe boundaries, so the 512-
-      // channel universe split does not apply to them.
-      if (!f.stripConfig) {
-        const localAddr = ((currentAddress - 1) % 512) + 1;
-        if (localAddr + channelCount - 1 > 512) {
-          const universeStart = Math.floor((currentAddress - 1) / 512) * 512 + 1;
-          currentAddress = universeStart + 512;
-        }
-      }
-
-      f.startAddress = currentAddress;
-      currentAddress += channelCount;
-
-      // For non-strip fixtures: assign a cascading initial position. For
-      // strips, the factory already centered the geometry; cascade the
-      // strip's points (not just fixturePosition) so the spatial-index
-      // AABB stays in sync with the visible geometry — otherwise circle/
-      // line strips become unclickable for i > 0.
-      if (f.stripConfig) {
-        const cascadeWorldDx = i * 0.02 * 3000; // matches old normalized offset
-        const cascadeWorldDy = i * 0.02 * 3000;
-        if (i !== 0) {
-          for (const p of f.stripConfig.points) {
-            p.x += cascadeWorldDx;
-            p.y += cascadeWorldDy;
-          }
-          syncStripBounds(f);
-        }
-      } else {
-        f.fixturePosition = {
-          x: 0.5 + (i * 0.02),
-          y: 0.5 + (i * 0.02),
-        };
-      }
+      f.fixturePosition = { x: 0.5 + (i * 0.02), y: 0.5 + (i * 0.02) };
     });
 
     const command = new AddFixturesCommand(sceneNodes.value, fixtures);

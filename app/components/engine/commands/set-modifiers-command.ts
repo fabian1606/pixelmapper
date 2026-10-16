@@ -1,119 +1,35 @@
-import type { Command } from '../composables/use-history';
-import { type SerializableCommand, registerCommand } from './serializable-command';
+import { type SerializableCommand } from './serializable-command';
 import type { EffectEngine } from '~/utils/engine/engine';
-import type { Effect } from '~/utils/engine/types';
-import { WaveformEffect } from '~/utils/engine/effects/waveform-effect';
-import { NoiseEffect } from '~/utils/engine/effects/noise-effect';
-import { SequencerEffect } from '~/utils/engine/effects/sequencer-effect';
-import { ColorEffect } from '~/utils/engine/effects/color-effect';
-import { DisplacementEffect } from '~/utils/engine/effects/displacement-effect';
-import { SpeedCurveEffect } from '~/utils/engine/effects/speed-curve-effect';
+import type { ModifierInstance } from '~/utils/engine/types';
+import { cloneModifiers } from '~/utils/engine/modifiers';
 
 /**
- * Deep clones an array of effects to decouple them from the live engine state.
- * This is crucial for history snapshots so that future mutations don't alter past history.
- */
-/** Detects the Effect class from either a live instance or a plain JSON object. */
-function instantiateEffect(effect: any): Effect {
-  // Live class instances
-  if (effect instanceof SpeedCurveEffect) return new SpeedCurveEffect();
-  if (effect instanceof DisplacementEffect) return new DisplacementEffect();
-  if (effect instanceof ColorEffect) return new ColorEffect();
-  if (effect instanceof SequencerEffect) return new SequencerEffect();
-  if (effect instanceof NoiseEffect) return new NoiseEffect();
-  if (effect instanceof WaveformEffect) return new WaveformEffect();
-  // Plain JSON (after JSON.parse(JSON.stringify(...))) — detect by property fingerprint
-  if (effect?.speedCurveParams) return new SpeedCurveEffect();
-  if (effect?.displacementParams) return new DisplacementEffect();
-  if (effect?.colorParams) return new ColorEffect();
-  if (effect?.sequencerParams) return new SequencerEffect();
-  if (effect?.noiseParams) return new NoiseEffect();
-  return new WaveformEffect();
-}
-
-export function cloneEffectsList(effects: Effect[]): Effect[] {
-  return effects.map(effect => {
-    const clone: Effect = instantiateEffect(effect);
-
-    // Clone all known properties
-    clone.id = effect.id;
-    clone.targetChannels = [...(effect.targetChannels || [])];
-    clone.targetFixtureIds = effect.targetFixtureIds ? [...effect.targetFixtureIds] : undefined;
-    clone.direction = effect.direction;
-    clone.reverse = effect.reverse;
-    clone.strength = effect.strength;
-    clone.fanning = effect.fanning;
-    clone.originX = effect.originX;
-    clone.originY = effect.originY;
-    clone.angle = effect.angle;
-    if ('speed' in effect) {
-      const spd = (effect as any).speed;
-      (clone as any).speed = typeof spd === 'object' ? { ...spd } : spd;
-    }
-    if ('waveformShape' in effect) (clone as any).waveformShape = (effect as any).waveformShape;
-    if ('waveformParams' in effect) (clone as any).waveformParams = { ...(effect as any).waveformParams };
-    if ('noiseParams' in effect && (effect as any).noiseParams) {
-      (clone as any).noiseParams = { ...(effect as any).noiseParams };
-    }
-    if ('sequencerParams' in effect && (effect as any).sequencerParams) {
-      (clone as any).sequencerParams = { ...(effect as any).sequencerParams };
-    }
-    if ('colorParams' in effect && (effect as any).colorParams) {
-      (clone as any).colorParams = { ...(effect as any).colorParams };
-    }
-    if ('displacementParams' in effect && (effect as any).displacementParams) {
-      (clone as any).displacementParams = { ...(effect as any).displacementParams };
-    }
-    if ('speedCurveParams' in effect && (effect as any).speedCurveParams) {
-      const scp = (effect as any).speedCurveParams;
-      (clone as any).speedCurveParams = {
-        ...scp,
-        points: scp.points.map((p: any) => ({ ...p })),
-      };
-    }
-
-    // Internal state like timePhase should theoretically be cloned too
-    if ('timePhase' in effect) {
-      (clone as any).timePhase = (effect as any).timePhase;
-    }
-
-    return clone;
-  });
-}
-
-/**
- * Snapshot-based command for undoing/redoing any changes to the global Modifiers (Effects) list.
+ * Snapshot-based command for undoing/redoing any change to the modifier
+ * list. Modifier instances are plain JSON, so snapshots are deep copies.
  */
 export class SetModifiersCommand implements SerializableCommand {
   readonly commandType = 'SetModifiers';
 
-  toPayload() {
-    return {
-      before: JSON.parse(JSON.stringify(this.beforeEffects)),
-      after: JSON.parse(JSON.stringify(this.afterEffects)),
-    };
-  }
-
   constructor(
     private effectEngine: EffectEngine,
-    private beforeEffects: Effect[],
-    private afterEffects: Effect[],
-    public description: string = 'Modifier Change'
-  ) { }
+    private beforeModifiers: ModifierInstance[],
+    private afterModifiers: ModifierInstance[],
+    public description: string = 'Modifier Change',
+  ) {}
+
+  toPayload() {
+    return { before: cloneModifiers(this.beforeModifiers), after: cloneModifiers(this.afterModifiers) };
+  }
 
   execute() {
-    this.effectEngine.clearEffects();
-    // Deep clone again on apply so the snapshot remains pristine for future undo/redo cycles
-    const toApply = cloneEffectsList(this.afterEffects);
-    toApply.forEach(eff => this.effectEngine.addEffect(eff));
+    // Clone on apply so the snapshot stays pristine for later undo/redo.
+    this.effectEngine.setModifiers(cloneModifiers(this.afterModifiers));
   }
 
   undo() {
-    this.effectEngine.clearEffects();
-    const toApply = cloneEffectsList(this.beforeEffects);
-    toApply.forEach(eff => this.effectEngine.addEffect(eff));
+    this.effectEngine.setModifiers(cloneModifiers(this.beforeModifiers));
   }
 }
 
-// SetModifiers replay requires a live EffectEngine — registered lazily in engine-store.ts
-// instead of here to avoid circular dependencies.
+// SetModifiers replay needs the live EffectEngine — registered in engine-store.ts
+// to avoid circular dependencies.

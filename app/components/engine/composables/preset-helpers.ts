@@ -1,9 +1,9 @@
-import type { ChannelType, Effect } from '~/utils/engine/types';
+import type { ChannelType, ModifierInstance } from '~/utils/engine/types';
 import type {
   PresetCategoryType,
   PresetChannelSnapshot,
-  PresetModifierSnapshot,
 } from '~/utils/engine/preset-types';
+import { cloneModifier } from '~/utils/engine/modifiers';
 import type { Channel } from '~/utils/engine/core/channel';
 
 // ─── Channel category sets ────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ export function getCategoryType(channelType: ChannelType): PresetCategoryType {
 }
 
 /** Returns the channel-type category for an effect based on its targetChannels. */
-export function getEffectCategoryType(effect: Effect): PresetCategoryType {
+export function getEffectCategoryType(effect: ModifierInstance): PresetCategoryType {
   if (!effect.targetChannels || effect.targetChannels.length === 0) return 'other';
   const firstChannel = effect.targetChannels[0];
   return firstChannel !== undefined ? getCategoryType(firstChannel) : 'other';
@@ -65,59 +65,29 @@ export function getChannelFingerprint(snapshots: PresetChannelSnapshot[]): strin
 }
 
 /**
- * Returns a stable identity key for an effect: just its type (no channels).
- * Used to match a live effect to its saved counterpart so that ANY
- * parameter change (including target channels) collapses to one change row
- * instead of showing as a separate "removed" + "added" pair.
+ * Stable identity key of a modifier: its instance id (falls back to the
+ * plugin hash). Used to match a live modifier to its saved counterpart so any
+ * parameter change collapses to one change row.
  */
-export function getModifierIdentity(effect: Effect | PresetModifierSnapshot): string {
-  return 'id' in effect && effect.id
-    ? effect.id
-    : ('effectType' in effect ? (effect as PresetModifierSnapshot).effectType : effect.constructor.name);
+export function getModifierIdentity(m: ModifierInstance): string {
+  return m.id || m.plugin;
 }
 
 /**
- * Builds a full deterministic fingerprint for a modifier effect including all values.
- * Used to detect whether a particular effect's *parameters* have changed.
+ * Deterministic fingerprint of a modifier including all values (plugin,
+ * targets, generic fields, params). Detects parameter changes.
  */
-export function getModifierFingerprint(effect: Effect | PresetModifierSnapshot): string {
-  const effectType =
-    'effectType' in effect
-      ? (effect as PresetModifierSnapshot).effectType
-      : effect.constructor.name;
-  const channels = [...(effect.targetChannels ?? [])].sort().join(',');
-  const direction = effect.direction ?? 'LINEAR';
-  const reverse = effect.reverse ?? false;
-  const scp = (effect as any).speedCurveParams;
-  const scpStr = scp ? JSON.stringify(scp.points) + scp.maxMultiplier + scp.cycleBeats : '';
-  return `${effectType}|${channels}|${effect.strength}|${effect.fanning}|${direction}|${reverse}|${scpStr}`;
+export function getModifierFingerprint(m: ModifierInstance): string {
+  const channels = [...(m.targetChannels ?? [])].sort().join(',');
+  const params = JSON.stringify(Object.keys(m.params ?? {}).sort().map(k => [k, m.params[k]]));
+  return `${m.plugin}|${m.signature}|${channels}|${m.strength}|${m.blendMode}|${JSON.stringify(m.speed)}|${JSON.stringify(m.distribution)}|${params}`;
 }
 
-// ─── Effect serialisation ─────────────────────────────────────────────────────
+// ─── Modifier serialisation ───────────────────────────────────────────────────
 
-/** Snapshots a live Effect into a serializable PresetModifierSnapshot. */
-export function snapshotEffect(effect: Effect): PresetModifierSnapshot {
-  return {
-    id: effect.id,
-    effectType: effect.constructor.name,
-    targetChannels: [...(effect.targetChannels ?? [])],
-    targetFixtureIds: [...(effect.targetFixtureIds ?? [])],
-    strength: effect.strength,
-    fanning: effect.fanning,
-    speed: { ...effect.speed },
-    direction: effect.direction ?? 'LINEAR',
-    reverse: effect.reverse ?? false,
-    originX: effect.originX ?? 0.5,
-    originY: effect.originY ?? 0.5,
-    angle: effect.angle ?? 0,
-    waveformShape: (effect as any).waveformShape ?? 'sine',
-    waveformParams: (effect as any).waveformParams ? { ...(effect as any).waveformParams } : { param: 0.5, start: 0, end: 1 },
-    noiseParams: (effect as any).noiseParams ? { ...(effect as any).noiseParams } : undefined,
-    sequencerParams: (effect as any).sequencerParams ? { ...(effect as any).sequencerParams } : undefined,
-    colorParams: (effect as any).colorParams ? { ...(effect as any).colorParams } : undefined,
-    displacementParams: (effect as any).displacementParams ? { ...(effect as any).displacementParams } : undefined,
-    speedCurveParams: (effect as any).speedCurveParams
-      ? { ...(effect as any).speedCurveParams, points: (effect as any).speedCurveParams.points.map((p: any) => ({ ...p })) }
-      : undefined,
-  };
+/** Snapshots a live modifier (deep copy) for presets and pinned modifiers. */
+export function snapshotEffect(m: ModifierInstance): ModifierInstance {
+  const snap = cloneModifier(m);
+  snap.targetFixtureIds = [...(m.targetFixtureIds ?? [])];
+  return snap;
 }

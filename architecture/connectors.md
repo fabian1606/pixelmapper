@@ -1,159 +1,97 @@
-# Connectors & Hardware
+# Connectors, Controllers & Hardware
+
+All outputs and hardware controllers are **extensions** (ADR 0001 D17). The core renders DMX and hands the rendered frames to whatever connectors are installed; without any connector extension the app still works, it just has no output. Connector setups belong to the **user and device**, not to the project (D18).
 
 ## Architecture
 
-Connectors are the output layer — they receive pre-built binary packets from the engine-store and forward them to hardware or other targets. **No encoding logic lives in connectors.** All packet building happens in `binary-encoder.ts`.
-
 ```
-engine-store (render loop)
-    │
-    ├── connectionsStore.sendFrame(dmxBuffer)
-    │       └── connector.sendFrame()        // for DMX-output connectors
-    │
-    └── connectionsStore.notifyEngineState(state)
-            └── connector.onEngineState()    // for parameter-based connectors
+engine worker ──frame──► engine-store.onFrame(dmx)
+                            ├── connectionsStore.sendFrame(dmx)          mapped universes → connector.sendFrame(universe, 512 B)
+                            └── connectionsStore.notifyEngineState(s)    { bpm, elapsedMs, beatTime, dmxBuffer } → connector.onEngineState
 ```
 
-## BaseConnector (`base-connector.ts`)
+| Piece | Where | Role |
+|---|---|---|
+| `ConnectorBase`, `Connector`, `ConnectorDefinition`, `defineConnector` | `@pixelmapper/extension-api` | Contract + base class (status, logs, label, outputs, auto-reconnect, `getConfig`/`applyConfig`, `canAutoConnect`) |
+| `connector-registry.ts` | `app/utils/connectors/` | Connector types from registered extensions; `restoreConnector(type, id, config)` |
+| `connections-store.ts` | `app/stores/` | Instances, frame routing, per-user persistence |
+| `ConnectorCard.vue` | `app/components/connectors/` | Generic card: status, label, connect/disconnect/remove, the type's `settings` component, output mapping, logs |
+| `binary-encoder.ts` | `app/utils/connectors/` | **Engine** packets only (layout, channels, modifiers → worker) |
 
-Abstract base class all connectors extend:
+### Writing a connector
 
-```typescript
-abstract class BaseConnector {
-    readonly id: string
-    status: ConnectorStatus           // 'disconnected' | 'connecting' | 'connected' | 'error'
-    errorMessage: string | null
-    logs: LogLine[]                   // reactive, capped at 500 entries
+```ts
+import { ConnectorBase, defineConnector, defineExtension } from '@pixelmapper/extension-api';
 
-    abstract connect(): Promise<void>
-    abstract disconnect(): Promise<void>
-    abstract sendFrame(dmxBuffer: Uint8Array): void
-
-    // Optional — for connectors that run their own renderer
-    onEngineState?(state: EngineConnectorState): void
+class UdpConnector extends ConnectorBase {
+  readonly meta = { type: 'my-udp', label: 'My UDP node', icon: 'network' };
+  constructor(id: string) { super(id); this.initOutputs(2); }     // two DMX outputs → universes via mapping
+  async connect() { /* open */ this.status.value = 'connected'; this.autoReconnect.value = true; }
+  async disconnect() { this.autoReconnect.value = false; this.status.value = 'disconnected'; }
+  override sendFrame(universeData: Uint8Array, universe?: number) { /* non-blocking write */ }
+  override getConfig() { return { ...super.getConfig(), host: this.host }; }
+  override applyConfig(c: Record<string, unknown>) { super.applyConfig(c); if (typeof c.host === 'string') this.host = c.host; }
+  host = '';
 }
+
+export default defineExtension({
+  id: 'connector-my-udp', version: '1.0.0', apiVersion: '^1.0.0',
+  displayName: 'My UDP output', description: 'Streams universes to my UDP node.',
+  contributes: { connectors: [defineConnector({
+    type: 'my-udp', label: 'My UDP node', icon: 'network', description: '…', direction: 'output',
+    create: id => new UdpConnector(id),
+    fromConfig: (id, config) => { const c = new UdpConnector(id); c.applyConfig(config); return c; },
+    settings: UdpSettings,            // prop `connector`, emits change(patch)
+  })] },
+});
 ```
 
-### EngineConnectorState
+- **Outputs:** `outputCount > 0` → the host calls `sendFrame(512 bytes, universe)` for every mapped output each frame. `outputCount = 0` → implement `onEngineState(state)` and read what you need from `state.dmxBuffer` (absolute address − 1). Never block; fire-and-forget writes.
+- **Fixture data:** connectors are not components; use `getFixture(id)` from the API (a readonly view incl. channels with `dmxAddress` and kind config). Re-read it occasionally (e.g. every 30 frames), not every frame.
+- **Settings:** the host renders label, connect/disconnect, output mapping and logs. The type's `settings` component renders only type-specific fields and emits `change(patch)`; the host applies it (`applyConfig`) and persists. Settings run in the extension's context, so `useExtensionContext()` / `useScope('project')` work (e.g. the ESP strip node edits strips through `ctx.commands.setFixtureKindConfig`).
+- **Auto-connect:** return `true` from `canAutoConnect()` when the instance can connect without a user gesture (WebSocket/ArtNet with a URL). Web Serial/MIDI need a click.
 
-Passed to `onEngineState` every frame:
+### Persistence (D18)
 
-```typescript
-interface EngineConnectorState {
-    bpm:              number
-    elapsedMs:        number
-    layoutRevision:   number      // increments when layout changes
-    channelsRevision: number      // increments when channels change
-    effectsRevision:  number      // increments when effects change
-    layoutPacket:     Uint8Array  // full framed packet (with 5-byte header)
-    channelsPacket:   Uint8Array
-    effectsPacket:    Uint8Array
-}
+`connections-store.ts` keeps setups in `localStorage["pm:connectors:<userId|local>"]` as `{ id, type, config }[]`, loads them after app mount (`app/plugins/02.connectors.client.ts`) and on user change, and keeps them across project switches. Entries whose type is not installed stay stored untouched. Nothing about connectors is in project snapshots or the change log.
+
+## First-party connector extensions
+
+| Extension | Set | Connectors |
+|---|---|---|
+| `connector-artnet` | distribution | `artnet`: universes to a local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
+| `connector-esp` | catalog | `serial` (ESP32 DMX node over Web Serial, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
+
+### ESP firmware protocol (`extensions/connector-esp/protocol.ts`)
+
+Framed packets `[0xAA][0x55][type][len u16 LE][payload]` (ADR D16: firmware encodings live in the connector extension):
+
+| Type | Packet | Sent by |
+|---|---|---|
+| `0x11` | VERSION_REQ (device answers `[version] X.Y.Z`) | all |
+| `0x15`–`0x17` | OTA begin (u32 size) / chunk / end | serial (firmware update) |
+| `0x18` | UNIVERSE_MAP `[count, u…]` | serial, when the output mapping changes |
+| `0x1A` | STRIP_SLOTS `[count] + 8 B/slot (pin, chip, ledCount, groupSize, ledsPerMeter)` | websocket, when the slot layout changes |
+| `0x20` | COLOR_CMD `r, g, b, brightness` | espnow-bridge (deduplicated, 1 s heartbeat) |
+| `0x21` | DMX_FRAME `[universe][512 bytes]` | serial, per mapped universe per frame |
+| `0x22` | PIXEL_FRAME `[slot][count u16][RGB(W) bytes]` | websocket, per slot per frame |
+
+Since plan P6.2 the app streams **rendered output**; the former on-device rendering packets (layout, channels, modifiers, BPM, timesync) are not sent to hardware any more. The firmware projects (`pio*/`) still expect the old packets and must implement `0x21`/`0x22` — firmware changes are out of scope of ADR 0001 (§9), so ESP output does not light until then.
+
+Strip nodes find their strips by kind id (`neopixel-strip`, read via `getFixture`) — the dependency direction is connector → kind, never core → kind.
+
+## Hardware controllers
+
+Controllers (MIDI grids etc.) are extensions too (`contributes.controllers`, ADR §5.7):
+
+```ts
+defineController({
+  id: 'akai-apc-mini-mk2', label: 'AKAI APC Mini mk2', description: '…',
+  createDriver: id => new APCMiniMk2Driver(id),     // extends ControllerDriverBase (Web MIDI)
+  layoutSvg, viewBox: { w: 433, h: 372 }, defaultGridSize: { w: 20, h: 17 },
+  controls,                                          // id, type, hit rect, svgId
+  matches: port => /APC mini mk2/i.test(port.name),
+})
 ```
 
-## SerialConnector (`serial-connector.ts`)
-
-Forwards pre-built binary packets to an ESP32 over USB Serial (Web Serial API).
-
-**Baud rate**: 921,600 (default). Matches `Serial.begin(921600)` in `main.cpp`.
-
-### Send Logic
-
-Uses revision-based change detection to minimize serial traffic:
-
-```typescript
-override onEngineState(state: EngineConnectorState) {
-    const first = this.frameCount === 0
-
-    if (first || state.bpm !== this.cachedBpm)
-        this.send(buildBpmPacket(state.bpm))
-
-    if (first || state.layoutRevision !== this.cachedLayout)
-        this.send(state.layoutPacket)           // full framed packet
-
-    if (first || state.channelsRevision !== this.cachedChannels)
-        this.send(state.channelsPacket)
-
-    if (first || state.effectsRevision !== this.cachedEffects)
-        this.send(state.effectsPacket)
-
-    if (first || this.frameCount % 120 === 0)   // every ~2s at 60fps
-        this.send(buildTimesyncPacket(state.elapsedMs))
-
-    this.frameCount++
-}
-```
-
-The framed packets (with `[0xAA][0x55]` header) are sent as-is — the ESP32 state machine strips the header before passing the payload to `engine_dispatch`.
-
-### Read Loop
-
-Incoming serial data (ESP32 log output like `[dmx] 0 0 0 255`) is decoded as UTF-8 text, split on newlines, and pushed to `connector.logs`. This is fire-and-forget — errors are silently dropped.
-
-### Error Isolation
-
-`send()` wraps `writer.write()` in a try-catch so a synchronous throw (e.g. port closed unexpectedly) triggers `disconnect()` instead of propagating into the render loop. The render loop additionally wraps `notifyEngineState` in a try-catch to ensure the RAF chain is never broken by a misbehaving connector.
-
-### Firmware Updates (Native OTA over Serial)
-
-The `SerialConnector` natively flashes OTA app-binaries from GitHub releases directly over the established Web Serial connection (without relying on external libraries like `esptool-js`).
-
-When the user clicks "update", the connector:
-1. Downloads the app binary (`firmware.bin`) from GitHub (via `/api/firmware-proxy`).
-2. Sends a `TYPE_OTA_BEGIN (0x15)` packet to the ESP32 to prepare the OTA partition via the Arduino `Update.h` framework.
-3. Slices the binary buffer into 2KB chunks and sends them sequentially via `TYPE_OTA_CHUNK (0x16)` packets.
-4. Pauses (`~30ms`) between chunks to allow the ESP32 to write to its flash memory without overflowing the serial hardware receive buffer.
-5. Sends `TYPE_OTA_END (0x17)`. The ESP32 finalizes the checksum, prints success logging, and automatically reboots into the new partition.
-
-**Strategy — Safe App-Only Updates**
-
-Only the Arduino app binary is flashed into the next available OTA partition (`0x10000` or higher). 
-The Bootloader (`0x2000`) and the partition table (`0x8000`) remain completely untouched. This is fundamentally safer than `esptool` whole-flash operations because a failed or aborted transfer will simply revert to the currently working firmware on next boot without breaking the bootloader.
-
-## ESP32 (`pio/src/main.cpp`)
-
-### Packet Reception
-
-A byte-level state machine processes incoming serial bytes:
-
-```
-WAIT_MAGIC1 → WAIT_MAGIC2 → WAIT_TYPE → WAIT_LEN_LO → WAIT_LEN_HI → COLLECT
-```
-
-On complete packet: calls `dispatch()`:
-- `TYPE_TIMESYNC` (0x13): handled locally — updates `timeOffset` via exponential smoothing
-- All other types: forwarded to `engine_dispatch(engine, rxType, rxBuf, rxPos)`
-
-RxBuf size: 8,192 bytes — sufficient for all standard packet sizes.
-
-### Render Loop
-
-```cpp
-void loop() {
-    while (Serial.available()) processByte(Serial.read());
-
-    uint32_t now = millis();
-    float engineTime = (float)now + timeOffset;   // aligned to browser clock
-    engine_render(engine, engineTime, now - lastMs);
-    lastMs = now;
-
-    const uint8_t* dmx = engine_get_dmx_buffer(engine);
-    ledcWrite(LED_PIN, dmx[0]);   // DMX ch1 → LED brightness
-
-    // Log first 4 channels every 100ms
-    if (now - lastDmxReport >= 100) { ... }
-}
-```
-
-No `delay()` — the loop runs as fast as the CPU allows (~kHz). Packet reception and rendering are interleaved naturally.
-
-### Clock Alignment
-
-The ESP32 runs its own `millis()` clock. The browser sends `TYPE_TIMESYNC` with its elapsed time every ~2 seconds. The ESP32 blends this into a `timeOffset`:
-
-```cpp
-timeOffset = timeOffset * 0.85f + (browserElapsed - millis()) * 0.15f;
-float engineTime = millis() + timeOffset;
-```
-
-This keeps the ESP32's effect phase synchronized with the browser simulation even without a shared clock source.
+Drivers extend `ControllerDriverBase` (status, logs, `onInput`/`emitInput`, `sendFeedback`). The core keeps the instances (`controller-store.ts`), the per-project controller list (live mode), and the generic **controller-twin** live widget that renders any registered definition (amendment A18). Design sources of layouts live in `docs/controller-designs/`.

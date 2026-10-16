@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "kind": "modifier",
+  "alias": "@pixelmapper/sequencer",
+  "name": "Pattern",
+  "version": "3.0.0",
+  "apiVersion": "^1.2.0",
+  "description": "Switches groups of fixtures on and off step by step. The rows of the step grid are groups chosen by the spread: Fixture by fixture alternates along the numbers (1-2-1-2), Spatial 2D cuts bands along the handle (1-1-2-2), Within each fixture cuts bands of heads. One step per tempo unit; Transition crossfades into the next step. Off = dimmed by the strength.",
+  "purpose": "Groups of fixtures switch on and off in steps.",
+  "speedUnit": "per step",
+  "signatures": ["scalar"],
+  "output": "scale",
+  "distribution": {
+    "modes": ["order", "linear", "radial"],
+    "scopes": ["across", "within"],
+    "grouping": false,
+    "default": { "mode": "order" },
+    "withinOffset": false
+  },
+  "params": [
+    { "key": "steps", "type": "steps", "label": "Steps", "tier": "primary", "default": { "groups": 2, "steps": 2, "cells": [[true, false], [false, true]] } },
+    { "key": "transition", "type": "number", "min": 0, "max": 1, "default": 0, "label": "Transition", "tier": "primary", "description": "Hard (0) ↔ soft: a crossfade over the whole step (1)." },
+    { "key": "invert", "type": "bool", "default": false, "label": "Invert", "tier": "advanced" }
+  ],
+  "presets": [
+    {
+      "id": "odd-even", "label": "Odd/Even", "description": "Every other fixture, swapping on the beat.", "default": true,
+      "params": { "steps": { "groups": 2, "steps": 2, "cells": [[true, false], [false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1,
+      "when": { "kind": ["row", "area"] }
+    },
+    {
+      "id": "chase-3", "label": "Chase 3", "description": "Every third fixture, running along (A-B-C).",
+      "params": { "steps": { "groups": 3, "steps": 3, "cells": [[true, false, false], [false, true, false], [false, false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "order", "reverse": false, "order": { "mirror": false } }, "strength": 1
+    },
+    {
+      "id": "sweep", "label": "Sweep", "description": "Four bands light one after another along the handle.",
+      "params": { "steps": { "groups": 4, "steps": 4, "cells": [[true, false, false, false], [false, true, false, false], [false, false, true, false], [false, false, false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
+    },
+    {
+      "id": "halves", "label": "Halves", "description": "First half, then second half (along the handle).",
+      "params": { "steps": { "groups": 2, "steps": 2, "cells": [[true, false], [false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
+    },
+    {
+      "id": "build-up", "label": "Build-Up", "description": "Bands add up along the handle until everything is on.",
+      "params": { "steps": { "groups": 4, "steps": 4, "cells": [[true, false, false, false], [true, true, false, false], [true, true, true, false], [true, true, true, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "linear", "reverse": false }, "strength": 1
+    },
+    {
+      "id": "center-out", "label": "Center-Out", "description": "Rings step outward from the center.",
+      "params": { "steps": { "groups": 3, "steps": 3, "cells": [[true, false, false], [false, true, false], [false, false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 0.5 }, "distribution": { "scope": "across", "mode": "radial", "reverse": false }, "strength": 1
+    },
+    {
+      "id": "segments", "label": "Segments", "description": "Each bar's segments light in turn.",
+      "params": { "steps": { "groups": 4, "steps": 4, "cells": [[true, false, false, false], [false, true, false, false], [false, false, true, false], [false, false, false, true]] }, "transition": 0 },
+      "speed": { "mode": "beat", "beatValue": 0.5 }, "distribution": { "scope": "within", "withinOffset": "none", "reverse": false }, "strength": 1,
+      "when": { "multiHead": true }
+    }
+  ]
+}

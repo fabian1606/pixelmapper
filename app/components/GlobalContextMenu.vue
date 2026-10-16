@@ -2,8 +2,19 @@
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
 import { onMounted, onUnmounted } from 'vue';
 import { Separator } from '@/components/ui/separator';
+import type { ScopeName } from '@pixelmapper/extension-api';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
 
-const { isOpen, position, options, closeMenu } = useGlobalContextMenu();
+const { isOpen, position, options, extensionContext, closeMenu } = useGlobalContextMenu();
+
+// Re-provide the opener's (non-global) scopes so contributed menu items see
+// the fixture/channel/modifier the menu was opened on.
+const OPENER_SCOPES: ScopeName[] = ['fixture', 'channel', 'signature', 'modifier', 'preset', 'liveWidget', 'livePage'];
+for (const name of OPENER_SCOPES) {
+  provideScope(name, () => extensionContext.value?.scopes?.[name] as never);
+}
 
 /**
  * Close menu when clicking outside or pressing Escape.
@@ -67,6 +78,21 @@ function handleAction(action?: () => void) {
             </span>
           </button>
         </template>
+        <!-- Extension slots: context-menu/<id>:items -->
+        <PmPanel v-if="extensionContext" id="context-menu" as="div" :manual="['header', 'before', 'after']">
+          <PmMenuGroup :id="extensionContext.id" as="fragment">
+            <template #item="{ item: ext, run, disabled }">
+              <button
+                :disabled="disabled"
+                class="relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors w-full text-left hover:bg-accent hover:text-accent-foreground focus:bg-accent disabled:opacity-50"
+                @click="closeMenu(); run()"
+              >
+                <span class="flex-1">{{ ext.label }}</span>
+                <span v-if="ext.shortcut" class="ml-auto text-xs tracking-widest text-muted-foreground">{{ ext.shortcut }}</span>
+              </button>
+            </template>
+          </PmMenuGroup>
+        </PmPanel>
       </div>
     </div>
   </Teleport>

@@ -3,27 +3,12 @@ import { ref, inject, watch, computed } from 'vue';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ChannelCategoryKey } from '~/utils/engine/channel-categories';
 import type { EffectEngine } from '~/utils/engine/engine';
-import type { Effect } from '~/utils/engine/types';
-import type { PresetModifierSnapshot } from '~/utils/engine/preset-types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { useSidebarLock } from '~/utils/engine/composables/use-sidebar-lock';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import type { BlendMode } from '~/utils/engine/types';
 
-const BLEND_MODE_LABELS: Record<BlendMode, string> = {
-  add: 'Add', override: 'Override', multiply: 'Mask', max: 'Brighten', min: 'Darken',
-};
-
-const BLEND_MODE_DESCRIPTIONS: Record<BlendMode, string> = {
-  add: 'Offsets from all modifiers are summed together. A waveform with strength 50 and another with strength 30 produce a combined swing of ±80 around the base.',
-  override: 'Each modifier fully replaces whatever came before it. Only the last modifier in the list determines the final value — earlier ones have no effect.',
-  multiply: 'The accumulated result is multiplied by each modifier\'s output. Best with a Sequencer: OFF fixtures are dimmed toward black while ON fixtures keep the previous modifiers intact.',
-  max: 'The brighter value wins at each step. Useful for combining two waveforms that should boost brightness without clipping — each one can only add, never subtract.',
-  min: 'The darker value wins at each step. Use to cut brightness or create shadow zones — a waveform can only reduce the result, never push it higher.',
-};
 import ChaserStepsList from './ChaserStepsList.vue';
 import ChaserModifiersList from './ChaserModifiersList.vue';
 
@@ -61,25 +46,6 @@ function handleDropdownOpenChange(open: boolean) {
 
 const historyTools = useChaserHistory(props, effectEngine);
 
-// Compute base hue from the first fixture's active step RGB for ColorEditor strip anchoring
-const baseHue = computed<number>(() => {
-  const f = props.fixtures[0];
-  if (!f) return 0;
-  const step = f.channels.find(c => c.type === 'RED')?.chaserConfig.activeEditStep ?? 0;
-  const r = (f.channels.find(c => c.type === 'RED')?.chaserConfig.stepValues[step] ?? 0) / 255;
-  const g = (f.channels.find(c => c.type === 'GREEN')?.chaserConfig.stepValues[step] ?? 0) / 255;
-  const b = (f.channels.find(c => c.type === 'BLUE')?.chaserConfig.stepValues[step] ?? 0) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-  if (d === 0) return 0;
-  let h = 0;
-  if (max === r) h = ((g - b) / d + 6) % 6;
-  else if (max === g) h = (b - r) / d + 2;
-  else h = (r - g) / d + 4;
-  return h * 60;
-});
-
 const { 
   activeChaserConfig, 
   tabChannelFilter, 
@@ -91,16 +57,10 @@ const {
 } = useChaserSteps(props, effectEngine, historyTools, handleChange);
 
 const {
+  selectionShape,
   activeModifiers,
   availableChannelTypes,
-  canAddDisplacement,
-  canAddSpeedCurve,
-  addWaveformModifier,
-  addNoiseModifier,
-  addSequencerModifier,
-  addColorModifier,
-  addDisplacementModifier,
-  addSpeedCurveModifier,
+  addModifier,
   addPinnedModifier,
   switchModifierType,
   handleModifierDragEnd,
@@ -109,14 +69,13 @@ const {
   toggleTargetChannel,
   removeModifier,
   selectModifier,
-  reverseDirection,
   reorderModifiers,
 } = useChaserModifiers(props, effectEngine, historyTools, tabChannelFilter, handleChange);
 
 const pinnedStore = usePinnedModifiersStore();
 const pinnedEffectIds = computed(() => new Set(pinnedStore.pinnedModifiers.map(p => p.effectId)));
 
-function handlePinModifier(effect: Effect) {
+function handlePinModifier(effect: ModifierInstance) {
   if (pinnedStore.isPinned(effect.id)) {
     pinnedStore.unpinModifier(effect.id);
   } else {
@@ -124,7 +83,7 @@ function handlePinModifier(effect: Effect) {
   }
 }
 
-function handleAddPinnedModifier(snapshot: PresetModifierSnapshot) {
+function handleAddPinnedModifier(snapshot: ModifierInstance) {
   addPinnedModifier(snapshot);
 }
 
@@ -133,9 +92,9 @@ function handleAddPinnedModifier(snapshot: PresetModifierSnapshot) {
 watch(layerMode, (mode) => {
   if (mode === 'steps' && effectEngine) {
     effectEngine.activeModifier.value = null;
-  } else if (mode === 'modifiers' && effectEngine && effectEngine.effects.length > 0) {
-    if (!effectEngine.activeModifier.value || !effectEngine.effects.includes(effectEngine.activeModifier.value as Effect)) {
-      effectEngine.activeModifier.value = effectEngine.effects[0] || null;
+  } else if (mode === 'modifiers' && effectEngine && effectEngine.modifiers.length > 0) {
+    if (!effectEngine.activeModifier.value || !effectEngine.modifiers.includes(effectEngine.activeModifier.value)) {
+      effectEngine.activeModifier.value = effectEngine.modifiers[0] || null;
     }
   }
 });
@@ -145,7 +104,7 @@ watch(activeModifiers, (modifiers) => {
   if (layerMode.value === 'modifiers' && effectEngine) {
     const currentActive = effectEngine.activeModifier.value;
     if (currentActive && !modifiers.includes(currentActive)) {
-      effectEngine.activeModifier.value = modifiers.length > 0 ? (modifiers[0] as Effect) : null;
+      effectEngine.activeModifier.value = modifiers.length > 0 ? (modifiers[0] ?? null) : null;
     }
   }
 });
@@ -153,7 +112,7 @@ watch(activeModifiers, (modifiers) => {
 function openModifier(effectId?: string) {
   layerMode.value = 'modifiers';
   if (effectId && effectEngine) {
-    const eff = effectEngine.effects.find(e => e.id === effectId);
+    const eff = effectEngine.modifiers.find(e => e.id === effectId);
     if (eff) {
       effectEngine.activeModifier.value = eff;
     }
@@ -213,52 +172,20 @@ defineExpose({
       <!-- Modifiers Level (scrollable) -->
       <ScrollArea v-else-if="layerMode === 'modifiers'" class="flex-1 min-h-0">
         <div class="px-4 pb-3 space-y-4">
-          <!-- Blend mode selector — only when 2+ modifiers active -->
-          <div v-if="activeModifiers.length >= 2" class="flex items-center gap-2">
-            <span class="text-xs text-muted-foreground w-20 shrink-0">Stacking</span>
-            <Select
-              :model-value="effectEngine?.stackBlendMode?.value ?? 'add'"
-              @update:model-value="(v: any) => { if (effectEngine) { effectEngine.stackBlendMode.value = v as BlendMode; handleChange(); } }"
-            >
-              <SelectTrigger class="h-7 text-xs flex-1" @click.stop @pointerdown.stop>
-                <span>{{ BLEND_MODE_LABELS[effectEngine?.stackBlendMode?.value ?? 'add'] }}</span>
-              </SelectTrigger>
-              <SelectContent @pointerdown.stop>
-                <TooltipProvider :delay-duration="400">
-                  <Tooltip v-for="(label, mode) in BLEND_MODE_LABELS" :key="mode">
-                    <TooltipTrigger as-child>
-                      <SelectItem :value="mode" class="text-xs">{{ label }}</SelectItem>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" class="max-w-[220px] text-xs bg-popover text-popover-foreground border border-border">
-                      {{ BLEND_MODE_DESCRIPTIONS[mode as BlendMode] }}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </SelectContent>
-            </Select>
-          </div>
           <ChaserModifiersList
             :active-modifiers="activeModifiers"
             :active-modifier="effectEngine?.activeModifier?.value ?? null"
             :available-channel-types="availableChannelTypes"
             :pinned-modifiers="pinnedStore.pinnedModifiers"
             :pinned-effect-ids="pinnedEffectIds"
-            :can-add-displacement="canAddDisplacement"
-            :can-add-speed-curve="canAddSpeedCurve"
-            :base-hue="baseHue"
+            :selection-shape="selectionShape"
             @select-modifier="selectModifier"
             @remove-modifier="removeModifier"
             @toggle-target-channel="toggleTargetChannel"
             @update-modifier="updateModifier"
             @update-modifier-properties="updateModifierProperties"
-            @reverse-direction="reverseDirection"
             @handle-modifier-drag-end="handleModifierDragEnd"
-            @add-modifier="addWaveformModifier"
-            @add-noise-modifier="addNoiseModifier"
-            @add-sequencer-modifier="addSequencerModifier"
-            @add-color-modifier="addColorModifier"
-            @add-displacement-modifier="addDisplacementModifier"
-            @add-speed-curve-modifier="addSpeedCurveModifier"
+            @add-modifier="addModifier"
             @add-pinned-modifier="handleAddPinnedModifier"
             @pin-modifier="handlePinModifier"
             @switch-modifier-type="switchModifierType"

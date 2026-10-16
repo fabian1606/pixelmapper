@@ -1,35 +1,19 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
-import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS } from '~/utils/engine/constants';
-import { sampleStripCapped, pointAtArcLength, type SampledCurve } from '~/utils/engine/strip-geometry';
-import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
+import type { ModifierInstance } from '~/utils/engine/types';
+import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
+import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
+import { modifierKey } from '~/utils/engine/modifiers';
+import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
+import { beamWorldPx } from '~/utils/kinds/kind-host';
+import { resolveDistribution, usesRanks } from '~/utils/engine/distribution/resolve';
 
 // ── Packet type constants ─────────────────────────────────────────────────────
 
-export const TYPE_BPM           = 0x10;
-export const TYPE_VERSION_REQ   = 0x11;
-export const TYPE_TIMESYNC      = 0x13;
+// Engine packets (the ESP firmware protocol lives in extensions/connector-esp).
 export const TYPE_LAYOUT_BIN    = 0x14;
 export const TYPE_CHAN_BIN      = 0x15;
-export const TYPE_FX_BIN        = 0x16;
-export const TYPE_OTA_BEGIN     = 0x15;
-export const TYPE_OTA_CHUNK     = 0x16;
-export const TYPE_OTA_END       = 0x17;
-export const TYPE_UNIVERSE_MAP  = 0x18;
-export const TYPE_STRIP_CONFIG  = 0x19;
-export const TYPE_STRIP_SLOTS   = 0x1A;
-// ESP-NOW USB bridge (separate esp32s3_espnow_bridge firmware):
-export const TYPE_COLOR_CMD     = 0x20; // r,g,b,brightness → ESP-NOW broadcast
-
-// Chip-type IDs sent in TYPE_STRIP_CONFIG / TYPE_STRIP_SLOTS. ESP32-S3 firmware
-// v1 only honours WS2812B (id 0); the field exists for forward-compat.
-export const STRIP_CHIP_TYPE_ID: Record<string, number> = {
-  'WS2812B':     0,
-  'WS2811':      1,
-  'SK6812-RGB':  2,
-  'SK6812-RGBW': 3,
-  'APA102':      4,
-};
+/** Modifier instances (replaces the former TYPE_FX_BIN, same id). */
+export const TYPE_MODIFIERS_BIN = 0x16;
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 
@@ -47,7 +31,9 @@ export const CHANNEL_TYPE_ID: Record<string, number> = {
 };
 
 const SPEED_MODE_ID: Record<string, number> = { time: 0, beat: 1, infinite: 2 };
-const DIRECTION_ID:  Record<string, number> = { NONE: 0, LINEAR: 1, RADIAL: 2, SYMMETRICAL: 3, ANGULAR: 4 };
+/** Distribution ids (rs-engine `distribution::{Mode, Grouping}::from_id`). */
+const DIST_MODE_ID: Record<string, number> = { none: 0, linear: 1, radial: 2, conical: 3, order: 4 };
+const GROUPING_ID: Record<string, number> = { none: 0, everyN: 1, sections: 2, random: 3 };
 
 // ── Low-level buffer writer ───────────────────────────────────────────────────
 
@@ -71,11 +57,12 @@ class BufWriter {
 
   u32(v: number) { this.buf.push(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff); }
 
-  bytes(arr: Uint8Array) {
-    for (let i = 0; i < arr.length; i++) this.buf.push(arr[i]!);
-  }
+  /** Payload size so far (bytes). */
+  get size(): number { return this.buf.length; }
 
   toPacket(type: number): Uint8Array {
+    // The frame length is u16: larger payloads cannot be framed (plan §5 risk).
+    if (this.buf.length > 0xffff) throw new Error(`packet 0x${type.toString(16)} payload of ${this.buf.length} bytes exceeds 64 KB`);
     const out = new Uint8Array(5 + this.buf.length);
     out[0] = MAGIC0; out[1] = MAGIC1; out[2] = type;
     out[3] = this.buf.length & 0xff;
@@ -85,127 +72,11 @@ class BufWriter {
   }
 }
 
-// ── Simple fixed packets ──────────────────────────────────────────────────────
-
-export function buildVersionRequestPacket(): Uint8Array {
-  // Zero-length payload — ESP32 replies with "[version] X.Y.Z\n" on serial
-  const out = new Uint8Array(5);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_VERSION_REQ; out[3] = 0; out[4] = 0;
-  return out;
-}
-
-export function buildBpmPacket(bpm: number): Uint8Array {
-  const out = new Uint8Array(9);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_BPM; out[3] = 4; out[4] = 0;
-  new DataView(out.buffer).setFloat32(5, bpm, true);
-  return out;
-}
-
-export function buildTimesyncPacket(elapsedMs: number): Uint8Array {
-  const out = new Uint8Array(9);
-  out[0] = MAGIC0; out[1] = MAGIC1; out[2] = TYPE_TIMESYNC; out[3] = 4; out[4] = 0;
-  new DataView(out.buffer).setFloat32(5, elapsedMs, true);
-  return out;
-}
-
-export function buildOtaBeginPacket(totalSize: number): Uint8Array {
-  const w = new BufWriter();
-  w.u32(totalSize);
-  return w.toPacket(TYPE_OTA_BEGIN);
-}
-
-export function buildOtaChunkPacket(chunk: Uint8Array): Uint8Array {
-  const w = new BufWriter();
-  w.bytes(chunk);
-  return w.toPacket(TYPE_OTA_CHUNK);
-}
-
-export function buildOtaEndPacket(): Uint8Array {
-  const w = new BufWriter();
-  return w.toPacket(TYPE_OTA_END);
-}
-
-// ── Strip config packet (TYPE_STRIP_CONFIG 0x19) ─────────────────────────────
-// Tells the ESP32-S3 node which LED strip layout to drive. Sent on connect and
-// whenever the bound fixture's stripConfig changes. Firmware v1 only consumes
-// ledCount + groupSize; chipType is forward-compat (always 0/WS2812B today).
-
-export interface StripConfigPayload {
-  chipType:     string;   // "WS2812B" | "SK6812-RGB" | …
-  ledCount:     number;
-  groupSize:    number;
-  ledsPerMeter: number;
-}
-
-export function buildStripConfigPacket(cfg: StripConfigPayload): Uint8Array {
-  const w = new BufWriter();
-  w.u8(STRIP_CHIP_TYPE_ID[cfg.chipType] ?? 0);
-  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledCount))));
-  w.u16(Math.max(1, Math.min(65535, Math.round(cfg.groupSize))));
-  w.u16(Math.max(0, Math.min(65535, Math.round(cfg.ledsPerMeter))));
-  return w.toPacket(TYPE_STRIP_CONFIG);
-}
-
-// ── Strip slots packet (TYPE_STRIP_SLOTS 0x1A) ───────────────────────────────
-// Sent instead of (or in addition to) TYPE_STRIP_CONFIG when a single ESP32
-// drives multiple LED strips on different GPIO pins.
-//
-// Payload:
-//   [slotCount: u8]
-//   per slot (8 bytes):
-//     [pin: u8, chipType: u8, ledCount: u16, groupSize: u16, ledsPerMeter: u16]
-//
-// NOTE: ledOffset (start-LED on shared pin) is stored in FixtureSlotInput but
-// NOT yet encoded on the wire — the firmware (main.cpp) needs to be compiled
-// with the working-tree changes (pinBase / ledOffset support, 10 bytes/slot)
-// before that field can be sent. Until then keep the packet at 8 bytes so it
-// stays compatible with the HEAD firmware that expects exactly 8 bytes/slot.
-
-export interface StripSlotPayload extends StripConfigPayload {
-  pin: number;        // GPIO pin number
-  ledOffset?: number; // Start-LED auf dem Pin (default 0) — not yet encoded
-}
-
-export function buildStripSlotsPacket(slots: StripSlotPayload[]): Uint8Array {
-  const w = new BufWriter();
-  w.u8(Math.min(slots.length, 255));
-  for (const s of slots) {
-    w.u8(s.pin & 0xff);
-    w.u8(STRIP_CHIP_TYPE_ID[s.chipType] ?? 0);
-    w.u16(Math.max(0, Math.min(65535, Math.round(s.ledCount))));
-    w.u16(Math.max(1, Math.min(65535, Math.round(s.groupSize))));
-    w.u16(Math.max(0, Math.min(65535, Math.round(s.ledsPerMeter))));
-    // ledOffset goes here once the firmware is updated to 10 bytes/slot:
-    // w.u16(Math.max(0, Math.min(65535, Math.round(s.ledOffset ?? 0))));
-  }
-  return w.toPacket(TYPE_STRIP_SLOTS);
-}
-
-// ── ESP-NOW USB bridge packets ────────────────────────────────────────────
-// Sent to the standalone esp32s3_espnow_bridge firmware over USB serial. The
-// bridge re-broadcasts whatever it receives via ESP-NOW to FF:FF:FF:FF:FF:FF,
-// stamping each packet with its persisted receiver-id so multiple bridges can
-// coexist on one channel.
-
-/** Color frame: 4 bytes the bridge broadcasts as-is (r,g,b,brightness). */
-export function buildColorCommandPacket(r: number, g: number, b: number, brightness: number): Uint8Array {
-  const w = new BufWriter();
-  w.u8(r & 0xff);
-  w.u8(g & 0xff);
-  w.u8(b & 0xff);
-  w.u8(brightness & 0xff);
-  return w.toPacket(TYPE_COLOR_CMD);
-}
-
-// ── Universe map packet (TYPE_UNIVERSE_MAP 0x18) ──────────────────────────────
-// Tells the ESP32 which DMX universes it should render and output.
-// Payload: [count, universe1, universe2, ...]
-
-export function buildUniverseMapPacket(universes: number[]): Uint8Array {
-  const w = new BufWriter();
-  w.u8(universes.length);
-  for (const u of universes) w.u8(u);
-  return w.toPacket(TYPE_UNIVERSE_MAP);
+/** FNV-1a hash of a fixture id (stable seed source for modifiers). */
+export function fixtureIdHash(id: string | number): number {
+  let h = 0x811c9dc5;
+  for (const c of String(id)) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193);
+  return h >>> 0;
 }
 
 // ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────
@@ -219,64 +90,23 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
   for (let i = 0; i < fixtures.length; i++) {
     const f = fixtures[i]!;
     const groupIndex = i;
-    const rotRad = (f.rotation ?? 0) * (Math.PI / 180);
-    const cosR = Math.cos(rotRad);
-    const sinR = Math.sin(rotRad);
-
-    // NeoPixel strips: pre-sample the curve once (capped to the configured
-    // target length, matching the renderer's sample_strip_curve_capped) so each
-    // beam's per-channel world position can be looked up by arc length —
-    // beam.localX projects along the AABB axis and is meaningless for a polyline.
-    let stripCurve: SampledCurve | null = null;
-    let stripLedCount = 0;
-    let stripGroupSize = 1;
-    let stripBeamIndex: Map<string, number> | null = null;
-    const minStripPoints = f.stripConfig?.shapeType === 'circle' ? 1 : 2;
-    if (f.stripConfig && f.stripConfig.points.length >= minStripPoints && f.beams.length > 0) {
-      const targetLen = f.stripConfig.lengthMeters * PIXELS_PER_METER;
-      stripCurve = sampleStripCapped(f.stripConfig.shapeType, f.stripConfig.points, targetLen, f.stripConfig.clockwise ?? true);
-      stripLedCount = Math.max(1, f.stripConfig.ledCount);
-      stripGroupSize = Math.max(1, f.stripConfig.groupSize);
-      stripBeamIndex = new Map();
-      for (let bi = 0; bi < f.beams.length; bi++) stripBeamIndex.set(f.beams[bi]!.id, bi);
-    }
-
+    // Layout v2: fixture id hash (stable per-fixture seeds) …
     w.u16(groupIndex);
+    w.u32(fixtureIdHash(f.id));
     w.u16(f.channels.length);
+    const headIndex = new Map(f.beams.map((b, bi) => [b.id, bi]));
 
+    const beamById = new Map(f.beams.map(b => [b.id, b]));
     for (const ch of f.channels) {
+      // Channel position = its beam's world position (kind beams via their
+      // offset, classic beams via the rotated local offset), else the origin.
       let worldX = f.fixturePosition.x;
       let worldY = f.fixturePosition.y;
-
-      if (stripCurve && stripBeamIndex && ch.beamId) {
-        // Place each logical pixel at the center of its physical-LED group on
-        // the (already-capped-to-target-length) curve. Matches the renderer's
-        // LED distribution in render.rs (different for circle vs open shapes).
-        const idx = stripBeamIndex.get(ch.beamId);
-        if (idx !== undefined) {
-          const firstLed = idx * stripGroupSize;
-          const lastLed = Math.min(firstLed + stripGroupSize - 1, stripLedCount - 1);
-          const centerLed = (firstLed + lastLed) / 2;
-          const t = f.stripConfig?.shapeType === 'circle'
-            ? (stripLedCount >= 1 ? centerLed / stripLedCount : 0)
-            : (stripLedCount > 1 ? 0.025 + (centerLed / (stripLedCount - 1)) * 0.95 : 0.5);
-          const p = pointAtArcLength(stripCurve, t * stripCurve.totalLength);
-          worldX = p.x / WORLD_WIDTH;
-          worldY = p.y / WORLD_HEIGHT;
-        }
-      } else if (ch.beamId) {
-        // Non-strip: per-beam position with rotation — mirrors engine.ts syncTargets() lines 82-96
-        const beam = f.beams?.find(b => b.id === ch.beamId);
-        if (beam) {
-          const fWidth  = f.fixtureSize.x * FIXTURE_RADIUS * 2;
-          const fHeight = f.fixtureSize.y * FIXTURE_RADIUS * 2;
-          const localPx = beam.localX * fWidth;
-          const localPy = beam.localY * fHeight;
-          const rotPx = localPx * cosR - localPy * sinR;
-          const rotPy = localPx * sinR + localPy * cosR;
-          worldX += rotPx / WORLD_WIDTH;
-          worldY += rotPy / WORLD_HEIGHT;
-        }
+      const beam = ch.beamId ? beamById.get(ch.beamId) : undefined;
+      if (beam) {
+        const p = beamWorldPx(f, beam);
+        worldX = p.x / WORLD_WIDTH;
+        worldY = p.y / WORLD_HEIGHT;
       }
 
       w.u16(f.startAddress - 1 + ch.addressOffset);
@@ -293,6 +123,8 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       // Per-channel DMX range (remap bounds). Defaults to full 0-255.
       w.u8(ch.rangeMin ?? 0);
       w.u8(ch.rangeMax ?? 255);
+      // … and the head (beam) index of every channel.
+      w.u16(ch.beamId !== undefined ? (headIndex.get(ch.beamId) ?? 0) : 0);
     }
   }
 
@@ -339,141 +171,119 @@ export function buildChannelsBin(fixtures: Fixture[]): Uint8Array {
   return w.toPacket(TYPE_CHAN_BIN);
 }
 
-// ── Effects packet (TYPE_FX_BIN 0x16) ────────────────────────────────────────
+// ── Modifiers packet (TYPE_MODIFIERS_BIN 0x16, version 2) ───────────────────
+// Payload (see rs-engine/core/src/bin_protocol.rs):
+//   u8 version(2); u16 count; per instance:
+//   u32 key; u16 pluginIndex; u8 signature; u8 output; u8 blend; f32 strength;
+//   speed; distribution; u8 nTypes; u8[] types; u16 maskBytes (0 = all);
+//   u8[] mask; u16 nParams; f32[] params.
+// distribution (plan M3.4):
+//   u8 scope(0 across,1 within); u8 mode(0 none,1 linear,2 radial,3 conical,4 order);
+//   f32 originX, originY, endX, endY; u8 reverse;
+//   u8 groupingKind(0 none,1 everyN,2 sections,3 random); u8 groupingN; u32 groupingSeed;
+//   u8 withinOffset(0 none,1 order);
+//   u16 rankEntries; per entry: u16 fixtureLayoutIndex, u16 rank
+//   (targeted fixtures only; mode order or withinOffset order).
+// Size budget: the u16 frame length caps the payload at 64 KB (e.g. 200
+// fixtures cost 800 bytes of ranks per ordered instance, a curve 512 bytes).
+// The plugin table (index → hash) travels next to the packet (worker message).
+
+/** Version byte of the modifiers packet. */
+export const MODIFIERS_BIN_VERSION = 2;
 
 const BLEND_MODE_ID: Record<string, number> = { add: 0, override: 1, multiply: 2, max: 3, min: 4 };
+const SIGNATURE_ID: Record<string, number> = { scalar: 0, rgb: 1, panTilt: 2 };
+/** Manifest output → wire id (rs-engine `OutputMode::from_id`). */
+const OUTPUT_MODE_ID: Record<string, number> = { bipolar: 0, absolute: 1, scale: 2 };
 
-export function buildEffectsBin(effects: Effect[], fixtures: Fixture[], stackBlendMode: import('~/utils/engine/types').BlendMode = 'add'): Uint8Array {
-  // Bitmask size derived from fixture count — both sides compute the same value
-  // after layout sync. Bit i = fixture with group_index i is targeted.
-  const fixtureCount = fixtures.length;
-  const bitmaskBytes = Math.ceil(fixtureCount / 8);
+/** Result of `buildModifiersBin`. */
+export interface ModifiersPacket {
+  /** Framed packet (strip the 5-byte header before dispatching to the engine). */
+  packet: Uint8Array;
+  /** Plugin table: index → content hash. */
+  plugins: string[];
+}
 
+/**
+ * Encodes modifier instances. Instances whose plugin manifest is unknown are
+ * skipped (they are included again once the plugin is known).
+ */
+export function buildModifiersBin(
+  modifiers: readonly ModifierInstance[],
+  fixtures: readonly Fixture[],
+  getManifest: (hash: string) => ContentPluginManifest | undefined,
+): ModifiersPacket {
   const idToIndex = new Map<string | number, number>();
   fixtures.forEach((f, i) => idToIndex.set(f.id, i));
+  /** Layout index by stringified id (rank tables are keyed by string). */
+  const indexByKey = new Map(fixtures.map((f, i) => [String(f.id), i]));
+  const maskBytes = Math.ceil(fixtures.length / 8);
+
+  const plugins: string[] = [];
+  const encodable = modifiers.filter(m => getManifest(m.plugin));
 
   const w = new BufWriter();
-  w.u8(BLEND_MODE_ID[stackBlendMode] ?? 0);
-  w.u8(effects.length);
+  w.u8(MODIFIERS_BIN_VERSION);
+  w.u16(encodable.length);
+  for (const m of encodable) {
+    const manifest = getManifest(m.plugin)!;
+    let pluginIndex = plugins.indexOf(m.plugin);
+    if (pluginIndex < 0) pluginIndex = plugins.push(m.plugin) - 1;
 
-  for (const effect of effects) {
-    // Channel types: count=0 means all channel types
-    const targetChannels: string[] = effect.targetChannels ?? [];
-    w.u8(targetChannels.length);
-    for (const ct of targetChannels) w.u8(CHANNEL_TYPE_ID[ct] ?? 255);
+    w.u32(modifierKey(m.id));
+    w.u16(pluginIndex);
+    w.u8(SIGNATURE_ID[m.signature] ?? 0);
+    w.u8(OUTPUT_MODE_ID[manifest.output] ?? 0);
+    w.u8(BLEND_MODE_ID[m.blendMode] ?? 0);
+    w.f32(Math.max(0, Math.min(1, m.strength)));
+    w.speed(m.speed);
 
-    // Fixture bitmask: bit i set → fixture with group_index i is targeted.
-    // null/empty targetFixtureIds → all fixtures targeted (all bits set).
-    const bitmask = new Uint8Array(bitmaskBytes);
-    const targetedIndices: number[] = [];
-    
-    if (effect.targetFixtureIds?.length) {
-      for (const id of effect.targetFixtureIds) {
+    // Distribution block; ranks are resolved here and sent as a table.
+    const d = m.distribution;
+    const resolved = resolveDistribution(m, fixtures);
+    w.u8(d.scope === 'within' ? 1 : 0);
+    w.u8(DIST_MODE_ID[d.mode] ?? 0);
+    w.f32(d.origin.x);
+    w.f32(d.origin.y);
+    w.f32(d.end.x);
+    w.f32(d.end.y);
+    w.u8(d.reverse ? 1 : 0);
+    w.u8(GROUPING_ID[d.grouping.kind] ?? 0);
+    w.u8(Math.max(1, Math.min(255, Math.round(d.grouping.n))));
+    w.u32(d.grouping.seed >>> 0);
+    w.u8(d.withinOffset === 'order' ? 1 : 0);
+    const entries = (usesRanks(d) ? Object.entries(resolved.ranks) : [])
+      .map(([id, rank]) => [indexByKey.get(id), rank] as const)
+      .filter((e): e is readonly [number, number] => e[0] !== undefined);
+    w.u16(entries.length);
+    for (const [index, rank] of entries) {
+      w.u16(index);
+      w.u16(rank);
+    }
+
+    // Scalar targets by channel type (rgb/panTilt resolve their channels in the core).
+    const types = m.signature === 'scalar' ? m.targetChannels.map(t => CHANNEL_TYPE_ID[t]).filter((v): v is number => v !== undefined) : [];
+    w.u8(types.length);
+    for (const t of types) w.u8(t);
+
+    // Fixture mask; undefined targetFixtureIds = all fixtures.
+    if (m.targetFixtureIds) {
+      const mask = new Uint8Array(Math.max(1, maskBytes));
+      for (const id of m.targetFixtureIds) {
         const idx = idToIndex.get(id);
-        if (idx !== undefined) targetedIndices.push(idx);
+        if (idx !== undefined) mask[idx >> 3]! |= 1 << (idx & 7);
       }
-    } else {
-      for (let i = 0; i < fixtureCount; i++) targetedIndices.push(i);
+      w.u16(mask.length);
+      for (const b of mask) w.u8(b);
     }
-    
-    for (const idx of targetedIndices) {
-      bitmask[idx >> 3]! |= (1 << (idx & 7));
-    }
-    for (const byte of bitmask) w.u8(byte);
-
-    w.u8(DIRECTION_ID[effect.direction ?? 'LINEAR'] ?? 1);
-    w.f32(effect.originX ?? 0.5);
-    w.f32(effect.originY ?? 0.5);
-    w.f32(effect.angle ?? 0);
-    // strength is 0–100% in the UI; Rust engine expects 0–255 DMX units
-    w.f32(effect.strength * 2.55);
-    w.u8(effect.reverse ? 1 : 0);
-    w.f32(effect.fanning);
-    // Shape type: 0=sine,1=square,2=triangle,3=sawtooth,4=bounce,5=ramp,6=smooth
-    const SHAPE_ID: Record<string, number> = {
-      sine: 0, square: 1, triangle: 2, sawtooth: 3, bounce: 4, ramp: 5, smooth: 6,
-    };
-    const waveformShape = (effect as any).waveformShape ?? 'sine';
-    const waveformParams = (effect as any).waveformParams ?? { param: 0.5, start: 0, end: 1 };
-    w.u8(SHAPE_ID[waveformShape] ?? 0);
-    w.f32(waveformParams.param ?? 0.5);
-    w.f32(waveformParams.start ?? 0);
-    w.f32(waveformParams.end ?? 1);
-    // Vertical baseline offset in [-1, 1] (0 = centered on base channel value).
-    w.f32(waveformParams.offset ?? 0);
-    // Inactive-zone floor override (0..1 = explicit, <0 = disabled).
-    w.f32(waveformParams.floor ?? -1);
-    w.speed({ ...effect.speed, beatOffset: effect.speed.beatOffset || 0 });
-
-    // Effect type discriminator + noise parameters (always written; Waveforms use defaults)
-    const noiseParams = (effect as any).noiseParams;
-    const isNoise = !!noiseParams;
-    const NOISE_TYPE_ID: Record<string, number> = { white: 0, perlin: 1, step: 2 };
-    const CHANNEL_MODE_ID: Record<string, number> = { linked: 0, independent: 1 };
-    w.u8(isNoise ? 1 : 0);
-    w.u8(NOISE_TYPE_ID[noiseParams?.noiseType] ?? 0);
-    w.f32(noiseParams?.scale ?? 1);
-    w.u8(CHANNEL_MODE_ID[noiseParams?.channelMode] ?? 0);
-    w.f32(noiseParams?.colorVariation ?? 0);
-    w.f32(noiseParams?.fade ?? 0);
-    w.f32(noiseParams?.threshold ?? 0);
-
-    // Sequencer parameters
-    const seqParams = (effect as any).sequencerParams;
-    const isSeq = !!seqParams;
-    const SEQ_PATTERN_ID: Record<string, number> = { split: 0, checkerboard: 1, sections: 2, scatter: 3, flow: 4 };
-    w.u8(isSeq ? 1 : 0);
-    if (isSeq) {
-      w.u8(SEQ_PATTERN_ID[seqParams.patternType] ?? 0);
-      w.f32(seqParams.originX ?? 0.5);
-      w.f32(seqParams.originY ?? 0.5);
-      w.f32(seqParams.angle ?? 0);
-      w.f32(seqParams.scale ?? 0.1);
-      w.u8(seqParams.count ?? 4);
-      w.f32(seqParams.density ?? 0.5);
-      w.f32(seqParams.densityVariation ?? 0);
-      w.u8(seqParams.invert ? 1 : 0);
+    else {
+      w.u16(0);
     }
 
-    // Color parameters (hue shift + saturation)
-    const colorP = (effect as any).colorParams;
-    const isColor = !!colorP;
-    w.u8(isColor ? 1 : 0);
-    if (isColor) {
-      w.f32(colorP.hueShift ?? 0);
-      w.f32(colorP.saturation ?? 1);
-      w.f32(colorP.hueRange ?? 0);
-      w.f32(colorP.satRange ?? 0);
-    }
-
-    // Displacement parameters
-    const dispP = (effect as any).displacementParams;
-    const isDisp = !!dispP;
-    const DISP_PATTERN_ID: Record<string, number> = { perlin: 0, white: 1 };
-    w.u8(isDisp ? 1 : 0);
-    if (isDisp) {
-      w.u8(DISP_PATTERN_ID[dispP.patternType] ?? 0);
-      w.f32(dispP.amountX ?? 0.1);
-      w.f32(dispP.amountY ?? 0.1);
-      w.f32(dispP.scale ?? 2);
-      w.u32(dispP.seed ?? 0);
-    }
-
-    // Speed curve parameters
-    const scP = (effect as any).speedCurveParams;
-    const isSC = !!scP;
-    w.u8(isSC ? 1 : 0);
-    if (isSC) {
-      const pts: { x: number; y: number }[] = scP.points ?? [];
-      w.u8(Math.min(pts.length, 255));
-      for (const pt of pts.slice(0, 255)) {
-        w.f32(pt.x);
-        w.f32(pt.y);
-      }
-      w.f32(scP.maxMultiplier ?? 4);
-      w.u8(scP.cycleBeats ?? 1);
-    }
+    const params = encodeParams(manifest.params, m.params, { ticks: resolved.ticks });
+    w.u16(params.length);
+    for (const v of params) w.f32(v);
   }
 
-  return w.toPacket(TYPE_FX_BIN);
+  return { packet: w.toPacket(TYPE_MODIFIERS_BIN), plugins };
 }

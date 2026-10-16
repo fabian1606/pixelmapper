@@ -20,8 +20,15 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { type SnapshotMap } from './commands/set-channel-values-command';
 import { useChannelValueHistory } from './composables/use-channel-value-history';
 import { useChannelSections } from './composables/use-channel-sections';
-import { SetModifiersCommand, cloneEffectsList } from './commands/set-modifiers-command';
+import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
 import { usePresets } from '~/components/engine/composables/use-presets';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmPanelSection from '~/components/primitives/PmPanelSection.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { fixtureView } from '~/utils/extensions/scope-views';
+import { modelTick } from '~/utils/extensions/model-tick';
+import type { SignatureTarget } from '@pixelmapper/extension-api';
 interface Props {
   selectedIds: Set<string | number>;
   fixtures: Fixture[];
@@ -86,7 +93,7 @@ function toggleTab(tab: ChannelCategoryKey) {
 function stopAllOrSelected() {
   const targetFixtures = props.selectedIds.size > 0 ? getSelectedFixtures() : props.fixtures;
   const snapshots = captureSnapshots(targetFixtures);
-  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  const beforeModifiers = effectEngine ? cloneModifiers(effectEngine.modifiers) : null;
   let modifiersChanged = false;
   
   // Also clear the active preset if "stop all" is used globally (not just for selected subset)
@@ -110,7 +117,7 @@ function stopAllOrSelected() {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
         if (effect.targetFixtureIds?.includes(f.id)) {
            effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
            modifiersChanged = true;
@@ -120,13 +127,13 @@ function stopAllOrSelected() {
   }
   
   if (effectEngine && modifiersChanged && beforeModifiers) {
-      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-        const eff = effectEngine.effects[i];
+      for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+        const eff = effectEngine.modifiers[i];
         if (eff && eff.targetFixtureIds?.length === 0) {
-           effectEngine.effects.splice(i, 1);
+           effectEngine.modifiers.splice(i, 1);
         }
       }
-      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), 'Stop All Modifiers'));
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneModifiers(effectEngine.modifiers), 'Stop All Modifiers'));
   }
 
   commitSnapshots(snapshots, 'Stop All');
@@ -136,7 +143,7 @@ function resetActiveTabGroup() {
   if (!activeTab.value) return;
   const fixtures = getSelectedFixtures();
   const snapshots = captureSnapshots(fixtures);
-  const beforeModifiers = effectEngine ? cloneEffectsList(effectEngine.effects) : null;
+  const beforeModifiers = effectEngine ? cloneModifiers(effectEngine.modifiers) : null;
   let modifiersChanged = false;
   
   for (const f of fixtures) {
@@ -150,7 +157,7 @@ function resetActiveTabGroup() {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
          if (effect.targetFixtureIds?.includes(f.id) && effect.targetChannels?.some(t => tabChannelFilter(t))) {
            effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== f.id);
            modifiersChanged = true;
@@ -160,13 +167,13 @@ function resetActiveTabGroup() {
   }
   
   if (effectEngine && modifiersChanged && beforeModifiers) {
-      for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-        const eff = effectEngine.effects[i];
+      for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+        const eff = effectEngine.modifiers[i];
         if (eff && eff.targetFixtureIds?.length === 0) {
-           effectEngine.effects.splice(i, 1);
+           effectEngine.modifiers.splice(i, 1);
         }
       }
-      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneEffectsList(effectEngine.effects), `Reset ${activeTab.value} Modifiers`));
+      commandHistory.execute(new SetModifiersCommand(effectEngine, beforeModifiers, cloneModifiers(effectEngine.modifiers), `Reset ${activeTab.value} Modifiers`));
   }
 
   commitSnapshots(snapshots, `Reset ${activeTab.value}`);
@@ -182,6 +189,11 @@ function handleBeforeChange(fixtures: Fixture[]) {
 // Helpers ------------------------------------------------------------------
 
 function getSelectedFixtures(): Fixture[] {
+  // Track selection and scene changes explicitly: the scene array is mutated
+  // in place (shallowRef + triggerRef), so `props.nodes` keeps its identity
+  // and an empty traversal would otherwise never read `selectedIds`.
+  void modelTick.value;
+  void props.selectedIds;
   const result: Fixture[] = [];
   function traverse(nodes: SceneNode[], inherited = false) {
     for (const node of nodes) {
@@ -200,6 +212,31 @@ function getSelectedFixtures(): Fixture[] {
 
 const availableTabs = computed(() => {
   return getAvailableCategories(getSelectedFixtures());
+});
+
+// Extension scope: in the position section, `signature` is the pan/tilt target
+// of the first selected moving fixture (slot `properties/position:*`). Channel
+// controls provide their own, more specific signature.
+provideScope('signature', (): SignatureTarget | undefined => {
+  if (activeTab.value !== 'position') return undefined;
+  for (const f of getSelectedFixtures()) {
+    const pan = f.channels.findIndex(c => c.type === 'PAN' && !c.isFine);
+    const tilt = f.channels.findIndex(c => c.type === 'TILT' && !c.isFine);
+    if (pan >= 0 && tilt >= 0) {
+      return {
+        signature: 'panTilt',
+        fixtureId: f.id,
+        channelRefs: [{ channelIndex: pan, type: 'PAN' }, { channelIndex: tilt, type: 'TILT' }],
+      };
+    }
+  }
+  return undefined;
+});
+
+// Extension scope: the property sidebar exposes `fixture` for a single selection.
+provideScope('fixture', () => {
+  const selected = getSelectedFixtures();
+  return selected.length === 1 ? fixtureView(selected[0]!) : undefined;
 });
 
 // Auto-close the sidebar if the selected fixtures no longer support the active category
@@ -236,7 +273,7 @@ const modifiedCategories = computed<Set<ChannelCategoryKey>>(() => {
     }
 
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
         if (effect.targetFixtureIds?.includes(fixture.id)) {
            for (const t of (effect.targetChannels || [])) {
               for (const cat of CHANNEL_CATEGORIES) {
@@ -278,16 +315,26 @@ defineExpose({ openTab });
 <template>
   <div ref="sidebarRef" class="absolute right-0 top-0 h-full flex pointer-events-none z-50">
     
-    <!-- Floating Overlay Panel -->
-    <div 
+    <!-- Floating Overlay Panel (extension slots: properties:*) -->
+    <PmPanel
+      id="properties"
       class="pointer-events-auto absolute right-14 top-4 bottom-4 w-72 bg-background border border-border shadow-2xl rounded-2xl z-10 overflow-hidden transition-all duration-200 ease-out"
       :class="[activeTab ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-0 scale-95 pointer-events-none']"
     >
-      <div v-if="activeTab" class="flex flex-col h-full">
+      <!-- Active category = section (extension slots: properties/<category>:*) -->
+      <PmPanelSection
+        v-if="activeTab"
+        :id="activeTab"
+        :key="activeTab"
+        :manual="['actions', 'before', 'after', 'items']"
+        class="flex flex-col h-full"
+        v-slot="{ Actions, Before, After, Items }"
+      >
         <!-- Overlay Header -->
         <div class="p-4 border-b border-border text-sm font-medium capitalize text-muted-foreground flex items-center justify-between">
           <span>{{ activeTab }}</span>
           <div class="flex items-center gap-2">
+            <component :is="Actions" />
             <span v-if="activeTab && availableTabs.total > 0" class="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full whitespace-nowrap normal-case">
               {{ activeTabFixtureCount }} of {{ availableTabs.total }} Fixture{{ availableTabs.total === 1 ? '' : 's' }}
             </span>
@@ -315,16 +362,20 @@ defineExpose({ openTab });
 
           <!-- Overlay Content (Faders) -->
           <ScrollArea v-show="!effectsManager || effectsManager.layerMode !== 'modifiers'" class="flex-1 min-h-0">
-            <FixturePropertiesChannelList
-              class="p-4"
-              :channel-sections="channelSections"
-              :active-step="effectsManager?.activeChaserConfig?.activeEditStep ?? 0"
-              @before-change="handleBeforeChange"
-            />
+            <div class="p-4 space-y-4">
+              <component :is="Before" />
+              <FixturePropertiesChannelList
+                :channel-sections="channelSections"
+                :active-step="effectsManager?.activeChaserConfig?.activeEditStep ?? 0"
+                @before-change="handleBeforeChange"
+              />
+              <component :is="Items" />
+              <component :is="After" />
+            </div>
           </ScrollArea>
         </div>
-      </div>
-    </div>
+      </PmPanelSection>
+    </PmPanel>
 
     <!-- Main Right Icon Bar -->
     <FixturePropertiesTabBar

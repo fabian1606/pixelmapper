@@ -1,7 +1,10 @@
+// ── WASM bindings ────────────────────────────────
+
 use wasm_bindgen::prelude::*;
 use crate::engine::EffectEngine;
-use crate::types::{RenderTarget, EffectConfig};
+use crate::runtime_js::JsModifierRuntime;
 
+/// The engine as used by the browser worker.
 #[wasm_bindgen]
 pub struct WasmEngine {
     engine: EffectEngine,
@@ -9,58 +12,59 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    /// Creates an engine whose modifiers run through the worker's plugin bridge.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         #[cfg(feature = "console_error_panic_hook")]
         console_error_panic_hook::set_once();
-
-        Self {
-            engine: EffectEngine::new(),
-        }
+        Self { engine: EffectEngine::with_runtime(Box::new(JsModifierRuntime)) }
     }
 
+    /// Records a tempo change at `at_ms` (ms since the clock epoch).
     #[wasm_bindgen]
-    pub fn set_bpm(&mut self, bpm: f32) {
-        self.engine.set_bpm(bpm);
+    pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32) {
+        self.engine.set_bpm_at(bpm, at_ms);
     }
 
+    /// Restarts the beat clock (new clock epoch).
     #[wasm_bindgen]
-    pub fn sync_targets(&mut self, serialized_targets: &str) -> Result<(), JsValue> {
-        let targets: Vec<RenderTarget> = serde_json::from_str(serialized_targets)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse targets: {}", e)))?;
-        
-        self.engine.sync_targets(targets);
-        Ok(())
+    pub fn reset_clock(&mut self, bpm: f32) {
+        self.engine.reset_clock(bpm);
     }
 
-    #[wasm_bindgen]
-    pub fn sync_effects(&mut self, serialized_effects: &str) -> Result<(), JsValue> {
-        let effects: Vec<EffectConfig> = serde_json::from_str(serialized_effects)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse effects: {}", e)))?;
-        
-        self.engine.sync_effects(effects);
-        Ok(())
-    }
-
+    /// Renders one frame at `time_ms` since the clock epoch.
     #[wasm_bindgen]
     pub fn render(&mut self, time_ms: f32, delta_time_ms: f32) {
         self.engine.render(time_ms, delta_time_ms);
     }
 
-    /// Dispatch a binary packet directly to the engine.
-    /// packet_type: 0x10=BPM(f32LE), 0x14=layout, 0x15=channels, 0x16=effects
-    /// Returns count of parsed items, or -1 on error.
+    /// Dispatches a binary packet payload (0x14 layout, 0x15 channels,
+    /// 0x16 modifiers). Returns the item count, or -1 on error.
     #[wasm_bindgen]
     pub fn dispatch(&mut self, packet_type: u8, data: &[u8]) -> i32 {
         self.engine.dispatch_bin(packet_type, data)
     }
 
-    /// Returns a direct memory view into the DMX buffer without copying.
-    /// This is an incredibly fast way for JS to read the Wasm memory.
+    /// Re-prepares disabled modifier instances (after plugins were loaded).
+    #[wasm_bindgen]
+    pub fn retry_disabled(&mut self) {
+        self.engine.retry_disabled();
+    }
+
+    /// Normalized signature tuples for live values: `requests` are flat
+    /// `(group index, signature id)` pairs; returns 3 f32 per request (NaN =
+    /// unavailable).
+    #[wasm_bindgen]
+    pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(requests.len() / 2 * 3);
+        self.engine.read_signatures(requests, &mut out);
+        out
+    }
+
+    /// Zero-copy view of the DMX buffer (re-fetch after any dispatch).
     #[wasm_bindgen]
     pub fn get_dmx_view(&self) -> js_sys::Uint8Array {
-        // Safe as long as the size/location of `dmx_buffer` doesn't change
-        // while JS is using the view.
+        // SAFETY: valid until the buffer is resized by a later dispatch.
         unsafe { js_sys::Uint8Array::view(&self.engine.dmx_buffer) }
     }
 }

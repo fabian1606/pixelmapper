@@ -1,13 +1,34 @@
-import { Fixture, type StripConfig } from './core/fixture'
+import { Fixture, type FixtureKindInstance } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
 import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
-import type { Effect } from './types'
+import type { ModifierInstance } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
 import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
-import { cloneEffectsList } from '~/components/engine/commands/set-modifiers-command'
+import { cloneModifiers } from './modifiers'
+import { cloneJson, rebuildKindFixture } from '~/utils/kinds/kind-host'
+import type { ProjectRequirement } from '~/utils/extensions/requires'
+import { migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution'
+
+// ─── Schema version ───────────────────────────────────────────────────────────
+
+/**
+ * Persisted format version (ADR D24). Version 2 introduced modifier
+ * instances backed by content plugins; version 3 replaced their direction
+ * fields with a distribution (ADR A20; v2 snapshots are migrated on load).
+ * Version-1 projects and presets are not migrated.
+ */
+export const SCHEMA_VERSION = 3
+
+/** Thrown when a snapshot has an incompatible schema version. */
+export class IncompatibleProjectError extends Error {
+  constructor(readonly found: unknown) {
+    super('This project was created with an incompatible version of Pixelmapper and cannot be opened.')
+    this.name = 'IncompatibleProjectError'
+  }
+}
 
 // ─── Serialized types (plain JSON-safe objects) ───────────────────────────────
 
@@ -55,7 +76,10 @@ export interface SerializedFixture {
   oflKey?: string
   channels: SerializedChannel[]
   beams: SerializedBeam[]
-  stripConfig?: StripConfig
+  /** Fixture-kind state (config + compiled cache), ADR §5.6. */
+  kind?: FixtureKindInstance
+  /** Namespaced extension data, ADR §5.8. */
+  extensionData?: Fixture['extensionData']
 }
 
 export interface SerializedGroup {
@@ -68,26 +92,19 @@ export interface SerializedGroup {
 
 export type SerializedNode = SerializedFixture | SerializedGroup
 
-export interface ConnectorSnapshot {
-  id: string
-  type: string
-  label: string
-  config: Record<string, unknown>
-}
-
 export interface ProjectSnapshot {
+  /** Persisted format version; must equal `SCHEMA_VERSION`. */
+  schemaVersion: number
   sceneNodes: SerializedNode[]
   savedPresets: Preset[]
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
-  activeEffects: Effect[]
+  modifiers: ModifierInstance[]
   livePages?: LivePage[]
   /** Controller instances persisted with the project. Auto-connect on load. */
   liveControllers?: import('~/utils/live/types').LiveControllerInstance[]
   /** Which preset is active at snapshot time — restored so reload keeps it. */
   selectedPresetId?: string | null
-  /** WebSocket connectors to restore on reload. */
-  connectors?: ConnectorSnapshot[]
   /** Global BPM at snapshot time — restored on reload. */
   globalBpm?: number
   /** Shared clock epoch — restored so effects render deterministically. */
@@ -99,6 +116,10 @@ export interface ProjectSnapshot {
   activeSectionMembers?: Record<string, string[]>
   /** Saved moving head positions for live performance recall. */
   savedPositions?: MovingHeadPosition[]
+  /** Extensions the project cannot be opened without (ADR D20). */
+  requires?: ProjectRequirement[]
+  /** Project-level namespaced extension data (ADR §5.8). */
+  extensionData?: Record<string, Record<string, unknown>>
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
@@ -144,7 +165,8 @@ export function serializeFixture(f: Fixture): SerializedFixture {
     oflKey: f.oflKey,
     channels: f.channels.map(serializeChannel),
     beams: f.beams.map(serializeBeam),
-    stripConfig: f.stripConfig ? { ...f.stripConfig } : undefined,
+    kind: f.kind ? cloneJson(f.kind) : undefined,
+    extensionData: f.extensionData ? cloneJson(f.extensionData) : undefined,
   }
 }
 
@@ -166,30 +188,33 @@ export function serializeProject(
   savedPresets: Preset[],
   pinnedModifiers: PinnedModifier[],
   globalBases: Record<string, number>,
-  activeEffects: Effect[],
+  modifiers: ModifierInstance[],
   livePages: LivePage[] = [],
   liveControllers: string[] = [],
   selectedPresetId: string | null = null,
-  connectors: ConnectorSnapshot[] = [],
   globalBpm: number = 120,
   clockEpoch: number = Date.now(),
   activeSectionMembers: Record<string, string[]> = {},
   savedPositions: MovingHeadPosition[] = [],
+  requires: ProjectRequirement[] = [],
+  extensionData: Record<string, Record<string, unknown>> | undefined = undefined,
 ): ProjectSnapshot {
   return {
+    schemaVersion: SCHEMA_VERSION,
     sceneNodes: sceneNodes.map(serializeNode),
     savedPresets: JSON.parse(JSON.stringify(savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(pinnedModifiers)),
     globalBases: { ...globalBases },
-    activeEffects: JSON.parse(JSON.stringify(activeEffects)),
+    modifiers: JSON.parse(JSON.stringify(modifiers)),
     livePages: JSON.parse(JSON.stringify(livePages)),
     liveControllers: JSON.parse(JSON.stringify(liveControllers)),
     savedPositions: JSON.parse(JSON.stringify(savedPositions)),
     selectedPresetId,
-    connectors: JSON.parse(JSON.stringify(connectors)),
     globalBpm,
     clockEpoch,
     activeSectionMembers,
+    requires: requires.map(r => ({ ...r })),
+    extensionData: extensionData ? cloneJson(extensionData) : undefined,
   }
 }
 
@@ -254,33 +279,12 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.channels = data.channels.map(deserializeChannel)
   f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY, b.localZ ?? 0))
 
-  if (data.stripConfig) {
-    // Default shapeType for legacy snapshots predating the line/circle support.
-    const sc: StripConfig = {
-      ...data.stripConfig,
-      shapeType: data.stripConfig.shapeType ?? 'bezier',
-      points: [],
-    }
-    // Back-compat: snapshots created before the polyline refactor encode the
-    // strip as fixturePosition + fixtureSize + rotation. Reconstruct two
-    // vertices along the rotated axis so old projects load identically.
-    const minPoints = sc.shapeType === 'circle' ? 1 : 2;
-    if (data.stripConfig.points && data.stripConfig.points.length >= minPoints) {
-      sc.points = data.stripConfig.points.map(p => ({ x: p.x, y: p.y }))
-    } else {
-      const W = 3000, H = 3000 // WORLD_WIDTH/HEIGHT — avoid circular import
-      const cx = data.fixturePosition.x * W
-      const cy = data.fixturePosition.y * H
-      const halfLen = (data.fixtureSize.x ?? 0) * 18 // FIXTURE_RADIUS = 18 world-px per unit
-      const rad = (data.rotation ?? 0) * Math.PI / 180
-      const dx = Math.cos(rad) * halfLen
-      const dy = Math.sin(rad) * halfLen
-      sc.points = [
-        { x: cx - dx, y: cy - dy },
-        { x: cx + dx, y: cy + dy },
-      ]
-    }
-    f.stripConfig = sc
+  if (data.extensionData) f.extensionData = cloneJson(data.extensionData)
+  if (data.kind) {
+    // Rebuild from config (migrates older config versions); falls back to the
+    // compiled cache when the kind's extension is not installed.
+    f.kind = cloneJson(data.kind)
+    rebuildKindFixture(f)
   }
   return f
 }
@@ -298,31 +302,53 @@ function deserializeNode(data: SerializedNode, parent: FixtureGroup | null = nul
   return fixture
 }
 
+/**
+ * Brings a snapshot to `SCHEMA_VERSION`: v2 → v3 migrates every modifier
+ * instance (live list, presets, pinned modifiers), and former built-in
+ * hashes are redirected. Throws `IncompatibleProjectError` for other versions.
+ */
+export function migrateSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
+  if (snapshot?.schemaVersion !== SCHEMA_VERSION && snapshot?.schemaVersion !== 2) throw new IncompatibleProjectError(snapshot?.schemaVersion)
+  // Deep and idempotent: also redirects former built-in hashes in v3 snapshots (plan M6.5).
+  return {
+    ...snapshot,
+    schemaVersion: SCHEMA_VERSION,
+    modifiers: migrateModifiersDeep(snapshot.modifiers ?? []),
+    savedPresets: migrateModifiersDeep(snapshot.savedPresets ?? []),
+    pinnedModifiers: migrateModifiersDeep(snapshot.pinnedModifiers ?? []),
+  }
+}
+
 export function deserializeProject(snapshot: ProjectSnapshot): {
   sceneNodes: SceneNode[]
   savedPresets: Preset[]
   pinnedModifiers: PinnedModifier[]
   globalBases: Record<string, number>
-  activeEffects: Effect[]
+  modifiers: ModifierInstance[]
   livePages: LivePage[]
   selectedPresetId: string | null
   globalBpm: number
   clockEpoch: number
   activeSectionMembers: Record<string, string[]>
   savedPositions: MovingHeadPosition[]
+  requires: ProjectRequirement[]
+  extensionData: Record<string, Record<string, unknown>> | undefined
 } {
+  snapshot = migrateSnapshot(snapshot)
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
     // Dimmers always start off; ignore any persisted DIMMER base from older projects.
     globalBases: { ...snapshot.globalBases, DIMMER: 0 },
-    activeEffects: cloneEffectsList(JSON.parse(JSON.stringify(snapshot.activeEffects))),
+    modifiers: cloneModifiers(snapshot.modifiers ?? []),
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
     selectedPresetId: snapshot.selectedPresetId ?? null,
     globalBpm: snapshot.globalBpm ?? 120,
     clockEpoch: snapshot.clockEpoch ?? Date.now(),
     activeSectionMembers: snapshot.activeSectionMembers ?? {},
     savedPositions: JSON.parse(JSON.stringify(snapshot.savedPositions ?? [])),
+    requires: (snapshot.requires ?? []).map(r => ({ ...r })),
+    extensionData: snapshot.extensionData ? cloneJson(snapshot.extensionData) : undefined,
   }
 }

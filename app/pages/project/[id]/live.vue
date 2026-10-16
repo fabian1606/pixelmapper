@@ -7,11 +7,17 @@ import LiveAddSidebar from '~/components/live/LiveAddSidebar.vue';
 import LiveEditSidebar from '~/components/live/LiveEditSidebar.vue';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveShortcuts } from '~/composables/use-live-shortcuts';
+import PmToolbar from '~/components/primitives/PmToolbar.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { livePageView } from '~/utils/extensions/scope-views';
 
 definePageMeta({ layout: 'project' });
 
 const store = useLiveModeStore();
 useLiveShortcuts();
+
+// Extension scope: the active live page.
+provideScope('livePage', () => (store.activePage ? livePageView(store.activePage) : undefined));
 
 const isFullscreen = ref(false);
 
@@ -48,7 +54,8 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
       </div>
 
       <!-- Floating buttons (play mode only) -->
-      <div v-if="!store.editMode" class="absolute top-4 right-4 z-10 flex items-center gap-1.5">
+      <!-- Extension slots: live:start|end -->
+      <PmToolbar v-if="!store.editMode" id="live" class="absolute top-4 right-4 z-10 flex items-center gap-1.5">
         <button
           class="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium bg-background/90 backdrop-blur-sm border border-border/60 shadow-lg text-muted-foreground hover:text-foreground transition-colors"
           @click="store.editMode = true"
@@ -64,7 +71,7 @@ onUnmounted(() => document.removeEventListener('fullscreenchange', onFullscreenC
           <Minimize v-if="isFullscreen" class="size-3.5" />
           <Maximize v-else class="size-3.5" />
         </button>
-      </div>
+      </PmToolbar>
     </div>
 
     <!-- Right: Edit sidebar (edit mode only) -->

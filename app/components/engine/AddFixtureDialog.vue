@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   Dialog,
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Library, Pencil, FileText, Clock, ChevronLeft, Trash2, Minus } from 'lucide-vue-next';
+import { Loader2, Library, Pencil, FileText, Clock, ChevronLeft, Trash2 } from 'lucide-vue-next';
 import FixtureLibraryBrowser from './FixtureLibraryBrowser.vue';
 import AddFixtureConfigForm from './AddFixtureConfigForm.vue';
 import CustomFixtureEditorDialog from './custom-fixture-editor/CustomFixtureEditorDialog.vue';
-import NeoPixelStripForm from './NeoPixelStripForm.vue';
+import KindAddForm from './KindAddForm.vue';
+import { listKinds } from '~/utils/kinds/kind-host';
+import { iconByName } from '~/utils/extensions/icons';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -27,8 +31,27 @@ const emit = defineEmits<{
 
 // ─── View State ───────────────────────────────────────────────────────────────
 
-type View = 'landing' | 'library' | 'neopixel';
+type View = 'landing' | 'library' | 'kind';
 const view = ref<View>('landing');
+
+// ─── Fixture kinds (extensions) ───────────────────────────────────────────────
+
+/** Registered fixture kinds (shown as source cards and in the library). */
+const kinds = computed(() => listKinds());
+/** Kind whose add form is open. */
+const selectedKindId = ref<string | null>(null);
+
+/** Opens a kind's add form. */
+function openKind(id: string) {
+  selectedKindId.value = id;
+  view.value = 'kind';
+}
+
+/** Adds kind fixtures built by the form. */
+function handleAddKindFixtures(fixtures: Fixture[]) {
+  emit('add', fixtures);
+  emit('update:open', false);
+}
 
 // ─── LocalStorage ─────────────────────────────────────────────────────────────
 
@@ -118,15 +141,6 @@ function openCustomEditor() {
   customFixtureToEdit.value = null;
   customFixtureStartWithAi.value = false;
   isCustomFixtureEditorOpen.value = true;
-}
-
-function openNeoPixelView() {
-  view.value = 'neopixel';
-}
-
-function handleAddNeoPixelStrip(fixtures: Fixture[]) {
-  emit('add', fixtures);
-  emit('update:open', false);
 }
 
 function editStoredCustomFixture(stored: StoredCustomFixture) {
@@ -287,7 +301,7 @@ watch(() => props.open, (isOpen) => {
 <template>
   <Dialog :open="open" @update:open="val => emit('update:open', val)">
     <DialogContent class="sm:max-w-[850px] p-0 overflow-hidden bg-background border-none shadow-2xl">
-      <div class="flex flex-col h-[85vh]">
+      <div class="flex flex-col h-[85vh] min-w-0">
 
         <!-- ── Landing View ──────────────────────────────────────────────── -->
         <template v-if="view === 'landing'">
@@ -295,9 +309,19 @@ watch(() => props.open, (isOpen) => {
             <DialogTitle class="text-lg font-bold tracking-tight">Add Fixture</DialogTitle>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-6 pb-6 flex flex-col gap-8">
+          <!-- Extension slots: add-fixture:*, add-fixture/sources:items -->
+          <PmPanel id="add-fixture" class="flex-1 overflow-y-auto px-6 pb-6 flex flex-col gap-8">
             <!-- 4 Action Cards -->
-            <div class="grid grid-cols-4 gap-3">
+            <PmMenuGroup id="sources" class="grid grid-cols-4 gap-3">
+              <template #item="{ item, run, disabled }">
+                <button
+                  class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
+                  :disabled="disabled"
+                  @click="run"
+                >
+                  <p class="text-sm font-semibold text-foreground">{{ item.label }}</p>
+                </button>
+              </template>
               <button
                 class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
                 @click="view = 'library'"
@@ -337,19 +361,22 @@ watch(() => props.open, (isOpen) => {
                 </div>
               </button>
 
+              <!-- Fixture kinds contributed by extensions -->
               <button
+                v-for="k in kinds"
+                :key="k.def.id"
                 class="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/40 transition-all p-5 text-center group"
-                @click="openNeoPixelView"
+                @click="openKind(k.def.id)"
               >
                 <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                  <Minus class="size-5 text-primary" />
+                  <component :is="iconByName(k.def.icon)" class="size-5 text-primary" />
                 </div>
                 <div>
-                  <p class="text-sm font-semibold text-foreground">NeoPixel Strip</p>
-                  <p class="text-xs text-muted-foreground mt-0.5">Parametric LED strip</p>
+                  <p class="text-sm font-semibold text-foreground">{{ k.def.label }}</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ k.def.library.category }}</p>
                 </div>
               </button>
-            </div>
+            </PmMenuGroup>
 
             <!-- Recent Fixtures -->
             <div v-if="recentFixtures.length > 0">
@@ -421,7 +448,7 @@ watch(() => props.open, (isOpen) => {
                 </button>
               </div>
             </div>
-          </div>
+          </PmPanel>
 
           <!-- Config Footer (same style as library view) -->
           <div
@@ -449,8 +476,8 @@ watch(() => props.open, (isOpen) => {
           </div>
         </template>
 
-        <!-- ── NeoPixel View ─────────────────────────────────────────────── -->
-        <template v-else-if="view === 'neopixel'">
+        <!-- ── Fixture Kind View ─────────────────────────────────────────── -->
+        <template v-if="view === 'kind' && selectedKindId">
           <div class="px-6 py-5 flex items-center gap-3 shrink-0">
             <Button
               variant="ghost"
@@ -460,11 +487,10 @@ watch(() => props.open, (isOpen) => {
             >
               <ChevronLeft class="size-4" />
             </Button>
-            <DialogTitle class="text-lg font-bold tracking-tight">NeoPixel LED Strip</DialogTitle>
+            <DialogTitle class="text-lg font-bold tracking-tight">{{ kinds.find(k => k.def.id === selectedKindId)?.def.label }}</DialogTitle>
           </div>
-
           <div class="flex-1 overflow-y-auto px-6 pb-6">
-            <NeoPixelStripForm @add="handleAddNeoPixelStrip" />
+            <KindAddForm :kind-id="selectedKindId" @add="handleAddKindFixtures" />
           </div>
         </template>
 
@@ -482,13 +508,14 @@ watch(() => props.open, (isOpen) => {
             <DialogTitle class="text-lg font-bold tracking-tight">Add from Library</DialogTitle>
           </div>
 
-          <div class="flex-1 flex flex-col min-h-0 bg-muted/20">
+          <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-muted/20">
             <FixtureLibraryBrowser
               class="flex-1"
               :selected-key="selectedSummary?.key"
               @select="handleSelect"
               @create-custom-fixture="openCustomEditor"
               @auto-create-fixture="triggerPdfUpload"
+              @select-kind="openKind"
             />
           </div>
 

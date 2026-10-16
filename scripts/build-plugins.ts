@@ -1,0 +1,174 @@
+/**
+ * build-plugins — compiles the built-in content plugins (ADR §6.10, plan P3.4).
+ *
+ * For every `plugins/<name>/` (manifest.json + modifier.ts [+ ui.ts]):
+ * build → validate (any error fails the build, ADR §10) → write
+ * `public/plugins/<hash>.wasm` and `<hash>.json` (package metadata incl.
+ * source), then generate `app/utils/plugins/builtin-index.ts`.
+ *
+ * Usage: `bun run scripts/build-plugins.ts [--watch]`
+ */
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { $ } from 'bun';
+import { buildPackage, validate, type ContentPluginManifest } from '@pixelmapper/plugin-toolchain';
+
+const ROOT = resolve(import.meta.dir, '..');
+const PLUGINS_DIR = join(ROOT, 'plugins');
+const OUT_DIR = join(ROOT, 'public/plugins');
+const INDEX_FILE = join(ROOT, 'app/utils/plugins/builtin-index.ts');
+/** Previous built-in hashes (plan M6.5): old hash → alias, version, param schema. Only ever grows. */
+const LEGACY_FILE = join(ROOT, 'app/utils/plugins/builtin-legacy.json');
+
+/** A former built-in (its hash can still appear in saved projects). */
+interface LegacyEntry {
+  hash: string;
+  alias: string;
+  version: string;
+  params: ContentPluginManifest['params'];
+}
+
+/** Built-ins listed in a previously generated index (empty when absent or unreadable). */
+function previousBuiltins(indexSource: string): Built[] {
+  const m = indexSource.match(/BUILTIN_PLUGINS: readonly BuiltinPlugin\[\] = (\[[\s\S]*?\n\]);/);
+  try {
+    return m ? (JSON.parse(m[1]!) as Built[]) : [];
+  }
+  catch {
+    return [];
+  }
+}
+
+/** Adds every previous built-in hash that is no longer current to the legacy list. */
+async function recordLegacy(previous: Built[], current: Built[]): Promise<void> {
+  const list = JSON.parse(await readFile(LEGACY_FILE, 'utf8').catch(() => '[]')) as LegacyEntry[];
+  const known = new Set([...list.map(e => e.hash), ...current.map(c => c.hash)]);
+  const added = previous
+    .filter(p => !known.has(p.hash))
+    .map(p => ({ hash: p.hash, alias: p.alias, version: p.manifest.version, params: p.manifest.params }));
+  if (added.length === 0) return;
+  await writeFile(LEGACY_FILE, `${JSON.stringify([...list, ...added], null, 2)}\n`);
+  console.log(`[build-plugins] recorded ${added.length} legacy hash(es) in builtin-legacy.json`);
+}
+
+/** One built plugin for the index. */
+interface Built {
+  alias: string;
+  name: string;
+  hash: string;
+  signatures: string[];
+  manifest: ContentPluginManifest;
+}
+
+/** Plugin folders (those with a manifest.json). */
+async function pluginFolders(): Promise<string[]> {
+  const out: string[] = [];
+  for (const e of await readdir(PLUGINS_DIR, { withFileTypes: true })) {
+    if (e.isDirectory() && await stat(join(PLUGINS_DIR, e.name, 'manifest.json')).then(() => true, () => false)) out.push(e.name);
+  }
+  return out.sort();
+}
+
+/** Builds and validates one plugin; throws with readable errors. */
+async function buildOne(name: string): Promise<{ built: Built; wasm: Uint8Array; meta: object }> {
+  const dir = join(PLUGINS_DIR, name);
+  const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as ContentPluginManifest;
+  const source: Record<string, string> = { 'modifier.ts': await readFile(join(dir, 'modifier.ts'), 'utf8') };
+  if (manifest.ui) source[manifest.ui.panel] = await readFile(join(dir, manifest.ui.panel), 'utf8');
+
+  const { pkg, diagnostics } = await buildPackage(manifest, source);
+  if (!pkg) throw new Error(`${name}: build failed\n${diagnostics.map(d => d.message).join('\n')}`);
+  const report = await validate({ manifest, wasm: pkg.wasm });
+  if (!report.ok) throw new Error(`${name}: validation failed\n  - ${report.errors.join('\n  - ')}`);
+  for (const w of report.warnings) console.warn(`[build-plugins] ${name}: ${w}`);
+
+  const { wasm, ...meta } = pkg;
+  return {
+    built: { alias: manifest.alias, name: manifest.name, hash: pkg.hash, signatures: manifest.signatures, manifest },
+    wasm,
+    meta: { ...meta, builtin: true },
+  };
+}
+
+/** File-name part of a hash (`sha256:abc` → `abc`). */
+const hexOf = (hash: string) => hash.replace(/^sha256:/, '');
+
+/** Builds everything once. */
+async function buildAll(): Promise<void> {
+  const t0 = performance.now();
+  await $`bun run --cwd ${join(ROOT, 'packages/plugin-toolchain')} gen:sdk`.quiet();
+  await mkdir(OUT_DIR, { recursive: true });
+
+  const built: Built[] = [];
+  const keep = new Set<string>();
+  for (const name of await pluginFolders()) {
+    const { built: b, wasm, meta } = await buildOne(name);
+    const hex = hexOf(b.hash);
+    await writeFile(join(OUT_DIR, `${hex}.wasm`), wasm);
+    await writeFile(join(OUT_DIR, `${hex}.json`), JSON.stringify(meta));
+    keep.add(`${hex}.wasm`).add(`${hex}.json`);
+    built.push(b);
+  }
+
+  // Remove outputs of previous builds.
+  for (const f of await readdir(OUT_DIR)) if (!keep.has(f)) await rm(join(OUT_DIR, f));
+
+  const index = `/**
+ * GENERATED by scripts/build-plugins.ts — do not edit.
+ * Built-in content plugins (\`plugins/*\`), served from \`/plugins/<hex>.wasm|.json\`.
+ * Manifests are embedded so defaults and param UIs are available synchronously.
+ */
+import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
+
+/** A built-in plugin. */
+export interface BuiltinPlugin {
+  alias: string;
+  name: string;
+  /** Content hash (\`sha256:<hex>\`). */
+  hash: string;
+  signatures: string[];
+  manifest: ContentPluginManifest;
+}
+
+/** All built-ins, sorted by alias. */
+export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = ${JSON.stringify(built.sort((a, b) => a.alias.localeCompare(b.alias)), null, 2)};
+
+/** Alias → hash. */
+export const BUILTIN_BY_ALIAS: Readonly<Record<string, string>> = Object.fromEntries(BUILTIN_PLUGINS.map(p => [p.alias, p.hash]));
+
+/** True for hashes of built-in plugins. */
+export function isBuiltinHash(hash: string): boolean {
+  return BUILTIN_PLUGINS.some(p => p.hash === hash);
+}
+`;
+  await mkdir(join(ROOT, 'app/utils/plugins'), { recursive: true });
+  const previous = await readFile(INDEX_FILE, 'utf8').catch(() => '');
+  await recordLegacy(previousBuiltins(previous), built);
+  if (previous !== index) await writeFile(INDEX_FILE, index);
+  console.log(`[build-plugins] ${built.length} plugin(s) in ${Math.round(performance.now() - t0)} ms`);
+}
+
+/** Rebuilds on changes to plugins or the SDK (debounced). */
+function watchMode(): void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const trigger = (_: string, file: string | null) => {
+    if (file && (file.endsWith('goldens.json') || file.endsWith('.test.ts'))) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      buildAll().catch(err => console.error(`[build-plugins] ${(err as Error).message}`));
+    }, 150);
+  };
+  watch(PLUGINS_DIR, { recursive: true }, trigger);
+  watch(join(ROOT, 'packages/plugin-sdk/assembly'), { recursive: true }, trigger);
+  console.log('[build-plugins] watching plugins/ and packages/plugin-sdk/');
+}
+
+try {
+  await buildAll();
+}
+catch (err) {
+  console.error(`[build-plugins] ${(err as Error).message}`);
+  if (!process.argv.includes('--watch')) process.exit(1);
+}
+if (process.argv.includes('--watch')) watchMode();

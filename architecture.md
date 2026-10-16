@@ -2,11 +2,12 @@
 
 ## Overview
 
-Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript frontend and a Rust engine compiled to WebAssembly.
+Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript frontend and a Rust engine compiled to WebAssembly. It is built as a **small core plus plugins** ([ADR 0001](architecture/adr/0001-extension-and-content-plugin-system.md), implemented):
 
-- **Rendering runs in the browser today** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`).
-- **Planned targets:** a **Tauri** desktop app (native Rust engine, direct ArtNet) and a backend render engine for generated visuals.
-- **ESP32 on-device rendering is no longer a goal.** ESP32 devices are pure output devices that receive rendered frames. (This replaces the former principle "browser and ESP32 run the same engine".)
+- **Rendering runs in the browser** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`). Modifiers are sandboxed content plugins (AssemblyScript → WASM) executed by the worker's plugin bridge.
+- **Everything specific is an extension** — controls (color picker, pan/tilt), fixture kinds (NeoPixel strip), outputs (ArtNet, ESP nodes) and hardware controllers (AKAI APC Mini mk2) are extensions. The core runs with zero extensions (`PM_NO_EXTENSIONS=1`, checked in CI).
+- **Outputs are rendered frames** — connectors receive rendered universes/pixels; ESP32 devices are pure output devices. (This replaces the former principle "browser and ESP32 run the same engine".)
+- **Planned targets:** a **Tauri** desktop app (native Rust engine, `wasmtime` modifier runtime, direct ArtNet) and a backend render engine for generated visuals (both out of scope of ADR 0001).
 
 ## Architectural Principles
 
@@ -14,39 +15,74 @@ Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript fron
 2. **Two plugin kinds:**
    - **Extensions** — features of the software (controls like the color picker, fixture kinds like NeoPixel strips, connectors, hardware controllers, live widgets). Authored as Nuxt layers in `extensions/`, distributed as prebuilt ES bundles, trusted, always active when installed. They talk to the core only through `@pixelmapper/extension-api`: auto-slots from layout primitives, inherited domain scopes, replaceable `pm.*` inputs, commands, and an opt-in live-value channel.
    - **Content plugins** — code that shapes the visual output (modifiers now; shaders and visuals later). AssemblyScript compiled to sandboxed WASM, pure functions, content-addressed by hash, shareable and generatable at runtime. Built-ins live in `plugins/`.
-3. **AI-first.** Every plugin surface is typed, self-describing (manifest `description`, param schemas) and validated by a standalone toolchain, so an AI agent can generate extensions (as code) and content plugins (live) safely.
-4. **Command pattern for every mutation** (undo/redo, persistence, live collaboration) — extensions included.
+3. **AI-first.** Every plugin surface is typed, self-describing (manifest `description`, param schemas) and validated by a standalone toolchain, so an AI agent can generate extensions (as code) and content plugins (live) safely. Generated references live in `docs/ai/`.
+4. **Command pattern for every mutation** (undo/redo, persistence, live collaboration) — extensions included (namespaced `ext/name` commands).
 5. **Rust orchestrates rendering**; modifiers run behind the `ModifierRuntime` trait (browser: JS bridge in the worker; Tauri: `wasmtime`).
 
 ## File Structure
 
-Current layout. The target layout after the plugin-system migration is specified in [ADR 0001 §4](architecture/adr/0001-extension-and-content-plugin-system.md#4-repository-layout-target); follow the [implementation plan](architecture/plugin-system-implementation-plan.md) to get there.
-
 ```
 pixelmapper/
 ├── aiBackendService/              # Express + LangGraph backend for AI tasks (fixture extraction/enrichment)
-│   └── src/{graph,server,state,model}.ts, nodes/
 ├── app/                           # Nuxt 4 / Vue 3 frontend (the core)
 │   ├── components/
-│   │   ├── engine/                # Workspace, sidebars, property controls, modifier editors, commands
-│   │   ├── live/                  # Live mode canvas + widgets
+│   │   ├── engine/                # Workspace, sidebars, property controls, modifier stack, kind forms, commands
+│   │   ├── live/                  # Live mode canvas + widgets (incl. generic controller twin)
 │   │   ├── design/                # Universe inspector, patch table
-│   │   ├── three/                 # 3D viewport + scene builders
+│   │   ├── three/                 # 3D viewport + scene builders (body polylines/shapes for kinds)
+│   │   ├── connectors/            # Generic ConnectorCard (status, settings slot, output mapping, logs)
+│   │   ├── extensions/            # Install dialog, missing-extension gate
+│   │   ├── primitives/            # Layout primitives with auto extension slots (PmPanel, PmPanelSection, …)
+│   │   ├── pm/                    # Core defaults of the replaceable pm.* inputs
+│   │   ├── extension-host/        # ExtensionSlot, Replaceable, ScopeProvider, choice dialog
+│   │   ├── plugin-host/           # ParamForm (param schema → pm.* inputs), previews, iframe panels
 │   │   └── ui/                    # shadcn-vue primitives (not replaceable)
-│   ├── stores/                    # Pinia stores (engine-store = render loop & project state)
+│   ├── composables/extensions/    # provideScope/useScope, useExtensionContext, useReplaceable, useLiveValue, onFrame
+│   ├── pages/                     # projects, editor, connections, extensions, dev/slots (slot catalog)
+│   ├── plugins/                   # 00 extension host · 01 content plugins · 02 connectors · 03 bundle loader
+│   ├── stores/                    # Pinia (engine-store = render loop & project state, connections, controllers, live)
 │   └── utils/
-│       ├── engine/                # Fixture model, worker, serialization, (legacy) TS effect classes
-│       ├── connectors/            # Connectors + binary encoders (→ become extensions)
-│       ├── controllers/           # Controller driver contracts (→ extensions)
+│       ├── extensions/            # registry, activation, slots, scopes, replacements, live hub, requires, loader + cache
+│       ├── engine/                # Fixture model, worker, serialization, modifier instances
+│       ├── kinds/                 # Fixture-kind host: build application, world transforms, canvas primitives
+│       ├── plugins/               # Plugin store (memory → IndexedDB → built-ins → Supabase), worker bridge, preview pool, create/import
+│       ├── persistence/           # Snapshots, change log, `.pmproject` archives
+│       ├── connectors/            # Connector registry + engine packet encoders
+│       ├── controllers/           # Registry-driven controller catalog
 │       └── ofl/                   # Open Fixture Library import
-├── controllers/                   # Hardware controller drivers (→ extensions/controller-*)
+├── extensions/                    # First-party extensions (Nuxt layers; Bun workspace)
+│   ├── color-picker/ pan-tilt/ connector-artnet/   # distribution set (layered into every build)
+│   ├── neopixel-strip/ connector-esp/ controller-akai-apc-mini-mk2/   # catalog (installable bundles)
+│   └── _debug-slots/              # dev-only slot labels (PM_DEBUG_SLOTS=1)
+├── plugins/                       # Built-in content plugins (AssemblyScript): color-adjust, noise, sequencer, waveform
+├── packages/
+│   ├── extension-api/             # @pixelmapper/extension-api — the only core surface extensions may import
+│   ├── extension-build/           # Vite lib preset → ES bundle + extension.json
+│   ├── plugin-sdk/                # @pixelmapper/plugin-sdk (AssemblyScript)
+│   └── plugin-toolchain/          # compile → instrument → validate → hash (CLI + in-browser)
+├── public/extensions/             # Built catalog bundles + catalog.json
+├── docs/
+│   ├── ai/                        # Generated API reference (d.ts bundles, index.json) — `bun run docs:ai`
+│   └── controller-designs/        # Design sources of controller layouts
 ├── rs-engine/
-│   ├── core/                      # Engine, render loop, binary protocol, effects (→ signatures + ModifierRuntime)
-│   ├── canvas/                    # 2D renderer (WASM)
-│   └── ffi/                       # ESP32 C FFI (to be removed, see plan P0.4)
-├── supabase/migrations/           # Database schema
-└── pio*/                          # ESP32 firmware (out of scope for the plugin migration)
+│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
+│   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
+├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
+├── tools/artnet-bridge/           # Local WebSocket → UDP ArtNet bridge
+├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)
+└── pio*/                          # ESP32 firmware (out of scope; must implement frames 0x21/0x22)
 ```
+
+## Tooling
+
+- `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
+- `bun run typecheck` — `nuxt typecheck` (vue-tsc).
+- `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
+- `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
+- `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
+- `bun run check:zero-extensions` — builds without any extension (`PM_NO_EXTENSIONS=1`) and runs the zero-extension smoke test.
+- `bun run build:plugins` / `bun run build:extensions` — compile built-in content plugins / build catalog extension bundles into `public/extensions/`.
+- `bun run docs:ai` — regenerate `docs/ai/` (extension-API and plugin-SDK declarations, `index.json`). The dev page `/dev/slots` lists every slot rendered in the session.
 
 ## Documentation Map
 
@@ -56,18 +92,25 @@ pixelmapper/
 - **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the plugin plan)
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
+- **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
+- [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
+- [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.1, distribution, previews
+- [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN` v2 (distribution block)
+- [Authoring extensions](architecture/guides/authoring-extensions.md) — task-oriented: controls, panel actions, kinds, connectors, controllers, widgets, commands (AI-ready)
+- [Authoring content plugins](architecture/guides/authoring-content-plugins.md) — SDK, manifest, params, validation, custom panels (AI-ready)
 - [Core Concepts: Fixtures, Channels, Beams](architecture/core-concepts.md)
 - [State Management & Reactivity](architecture/state.md)
 - [Connectors & Hardware](architecture/connectors.md)
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
-- Created during the migration: `architecture/extensions.md`, `architecture/guides/authoring-extensions.md`, `architecture/guides/authoring-content-plugins.md`
+- [Extensions — how the extension host works](architecture/extensions.md) (registry, scopes, slots, `pm.*` replaceables, live values, requires, distribution)
+- **Generated reference:** [docs/ai/](docs/ai/README.md) — bundled API declarations and `index.json` of contracts, scopes and slots
 
 ## Glossary
 
 | Term | Meaning |
 |---|---|
-| **Modifier** | A content plugin that changes channel values over time/space (called `Effect` in pre-migration code). |
+| **Modifier** | A content plugin that changes channel values over time/space (`ModifierInstance` in code; formerly `Effect`). |
 | **Signature** | The typed value tuple a modifier reads/writes: `scalar`, `rgb`, `panTilt`. Mapped to DMX channels by the core. |
 | **Extension** | Trusted, installable feature package (Nuxt layer / ES bundle). |
 | **Content plugin** | Sandboxed AssemblyScript/WASM package identified by content hash. |
@@ -75,11 +118,47 @@ pixelmapper/
 | **Slot** | Extension point auto-generated by a layout primitive; id = primitive id path + position, e.g. `properties/color:actions`. |
 | **`pm.*` input** | Replaceable domain input (fader, color input, XY input, …) with a typed contract; also the UI kit for content-plugin params. |
 | **Fixture kind** | Extension-provided fixture generator that compiles a config into channels, beams, body primitives and handles. |
+| **Distribution** | How a modifier spreads over fixtures; shared by all modifiers. The UI calls it Spread: all the same, Spatial 2D (handle on the canvas), fixture by fixture (order numbers) or within each fixture. Produces `spatial`, `rank`, `distGroup` per sample. |
+| **Rank / order numbers** | Position of a fixture in an order (clicked or from a drawn line); several fixtures may share one. |
+| **`spatial`** | Per-sample position along the distribution: 0 at the origin / first number, 1 at the end / after the last. |
+| **`timePhase`** | Temporal phase of an instance in cycles (one pass / step per unit). |
+| **Recipe** | Manifest preset: a named, complete look (params, speed, distribution, strength). |
+| **Profile / Motion** | Curves of Wave and Color Shift: what is lit over the distance / where it is during one pass. |
+| **Curve shape** | Programmatic curve generator with args (each arg is a handle in `pm.curve`); extensions can contribute more. |
+| **Composite editor** | One `pm.*` input bound to several params (e.g. the hue strip binds hue shift + range). |
+| **Endless strip** | Animated preview of a modifier on "infinitely many pixels", independent of the fixture count. |
+
+
+## Presets, Variants & Groups
+
+- **Presets** are snapshots of programmed channel values and modifier instances for a set of fixtures, grouped into `PresetCategory` (color, movement, …) for display.
+- **Preset variants** depend on a `basePresetId` and store only their *differences* (overrides). Applying a variant merges the base state with the overrides at apply time, so base edits propagate to all variants. Diffing and merging are pure functions.
+- **Groups** (`SceneNode`s) organize fixtures hierarchically for selection and for applying modifiers to many fixtures at once.
+
+## Software Patterns & Guidelines
+
+Complements `AGENTS.md` (code style) and ADR 0001 (plugin rules).
+
+- **Modularity:** split large files into focused modules; keep UI and engine logic separate and bridge them with Pinia.
+- **Pure functions for engine logic** (preset diffing, variant merging, requires bookkeeping, kind builds) — testable, side-effect free.
+- **Composables** encapsulate UI logic and global UI state (`use-presets.ts`, `useGlobalContextMenu.ts`, …).
+- **`v-model` components** use `defineModel()`.
+- **Context menus** are global and programmatic: trigger with `@contextmenu.prevent="openMenu($event, options)"`, rendered by `GlobalContextMenu.vue` (in `app.vue`), state in `app/composables/useGlobalContextMenu.ts`. Options (labels, icons, callbacks) are defined at the trigger; extensions add items through `context-menu/<target>:items` slots.
+- **Floating overlays** that must not close the sidebar are listed in `FLOATING_OVERLAY_SELECTORS` (`app/utils/floating-overlay.ts`).
+- **JSDoc** on all major interfaces, classes and exported functions.
+
+### Adding new features
+
+1. **Decide core vs. extension vs. content plugin** (ADR 0001 §3): anything specific to a device, protocol or look belongs in an extension or a content plugin; the core only grows generic contracts.
+2. **Implement** through commands for every mutation; extensions use only `@pixelmapper/extension-api`.
+3. **Test** next to the code (`*.test.ts`), run the gate (typecheck, `bun run test`, lint, `check:extensions`, `cargo test`, build).
+4. **Document** here or in the sub-documents; regenerate `docs/ai/` when the extension API or SDK changes.
 
 ## Custom Fixtures (SVG Based)
 
 To support custom, highly visual, or non-standard fixtures, the architecture provides a Custom Fixture Editor.
 - **Concept:** Users define a fixture visually by importing an SVG graphic.
+- **Fixture category** follows the OFL category schema (`custom-fixture-types.ts`) and selects the canvas render mode (`single`, `bar`, `matrix`, `custom_svg`) and the shown settings (e.g. pixel density for `Pixel Bar`/`Matrix`). Generated, configurable fixtures (strips, matrices of arbitrary shape) are **fixture kinds** provided by extensions instead — see [authoring extensions](architecture/guides/authoring-extensions.md).
 - **Head Mapping:** For `Custom SVG` fixtures, users can assign exactly one SVG element to each head (`head-1`, `head-2`, ...). The head count is manual in the sidebar, and assignment happens by selecting a head and clicking an SVG element in the canvas.
 - **Persistence:** The uploaded SVG plus `head -> elementId` mapping is stored directly on the fixture JSON in `pixelmapper.customSvg`, then restored when editing again.
 - **Architecture:** The editor is highly modular, located in `app/components/engine/custom-fixture-editor/`. It is split into specialized sub-components for header, canvas rendering modes, sidebar forms, and a detailed DMX channel/mode editor. State is centralized in the `useCustomFixtureForm` composable to ensure consistency across the wizard steps.
@@ -134,20 +213,24 @@ For modifier fanning (sine-wave effects that spread phase across fixture heads),
 
 ## AI Backend Service (aiBackendService)
 
-To aid in the creation of fixtures, an Express-based AI backend service powered by LangGraph uses LLMs to parse fixture manuals and automatically extract physical dimensions, features, and DMX mappings.
-- **Concept:** Provide a manual text (later OCR'd PDF) to an endpoint `/extract-fixture`.
-- **Pipeline:** A LangGraph pipeline directs the text through specific extraction nodes (currently just General Info), utilizing `withStructuredOutput` to enforce correct schemas.
-- **Goal:** Feed the extracted data straight into the Custom Fixture Editor to dramatically speed up fixture authoring.
+An Express + LangGraph backend uses LLMs to parse fixture manuals and extract physical dimensions, features and DMX mappings, feeding the result into the Custom Fixture Editor.
+- **Endpoint:** `/extract-fixture` takes manual text (later OCR'd PDF).
+- **LangGraph workflow:** a state machine (`ExtractionState`) runs the text through isolated nodes (`extractGeneralInfo.ts`, `extractChannels.ts`, `extractModes.ts`).
+- **Typed output:** simple nodes use `withStructuredOutput`; nested arrays (channels, modes) use tool calling bound to Zod schemas (e.g. `OflChannelSchema`), which splits the context and keeps outputs strictly typed.
+- **SSE streaming:** status messages stream to `CustomFixtureEditorDialog.vue` before the final assembled `OflFixture` is returned.
+- The AI agent loop for generating plugins is out of scope of ADR 0001; it builds on the self-describing surfaces in `docs/ai/`.
 
 ## Direct DMX Control (Universe Inspector)
 
 The Universe Panel (`UniversePanel.vue`) provides direct, low-level access to the DMX buffer.
 - **Banner Grouping**: Fixtures appear as cohesive units with a single header.
 - **Fader Components**: `DmxChannelFader.vue` enables per-channel manipulation with horizontal icon previews, capability selection (popover), and precise numeric entry.
-- **Overrides**: All manual adjustments create high-priority overrides in the `engineStore`, bypassing effects until cleared.
+- **Overrides**: All manual adjustments create high-priority overrides in `engineStore.overrideMap`, bypassing modifiers until cleared (drag sets, double-click clears, numeric input fine-tunes).
 - **High-Frequency Performance**: To ensure 60fps even with 512+ reactive DMX values, the Grid and Faders use a "Bypass Reactivity" pattern. Instead of Vue template interpolation (which triggers expensive virtual DOM patches), values are pushed directly to cached DOM nodes via `requestAnimationFrame` using the `bufferRevision` reactive trigger only for the initial scheduling.
 - **Dual View Modes**:
     - **Grid View**: A visual, bit-packed representation of the universe helpful for identifying overlaps and gaps.
     - **Table View (`PatchTable.vue`)**: A structured list optimized for auditing fixture settings (ID, Name, Type, Mode, Address, etc.).
     - **Selection Sync**: Both views are fully synchronized with the `engineStore.selectedIds` and the 2D Workspace.
-
+- **View switching:** the grid uses `v-show` (keeps scroll state), the table `v-if`.
+- **High-resolution DMX (16/24-bit):** fine channels are synthesized as independent `GENERIC` channels during parsing and shown as separate faders. The Rust engine renders the coarse channel in a float `render_buffer` and packs the high-precision value into the byte slots.
+- **Patching & boundaries:** fixtures never cross the 512-channel universe boundary, except fixture kinds that declare `spansUniverses` (long LED strips; `app/utils/engine/addressing.ts`). Drag-and-drop in `AddressGrid` enforces this with a live address label and conflict highlighting.

@@ -28,7 +28,7 @@ export function findRichestFixture(fixtures: Fixture[], filter: ChannelFilter, e
 
     let effectCount = 0;
     if (effectEngine) {
-      for (const effect of effectEngine.effects) {
+      for (const effect of effectEngine.modifiers) {
         if (effect.targetFixtureIds?.includes(f.id) && effect.targetChannels?.some(t => filter(t))) {
           effectCount++;
         }
@@ -85,14 +85,14 @@ export function syncCategoryFromSource(
   // Sync modifiers
   if (effectEngine && (mode === 'modifiers' || mode === 'all')) {
     // 1. Remove target from any effects that affect the filtered channels
-    for (const effect of effectEngine.effects) {
+    for (const effect of effectEngine.modifiers) {
       if (effect.targetFixtureIds?.includes(target.id) && effect.targetChannels?.some(t => filter(t))) {
         effect.targetFixtureIds = effect.targetFixtureIds.filter(id => id !== target.id);
       }
     }
 
     // 2. Add target to any effects that affect the filtered channels on the source
-    for (const effect of effectEngine.effects) {
+    for (const effect of effectEngine.modifiers) {
       if (effect.targetFixtureIds?.includes(source.id) && effect.targetChannels?.some(t => filter(t))) {
         if (!effect.targetFixtureIds.includes(target.id)) {
           effect.targetFixtureIds.push(target.id);
@@ -101,10 +101,10 @@ export function syncCategoryFromSource(
     }
 
     // Clean up empty effects
-    for (let i = effectEngine.effects.length - 1; i >= 0; i--) {
-      const e = effectEngine.effects[i];
+    for (let i = effectEngine.modifiers.length - 1; i >= 0; i--) {
+      const e = effectEngine.modifiers[i];
       if (e && e.targetFixtureIds && e.targetFixtureIds.length === 0) {
-        effectEngine.effects.splice(i, 1);
+        effectEngine.modifiers.splice(i, 1);
       }
     }
   }

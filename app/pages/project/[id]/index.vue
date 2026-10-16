@@ -19,6 +19,7 @@ import ViewportModeSwitcher, { type ViewportMode } from '~/components/design/Vie
 import UniverseInspector from '~/components/design/UniverseInspector.vue';
 import { storeToRefs } from 'pinia';
 import { useEngineStore } from '~/stores/engine-store';
+import { setPageViewportMode } from '~/composables/extensions/provide-root-scopes';
 
 definePageMeta({ layout: 'project' })
 
@@ -46,6 +47,8 @@ const Viewport3D = defineAsyncComponent(() => import('~/components/three/Viewpor
 const threeDActivated = ref(false)
 watch(viewportMode, (mode) => {
   if (mode === '3d') threeDActivated.value = true
+  // Mirror into the global `viewport` extension scope.
+  setPageViewportMode(mode)
 }, { immediate: true })
 
 function handleZoomTo(node: SceneNode) {
@@ -245,7 +248,7 @@ useShortcuts([
         :nodes="sceneNodes"
         :selected-ids="selectedIds"
         :fixtures="flatFixtures"
-        :effects="engine.effects"
+        :effects="engine.modifiers"
         @select="handleSelect"
         @group="handleGroup"
         @ungroup="handleUngroup"

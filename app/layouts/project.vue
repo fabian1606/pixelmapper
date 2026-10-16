@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, provide, computed } from 'vue';
 import { useEngineStore } from '~/stores/engine-store';
 import { useCollaboration } from '~/composables/use-collaboration';
 import { storeToRefs } from 'pinia';
+import MissingExtensionDialog from '~/components/extensions/MissingExtensionDialog.vue';
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
@@ -12,7 +13,7 @@ engineStore.initEngine();
 
 provide('effectEngine', engineStore.engine);
 
-const { projectLoading, projectError } = storeToRefs(engineStore);
+const { projectLoading, projectError, missingExtensions } = storeToRefs(engineStore);
 
 const collab = useCollaboration(projectId.value);
 
@@ -43,6 +44,16 @@ onUnmounted(() => {
           <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
         </div>
       </div>
+
+      <div v-else-if="projectError === 'incompatible'" class="flex items-center justify-center h-full">
+        <div class="text-center space-y-3 max-w-sm px-4">
+          <h2 class="text-lg font-semibold">Incompatible project</h2>
+          <p class="text-sm text-muted-foreground">This project was created with an incompatible version of Pixelmapper and cannot be opened.</p>
+          <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
+        </div>
+      </div>
+
+      <MissingExtensionDialog v-else-if="projectError === 'missing-extensions'" :missing="missingExtensions" />
 
       <div v-else-if="projectError === 'error'" class="flex items-center justify-center h-full">
         <div class="text-center space-y-3 max-w-sm px-4">

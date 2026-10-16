@@ -32,14 +32,14 @@ export function onWidgetTrigger(handler: TriggerHandler): () => void {
 }
 
 // ── widget.slide ───────────────────────────────────────────────────────────────
-// Broadcast slider/xy-pad drag values in real time (ephemeral, not persisted).
+// Broadcast slider/xy drag values in real time (ephemeral, not persisted).
 // Remote clients update the DMX channel visually — same pattern as channel.update.
 
 export interface WidgetSlidePayload {
   pageId: string;
   widgetId: string;
   value: number;   // 0–1 normalized
-  value2?: number; // for xy-pad second axis
+  value2?: number; // for the xy widget's second axis
   /** When the widget is a controller-twin, identifies which sub-fader. */
   controlId?: string;
 }

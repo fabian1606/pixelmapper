@@ -114,7 +114,7 @@ export function useCollaboration(projectId: string): CollaborationContext {
     dispatchChannelUpdate(flat);
 
     // Push modifier/effect state
-    const effects = engineStore.activeEffects;
+    const effects = engineStore.modifiers;
     if (effects?.length) {
       liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effects)) });
     }

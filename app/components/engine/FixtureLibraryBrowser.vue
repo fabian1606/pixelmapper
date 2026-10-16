@@ -8,6 +8,10 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import PmPanel from '~/components/primitives/PmPanel.vue';
+import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
+import { listKinds } from '~/utils/kinds/kind-host';
+import { iconByName } from '~/utils/extensions/icons';
 
 const props = defineProps<{
   selectedKey?: string;
@@ -17,7 +21,24 @@ const emit = defineEmits<{
   (e: 'select', item: FixtureSummary): void;
   (e: 'create-custom-fixture'): void;
   (e: 'auto-create-fixture'): void;
+  /** A fixture kind (extension) was chosen. */
+  (e: 'select-kind', kindId: string): void;
 }>();
+
+// ─── Fixture kinds ────────────────────────────────────────────────────────────
+
+/**
+ * Registered kinds matching the search / category filter. Kinds live in
+ * their category (and in search results), not in the unfiltered list.
+ */
+const visibleKinds = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  const cat = categoryFilter.value && categoryFilter.value !== 'All' ? categoryFilter.value : '';
+  if (!q && !cat) return [];
+  return listKinds().filter(({ def }) =>
+    (!cat || def.library.category === cat)
+    && (!q || `${def.label} ${def.description} ${def.library.category}`.toLowerCase().includes(q)));
+});
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +57,7 @@ const isSearching = computed(() => search.value.trim().length > 0 || (categoryFi
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
-const CATEGORIES = [
+const BASE_CATEGORIES = [
   'All',
   'Color Changer',
   'Dimmer',
@@ -45,6 +66,9 @@ const CATEGORIES = [
   'Effect',
   'Pixel Bar',
 ];
+
+/** OFL categories plus the categories of registered kinds. */
+const CATEGORIES = computed(() => [...new Set([...BASE_CATEGORIES, ...listKinds().map(k => k.def.library.category)])]);
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
@@ -126,10 +150,16 @@ onMounted(fetchManufacturers);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
+/** Kebab-case slug for stable primitive ids (e.g. manufacturer keys). */
+function slugId(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-background overflow-hidden font-sans">
+  <!-- Extension slots: library:*, library/categories:items, library/<manufacturer>:items -->
+  <PmPanel id="library" class="flex flex-col h-full bg-background overflow-hidden font-sans">
     <!-- Search & Filters -->
     <div class="p-4 bg-muted/20">
       <div class="flex gap-2 items-center">
@@ -163,7 +193,16 @@ onMounted(fetchManufacturers);
       </div>
       
       <!-- Category filter pills -->
-      <div class="flex gap-1.5 flex-wrap mt-3">
+      <PmMenuGroup id="categories" class="flex gap-1.5 flex-wrap mt-3">
+        <template #item="{ item, run, disabled }">
+          <button
+            class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors bg-muted text-muted-foreground hover:bg-accent hover:text-foreground border border-transparent hover:border-border"
+            :disabled="disabled"
+            @click="run"
+          >
+            {{ item.label }}
+          </button>
+        </template>
         <button
           v-for="cat in CATEGORIES"
           :key="cat"
@@ -175,7 +214,7 @@ onMounted(fetchManufacturers);
         >
           {{ cat }}
         </button>
-      </div>
+      </PmMenuGroup>
     </div>
 
     <!-- Result Message / Count -->
@@ -187,6 +226,21 @@ onMounted(fetchManufacturers);
 
     <!-- Fixture list -->
     <div class="flex-1 overflow-y-auto min-h-0 bg-background/50">
+      <!-- Generated fixtures (kinds contributed by extensions) -->
+      <div v-if="visibleKinds.length" class="flex flex-col px-1 pt-1 border-b border-border/50 pb-1">
+        <button
+          v-for="k in visibleKinds"
+          :key="k.def.id"
+          class="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40 group/item"
+          @click="emit('select-kind', k.def.id)"
+        >
+          <component :is="iconByName(k.def.icon)" class="size-4 text-primary shrink-0" />
+          <span class="flex flex-1 flex-col min-w-0">
+            <span class="text-sm font-medium text-foreground truncate group-hover/item:text-primary transition-colors">{{ k.def.label }}</span>
+            <span class="text-[10px] text-muted-foreground truncate">{{ k.def.library.category }} · {{ k.def.description }}</span>
+          </span>
+        </button>
+      </div>
       
       <!-- SEARCH MODE -->
       <template v-if="isSearching">
@@ -235,7 +289,16 @@ onMounted(fetchManufacturers);
               <div v-if="fixtureCache[mf.key]?.loading && fixtureCache[mf.key]?.items.length === 0" class="flex items-center justify-center py-4">
                  <Loader2 class="size-4 animate-spin text-primary opacity-50" />
               </div>
-              <div v-else class="flex flex-col px-1">
+              <PmMenuGroup v-else :id="slugId(mf.key)" class="flex flex-col px-1">
+                <template #item="{ item: menuItem, run, disabled }">
+                  <button
+                    class="flex flex-col gap-1 px-3 py-2.5 text-left rounded-md transition-all border border-transparent hover:bg-accent/40"
+                    :disabled="disabled"
+                    @click="run"
+                  >
+                    <span class="text-sm font-medium text-muted-foreground/90">{{ menuItem.label }}</span>
+                  </button>
+                </template>
                 <button
                   v-for="item in fixtureCache[mf.key]?.items"
                   :key="item.key"
@@ -249,12 +312,12 @@ onMounted(fetchManufacturers);
                     <span class="text-sm font-medium text-muted-foreground/90 group-hover/item:text-primary transition-colors">{{ item.name }}</span>
                   </div>
                 </button>
-              </div>
+              </PmMenuGroup>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
       </template>
 
     </div>
-  </div>
+  </PmPanel>
 </template>

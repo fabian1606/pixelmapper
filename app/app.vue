@@ -4,8 +4,14 @@ import { onMounted, onBeforeUnmount } from 'vue';
 import { useWakeLock, useDocumentVisibility } from '@vueuse/core';
 import { watch } from 'vue';
 import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
+import { provideRootScopes } from '~/composables/extensions/provide-root-scopes';
+import ReplacementChoiceDialog from '~/components/extension-host/ReplacementChoiceDialog.vue';
+import ToastStack from '~/components/ToastStack.vue';
 
 const engineStore = useEngineStore();
+
+// Global extension scopes: project, selection, viewport (ADR §5.2).
+provideRootScopes();
 
 const { isSupported: wakeLockSupported, isActive: wakeLockActive, request: requestWakeLock, release: releaseWakeLock } = useWakeLock();
 const visibility = useDocumentVisibility();
@@ -39,5 +45,7 @@ onBeforeUnmount(() => {
       <NuxtPage />
     </NuxtLayout>
     <GlobalContextMenu />
+    <ReplacementChoiceDialog />
+    <ToastStack />
   </div>
 </template>

@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-waveform",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (waveform). Built by scripts/build-plugins.ts.",
+  "private": true
+}

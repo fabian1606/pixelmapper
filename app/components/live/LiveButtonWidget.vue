@@ -7,6 +7,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
 import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
 import { applyMapping, isFlashMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -72,16 +73,17 @@ function applyOwnMapping(active: boolean) {
   applyMapping(props.widget.mapping, active, { key: props.widget.id, dimmerState });
 }
 
-function onPointerDown(e: PointerEvent) {
+/** pm.button pressed. */
+function onPress() {
   if (props.editMode) return;
-  (e.target as HTMLElement).setPointerCapture(e.pointerId);
   pressed.value = true;
   if (section.membership.value) section.press();
   else applyOwnMapping(true);
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true });
 }
 
-function onPointerUp() {
+/** pm.button released. */
+function onRelease() {
   if (props.editMode) return;
   pressed.value = false;
   if (section.membership.value) section.release();
@@ -91,24 +93,16 @@ function onPointerUp() {
 </script>
 
 <template>
-  <button
-    class="w-full h-full rounded flex items-center justify-center text-sm font-medium transition-all select-none border relative"
-    :class="[
-      visuallyActive
-        ? 'brightness-150 scale-95'
-        : 'brightness-100 scale-100',
-      editMode ? 'pointer-events-none' : 'cursor-pointer',
-    ]"
-    :style="{
-      backgroundColor: displayColor,
-      borderColor: `${displayColor}88`,
-      color: '#fff',
-    }"
-    @pointerdown="onPointerDown"
-    @pointerup="onPointerUp"
-    @pointerleave="onPointerUp"
+  <!-- pm.button; edit mode disables pointer interaction -->
+  <Replaceable
+    name="pm.button"
+    :model-value="visuallyActive"
+    :label="displayLabel"
+    :color="displayColor"
+    :class="editMode && 'pointer-events-none'"
+    @press="onPress"
+    @release="onRelease"
   >
-    <span class="truncate px-2">{{ displayLabel }}</span>
     <Zap v-if="isFlash" class="absolute bottom-0.5 right-0.5 size-2.5 text-yellow-400 drop-shadow" :stroke-width="2.5" />
-  </button>
+  </Replaceable>
 </template>

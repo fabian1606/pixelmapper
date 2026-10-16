@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* First-party extensions are Nuxt layers outside the app root; Tailwind's
+   automatic source detection only scans below it, so register them. */
+@source "../../../extensions";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

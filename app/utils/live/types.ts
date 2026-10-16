@@ -1,4 +1,25 @@
-export type LiveWidgetType = 'button' | 'slider' | 'xy-pad' | 'controller-twin' | 'label' | 'fixture-preview' | 'color-wheel' | 'beat'
+/** Live widget types shipped by the core (ADR §5.7). `controller-twin` moves to the controller extensions in plan P6.4. */
+export type CoreLiveWidgetType = 'button' | 'slider' | 'xy' | 'color' | 'label' | 'beat' | 'fixture-preview' | 'controller-twin'
+
+/** Any live widget type: core, or `<extensionId>/<name>` from an extension. */
+export type LiveWidgetType = CoreLiveWidgetType | `${string}/${string}`
+
+/** Pre-dedupe type names (plan P2.3) and their replacements. */
+const LEGACY_WIDGET_TYPES: Record<string, CoreLiveWidgetType> = {
+  'xy-pad': 'xy',
+  'color-wheel': 'color',
+}
+
+/** Maps legacy widget type names to their current name (no-op otherwise). */
+export function normalizeWidgetType(type: string): LiveWidgetType {
+  return (LEGACY_WIDGET_TYPES[type] ?? type) as LiveWidgetType
+}
+
+/** Normalizes widget types of a page in place (used when loading pages / replaying). */
+export function normalizePageWidgetTypes(page: LivePage): LivePage {
+  for (const w of page.widgets) w.type = normalizeWidgetType(w.type)
+  return page
+}
 
 /** A persisted controller instance: one entry per physical device slot. */
 export interface LiveControllerInstance {
@@ -103,6 +124,8 @@ export interface LiveWidget {
   controllerChildren?: ControllerChildBinding[]
   // Flat group association: widgets sharing the same groupId are grouped.
   groupId?: string
+  /** Namespaced extension data (ADR §5.8): `extensionData[extensionId][key]`. */
+  extensionData?: Record<string, Record<string, unknown>>
 }
 
 export type SectionSource = 'all-presets' | 'selected-presets' | 'preset-variants' | 'color-variants'
@@ -170,18 +193,24 @@ export function defaultLivePage(overrides: Partial<LivePage> = {}): LivePage {
   };
 }
 
-export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0): LiveWidget {
-  const sizes: Record<LiveWidgetType, [number, number]> = {
-    button: [3, 3],
-    slider: [2, 6],
-    'xy-pad': [6, 6],
-    'controller-twin': [12, 8],
-    label: [4, 1],
-    'fixture-preview': [12, 8],
-    'color-wheel': [12, 5],
-    beat: [4, 3],
-  };
-  const [w, h] = sizes[type];
+/** Default grid footprint of the core widget types. */
+export const CORE_WIDGET_SIZES: Record<CoreLiveWidgetType, [number, number]> = {
+  button: [3, 3],
+  slider: [2, 6],
+  xy: [6, 6],
+  'controller-twin': [12, 8],
+  label: [4, 1],
+  'fixture-preview': [12, 8],
+  color: [12, 5],
+  beat: [4, 3],
+}
+
+/**
+ * Creates a widget of `type` at a grid position. `size` overrides the core
+ * default footprint (extension widgets pass their definition's size).
+ */
+export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0, size?: [number, number]): LiveWidget {
+  const [w, h] = size ?? CORE_WIDGET_SIZES[type as CoreLiveWidgetType] ?? [4, 4]
   return {
     id: crypto.randomUUID(),
     type,
@@ -190,5 +219,5 @@ export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0): L
     gridW: w,
     gridH: h,
     mapping: { type: 'none' },
-  };
+  }
 }

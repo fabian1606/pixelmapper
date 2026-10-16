@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import type { Fixture } from './core/fixture';
 import type { SceneNode, FixtureGroup } from './core/group';
 import {

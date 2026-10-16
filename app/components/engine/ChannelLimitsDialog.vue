@@ -5,7 +5,7 @@ import type { Channel } from '~/utils/engine/core/channel';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import DraggableNumberInput from '@/components/ui/DraggableNumberInput.vue';
+import Replaceable from '~/components/extension-host/Replaceable.vue';
 import { useHistory } from './composables/use-history';
 import { SetChannelRangeCommand, type RangeSnapshotMap } from './commands/set-channel-range-command';
 import { useEngineStore } from '~/stores/engine-store';
@@ -247,7 +247,8 @@ onUnmounted(() => {
         />
         <div class="flex items-center justify-between gap-3">
           <span class="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Default value</span>
-          <DraggableNumberInput
+          <Replaceable
+        name="pm.numberInput"
             class="w-20"
             :model-value="gv.def"
             :min="0"
@@ -269,7 +270,8 @@ onUnmounted(() => {
           />
           <div class="flex items-center justify-between gap-3">
             <span class="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Default value</span>
-            <DraggableNumberInput
+            <Replaceable
+        name="pm.numberInput"
               class="w-20"
               :model-value="editState[String(t.fixture.id)]?.def ?? 0"
               :min="0"

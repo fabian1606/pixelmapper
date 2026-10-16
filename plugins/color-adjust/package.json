@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-color-adjust",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (color-adjust). Built by scripts/build-plugins.ts.",
+  "private": true
+}

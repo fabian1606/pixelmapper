@@ -1,6 +1,6 @@
 # Live Collaboration
 
-Pixelmapper supports real-time multi-user editing over a single Supabase Realtime channel per project (`project:{id}`). Two clients open the same project and see each other's cursors, selections, modifier scrubs, fixture drags, and committed undo/redo history — with deterministic, time-synchronized effect rendering.
+Pixelmapper supports real-time multi-user editing over a single Supabase Realtime channel per project (`project:{id}`). Two clients open the same project and see each other's cursors, selections, modifier scrubs, fixture drags, and committed undo/redo history — with deterministic, time-synchronized modifier rendering.
 
 ## Overview
 
@@ -101,8 +101,8 @@ Two mechanisms prevent feedback loops:
 | `chaser.editstep` | B | per-user | immediate | replace | Active chaser step the user is editing (per fixture) |
 | `fixture.drag` | A | shared | raf | replace | Live drag of `fixturePosition.{x,y}` — calls `triggerCanvasSync` + `triggerRef(sceneNodes)` |
 | `channel.update` | A | shared | raf | replace | Bulk channel state — `stepValues[]` and `colorValue` per fixture/channel |
-| `modifier.update` | A | shared | raf | replace | Incremental param patch on a single effect by id (`Object.assign(effect, changes)`) |
-| `modifier.sync` | A | shared | raf | replace | **Full effects-list replace**, dispatched when a structural change (split) happens locally so remotes get the new effect tree atomically |
+| `modifier.update` | A | shared | raf | replace | Incremental patch on one modifier instance by id: generic fields (`changes`) and/or plugin params (`paramChanges`, merged into `params`) |
+| `modifier.sync` | A | shared | raf | replace | **Full modifier-list replace** (`{ modifiers }`), dispatched when a structural change (split) happens locally so remotes get the new stack atomically |
 | `preset.set` | A | shared | immediate | replace | `{ presetId: string \| null }` — applies/stops the preset and updates `selectedPresetId` via `setActivePreset(…, { broadcast: false, persist: false })` |
 | `engine.clock` | A | shared | immediate | replace | Sets shared `clockEpoch` (only adopts if remote epoch is earlier) |
 
@@ -134,7 +134,7 @@ watch(flatFixtures, () => {
 }, { deep: true });
 ```
 
-This replaces per-callsite `dispatchChannelUpdate` calls in components like `FixturePropertyControl.vue`, `FixtureColorPicker.vue`, `FixturePanTiltPad.vue`. Any UI mutation reaches all peers without per-component instrumentation. The `isApplyingRemote()` guard prevents echo loops when the mutation came from an inbound `channel.update` op.
+This replaces per-callsite `dispatchChannelUpdate` calls in components like `FixturePropertyControl.vue`, `FixtureColorControl.vue`, `FixturePanTiltControl.vue`. Any UI mutation reaches all peers without per-component instrumentation. The `isApplyingRemote()` guard prevents echo loops when the mutation came from an inbound `channel.update` op.
 
 `dispatchChannelUpdate` (`app/composables/dispatch-channel-update.ts`) builds a `{ channels: [{ fixtureId, channelIndex, stepValues, colorValue }] }` payload and dispatches `channel.update`.
 
@@ -143,40 +143,25 @@ This replaces per-callsite `dispatchChannelUpdate` calls in components like `Fix
 `getSafeEffectToMutate` in `app/components/engine/composables/use-chaser-modifiers.ts` splits an effect when the user edits it with only a subset of its target fixtures selected:
 
 - Original keeps the unselected target IDs
-- A clone is created via `cloneModifier` (which delegates to `cloneEffectsList` so all effect classes — Waveform/Noise/Sequencer/Color — are properly instantiated, not just Waveform)
+- A clone is created via `cloneModifier` (plain JSON deep copy of the `ModifierInstance`; works on reactive proxies)
 - The clone gets a freshly generated UUID via `crypto.randomUUID()` so it is distinguishable from the original on remote
-- The clone takes the selected target IDs and is added to `effectEngine.effects`
+- The clone takes the selected target IDs and is added to `effectEngine.modifiers`
 
 The dispatcher branches:
 
 - **No split** (`didSplit === false`) → `liveBus.dispatch('modifier.update', { effectId, changes })` — the cheap incremental patch
-- **Split** (`didSplit === true`) → `liveBus.dispatch('modifier.sync', { effects: JSON.parse(JSON.stringify(effectEngine.effects)) })` — the full effects list, so remotes can replace their tree atomically
+- **Split** (`didSplit === true`) → `liveBus.dispatch('modifier.sync', { modifiers: JSON.parse(JSON.stringify(effectEngine.modifiers)) })` — the full list, so remotes can replace their stack atomically
 
-The `modifier.sync` apply on the receiver runs `cloneEffectsList(effects)` to rebuild proper class instances, then `splice`s the existing `activeEffects` array in place. Subsequent `modifier.update` ops in the same drag carry the clone's new id, so they land on the correct effect.
+The `modifier.sync` apply on the receiver clones the list and `splice`s the existing `modifiers` array in place. Subsequent `modifier.update` ops in the same drag carry the clone's new id, so they land on the correct instance.
 
-### Effect Class Reconstruction From Plain JSON
+### Plugins by hash
 
-`JSON.stringify` strips class info; `JSON.parse` returns plain `Object`s. Components that detect modifier type via `instanceof` (e.g. `ChaserModifiersList.modifierTypeName`) silently fall through to "Waveform" for any effect that has been round-tripped through JSON.
+Modifier instances are plain JSON (`ModifierInstance`, ADR §6.3) — there are no classes to reconstruct after a JSON round trip. An instance references its content plugin only by **content hash** (`plugin: "sha256:…"`); ops and commands never carry code.
 
-Three places hit this: `SetModifiersCommand` payloads (history replay), `deserializeProject` (project load from snapshot), and `modifier.sync` apply (remote receive).
-
-The fix lives in `set-modifiers-command.ts`:
-
-```ts
-function instantiateEffect(effect: any): Effect {
-  if (effect instanceof ColorEffect) return new ColorEffect();
-  if (effect instanceof SequencerEffect) return new SequencerEffect();
-  if (effect instanceof NoiseEffect) return new NoiseEffect();
-  if (effect instanceof WaveformEffect) return new WaveformEffect();
-  // Plain JSON — fingerprint by characteristic property
-  if (effect?.colorParams) return new ColorEffect();
-  if (effect?.sequencerParams) return new SequencerEffect();
-  if (effect?.noiseParams) return new NoiseEffect();
-  return new WaveformEffect();
-}
-```
-
-`cloneEffectsList(effects)` calls this for every entry and copies the common + per-class properties onto the new instance. It is invoked by `SetModifiersCommand.execute/undo`, by `deserializeProject` in `app/utils/engine/serialize.ts`, and by the `modifier.sync` op apply.
+- **Publishing:** a plugin created from code (or imported) is uploaded to `content_plugins` + the `content-plugins` bucket before collaborators need it. "Add to stack" in the create dialog publishes with `project` visibility automatically, so every collaborator of the project can read it (RLS).
+- **Receiving:** `modifier.update` / `modifier.sync` / `SetModifiers` replays are applied **immediately** (keeps op order). The next packet rebuild in `engine-store.ts` (`resolveUnknownPlugins`) resolves hashes it does not know — memory → IndexedDB → built-ins → Supabase (`app/utils/plugins/plugin-store.ts`). Until then the modifiers packet skips the instance (the stack renders without it) and its card shows a spinner; on success the packet is rebuilt.
+- **Trust:** received packages must hash to their id; packages owned by someone else are additionally recompiled from their source with the pinned toolchain and must reproduce the hash (ADR §6.7). Failures show on the card with a retry button and are not retried on every frame.
+- **Project load** uses the same path: unknown hashes in the snapshot resolve on the first rebuild.
 
 ### Preset Activation — both tiers, not undoable
 
@@ -205,9 +190,11 @@ Both pushes are skipped when `isApplyingRemote()` is true (the activation came f
 | `app/composables/dispatch-channel-update.ts` | Helper that serializes `flatFixtures` channels and dispatches `channel.update` |
 | `app/components/engine/composables/use-history.ts` | `execute / executeRemote`, `lastSeenSequenceNumber`, persistence hooks, `persistChange` (persist a change without an undo entry) |
 | `app/components/engine/commands/serializable-command.ts` | Command registry, `registerCommand`, `commandFromPayload`, `ReplayContext` |
-| `app/components/engine/commands/set-modifiers-command.ts` | `cloneEffectsList`, `instantiateEffect` (fingerprint reconstruction) |
+| `app/components/engine/commands/set-modifiers-command.ts` | `SetModifiers` (before/after lists via `cloneModifiers`) |
 | `app/components/engine/composables/use-chaser-modifiers.ts` | `getSafeEffectToMutate` (split logic), `dispatchModifierUpdate` (`modifier.update` vs `modifier.sync` branching) |
-| `app/utils/engine/serialize.ts` | `deserializeProject` runs effects through `cloneEffectsList` to restore class instances |
+| `supabase/migrations/005_content_plugins.sql` | `content_plugins` table + bucket, RLS (public / own / project collaborators), immutable |
+| `app/utils/engine/serialize.ts` | Schema v2 snapshots (`modifiers: ModifierInstance[]`); v1 rejected |
+| `app/utils/plugins/plugin-store.ts` | Resolves plugin hashes (cache → built-ins → Supabase), verifies foreign packages, publishes |
 | `app/stores/engine-store.ts` | `clockEpoch`, central channel-sync watcher, render loop using shared epoch |
 | `supabase/functions/push-change/index.ts` | Edge function — auth, validate, INSERT into `project_changes`, return `sequence_number` |
 | `supabase/migrations/002_enable_realtime.sql` | `ALTER PUBLICATION supabase_realtime ADD TABLE project_changes` so CDC fires |

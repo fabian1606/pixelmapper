@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
-use crate::types::{ColorChannel, LutChannel, ShutterChannel, FixtureCanvasData, FixtureBeam, StripData, StripShapeType};
+use crate::types::{BodyPrimitive, ColorChannel, LutChannel, ShutterChannel, FixtureCanvasData, FixtureBeam};
 use crate::svg_render::{SvgCachedFixture, draw_svg_fixture};
 
 pub struct RenderState {
@@ -123,223 +123,6 @@ pub fn resolve_color(p: &PhotoRefs, buf: &[u8], t_sec: f64) -> Color {
     Color::rgba(clamp(r), clamp(g), clamp(b), 255)
 }
 
-/// Cubic Bézier control points (p0, c1, c2, p1).
-pub struct CubicBezierSeg {
-    pub p0: [f32; 2],
-    pub c1: [f32; 2],
-    pub c2: [f32; 2],
-    pub p1: [f32; 2],
-}
-
-/// Converts the strip's control polyline into N-1 Catmull-Rom cubic Bézier segments.
-/// Endpoint tangents are mirrored so the curve has no jarring discontinuity at the ends.
-pub fn catmull_rom_beziers(points: &[[f32; 2]]) -> Vec<CubicBezierSeg> {
-    let n = points.len();
-    if n < 2 { return Vec::new(); }
-    let mut out = Vec::with_capacity(n - 1);
-    for i in 0..n - 1 {
-        let p0 = points[i];
-        let p1 = points[i + 1];
-        let pm1 = if i == 0 {
-            [2.0 * p0[0] - p1[0], 2.0 * p0[1] - p1[1]]
-        } else {
-            points[i - 1]
-        };
-        let p2 = if i + 2 >= n {
-            [2.0 * p1[0] - p0[0], 2.0 * p1[1] - p0[1]]
-        } else {
-            points[i + 2]
-        };
-        out.push(CubicBezierSeg {
-            p0,
-            c1: [p0[0] + (p1[0] - pm1[0]) / 6.0, p0[1] + (p1[1] - pm1[1]) / 6.0],
-            c2: [p1[0] - (p2[0] - p0[0]) / 6.0, p1[1] - (p2[1] - p0[1]) / 6.0],
-            p1,
-        });
-    }
-    out
-}
-
-/// Evaluates a cubic Bézier at parameter t ∈ [0, 1].
-fn bezier_point(b: &CubicBezierSeg, t: f32) -> [f32; 2] {
-    let u = 1.0 - t;
-    let uu = u * u;
-    let tt = t * t;
-    let w0 = uu * u;
-    let w1 = 3.0 * uu * t;
-    let w2 = 3.0 * u * tt;
-    let w3 = tt * t;
-    [
-        w0 * b.p0[0] + w1 * b.c1[0] + w2 * b.c2[0] + w3 * b.p1[0],
-        w0 * b.p0[1] + w1 * b.c1[1] + w2 * b.c2[1] + w3 * b.p1[1],
-    ]
-}
-
-pub const BEZIER_SAMPLES_PER_SEG: usize = 24;
-
-/// Samples the Catmull-Rom curve into a dense polyline (used for both stroking
-/// and arc-length-aware LED placement). Returns (points, cumulative_arc_length).
-pub fn sample_strip_curve(points: &[[f32; 2]]) -> (Vec<[f32; 2]>, Vec<f32>) {
-    let beziers = catmull_rom_beziers(points);
-    if beziers.is_empty() {
-        return (points.to_vec(), vec![0.0]);
-    }
-    let mut out: Vec<[f32; 2]> = Vec::with_capacity(beziers.len() * BEZIER_SAMPLES_PER_SEG + 1);
-    let mut cum: Vec<f32> = Vec::with_capacity(out.capacity());
-    out.push(beziers[0].p0);
-    cum.push(0.0);
-    let mut total = 0.0;
-    for b in &beziers {
-        let mut prev = *out.last().unwrap();
-        for i in 1..=BEZIER_SAMPLES_PER_SEG {
-            let t = i as f32 / BEZIER_SAMPLES_PER_SEG as f32;
-            let p = bezier_point(b, t);
-            total += ((p[0] - prev[0]).powi(2) + (p[1] - prev[1]).powi(2)).sqrt();
-            out.push(p);
-            cum.push(total);
-            prev = p;
-        }
-    }
-    (out, cum)
-}
-
-/// Same as `sample_strip_curve` but ALWAYS yields a polyline of exactly
-/// `target_length` arc-length, walked from `points[0]` (the star anchor):
-///   • polyline geometrically longer  → trimmed to exact target length
-///   • polyline geometrically shorter → extended along the last tangent
-/// The returned cumulative array's final entry equals `target_length` exactly.
-pub fn sample_strip_curve_capped(
-    points: &[[f32; 2]],
-    target_length: f32,
-) -> (Vec<[f32; 2]>, Vec<f32>) {
-    let (mut samples, mut cum) = sample_strip_curve(points);
-    if target_length <= 0.0 || samples.is_empty() {
-        return (samples, cum);
-    }
-    let total = *cum.last().unwrap_or(&0.0);
-
-    if total > target_length {
-        // Find the first sample past target, then interpolate to the exact point.
-        let mut cutoff = samples.len();
-        for (i, &c) in cum.iter().enumerate() {
-            if c >= target_length { cutoff = i; break; }
-        }
-        if cutoff == 0 {
-            // Should be unreachable (cum[0] = 0 < target), but guard anyway.
-            return (vec![samples[0]], vec![0.0]);
-        }
-        if cutoff < samples.len() {
-            let prev = samples[cutoff - 1];
-            let next = samples[cutoff];
-            let s0 = cum[cutoff - 1];
-            let s1 = cum[cutoff];
-            let t = (target_length - s0) / (s1 - s0).max(0.0001);
-            let end = [prev[0] + (next[0] - prev[0]) * t, prev[1] + (next[1] - prev[1]) * t];
-            samples.truncate(cutoff);
-            cum.truncate(cutoff);
-            samples.push(end);
-            cum.push(target_length);
-        }
-    } else if total < target_length && samples.len() >= 2 {
-        // Extend along the tangent of the last sampled segment.
-        let n = samples.len();
-        let p_last = samples[n - 1];
-        let p_prev = samples[n - 2];
-        let dx = p_last[0] - p_prev[0];
-        let dy = p_last[1] - p_prev[1];
-        let len = (dx * dx + dy * dy).sqrt().max(0.001);
-        let ux = dx / len;
-        let uy = dy / len;
-        let extra = target_length - total;
-        let ext = [p_last[0] + ux * extra, p_last[1] + uy * extra];
-        samples.push(ext);
-        cum.push(target_length);
-    }
-    (samples, cum)
-}
-
-// ─── Shape-specific sampling ─────────────────────────────────────────────────
-
-const CIRCLE_SAMPLES: usize = 96;
-
-/// Linear sample of a 2-point straight segment, length-capped to `target_length`.
-pub fn sample_line_capped(points: &[[f32; 2]], target_length: f32) -> (Vec<[f32; 2]>, Vec<f32>) {
-    if points.is_empty() {
-        return (Vec::new(), vec![0.0]);
-    }
-    let p0 = points[0];
-    let p1 = if points.len() >= 2 {
-        points[1]
-    } else {
-        [p0[0] + target_length, p0[1]]
-    };
-    let mut dx = p1[0] - p0[0];
-    let mut dy = p1[1] - p0[1];
-    let mut len = (dx * dx + dy * dy).sqrt();
-    if len < 0.0001 { dx = 1.0; dy = 0.0; len = 1.0; }
-    let ux = dx / len;
-    let uy = dy / len;
-    let t_len = target_length.max(0.0);
-    let steps = 24usize;
-    let mut out = Vec::with_capacity(steps + 1);
-    let mut cum = Vec::with_capacity(steps + 1);
-    for i in 0..=steps {
-        let s = (i as f32 / steps as f32) * t_len;
-        out.push([p0[0] + ux * s, p0[1] + uy * s]);
-        cum.push(s);
-    }
-    (out, cum)
-}
-
-/// Parametric circle sample around a single center point.
-///
-/// `target_length` is interpreted as the circle's **diameter** (derived from
-/// ledCount/ledsPerMeter), so the visible circle width matches the physical
-/// strip length. LEDs are then distributed over the full circumference
-/// `π · diameter`. LED 0 sits at 12 o'clock; wraps clockwise.
-pub fn sample_circle(points: &[[f32; 2]], target_length: f32, clockwise: bool) -> (Vec<[f32; 2]>, Vec<f32>) {
-    let c = if points.is_empty() { [0.0, 0.0] } else { points[0] };
-    let diameter = target_length.max(0.0);
-    if diameter <= 0.0001 {
-        return (vec![c], vec![0.0]);
-    }
-    let radius = diameter / 2.0;
-    let circumference = 2.0 * std::f32::consts::PI * radius;
-    let dir = if clockwise { 1.0_f32 } else { -1.0_f32 };
-    let mut out = Vec::with_capacity(CIRCLE_SAMPLES + 1);
-    let mut cum = Vec::with_capacity(CIRCLE_SAMPLES + 1);
-    for i in 0..=CIRCLE_SAMPLES {
-        let t = i as f32 / CIRCLE_SAMPLES as f32;
-        let angle = -std::f32::consts::FRAC_PI_2 + dir * t * 2.0 * std::f32::consts::PI;
-        out.push([c[0] + angle.cos() * radius, c[1] + angle.sin() * radius]);
-        cum.push(t * circumference);
-    }
-    (out, cum)
-}
-
-/// Shape-aware capped polyline sampler. Branches on `shape_type` and feeds the
-/// shape-specific generator. Mirrors TS `sampleStripCapped`.
-pub fn sample_strip_capped(
-    shape: StripShapeType,
-    points: &[[f32; 2]],
-    target_length: f32,
-) -> (Vec<[f32; 2]>, Vec<f32>) {
-    sample_strip_capped_dir(shape, points, target_length, true)
-}
-
-pub fn sample_strip_capped_dir(
-    shape: StripShapeType,
-    points: &[[f32; 2]],
-    target_length: f32,
-    clockwise: bool,
-) -> (Vec<[f32; 2]>, Vec<f32>) {
-    match shape {
-        StripShapeType::Line   => sample_line_capped(points, target_length),
-        StripShapeType::Circle => sample_circle(points, target_length, clockwise),
-        StripShapeType::Bezier => sample_strip_curve_capped(points, target_length),
-    }
-}
-
 /// Draws a diamond (rotated square) anchor handle centred at (cx, cy).
 /// Visual style mirrors the Vue `SpatialHandle.vue` origin handle:
 /// solid primary-yellow fill, dark inner border, faint outer glow.
@@ -370,194 +153,143 @@ fn draw_diamond(canvas: &mut Canvas<OpenGl>, cx: f32, cy: f32, half_size: f32, f
     canvas.stroke_path(&mut path, &sp);
 }
 
-/// Returns the point on the sampled curve at arc-length `s`.
-fn sample_at_arc_length(samples: &[[f32; 2]], cum: &[f32], s: f32) -> [f32; 2] {
-    if samples.is_empty() { return [0.0, 0.0]; }
-    let total = *cum.last().unwrap_or(&0.0);
-    if s <= 0.0 { return samples[0]; }
-    if s >= total { return *samples.last().unwrap(); }
-    // Binary search for the right interval.
-    let mut lo = 0usize;
-    let mut hi = cum.len() - 1;
-    while lo + 1 < hi {
-        let mid = (lo + hi) >> 1;
-        if cum[mid] <= s { lo = mid; } else { hi = mid; }
-    }
-    let s0 = cum[lo];
-    let s1 = cum[hi];
-    let t = (s - s0) / (s1 - s0).max(0.0001);
-    let a = samples[lo];
-    let b = samples[hi];
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+// ── Fixture-kind drawing (ADR §5.6) ─────────────────────────────────────────
+
+/// RGBA bytes → femtovg color.
+fn rgba(c: [u8; 4]) -> Color {
+    Color::rgba(c[0], c[1], c[2], c[3])
 }
 
-/// Renders a NeoPixel LED strip as a Catmull-Rom Bézier curve in
-/// WORLD-PIXEL coordinates. Caller must NOT have applied translate/rotate
-/// for strip fixtures — the polyline points already encode world placement.
-///
-///  • smooth substrate stroke (cubic Bézier per segment, no sharp corners)
-///  • `ledCount` LED dots distributed by arc length along the whole curve
-///  • when `selected` (but not editing): only the selection outline
-///  • when `editing`: outline + filled handle at every vertex + a faint "+"
-///    handle at every segment midpoint (click to insert a new vertex)
-fn draw_strip_fixture(
+/// Builds the path of a body primitive.
+fn primitive_path(p: &BodyPrimitive) -> Path {
+    let mut path = Path::new();
+    match p {
+        BodyPrimitive::Polyline { points, closed, .. } => {
+            if let Some(first) = points.first() {
+                path.move_to(first[0], first[1]);
+                for q in &points[1..] { path.line_to(q[0], q[1]); }
+                if *closed { path.close(); }
+            }
+        }
+        BodyPrimitive::Polygon { points, .. } => {
+            if let Some(first) = points.first() {
+                path.move_to(first[0], first[1]);
+                for q in &points[1..] { path.line_to(q[0], q[1]); }
+                path.close();
+            }
+        }
+        BodyPrimitive::Circle { center, radius, .. } => path.circle(center[0], center[1], *radius),
+        BodyPrimitive::Rect { rect, radius, .. } => {
+            if *radius > 0.0 { path.rounded_rect(rect[0], rect[1], rect[2], rect[3], *radius); }
+            else { path.rect(rect[0], rect[1], rect[2], rect[3]); }
+        }
+    }
+    path
+}
+
+/// Draws a fixture-kind fixture in WORLD pixels (no fixture transform):
+///  • body primitives with their styles (polyline default: dark substrate)
+///  • beam emitters as dots in the beam's resolved color
+///  • selection outline along the body (or the AABB without a body)
+///  • active handles (anchors when selected, all in edit mode)
+fn draw_kind_fixture(
     canvas: &mut Canvas<OpenGl>,
     fixture: &FixtureCanvasData,
-    strip: &StripData,
+    state: &RenderState,
     dmx_buffer: &[u8],
-    scale: f32,
     t_sec: f64,
 ) {
-    let points = &strip.points;
-    let min_points = match strip.shape_type {
-        StripShapeType::Circle => 1,
-        _ => 2,
-    };
-    if points.len() < min_points { return; }
+    let scale = state.scale;
 
-    // Capped polyline: always exactly `target_length`. For bezier this trims
-    // or extends the Catmull-Rom curve; for line it's a linear segment; for
-    // circle it's a parametric ring with derived radius.
-    let (samples, cum) = sample_strip_capped_dir(strip.shape_type, points, strip.target_length, strip.clockwise);
-    let total_len = *cum.last().unwrap_or(&0.0);
-    if total_len <= 0.0 || samples.len() < 2 { return; }
-
-    // 1. Substrate stroke — render the capped curve as a polyline (the dense
-    //    samples are visually indistinguishable from a Bézier stroke at the
-    //    sample density we use, and this lets us trim mid-segment cleanly).
-    let substrate_w = (5.0 / scale).max(1.5);
-    let mut substrate_path = Path::new();
-    substrate_path.move_to(samples[0][0], samples[0][1]);
-    for i in 1..samples.len() {
-        substrate_path.line_to(samples[i][0], samples[i][1]);
-    }
-    let mut substrate_paint = Paint::color(Color::rgba(40, 40, 40, 220));
-    substrate_paint.set_line_width(substrate_w);
-    substrate_paint.set_line_cap(femtovg::LineCap::Round);
-    substrate_paint.set_line_join(femtovg::LineJoin::Round);
-    canvas.stroke_path(&mut substrate_path, &substrate_paint);
-
-    // 2. LED dots distributed by arc length over [0, total_len].
-    let led_count = strip.led_count.max(1);
-    let group_size = strip.group_size.max(1);
-    let beam_count = fixture.beams.len();
-    // Physical dot radius derived from the real LED spacing (arc length per LED,
-    // world units). ~90 % coverage between neighbours so dots nearly touch but
-    // don't overlap. Pure world size → scales naturally with zoom (as if moving
-    // physically toward/away from the fixtures); no screen-space floor. The
-    // `.max(0.5)` only guards against a zero radius in degenerate cases.
-    let spacing = total_len / led_count as f32;
-    let led_r = (spacing * 0.45).max(0.5);
-
-    for led_idx in 0..led_count {
-        let pixel_idx = (led_idx / group_size).min(beam_count.saturating_sub(1));
-        let beam: Option<&FixtureBeam> = fixture.beams.get(pixel_idx);
-        let color = match beam {
-            Some(b) => resolve_color(&PhotoRefs::from_beam(b), dmx_buffer, t_sec),
-            None    => resolve_color(&PhotoRefs::from_fixture(fixture), dmx_buffer, t_sec),
-        };
-        // Circle wraps around, so LED 0 and LED N should sit next to each
-        // other — distribute uniformly over the full perimeter without the
-        // 5% inset used for open shapes (bezier/line).
-        let t = match strip.shape_type {
-            StripShapeType::Circle => {
-                if led_count >= 1 { led_idx as f32 / led_count as f32 } else { 0.0 }
+    // 1. Body.
+    for p in &fixture.body {
+        let mut path = primitive_path(p);
+        match p {
+            BodyPrimitive::Polyline { width, style, .. } => {
+                let mut paint = Paint::color(style.stroke.map(rgba).unwrap_or(Color::rgba(40, 40, 40, 220)));
+                paint.set_line_width(width.max(1.5 / scale));
+                paint.set_line_cap(femtovg::LineCap::Round);
+                paint.set_line_join(femtovg::LineJoin::Round);
+                canvas.stroke_path(&mut path, &paint);
             }
-            _ => {
-                if led_count > 1 {
-                    0.025 + (led_idx as f32 / (led_count - 1) as f32) * 0.95
-                } else {
-                    0.5
+            BodyPrimitive::Polygon { style, .. } | BodyPrimitive::Circle { style, .. } | BodyPrimitive::Rect { style, .. } => {
+                if let Some(fill) = style.fill { canvas.fill_path(&mut path, &Paint::color(rgba(fill))); }
+                if let Some(stroke) = style.stroke {
+                    let mut paint = Paint::color(rgba(stroke));
+                    paint.set_line_width(1.5 / scale);
+                    canvas.stroke_path(&mut path, &paint);
                 }
             }
-        };
-        let pos = sample_at_arc_length(&samples, &cum, t * total_len);
-        let mut dot = Path::new();
-        dot.circle(pos[0], pos[1], led_r);
-        canvas.fill_path(&mut dot, &Paint::color(color));
+        }
     }
 
-    // 3. Selection outline (replays the capped curve as a colored stroke).
+    // 2. Emitters (beams without emitters are drawn at their local position).
+    for beam in &fixture.beams {
+        let color = resolve_color(&PhotoRefs::from_beam(beam), dmx_buffer, t_sec);
+        let r = if beam.emitter_radius > 0.0 { beam.emitter_radius } else { 4.0 };
+        let mut dots = Path::new();
+        for e in &beam.emitters { dots.circle(e[0], e[1], r); }
+        canvas.fill_path(&mut dots, &Paint::color(color));
+    }
+
+    // 3. Selection outline.
     if fixture.selected || fixture.remote_selection_color.is_some() {
-        let outline_color = border_color(fixture.selected, fixture.remote_selection_color);
-        let lw = (2.0 / scale).max(0.5);
-        let mut outline = Path::new();
-        outline.move_to(samples[0][0], samples[0][1]);
-        for i in 1..samples.len() {
-            outline.line_to(samples[i][0], samples[i][1]);
-        }
-        let mut stroke = Paint::color(outline_color);
-        stroke.set_line_width(lw);
+        let mut stroke = Paint::color(border_color(fixture.selected, fixture.remote_selection_color));
+        stroke.set_line_width((2.0 / scale).max(0.5));
         stroke.set_line_cap(femtovg::LineCap::Round);
         stroke.set_line_join(femtovg::LineJoin::Round);
-        canvas.stroke_path(&mut outline, &stroke);
-    }
-
-    // 4. Editing handles — only when explicitly in edit mode AND for bezier
-    //    shapes. line/circle have no separate handles: the LED-dots themselves
-    //    serve as the interactive elements (handled by JS-side hit-testing).
-    if fixture.editing && strip.shape_type == StripShapeType::Bezier {
-        let handle_r = 6.0 / scale;
-        let handle_stroke_w = 1.5 / scale;
-        let handle_fill = Color::rgba(20, 20, 20, 255);
-        let handle_outline_color = Color::rgba(251, 191, 36, 255);
-        let mut handle_outline = Paint::color(handle_outline_color);
-        handle_outline.set_line_width(handle_stroke_w);
-
-        // Vertex 0 = ANCHOR diamond (matches the modifier origin handle's look).
-        // Other vertices = circle handles. The focused vertex gets a brighter
-        // ring so the user knows which one Delete will remove.
-        let focused = strip.selected_vertex_idx;
-        for (idx, p) in points.iter().enumerate() {
-            // Focus halo behind the handle.
-            if (idx as i32) == focused {
-                let halo_r = handle_r * 1.9;
-                let mut halo = Path::new();
-                halo.circle(p[0], p[1], halo_r);
-                let mut halo_paint = Paint::color(Color::rgba(251, 191, 36, 90));
-                halo_paint.set_line_width((2.5 / scale).max(1.0));
-                canvas.stroke_path(&mut halo, &halo_paint);
-            }
-
-            if idx == 0 {
-                let half = handle_r * 1.2;
-                let dark_border = Color::rgba(0, 0, 0, 128);
-                draw_diamond(canvas, p[0], p[1], half, handle_outline_color, dark_border, handle_stroke_w);
-            } else {
-                let mut h = Path::new();
-                h.circle(p[0], p[1], handle_r);
-                canvas.fill_path(&mut h, &Paint::color(handle_fill));
-                canvas.stroke_path(&mut h, &handle_outline);
+        if fixture.body.is_empty() {
+            let hw = fixture.width * 18.0;
+            let hh = fixture.height * 18.0;
+            let mut path = Path::new();
+            path.rounded_rect(fixture.world_x * state.world_w - hw, fixture.world_y * state.world_h - hh, hw * 2.0, hh * 2.0, 4.0 / scale);
+            canvas.stroke_path(&mut path, &stroke);
+        } else {
+            for p in &fixture.body {
+                let mut path = primitive_path(p);
+                canvas.stroke_path(&mut path, &stroke);
             }
         }
+    }
 
-        // Mid-handles between CONTROL vertices (not on the capped curve).
-        // Use the bezier-segment arc-length midpoints from the FULL curve so
-        // the handles stay on the visible Catmull-Rom curve geometry.
-        let (full_samples, full_cum) = sample_strip_curve(points);
-        let mid_r = 4.5 / scale;
-        let mid_fill = Paint::color(Color::rgba(251, 191, 36, 150));
-        let plus_arm = mid_r * 0.5;
-        let plus_w = 1.2 / scale;
-        let mut plus_paint = Paint::color(handle_fill);
-        plus_paint.set_line_width(plus_w);
-
-        for i in 0..points.len() - 1 {
-            let seg_start = full_cum[i * BEZIER_SAMPLES_PER_SEG];
-            let seg_end = full_cum[(i + 1) * BEZIER_SAMPLES_PER_SEG];
-            let mid_s = (seg_start + seg_end) * 0.5;
-            let mid_pos = sample_at_arc_length(&full_samples, &full_cum, mid_s);
-
-            let mut h = Path::new();
-            h.circle(mid_pos[0], mid_pos[1], mid_r);
-            canvas.fill_path(&mut h, &mid_fill);
-
-            let mut plus_path = Path::new();
-            plus_path.move_to(mid_pos[0] - plus_arm, mid_pos[1]);
-            plus_path.line_to(mid_pos[0] + plus_arm, mid_pos[1]);
-            plus_path.move_to(mid_pos[0], mid_pos[1] - plus_arm);
-            plus_path.line_to(mid_pos[0], mid_pos[1] + plus_arm);
-            canvas.stroke_path(&mut plus_path, &plus_paint);
+    // 4. Handles.
+    let handle_r = 6.0 / scale;
+    let stroke_w = 1.5 / scale;
+    let accent = Color::rgba(251, 191, 36, 255);
+    let dark = Color::rgba(20, 20, 20, 255);
+    let mut outline = Paint::color(accent);
+    outline.set_line_width(stroke_w);
+    for h in fixture.handles.iter().filter(|h| h.active(fixture.selected, fixture.edit_mode)) {
+        if fixture.focused_handle.as_deref() == Some(h.id.as_str()) {
+            let mut halo = Path::new();
+            halo.circle(h.x, h.y, handle_r * 1.9);
+            let mut halo_paint = Paint::color(Color::rgba(251, 191, 36, 90));
+            halo_paint.set_line_width((2.5 / scale).max(1.0));
+            canvas.stroke_path(&mut halo, &halo_paint);
+        }
+        match h.role.as_str() {
+            "anchor" => draw_diamond(canvas, h.x, h.y, handle_r * 1.2, accent, Color::rgba(0, 0, 0, 128), stroke_w),
+            "midpoint" => {
+                let mid_r = 4.5 / scale;
+                let mut dot = Path::new();
+                dot.circle(h.x, h.y, mid_r);
+                canvas.fill_path(&mut dot, &Paint::color(Color::rgba(251, 191, 36, 150)));
+                let arm = mid_r * 0.5;
+                let mut plus = Path::new();
+                plus.move_to(h.x - arm, h.y);
+                plus.line_to(h.x + arm, h.y);
+                plus.move_to(h.x, h.y - arm);
+                plus.line_to(h.x, h.y + arm);
+                let mut plus_paint = Paint::color(dark);
+                plus_paint.set_line_width(1.2 / scale);
+                canvas.stroke_path(&mut plus, &plus_paint);
+            }
+            _ => {
+                let mut c = Path::new();
+                c.circle(h.x, h.y, handle_r);
+                canvas.fill_path(&mut c, &Paint::color(dark));
+                canvas.stroke_path(&mut c, &outline);
+            }
         }
     }
 }
@@ -616,9 +348,9 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
 
         canvas.save();
 
-        if let Some(strip) = &fixture.strip {
-            // Strip points are already in world-pixel space — don't transform.
-            draw_strip_fixture(canvas, fixture, strip, dmx_buffer, state.scale, t_sec);
+        if fixture.is_kind() {
+            // Kind geometry is already in world-pixel space — don't transform.
+            draw_kind_fixture(canvas, fixture, state, dmx_buffer, t_sec);
             canvas.restore();
             continue;
         }

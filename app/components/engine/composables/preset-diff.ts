@@ -1,11 +1,10 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
-import type { Effect } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import type {
   Preset,
   PresetCategory,
   PresetCategoryType,
   PresetChannelSnapshot,
-  PresetModifierSnapshot,
 } from '~/utils/engine/preset-types';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import {
@@ -25,7 +24,7 @@ interface GroupEntry {
   fixtureIds: (string | number)[];
   fixtureNames: string[];
   channels: PresetChannelSnapshot[];
-  modifiers: PresetModifierSnapshot[];
+  modifiers: ModifierInstance[];
   /** Tracks the current identity-keyed modifier for later replacement */
   modifierIdentity?: string;
 }
@@ -80,11 +79,11 @@ function resolveGroupLabel(
 
 function buildPresetIndex(activePreset: Preset): {
   channels: Map<string, PresetChannelSnapshot>;
-  modifiers: Map<string, PresetModifierSnapshot>;
+  modifiers: Map<string, ModifierInstance>;
 } {
   // key: `${fixtureId}:${channelIndex}` → snapshot
   const channels = new Map<string, PresetChannelSnapshot>();
-  const modifiers = new Map<string, PresetModifierSnapshot>();
+  const modifiers = new Map<string, ModifierInstance>();
 
   for (const cat of activePreset.categories) {
     for (const fixId of cat.fixtureIds) {
@@ -208,7 +207,7 @@ function upsertModifierChange(
   fixtureMap: Map<string | number, string>,
   fixtureId: string | number,
   cat: PresetCategoryType,
-  snap: PresetModifierSnapshot
+  snap: ModifierInstance
 ): void {
   const identity = getModifierIdentity(snap);
   const key = `modifier__${cat}__${identity}`;
@@ -233,9 +232,9 @@ function upsertModifierChange(
 }
 
 function diffModifiers(
-  effects: Effect[],
+  effects: ModifierInstance[],
   fixtureMap: Map<string | number, string>,
-  presetModifiers: Map<string, PresetModifierSnapshot>,
+  presetModifiers: Map<string, ModifierInstance>,
   activePreset: Preset | null,
   groupMap: Map<string, GroupEntry>
 ): void {
@@ -298,7 +297,7 @@ function diffModifiers(
  */
 export function extractCategories(
   fixtures: Fixture[],
-  effects: Effect[] = [],
+  effects: ModifierInstance[] = [],
   activePreset: Preset | null = null,
   nodes?: SceneNode[]
 ): PresetCategory[] {

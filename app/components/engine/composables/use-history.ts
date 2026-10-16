@@ -43,6 +43,8 @@ const persistenceHooks = {
   walAppend: null as ((entry: WalEntryForHooks) => Promise<void>) | null,
   /** Current project id — needed for WAL scoping. */
   currentProjectId: null as (() => string | null) | null,
+  /** Called for every persisted command (requires bookkeeping, ADR §5.8). */
+  onPersist: null as ((commandType: string, payload: object) => void) | null,
 };
 
 export function setPersistenceHooks(hooks: {
@@ -51,12 +53,14 @@ export function setPersistenceHooks(hooks: {
   markDirty?: () => void;
   walAppend?: (entry: WalEntryForHooks) => Promise<void>;
   currentProjectId?: () => string | null;
+  onPersist?: (commandType: string, payload: object) => void;
 }) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
   persistenceHooks.markDirty = hooks.markDirty ?? null;
   persistenceHooks.walAppend = hooks.walAppend ?? null;
   persistenceHooks.currentProjectId = hooks.currentProjectId ?? null;
+  persistenceHooks.onPersist = hooks.onPersist ?? null;
 }
 
 export function triggerSaveSnapshot() {
@@ -69,6 +73,12 @@ export function triggerSaveSnapshot() {
  */
 function persistOne(commandType: string, payload: object, label: string) {
   if (!persistenceHooks.pushChange) return;
+  try {
+    persistenceHooks.onPersist?.(commandType, payload);
+  }
+  catch (err) {
+    console.warn(`[history] onPersist failed (${label}):`, err);
+  }
   const changeId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;

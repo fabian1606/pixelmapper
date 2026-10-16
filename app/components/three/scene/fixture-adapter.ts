@@ -1,9 +1,10 @@
 import { Euler, Vector3 } from 'three';
-import type { Fixture, StripPoint } from '~/utils/engine/core/fixture';
+import type { Vec2 } from '@pixelmapper/extension-api';
+import type { Fixture } from '~/utils/engine/core/fixture';
 import { buildBeamPhotometry, type BeamPhotometry } from '~/utils/engine/core/photometry';
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS, STAGE_SIZE_METERS } from '~/utils/engine/constants';
-import { PIXELS_PER_METER } from '~/utils/engine/neopixel-strip-factory';
-import { sampleStripCapped, pointAtArcLength } from '~/utils/engine/strip-geometry';
+import { PIXELS_PER_METER, kindToWorld } from '~/utils/kinds/kind-host';
+import { resolveCssColor } from '~/utils/kinds/kind-canvas';
 
 const DEG2RAD = Math.PI / 180;
 
@@ -83,7 +84,8 @@ export interface BodyModel {
   euler: Euler;
   /** Box size in meters (x, y, z). */
   size: Vector3;
-  isStrip: boolean;
+  /** Kind fixtures get a small pivot box; their body is drawn from primitives. */
+  compact: boolean;
 }
 
 /** Beam-capable fixture (moving head / spot / PAR with lens data). */
@@ -112,15 +114,28 @@ export interface BeamModel {
   photometry: BeamPhotometry;
 }
 
-/** Substrate geometry for one NeoPixel strip — the visible PCB/tube of the strip. */
-export interface StripModel {
+/** A `polyline` body primitive of a kind fixture, drawn as a tube. */
+export interface PolylineModel {
   fixtureId: string | number;
-  /** Polyline in world meters, already oriented (tilt/roll about the centroid pivot). */
+  /** Polyline in world meters, already oriented (tilt/roll about the fixture origin). */
   polyline: Vector3[];
-  /** Circle shapes form a closed ring (no seam). */
+  /** Closed rings have no seam. */
   isClosed: boolean;
   /** Tube radius in meters. */
   radius: number;
+  /** Stroke RGBA bytes (default: dark substrate). */
+  color?: [number, number, number, number] | null;
+}
+
+/** A flat `circle` / `rect` / `polygon` body primitive of a kind fixture. */
+export interface ShapeModel {
+  fixtureId: string | number;
+  /** Outline in world meters (oriented). */
+  outline: Vector3[];
+  /** Same outline in the flat kind plane (for triangulation). */
+  flat: Vec2[];
+  /** Fill RGBA bytes (default: dark substrate). */
+  color?: [number, number, number, number] | null;
 }
 
 /** SVG artwork rendered as a textured plane at the fixture's footprint. */
@@ -139,7 +154,8 @@ export interface SceneModel {
   pixels: PixelModel;
   bodies: BodyModel[];
   beams: BeamModel[];
-  strips: StripModel[];
+  polylines: PolylineModel[];
+  shapes: ShapeModel[];
   svgPlanes: SvgPlaneModel[];
 }
 
@@ -194,87 +210,90 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
   const rawPixels: RawPixel[] = [];
   const bodies: BodyModel[] = [];
   const beams: BeamModel[] = [];
-  const strips: StripModel[] = [];
+  const polylines: PolylineModel[] = [];
+  const shapes: ShapeModel[] = [];
   const svgPlanes: SvgPlaneModel[] = [];
 
   for (const f of fixtures) {
     const pos = fixtureWorldPosition(f);
     const euler = fixtureEuler(f);
 
-    if (f.stripConfig) {
-      const sc = f.stripConfig;
-      const targetLength = sc.lengthMeters * PIXELS_PER_METER;
-      const sampled = sampleStripCapped(sc.shapeType, sc.points, targetLength, sc.clockwise ?? true);
-      const ledCount = Math.max(1, sc.ledCount);
-      const groupSize = Math.max(1, sc.groupSize);
-
-      // Orientation: tilt/roll about the fixture position (= strip AABB
-      // centroid, kept in sync by syncStripBounds). Yaw is deliberately
-      // omitted — 2D ignores `rotation` for strips and syncStripBounds resets
-      // it to 0, so applying it here could only desync the top-down footprint.
-      const stripEuler = new Euler((f.tiltX || 0) * DEG2RAD, 0, (f.rollZ || 0) * DEG2RAD, 'YXZ');
-      const hasOrientation = stripEuler.x !== 0 || stripEuler.z !== 0;
-      const toWorld = (pt: StripPoint): Vector3 => {
-        const v = new Vector3(worldPxToMeters(pt.x) - pos.x, 0, worldPxToMeters(pt.y) - pos.z);
-        if (hasOrientation) v.applyEuler(stripEuler);
+    const compiled = f.kind?.compiled;
+    if (compiled) {
+      // Kind fixture (ADR §5.6): everything comes from the compiled build in
+      // fixture-relative world pixels. Position + yaw via kindToWorld (same
+      // as 2D), then tilt/roll about the fixture origin.
+      const tilt = new Euler((f.tiltX || 0) * DEG2RAD, 0, (f.rollZ || 0) * DEG2RAD, 'YXZ');
+      const oriented = tilt.x !== 0 || tilt.z !== 0;
+      const toWorld = (p: Vec2): Vector3 => {
+        const w = kindToWorld(f, p);
+        const v = new Vector3(worldPxToMeters(w.x) - pos.x, 0, worldPxToMeters(w.y) - pos.z);
+        if (oriented) v.applyEuler(tilt);
         return v.add(pos);
       };
 
-      // One point per PHYSICAL LED (matching the 2D renderer), colored by its
-      // group's beam. Photometry is resolved once per beam and shared across
-      // the group's LEDs. Same arc parametrization as 2D: 2.5% inset on open
-      // shapes, full wrap on circles.
-      const beamPhotometry = f.beams.map(b => buildBeamPhotometry(f, String(b.id)));
-      const fallbackPhotometry = beamPhotometry[0] ?? buildBeamPhotometry(f);
-      // Physical dot size from the real LED pitch — pure world size, like 2D's
-      // led_r = spacing·0.45 (this is a diameter, hence ·0.9).
-      const spacing = sc.lengthMeters / ledCount;
-      const size = Math.max(0.004, spacing * 0.9);
-      for (let led = 0; led < ledCount; led++) {
-        const pixelIdx = Math.min(Math.floor(led / groupSize), f.beams.length - 1);
-        const t = sc.shapeType === 'circle'
-          ? led / ledCount
-          : ledCount > 1 ? 0.025 + (led / (ledCount - 1)) * 0.95 : 0.5;
-        const pt = pointAtArcLength(sampled, t * sampled.totalLength);
-        const w = toWorld(pt);
-        rawPixels.push({
-          x: w.x,
-          y: w.y,
-          z: w.z,
-          size,
-          photometry: beamPhotometry[pixelIdx] ?? fallbackPhotometry,
-          fixtureId: f.id,
-        });
-      }
-
-      // Substrate polyline for the tube mesh — downsample the dense arc
-      // samples (bezier emits 32/segment) so the merged tube stays cheap.
-      if (sampled.points.length >= 2 && sampled.totalLength > 0) {
-        const isClosed = sc.shapeType === 'circle';
-        const pts = sampled.points;
-        // For closed rings the sampler's last point duplicates the first —
-        // drop it so the closed CatmullRomCurve3 doesn't get a seam kink.
-        const last = isClosed ? pts.length - 1 : pts.length;
-        const step = Math.max(1, Math.ceil(last / 96));
-        const polyline: Vector3[] = [];
-        for (let i = 0; i < last; i += step) polyline.push(toWorld(pts[i]!));
-        if (!isClosed && (last - 1) % step !== 0) polyline.push(toWorld(pts[last - 1]!));
-        if (polyline.length >= 2) {
-          // Radius ≈ the 2D substrate's 5px stroke width (5/250/2 m), padded a
-          // touch so it reads at typical orbit distances.
-          strips.push({ fixtureId: f.id, polyline, isClosed, radius: 0.01 });
+      // Emitters: one point per physical emitter, colored by its beam.
+      for (const b of f.beams) {
+        const photometry = buildBeamPhotometry(f, String(b.id));
+        const size = Math.max(0.004, (2 * (b.emitterRadius ?? 4)) / PIXELS_PER_METER);
+        for (const e of b.emitters ?? (b.offsetPx ? [b.offsetPx] : [])) {
+          const w = toWorld(e);
+          rawPixels.push({ x: w.x, y: w.y, z: w.z, size, photometry, fixtureId: f.id });
         }
       }
 
-      // Strip body: small handle box at the centroid pivot — fallback raycast
-      // target plus the projection anchor for line/box-select and the gizmo.
-      bodies.push({
-        fixtureId: f.id,
-        position: pos.clone(),
-        euler,
-        size: new Vector3(0.15, 0.15, 0.15),
-        isStrip: true,
-      });
+      // Body primitives.
+      for (const p of compiled.body) {
+        switch (p.type) {
+          case 'polyline': {
+            // Downsample dense polylines so the merged tube stays cheap.
+            const step = Math.max(1, Math.ceil(p.points.length / 96));
+            const pts: Vec2[] = [];
+            for (let i = 0; i < p.points.length; i += step) pts.push(p.points[i]!);
+            if (!p.closed && (p.points.length - 1) % step !== 0) pts.push(p.points[p.points.length - 1]!);
+            if (pts.length >= 2) {
+              polylines.push({
+                fixtureId: f.id,
+                polyline: pts.map(toWorld),
+                isClosed: !!p.closed,
+                radius: Math.max(0.005, p.width / 2 / PIXELS_PER_METER),
+                color: resolveCssColor(p.style.stroke, p.style.opacity),
+              });
+            }
+            break;
+          }
+          case 'polygon':
+          case 'rect':
+          case 'circle': {
+            const flat: Vec2[] = p.type === 'polygon'
+              ? p.points
+              : p.type === 'rect'
+                ? [{ x: p.rect.x, y: p.rect.y }, { x: p.rect.x + p.rect.w, y: p.rect.y }, { x: p.rect.x + p.rect.w, y: p.rect.y + p.rect.h }, { x: p.rect.x, y: p.rect.y + p.rect.h }]
+                : Array.from({ length: 32 }, (_, i) => ({
+                    x: p.center.x + Math.cos((i / 32) * Math.PI * 2) * p.radius,
+                    y: p.center.y + Math.sin((i / 32) * Math.PI * 2) * p.radius,
+                  }));
+            shapes.push({ fixtureId: f.id, outline: flat.map(toWorld), flat, color: resolveCssColor(p.style.fill ?? p.style.stroke, p.style.opacity) });
+            break;
+          }
+          case 'svg': {
+            const c = toWorld({ x: p.rect.x + p.rect.w / 2, y: p.rect.y + p.rect.h / 2 });
+            svgPlanes.push({
+              fixtureId: f.id,
+              position: c,
+              euler,
+              width: p.rect.w / PIXELS_PER_METER,
+              height: p.rect.h / PIXELS_PER_METER,
+              svgData: p.markup,
+            });
+            break;
+          }
+        }
+      }
+
+      // Small pivot box at the origin — fallback raycast target plus the
+      // projection anchor for line/box-select and the gizmo.
+      bodies.push({ fixtureId: f.id, position: pos.clone(), euler, size: new Vector3(0.15, 0.15, 0.15), compact: true });
       continue;
     }
 
@@ -312,7 +331,7 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
       position: pos.clone(),
       euler,
       size: new Vector3(Math.max(0.15, fp.x), 0.18, Math.max(0.15, fp.y)),
-      isStrip: false,
+      compact: false,
     });
 
     // SVG artwork as a textured plane at the footprint — the dots on top
@@ -377,7 +396,8 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
     pixels: { count, positions, sizes, photometry, pixelFixture },
     bodies,
     beams,
-    strips,
+    polylines,
+    shapes,
     svgPlanes,
   };
 }

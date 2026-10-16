@@ -2,188 +2,151 @@
 
 ## Why Rust + WebAssembly?
 
-All DMX calculation logic runs in Rust — compiled to either WASM (browser) or a native static library (ESP32). The reasons:
+All DMX calculation runs in Rust (`rs-engine-core`), compiled to WASM and executed in a Web Worker (later natively for Tauri). The ESP32 is a pure output device and no longer runs the engine (ADR 0001).
 
-1. **Performance**: The engine iterates over all targets, chasers, and effects every frame. In Rust/WASM this runs without GC pauses or JS engine overhead.
-2. **Zero-copy DMX access**: The `dmx_buffer: [u8; 512]` lives directly in WASM memory. The browser reads it via `js_sys::Uint8Array::view()` without copying — a direct pointer into the WASM heap.
-3. **Code sharing**: Browser and ESP32 use the same Rust crate (`rs-engine-core`). Same logic, identical output — no porting effort, no divergence.
+1. **Performance**: the engine walks every target, chaser and modifier sample each frame without GC pauses.
+2. **Zero-copy DMX access**: `dmx_buffer` lives in WASM memory; `get_dmx_view()` returns a `Uint8Array` view into it.
+3. **Code sharing**: browser and the planned Tauri app use the same crate.
+
+Modifier *logic* is not in the engine any more: modifiers are content plugins (ADR §6) — AssemblyScript compiled to their own WASM modules and run through a `ModifierRuntime`. The engine computes phases, samples and blending; plugins only compute one value tuple per sample.
+
+## Threads and data flow
+
+```
+main thread                                  engine worker (engine-worker.ts)
+───────────                                  ────────────────────────────────
+engine-store.ts                              WasmEngine (rs-engine-core)
+  build packets on change ──dispatch──────►    dispatch_bin(0x14 / 0x15)
+  buildModifiersBin ──modifiers-sync──────►    WorkerPluginBridge.setTable + dispatch_bin(0x16)
+  plugin-store loadWasm ──plugin-load─────►    WorkerPluginBridge.load (PluginInstance per instance)
+                                               setInterval(16 ms): render → canvas.draw
+  onFrame(dmx, elapsed, signatures) ◄─frame─   DMX copy (+ requested signature tuples)
+  → connectors, live hub, UI
+  Watchdog: no frame for 1 s → respawn worker, replay packets/plugins,
+            suspend non-built-in plugins (toast)
+```
+
+`EffectEngine` (`app/utils/engine/engine.ts`) owns the worker: it caches every packet, plugin module and canvas message so a respawned worker is replayed to the same state, and bumps `generation` so `FixtureCanvas` re-transfers a fresh `OffscreenCanvas`.
 
 ## rs-engine-core
 
-The platform-agnostic crate. No `std::io`, no `std::net`, no web APIs.
+| Module | Role |
+|--------|------|
+| `engine.rs` | `EffectEngine`: targets, heads, instances, `render`, blending, signature readback |
+| `bin_protocol.rs` | Payload parsers for 0x14 / 0x15 / 0x16 (see [binary-protocol.md](binary-protocol.md)) |
+| `signatures.rs` | `Signature` (scalar / rgb / panTilt), color-system read/write (RGB, RGBW, RGBA, CMY), 16-bit pairs, range remap |
+| `phase.rs` | Speed phase (time / beat / infinite) and phase speed |
+| `distribution.rs` | Per-sample `spatial`, `rank`, `distGroup` of an instance's distribution (ADR A20); mirrored in `app/utils/engine/distribution/sample.ts`, parity-tested on `distribution_table.json` |
+| `beat_clock.rs` | Piecewise BPM integral (`set_bpm_at`) so beat time is continuous across tempo changes |
+| `runtime.rs` | `ModifierRuntime` trait, `FrameCtx` / `Sample` (16 f32 each), `NullRuntime` |
+| `runtime_js.rs` + `js/plugin-bridge.js` | Browser runtime: calls `globalThis.__pmPluginBridge` (the worker's `WorkerPluginBridge`) |
+| `wasm_bindings.rs` | `WasmEngine` for the worker |
 
-### EffectEngine (`engine.rs`)
+### Render pipeline (`EffectEngine::render`)
 
-```rust
-pub struct EffectEngine {
-    pub dmx_buffer:  [u8; 512],   // Final DMX values (1 universe)
-    pub base_buffer: [f32; 512],  // Float base values before effect overlay
-    pub global_bpm:  f32,
-    pub targets:     Vec<RenderTarget>,
-    pub effects:     Vec<Box<dyn Effect>>,
-}
-```
+1. **Base values** — every target's chaser value (0–255) into `base_buffer` and `render_buffer`.
+2. **Modifiers, in list order** — for each enabled instance:
+   1. *Collect samples* by signature: `scalar` → one sample per targeted channel (filtered by channel types and fixture mask); `rgb` → one per head with a color system; `panTilt` → one per head with pan + tilt.
+   2. *Fill `FrameCtx`*: time, beat time, BPM, phase speed, arity, instance seed, strength, and (v1.1) `timePhase`, `rankCount`, `distGroupCount`, (v1.2) `spread` and the handle.
+   3. *Fill samples*:
+      - world x/y;
+      - the distribution values (`spatial`, `rank`, `distGroup`, see below) and the legacy `phase = timePhase − spatial`;
+      - rank among targeted fixtures, head index/count;
+      - a stable 24-bit seed of (fixture id hash, head, instance);
+      - the current working values (`base0..2`, normalized) and the channel-type seed.
+   4. *Run the plugin* via `ModifierRuntime::render` (one call per instance per frame, all samples at once). A runtime error disables the instance until its plugin or params change (`retry_disabled` after plugin loads).
+   5. *Blend* into `render_buffer` (ADR amendment A13):
+      - `bipolar`: `v = base + strength × (out − 1) / 2` (out = 1 lands on the base, −1 on base − strength); `add` applies `prev + (v − base)`, other modes combine `prev` and `v`.
+      - `scale` (A20): `factor = 1 − strength + strength × out`, `mapped = base × factor`; `add` applies `prev + (mapped − base)`, `multiply` `prev × factor`, others combine `prev` and `mapped`.
+      - `absolute`: `mixed = blendOp(prev, out)`, then `prev + (mixed − prev) × strength`.
+      - rgb heads write through their color system (RGBW white = min(r, g, b), CMY inverted); pan/tilt write 16-bit pairs when a fine channel exists.
+3. **DMX** — `render_buffer` remapped to each channel's `[rangeMin, rangeMax]` into `dmx_buffer`.
 
-**`render(time_ms, delta_time_ms)`** runs once per frame:
+### Signature readback (live values)
 
-1. **Update** — calls `effect.update(delta_ms, bpm)` on all effects (accumulate phase)
-2. **Base/Chaser** — for each target: compute interpolated chaser value → write to `base_buffer[dmx_index]`
-3. **Effects** — for each target × effect: render wave shape `[-1, 1]`, map to DMX range, additively blend onto `dmx_buffer`
-4. **Clamp** — final values stay within `[0, 255]`
+`read_signatures(requests)` returns the normalized tuple of each requested `(group index, signature)` after the last render — 3 f32 per request, NaN when the fixture lacks the channels. `scalar` reads the DIMMER channel (else the first channel), `rgb`/`panTilt` the first matching head. The worker attaches the tuples to frame messages only while extensions subscribe to `signature` live targets (see [extensions.md](extensions.md)).
 
-**`dispatch_bin(packet_type, data)`** is the sole entry point for configuration data:
-
-```rust
-pub fn dispatch_bin(&mut self, packet_type: u8, data: &[u8]) -> i32 {
-    match packet_type {
-        0x10 => { /* BPM: f32 LE */ }
-        0x14 => parse_layout_bin(self, data),   // fixture positions
-        0x15 => parse_channels_bin(self, data), // chaser configs
-        0x16 => parse_effects_bin(self, data),  // effect parameters
-        _    => -1,
-    }
-}
-```
-
-Returns the count of parsed items, or `-1` on error.
-
-### WASM Bindings (`wasm_bindings.rs`)
-
-```rust
-#[wasm_bindgen]
-impl WasmEngine {
-    pub fn dispatch(&mut self, packet_type: u8, data: &[u8]) -> i32
-    pub fn render(&mut self, time_ms: f32, delta_time_ms: f32)
-    pub fn set_bpm(&mut self, bpm: f32)
-    pub fn get_dmx_view(&self) -> js_sys::Uint8Array  // zero-copy pointer
-}
-```
-
-`get_dmx_view()` returns a direct `Uint8Array` view into `dmx_buffer` — no memcopy, no allocation. Valid as long as no `dispatch` call causes WASM memory to grow (re-fetch afterwards, as done in `engine.ts`).
-
-### FFI Layer (`rs-engine-ffi`)
-
-Thin `extern "C"` wrappers over `dispatch_bin` for ESP32/PlatformIO:
-
-```c
-// engine_ffi.h
-EffectEngine*  engine_new();
-void           engine_free(EffectEngine* ptr);
-int32_t        engine_dispatch(EffectEngine* ptr, uint8_t packet_type,
-                               const uint8_t* data, uint32_t len);
-void           engine_render(EffectEngine* ptr, float time_ms, float delta_ms);
-const uint8_t* engine_get_dmx_buffer(EffectEngine* ptr);
-```
-
-## engine-store.ts — The Render Loop
-
-The Pinia store holds the entire application state and drives the 60 fps loop.
-
-### Packet Cache & Revision Tracking
-
-Instead of passing fixtures directly to the engine, the store builds binary packets and caches them:
-
-```typescript
-let layoutPacket:   Uint8Array  // fixture positions + channel metadata
-let channelsPacket: Uint8Array  // chaser configurations
-let effectsPacket:  Uint8Array  // effect parameters
-
-const layoutRevision   = ref(0)
-const channelsRevision = ref(0)
-const effectsRevision  = ref(0)
-```
-
-Vue watchers rebuild packets on change:
-
-| Watcher | Triggers when | Rebuilds |
-|---------|---------------|----------|
-| `watch(flatFixtures, { deep: true })` | Fixture moved, channel added | layout + channels |
-| `watch(globalBases, { deep: true })` | Global base values (Dimmer, RGB) changed | channels |
-| `watch(activeEffects, { deep: true })` | Effect added or modified | effects |
-
-### Render Loop
-
-```typescript
-const renderLoop = (time: number) => {
-    const lr = layoutRevision.value
-    const cr = channelsRevision.value
-    const er = effectsRevision.value
-
-    // Only dispatch if something changed AND WASM is ready (returns >= 0)
-    if (lr !== lastDispatchedLayout
-        && engine.dispatch(TYPE_LAYOUT_BIN, layoutPacket.subarray(5)) >= 0)
-        lastDispatchedLayout = lr
-
-    if (cr !== lastDispatchedChannels
-        && engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5)) >= 0)
-        lastDispatchedChannels = cr
-
-    if (er !== lastDispatchedEffects
-        && engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5)) >= 0)
-        lastDispatchedEffects = er
-
-    engine.render(elapsed, delta)
-    connectionsStore.sendFrame(engine.dmxBuffer)
-    connectionsStore.notifyEngineState({ ..., layoutPacket, channelsPacket, effectsPacket })
-
-    animFrameId = requestAnimationFrame(renderLoop)
-}
-```
-
-**Note**: `subarray(5)` skips the 5-byte framing header `[0xAA][0x55][type][len_lo][len_hi]`. The WASM `dispatch_bin` expects only the raw payload — the header is for the ESP32 state-machine parser.
-
-**Note**: WASM initializes asynchronously. While `wasmEngine` is still null, `dispatch()` returns `-1`. The loop only updates `lastDispatched*` on success (`>= 0`), so the packet is automatically retried next frame.
-
-## Effects
-
-All effects implement the `Effect` trait:
+### WASM bindings (`WasmEngine`)
 
 ```rust
-pub trait Effect {
-    fn update(&mut self, delta_ms: f32, bpm: f32);
-    fn render(&self, world_x: f32, world_y: f32) -> f32;  // returns [-1, 1]
-    fn get_config(&self) -> &EffectConfig;
-}
+pub fn dispatch(&mut self, packet_type: u8, data: &[u8]) -> i32   // count or -1
+pub fn render(&mut self, time_ms: f32, delta_time_ms: f32)
+pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32)                 // tempo change on the beat clock
+pub fn reset_clock(&mut self, bpm: f32)                            // new clock epoch
+pub fn retry_disabled(&mut self)                                   // after plugin loads
+pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32>
+pub fn get_dmx_view(&self) -> js_sys::Uint8Array                   // zero-copy
 ```
 
-### EffectConfig
+## Plugin runtime
 
-```rust
-pub struct EffectConfig {
-    pub target_channels:      Vec<String>,          // empty = all channel types
-    pub target_group_indices: Option<Vec<usize>>,   // None = all fixtures
-    pub direction:            EffectDirection,
-    pub origin_x:             f32,
-    pub origin_y:             f32,
-    pub angle:                f32,
-    pub strength:             f32,     // amplitude in DMX units
-    pub reverse:              bool,
-    pub fanning:              f32,     // per-fixture phase offset multiplier
-    pub speed:                SpeedConfig,
-    pub effect_type:          String,
-}
-```
+Plugins are content-addressed packages (`sha256:` over manifest ‖ wasm ‖ ui). The worker loads modules by hash (`plugin-load`); the modifiers packet references plugins by index into a per-packet plugin table sent alongside (`modifiers-sync`). `WorkerPluginBridge` keeps one `PluginInstance` (from `@pixelmapper/plugin-toolchain/runtime`) per modifier instance, calls `pm_prepare(params)` when params change and `pm_render(ctx, samples, count, out)` each frame.
 
-### Direction Modes
+Safety (ADR §6.7): modules may only import `env.memory`, `env.abort`, `pm.budget`, `pm.log`; the toolchain instruments every loop and call with a budget counter (`pm.budget`), so an infinite loop traps instead of hanging; memory is capped at 256 pages. Traps, aborts and budget overruns post `plugin-error` to the main thread (toast) and disable that instance only. A worker that stops producing frames altogether is killed by the watchdog (above).
 
-| Mode | Behavior |
-|------|----------|
-| `None` | All fixtures share the same phase |
-| `Linear` | Phase offset distributed linearly via fanning |
-| `Radial` | Phase offset = distance from origin point |
-| `Symmetrical` | Like Linear but mirrored |
+## ABI v1 / v1.1 / v1.2
+
+Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
+
+| `FrameCtx` (f32 index) | | `Sample` (f32 index) | |
+|---|---|---|---|
+| 0 | timeMs (shared clock) | 0, 1 | x, y (normalized world) |
+| 1 | beatTime | 2 | phase (cycles; legacy = timePhase − spatial) |
+| 2 | bpm | 3, 4 | groupIndex, groupCount (targeted fixtures) |
+| 3 | phaseSpeed (cycles/s) | 5, 6 | headIndex, headCount |
+| 4 | arity (1 / 3 / 2) | 7 | seed (24-bit) |
+| 5, 6 | seedLo, seedHi (instance) | 8–10 | base0..2 (working values before this modifier) |
+| 7 | strength (informational) | 11, 12 | channelSeedLo/Hi (scalar) |
+| 8 | timePhase (v1.1) | 13 | spatial (v1.1) |
+| 9 | rankCount (v1.1) | 14 | rank (v1.1, −1 = none) |
+| 10 | distGroupCount (v1.1) | 15 | distGroup (v1.1, −1 = none) |
+| 11 | spread (v1.2: 0 same, 1 spatial 2D, 2 fixture by fixture, 3 within) | | |
+| 12–15 | Spatial 2D handle origin x/y, end x/y (v1.2, normalized world) | | |
+
+v1.1 and v1.2 are additive: older plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
+
+## Main-thread previews
+
+`app/utils/plugins/preview-pool.ts` runs the same plugins on the main thread:
+- the endless strip (`renderStrip`: 256 virtual pixels with continuous `spatial`), recipe thumbnails and the Add-menu thumbnails;
+- noise history traces (`renderTraces`);
+- the canvas field overlay while dragging the distribution handle (`renderField`). It mirrors the engine's phase/seed computation and host mapping; a trapping plugin is marked broken there, the worker remains authoritative.
+
+## engine-store.ts — packets and dispatch
+
+The store builds binary packets when the model changes and dispatches only changed ones (revision counters):
+
+| Watcher | Rebuilds |
+|---------|----------|
+| fixtures (deep) | layout (0x14) + channels (0x15) |
+| global bases | channels |
+| `modifiers` (deep) | modifiers (0x16) + plugin table; ensures the referenced plugins are loaded into the worker |
+
+A light rAF loop forwards changed packets to the worker (`subarray(5)` strips the framing header); `flushEngineOutput()` forces an immediate rebuild + dispatch during drags. Frames come back via `engine.onFrame` and fan out to connectors (`sendFrame`), the live hub and UI.
+
+## Modifier instances (TS model)
+
+`ModifierInstance` (`app/utils/engine/types.ts`, ADR §6.3/A20): `id`, `plugin` (hash), `signature`, `targetChannels`, `targetFixtureIds?`, `blendMode`, `strength` (0–1), `speed`, `distribution`, `params`. Instances are plain JSON (cloned with `cloneModifier`); `createModifier(hash)` fills manifest defaults (params and `distribution.default`). On add, the recipe matching the selection is applied and placed on it (`use-chaser-modifiers.ts`, `recipes.ts`). Cards (`modifier-card/ModifierCard.vue`) render recipes, `ParamForm` v2 (composite editors, tiers, `when`), the tempo row, the shared `DistributionSection` and "More" (blend mode).
+
+### Distribution
+
+`Distribution` (`@pixelmapper/extension-api`): `scope` (across / within), `mode`, the gradient handle `origin`/`end`, `reverse`, `order` (explicit `ranks`, drawn `line`, `mirror`, `snap`), `grouping`, `withinOffset`. The UI shows one "Spread" dropdown (All the same · Spatial 2D · Fixture by fixture · Within each fixture); the handle is edited on the canvas, the order with one Reassign session (click fixtures or draw a line).
+
+| Mode | `spatial` per sample |
+|------|----------------------|
+| `none` | 0 |
+| `linear` | projection of (p − origin) on (end − origin) ÷ length² (0 at origin, 1 at end) |
+| `radial` | distance from origin ÷ handle length |
+| `conical` | angle around origin relative to the handle, in turns |
+| `order` | rank / rankCount (ranks resolved in TS by `resolveRanks`: explicit clicks, projection on the drawn line with a tolerance for roughly aligned fixtures, or the selection's main axis; `mirror` ranks by distance from the line start) |
+| scope `within` | head / headCount (offset by the fixture's rank with `withinOffset: 'order'`) |
+
+Grouping (recipes only) maps ranks to groups (`spatial = group / n`); `reverse` applies `1 − spatial` last. Order and within never depend on the handle.
 
 ### SpeedConfig
 
-Speed can be specified as absolute time (ms) or BPM-relative:
-
-```rust
-pub enum SpeedMode { Time, Beat, Infinite }
-
-pub struct SpeedConfig {
-    pub mode:        SpeedMode,
-    pub time_ms:     f32,
-    pub beat_value:  f32,   // e.g. 1.0 = 1 beat, 0.5 = half beat
-    pub beat_offset: f32,   // phase offset in beats
-}
+```ts
+{ mode: 'time' | 'beat' | 'infinite'; timeMs: number; beatValue: number; beatOffset: number }
 ```
+
+`time`: phase = timeMs / speed.timeMs. `beat`: phase = (beatTime + beatOffset) / beatValue. `infinite`: phase 0 (frozen).

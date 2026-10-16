@@ -7,14 +7,11 @@ import { MoveResizeLiveWidgetCommand, BatchMoveResizeLiveWidgetsCommand, SetSect
 import { findSectionFor } from '~/utils/live/sections';
 import { getPresetNaturalRGB, growColorVariants } from '~/utils/live/color-utils';
 import { useEngineStore } from '~/stores/engine-store';
-import LiveButtonWidget from './LiveButtonWidget.vue';
-import LiveSliderWidget from './LiveSliderWidget.vue';
-import LiveXYPadWidget from './LiveXYPadWidget.vue';
-import LiveLabelWidget from './LiveLabelWidget.vue';
-import LiveControllerTwinWidget from './LiveControllerTwinWidget.vue';
-import LiveFixturePreviewWidget from './LiveFixturePreviewWidget.vue';
-import LiveColorWheelWidget from './LiveColorWheelWidget.vue';
-import LiveBeatWidget from './LiveBeatWidget.vue';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { resolveWidgetType } from '~/utils/live/widget-registry';
+import { registryVersion } from '~/utils/extensions/registry';
+import ExtensionContributionHost from '~/components/extension-host/ExtensionContributionHost.vue';
+import { liveWidgetView } from '~/utils/extensions/scope-views';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -27,6 +24,18 @@ const props = defineProps<{
 const store = useLiveModeStore();
 const engineStore = useEngineStore();
 const history = useHistory();
+
+// Extension scope: this live widget.
+provideScope('liveWidget', () => liveWidgetView(props.widget));
+
+/** Resolved widget type (core or extension); `null` → placeholder. */
+const widgetType = computed(() => {
+  void registryVersion.value;
+  return resolveWidgetType(props.widget.type);
+});
+
+/** Extension id encoded in a namespaced type (for the placeholder text). */
+const missingExtensionId = computed(() => props.widget.type.split('/')[0]);
 
 const isSelected = computed(() => store.selectedWidgetIds.has(props.widget.id));
 // Resize handles only when exactly this one widget is selected (no multi-resize).
@@ -420,16 +429,24 @@ const handleVisualSize = computed(() => {
       style="inset: -2px; border: 1.5px dashed rgba(250, 204, 21, 0.85);"
     />
 
-    <LiveButtonWidget v-if="widget.type === 'button'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <LiveSliderWidget v-else-if="widget.type === 'slider'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <LiveXYPadWidget v-else-if="widget.type === 'xy-pad'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <LiveLabelWidget v-else-if="widget.type === 'label'" :widget="widget" :edit-mode="editMode" />
-    <LiveControllerTwinWidget v-else-if="widget.type === 'controller-twin'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <LiveFixturePreviewWidget v-else-if="widget.type === 'fixture-preview'" :widget="widget" :page-id="pageId" :edit-mode="editMode" :canvas-scale="canvasScale" />
-    <LiveColorWheelWidget v-else-if="widget.type === 'color-wheel'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <LiveBeatWidget v-else-if="widget.type === 'beat'" :widget="widget" :page-id="pageId" :edit-mode="editMode" />
-    <div v-else class="w-full h-full flex items-center justify-center text-xs text-muted-foreground border border-dashed border-white/20 rounded">
-      {{ widget.type }}
+    <!-- Core widgets get props; extension widgets read the liveWidget scope. -->
+    <component
+      :is="widgetType.component"
+      v-if="widgetType && !widgetType.extensionId"
+      :widget="widget"
+      :page-id="pageId"
+      :edit-mode="editMode"
+      :canvas-scale="canvasScale"
+    />
+    <div v-else-if="widgetType" class="w-full h-full" :class="editMode && 'pointer-events-none'">
+      <ExtensionContributionHost
+        :extension-id="widgetType.extensionId!"
+        :slot-id="`live-widget:${widget.type}`"
+        :component="widgetType.component"
+      />
+    </div>
+    <div v-else class="w-full h-full flex items-center justify-center p-2 text-center text-xs text-muted-foreground border border-dashed border-white/20 rounded">
+      Widget from extension “{{ missingExtensionId }}” not installed
     </div>
 
     <!-- Resize handles: edit mode + single-widget selection only -->

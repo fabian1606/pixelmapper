@@ -14,6 +14,98 @@ export type Database = {
   }
   public: {
     Tables: {
+      content_plugins: {
+        Row: {
+          alias: string
+          created_at: string | null
+          hash: string
+          kind: string
+          manifest: Json
+          name: string
+          owner_id: string
+          project_id: string | null
+          source: Json
+          toolchain: string
+          version: string
+          visibility: string
+        }
+        Insert: {
+          alias: string
+          created_at?: string | null
+          hash: string
+          kind: string
+          manifest: Json
+          name: string
+          owner_id?: string
+          project_id?: string | null
+          source: Json
+          toolchain: string
+          version: string
+          visibility?: string
+        }
+        Update: {
+          alias?: string
+          created_at?: string | null
+          hash?: string
+          kind?: string
+          manifest?: Json
+          name?: string
+          owner_id?: string
+          project_id?: string | null
+          source?: Json
+          toolchain?: string
+          version?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_plugins_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plugins_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extensions: {
+        Row: {
+          created_at: string | null
+          id: string
+          manifest: Json
+          publisher: string
+          version: string
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          manifest: Json
+          publisher?: string
+          version: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          manifest?: Json
+          publisher?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extensions_publisher_fkey"
+            columns: ["publisher"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -190,6 +282,35 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      user_extensions: {
+        Row: {
+          extension_id: string
+          installed_at: string | null
+          user_id: string
+          version_range: string
+        }
+        Insert: {
+          extension_id: string
+          installed_at?: string | null
+          user_id?: string
+          version_range?: string
+        }
+        Update: {
+          extension_id?: string
+          installed_at?: string | null
+          user_id?: string
+          version_range?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_extensions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

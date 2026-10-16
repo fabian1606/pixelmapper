@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use femtovg::{Canvas, renderer::OpenGl};
 use crate::spatial::SpatialIndex;
-use crate::types::{FixtureCanvasData, StripShapeType};
+use crate::types::{BodyPrimitive, FixtureCanvasData};
 use crate::svg_render::{SvgCachedFixture, parse_svg};
 
 const FIXTURE_RADIUS: f32 = 18.0;
@@ -36,41 +36,49 @@ fn point_near_polyline_sq(px: f32, py: f32, points: &[[f32; 2]], threshold_sq: f
     false
 }
 
-/// Strip-curve hit test: samples the CAPPED shape (same one the renderer
-/// draws) and checks distance to each chord. Clicking outside the rendered
-/// portion of the strip (e.g. a control-polyline tail that got trimmed) does
-/// NOT count as a hit, which matches the visual.
-fn point_near_strip_curve_sq(
-    px: f32, py: f32,
-    shape: StripShapeType,
-    control_points: &[[f32; 2]],
-    target_length: f32,
-    clockwise: bool,
-    threshold_sq: f32,
-) -> bool {
-    let (samples, _cum) = crate::render::sample_strip_capped_dir(shape, control_points, target_length, clockwise);
-    point_near_polyline_sq(px, py, &samples, threshold_sq)
+/// Even-odd point-in-polygon test.
+fn point_in_polygon(px: f32, py: f32, points: &[[f32; 2]]) -> bool {
+    let mut inside = false;
+    let n = points.len();
+    if n < 3 { return false; }
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = (points[i][0], points[i][1]);
+        let (xj, yj) = (points[j][0], points[j][1]);
+        if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi + f32::EPSILON) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
-/// Local copy of render::sample_at_arc_length (private there). Used by
-/// hit_test_strip_endpoint to place mid-handles at curve arc-length midpoints.
-fn sample_at_arc_length_local(samples: &[[f32; 2]], cum: &[f32], s: f32) -> [f32; 2] {
-    if samples.is_empty() { return [0.0, 0.0]; }
-    let total = *cum.last().unwrap_or(&0.0);
-    if s <= 0.0 { return samples[0]; }
-    if s >= total { return *samples.last().unwrap(); }
-    let mut lo = 0usize;
-    let mut hi = cum.len() - 1;
-    while lo + 1 < hi {
-        let mid = (lo + hi) >> 1;
-        if cum[mid] <= s { lo = mid; } else { hi = mid; }
+/// Precise hit test of a kind fixture: body primitives (within `tol` world
+/// pixels) or emitter dots.
+fn kind_hit(f: &FixtureCanvasData, wx: f32, wy: f32, tol: f32) -> bool {
+    for p in &f.body {
+        let hit = match p {
+            BodyPrimitive::Polyline { points, closed, width, .. } => {
+                let reach = width * 0.5 + tol;
+                let mut pts = points.clone();
+                if *closed { if let Some(first) = points.first() { pts.push(*first); } }
+                point_near_polyline_sq(wx, wy, &pts, reach * reach)
+            }
+            BodyPrimitive::Polygon { points, .. } => point_in_polygon(wx, wy, points),
+            BodyPrimitive::Circle { center, radius, .. } => {
+                let d = ((wx - center[0]).powi(2) + (wy - center[1]).powi(2)).sqrt();
+                d <= radius + tol
+            }
+            BodyPrimitive::Rect { rect, .. } => {
+                wx >= rect[0] - tol && wx <= rect[0] + rect[2] + tol && wy >= rect[1] - tol && wy <= rect[1] + rect[3] + tol
+            }
+        };
+        if hit { return true; }
     }
-    let s0 = cum[lo];
-    let s1 = cum[hi];
-    let t = (s - s0) / (s1 - s0).max(0.0001);
-    let a = samples[lo];
-    let b = samples[hi];
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+    f.beams.iter().any(|b| {
+        let r = if b.emitter_radius > 0.0 { b.emitter_radius } else { 4.0 } + tol;
+        b.emitters.iter().any(|e| (wx - e[0]).powi(2) + (wy - e[1]).powi(2) <= r * r)
+    })
 }
 
 #[wasm_bindgen]
@@ -216,9 +224,9 @@ impl WasmCanvas {
 
     /// Hit test in viewport space. Returns fixture id or undefined.
     ///
-    /// For strip fixtures, performs a precise polyline distance check so the
-    /// AABB doesn't produce false positives in the empty space between bends.
-    /// Non-strip fixtures use the AABB result directly.
+    /// Kind fixtures are tested precisely against their body and emitters so
+    /// the AABB doesn't produce false positives (e.g. between strip bends);
+    /// other fixtures use the AABB result directly.
     #[wasm_bindgen]
     pub fn hit_test(&self, vx: f32, vy: f32) -> Option<String> {
         let scale = self.render_state.scale;
@@ -226,7 +234,6 @@ impl WasmCanvas {
         let wy = (vy - self.render_state.cam_y) / scale;
 
         let hit_dist = (8.0 / scale).max(2.0);
-        let hit_dist_sq = hit_dist * hit_dist;
 
         let candidate_ids = self.spatial_index.hit_test_all(wx, wy);
         for cid in &candidate_ids {
@@ -235,11 +242,9 @@ impl WasmCanvas {
                 Some(f) => f,
                 None => continue,
             };
-            if let Some(strip) = &f.strip {
-                if point_near_strip_curve_sq(wx, wy, strip.shape_type, &strip.points, strip.target_length, strip.clockwise, hit_dist_sq) {
-                    return Some(f.id.clone());
-                }
-                // Strip AABB hit but cursor isn't actually on the curve.
+            if f.is_kind() {
+                if kind_hit(f, wx, wy, hit_dist) { return Some(f.id.clone()); }
+                // AABB hit but not on the body.
                 continue;
             }
             return Some(f.id.clone());
@@ -263,8 +268,8 @@ impl WasmCanvas {
 
         for fixture in &self.fixtures {
             if fixture.beams.len() <= 1 { continue; }
-            // Strips use Figma-style endpoint handles instead of rotation corners.
-            if fixture.strip.is_some() { continue; }
+            // Kind fixtures expose their own handles instead of rotation corners.
+            if fixture.is_kind() { continue; }
 
             let fx = fixture.world_x * world_w;
             let fy = fixture.world_y * world_h;
@@ -294,64 +299,28 @@ impl WasmCanvas {
         None
     }
 
-    /// Hit-test for NeoPixel strip handles. Returns one of:
-    ///   - "<fixtureId>:vertex:<idx>"  → vertex handle hit (drag to move)
-    ///   - "<fixtureId>:mid:<idx>"     → mid-segment handle hit (click to insert)
-    /// Shape-specific behavior:
-    ///   bezier → vertex + mid handles, ONLY when `editing == true`
-    ///   line   → vertex handles for points[0] and points[1] always (no edit-mode
-    ///            gating, no mid handles). The user grabs the visible end LEDs.
-    ///   circle → no handles at all; clicks fall through to body hit-test.
-    /// Vertex handles take priority over mid-handles.
+    /// Hit-test for fixture-kind handles. Returns `"<fixtureId>\u{1f}<handleId>"`
+    /// for the nearest active handle (anchors when the fixture is selected,
+    /// all handles in edit mode). Vertex/anchor handles win over midpoints.
     #[wasm_bindgen]
-    pub fn hit_test_strip_endpoint(&self, vx: f32, vy: f32) -> Option<String> {
+    pub fn hit_test_handle(&self, vx: f32, vy: f32) -> Option<String> {
         let scale = self.render_state.scale;
         let wx = (vx - self.render_state.cam_x) / scale;
         let wy = (vy - self.render_state.cam_y) / scale;
-
-        let vert_r = 10.0 / scale;
-        let vert_r_sq = vert_r * vert_r;
-        let mid_r = 8.0 / scale;
-        let mid_r_sq = mid_r * mid_r;
-
-        // First pass: vertex handles (priority).
-        for fixture in &self.fixtures {
-            let strip = match &fixture.strip { Some(s) => s, None => continue };
-            match strip.shape_type {
-                StripShapeType::Bezier => {
-                    if !fixture.editing { continue; }
-                }
-                StripShapeType::Line => { /* always hit-test endpoints */ }
-                StripShapeType::Circle => continue,
-            }
-            for (i, p) in strip.points.iter().enumerate() {
-                let d = (wx - p[0]).powi(2) + (wy - p[1]).powi(2);
-                if d <= vert_r_sq {
-                    return Some(format!("{}:vertex:{}", fixture.id, i));
-                }
+        let mut best: Option<(u8, f32, String)> = None;
+        for f in &self.fixtures {
+            for h in f.handles.iter().filter(|h| h.active(f.selected, f.edit_mode)) {
+                let (prio, r) = if h.role == "midpoint" { (1u8, 8.0 / scale) } else { (0u8, 10.0 / scale) };
+                let d = (wx - h.x).powi(2) + (wy - h.y).powi(2);
+                if d > r * r { continue; }
+                let better = match &best {
+                    None => true,
+                    Some((bp, bd, _)) => prio < *bp || (prio == *bp && d < *bd),
+                };
+                if better { best = Some((prio, d, format!("{}\u{1f}{}", f.id, h.id))); }
             }
         }
-        // Second pass: mid-segment handles (bezier edit-mode only).
-        for fixture in &self.fixtures {
-            if !fixture.editing { continue; }
-            let strip = match &fixture.strip { Some(s) => s, None => continue };
-            if strip.shape_type != StripShapeType::Bezier { continue; }
-            if strip.points.len() < 2 { continue; }
-            let (samples, cum) = crate::render::sample_strip_curve(&strip.points);
-            for i in 0..strip.points.len() - 1 {
-                // Each Bézier segment's samples span (i*BEZIER_SAMPLES_PER_SEG ..
-                // (i+1)*BEZIER_SAMPLES_PER_SEG) — see render::sample_strip_curve.
-                let seg_start = cum[i * crate::render::BEZIER_SAMPLES_PER_SEG];
-                let seg_end = cum[(i + 1) * crate::render::BEZIER_SAMPLES_PER_SEG];
-                let mid_s = (seg_start + seg_end) * 0.5;
-                let mid = sample_at_arc_length_local(&samples, &cum, mid_s);
-                let d = (wx - mid[0]).powi(2) + (wy - mid[1]).powi(2);
-                if d <= mid_r_sq {
-                    return Some(format!("{}:mid:{}", fixture.id, i));
-                }
-            }
-        }
-        None
+        best.map(|(_, _, id)| id)
     }
 
     #[wasm_bindgen]

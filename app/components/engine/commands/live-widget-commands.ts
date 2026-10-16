@@ -1,6 +1,7 @@
 import type { Command } from '../composables/use-history';
 import { type SerializableCommand, registerCommand } from './serializable-command';
 import type { LivePage, LiveWidget, LiveMapping, ControllerChildBinding, LiveSection, SectionMember, SectionColorEntry } from '~/utils/live/types';
+import { normalizeWidgetType } from '~/utils/live/types';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 
 function getLiveStore() {
@@ -97,7 +98,7 @@ export class AddLiveWidgetCommand implements SerializableCommand {
   toPayload() { return { pageId: this.pageId, widget: this.widget }; }
 }
 
-registerCommand('live.addWidget', (p) => new AddLiveWidgetCommand(p.pageId, p.widget));
+registerCommand('live.addWidget', (p) => new AddLiveWidgetCommand(p.pageId, { ...p.widget, type: normalizeWidgetType(p.widget.type) }));
 
 // ─── RemoveLiveWidget ─────────────────────────────────────────────────────────
 

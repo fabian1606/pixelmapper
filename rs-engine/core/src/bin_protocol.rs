@@ -1,8 +1,24 @@
-use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, channel_type_name};
-use crate::types::{BlendMode, ChannelMode, ChaserConfig, ColorParams, CurvePoint, DisplacementParams, DisplacementPatternType, EffectConfig, EffectDirection, NoiseParams, NoiseType, SequencerParams, SequencerPatternType, SpeedConfig, SpeedCurveParams, SpeedMode, WaveformShape, WaveformShapeParams};
+// ── Binary protocol ──────────────────────────────
+//
+// Payload parsers (the 5-byte framing header is stripped by the caller).
+// See architecture/binary-protocol.md.
+//   0x14 TYPE_LAYOUT_BIN     fixtures, channels, heads (v2)
+//   0x15 TYPE_CHAN_BIN       chaser configs
+//   0x16 TYPE_MODIFIERS_BIN  modifier instances (replaces TYPE_FX_BIN)
 
-// ── Cursor-based byte reader ──────────────────────────────────────────────────
+use crate::distribution::{Distribution, Grouping, Mode, Scope};
+use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, ModifierInstance};
+use crate::signatures::Signature;
+use crate::types::{BlendMode, ChaserConfig, EffectDirection, OutputMode, SpeedConfig, SpeedMode};
 
+/// Current version byte of the modifiers packet (distribution block, ADR A20).
+pub const MODIFIERS_BIN_VERSION: u8 = 2;
+/// Legacy version byte (direction block); still parsed and mapped.
+pub const MODIFIERS_BIN_VERSION_V1: u8 = 1;
+
+// ── Cursor ───────────────────────────────────────
+
+/// Little-endian byte reader.
 struct Cursor<'a> {
     data: &'a [u8],
     pos: usize,
@@ -10,373 +26,221 @@ struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     fn new(data: &'a [u8]) -> Self { Self { data, pos: 0 } }
-    fn remaining(&self) -> usize { self.data.len().saturating_sub(self.pos) }
 
-    fn read_u8(&mut self) -> Option<u8> {
-        if self.remaining() < 1 { return None; }
-        let v = self.data[self.pos];
-        self.pos += 1;
-        Some(v)
+    fn take<const N: usize>(&mut self) -> Option<[u8; N]> {
+        let bytes: [u8; N] = self.data.get(self.pos..self.pos + N)?.try_into().ok()?;
+        self.pos += N;
+        Some(bytes)
     }
 
-    fn read_u16_le(&mut self) -> Option<u16> {
-        if self.remaining() < 2 { return None; }
-        let v = u16::from_le_bytes([self.data[self.pos], self.data[self.pos + 1]]);
-        self.pos += 2;
-        Some(v)
-    }
+    fn u8(&mut self) -> Option<u8> { self.take::<1>().map(|b| b[0]) }
+    fn u16(&mut self) -> Option<u16> { self.take::<2>().map(u16::from_le_bytes) }
+    fn u32(&mut self) -> Option<u32> { self.take::<4>().map(u32::from_le_bytes) }
+    fn f32(&mut self) -> Option<f32> { self.take::<4>().map(f32::from_le_bytes) }
 
-    fn read_f32_le(&mut self) -> Option<f32> {
-        if self.remaining() < 4 { return None; }
-        let bytes = [
-            self.data[self.pos],
-            self.data[self.pos + 1],
-            self.data[self.pos + 2],
-            self.data[self.pos + 3],
-        ];
-        self.pos += 4;
-        Some(f32::from_le_bytes(bytes))
-    }
-
-    fn read_u32_le(&mut self) -> Option<u32> {
-        if self.remaining() < 4 { return None; }
-        let v = u32::from_le_bytes([
-            self.data[self.pos],
-            self.data[self.pos + 1],
-            self.data[self.pos + 2],
-            self.data[self.pos + 3],
-        ]);
-        self.pos += 4;
-        Some(v)
-    }
-
-    fn read_speed_config(&mut self) -> Option<SpeedConfig> {
-        let mode_byte   = self.read_u8()?;
-        let time_ms     = self.read_f32_le()?;
-        let beat_value  = self.read_f32_le()?;
-        let beat_offset = self.read_f32_le()?;
-        let mode = match mode_byte {
+    fn speed(&mut self) -> Option<SpeedConfig> {
+        let mode = match self.u8()? {
             0 => SpeedMode::Time,
             1 => SpeedMode::Beat,
             _ => SpeedMode::Infinite,
         };
-        Some(SpeedConfig { mode, time_ms, beat_value, beat_offset })
+        Some(SpeedConfig { mode, time_ms: self.f32()?, beat_value: self.f32()?, beat_offset: self.f32()? })
     }
 
-    fn read_chaser_config(&mut self) -> Option<ChaserConfig> {
-        let steps_count   = self.read_u8()? as usize;
-        let active_step   = self.read_u8()? as usize;
-        let is_playing    = self.read_u8()? != 0;
-        let step_duration = self.read_speed_config()?;
-        let fade_duration = self.read_speed_config()?;
+    /// v1 direction block, mapped onto a distribution:
+    /// `u8 direction; f32 originX, originY, angle, fanning; u8 reverse`.
+    fn legacy_direction(&mut self) -> Option<Distribution> {
+        let direction = EffectDirection::from_id(self.u8()?);
+        let origin = (self.f32()?, self.f32()?);
+        let angle = self.f32()?;
+        let fanning = self.f32()?;
+        let reverse = self.u8()? != 0;
+        // The handle length is the former fanning (one cycle per `fanning`).
+        let len = if direction == EffectDirection::Angular { 0.1 } else { fanning };
+        let end = (origin.0 + angle.cos() * len, origin.1 + angle.sin() * len);
+        let mode = match direction {
+            _ if fanning == 0.0 => Mode::None,
+            EffectDirection::Linear => Mode::Linear,
+            EffectDirection::Radial => Mode::Radial,
+            EffectDirection::Symmetrical => Mode::Mirror,
+            EffectDirection::Angular => Mode::Conical,
+            EffectDirection::None => Mode::None,
+        };
+        Some(Distribution { mode, origin, end, reverse, ..Default::default() })
+    }
+
+    /// v2 distribution block (see `parse_modifiers_bin`); ranks by layout index.
+    fn distribution(&mut self) -> Option<Distribution> {
+        let scope = if self.u8()? == 1 { Scope::Within } else { Scope::Across };
+        let mode = Mode::from_id(self.u8()?);
+        let origin = (self.f32()?, self.f32()?);
+        let end = (self.f32()?, self.f32()?);
+        let reverse = self.u8()? != 0;
+        let grouping = Grouping::from_id(self.u8()?);
+        let grouping_n = (self.u8()? as u32).max(1);
+        let grouping_seed = self.u32()?;
+        let within_order = self.u8()? == 1;
+        let entries = self.u16()? as usize;
+        let mut ranks: Vec<i32> = Vec::new();
+        let mut rank_count = 0u32;
+        for _ in 0..entries {
+            let index = self.u16()? as usize;
+            let rank = self.u16()? as i32;
+            if ranks.len() <= index {
+                ranks.resize(index + 1, -1);
+            }
+            ranks[index] = rank;
+            rank_count = rank_count.max(rank as u32 + 1);
+        }
+        Some(Distribution { scope, mode, origin, end, reverse, grouping, grouping_n, grouping_seed, within_order, ranks, rank_count })
+    }
+
+    fn chaser(&mut self) -> Option<ChaserConfig> {
+        let steps_count = self.u8()? as usize;
+        let active_edit_step = self.u8()? as usize;
+        let is_playing = self.u8()? != 0;
+        let step_duration = self.speed()?;
+        let fade_duration = self.speed()?;
         let mut step_values = Vec::with_capacity(steps_count);
         for _ in 0..steps_count {
-            step_values.push(self.read_f32_le()?);
+            step_values.push(self.f32()?);
         }
-        Some(ChaserConfig {
-            step_values,
-            steps_count,
-            active_edit_step: active_step,
-            is_playing,
-            step_duration,
-            fade_duration,
-        })
+        Some(ChaserConfig { step_values, steps_count, active_edit_step, is_playing, step_duration, fade_duration })
     }
 }
 
-// ── Public parsers ────────────────────────────────────────────────────────────
+// ── Layout (0x14, v2) ────────────────────────────
 
-/// TYPE_LAYOUT_BIN (0x14): fixture positions + channel metadata
+/// Parses fixtures → channels:
+/// `u16 count; { u16 group; u32 idHash; u16 channels; { u16 dmx; u8 type;
+/// f32 x; f32 y; u8 resolution; u16 fine0; u16 fine1; u8 rangeMin;
+/// u8 rangeMax; u16 head } }`.
 pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
-    let mut c = Cursor::new(data);
-    let fixture_count = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-    let mut entries = Vec::with_capacity(fixture_count);
-
-    for _ in 0..fixture_count {
-        let group_index   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-        let channel_count = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-
-        let mut channels = Vec::with_capacity(channel_count);
-        for _ in 0..channel_count {
-            let dmx_index       = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-            let channel_type_id = match c.read_u8()     { Some(v) => v,          None => return -1 };
-            let world_x         = match c.read_f32_le() { Some(v) => v,          None => return -1 };
-            let world_y         = match c.read_f32_le() { Some(v) => v,          None => return -1 };
-            let resolution      = match c.read_u8()     { Some(v) => v,          None => return -1 };
-            let fine_offset_0   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-            let fine_offset_1   = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-            let range_min       = match c.read_u8()     { Some(v) => v,          None => return -1 };
-            let range_max       = match c.read_u8()     { Some(v) => v,          None => return -1 };
-
-            // We do NOT continue early for resolution==0. Fine channels need to be instantiated
-            // as targets so their chaser_config updates the base_buffer.
-
-            channels.push(LayoutChannelEntry {
-                dmx_index,
-                channel_type_id,
-                world_x,
-                world_y,
-                resolution,
-                fine_offsets: [fine_offset_0, fine_offset_1],
-                range_min,
-                range_max,
-            });
+    fn parse(c: &mut Cursor) -> Option<Vec<LayoutEntry>> {
+        let count = c.u16()? as usize;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let group_index = c.u16()? as usize;
+            let id_hash = c.u32()?;
+            let n = c.u16()? as usize;
+            let mut channels = Vec::with_capacity(n);
+            for _ in 0..n {
+                channels.push(LayoutChannelEntry {
+                    dmx_index: c.u16()? as usize,
+                    channel_type_id: c.u8()?,
+                    world_x: c.f32()?,
+                    world_y: c.f32()?,
+                    resolution: c.u8()?,
+                    fine_offsets: [c.u16()? as usize, c.u16()? as usize],
+                    range_min: c.u8()?,
+                    range_max: c.u8()?,
+                    head_index: c.u16()?,
+                });
+            }
+            entries.push(LayoutEntry { group_index, id_hash, channels });
         }
-        entries.push(LayoutEntry { group_index, channels });
+        Some(entries)
     }
-
-    let count = entries.len() as i32;
-    engine.sync_layout(entries);
-    count
+    match parse(&mut Cursor::new(data)) {
+        Some(entries) => {
+            let n = entries.len() as i32;
+            engine.sync_layout(entries);
+            n
+        }
+        None => -1,
+    }
 }
 
-/// TYPE_CHANNELS_BIN (0x15): chaser values, channels grouped by identical config
+// ── Channels (0x15) ──────────────────────────────
+
+/// Parses chaser configs shared by several DMX indices.
 pub fn parse_channels_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
-    let mut c = Cursor::new(data);
-    let entry_count = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-    let mut entries = Vec::with_capacity(entry_count);
-
-    for _ in 0..entry_count {
-        let dmx_count = match c.read_u16_le() { Some(v) => v as usize, None => return -1 };
-        let mut dmx_indices = Vec::with_capacity(dmx_count);
-        for _ in 0..dmx_count {
-            match c.read_u16_le() {
-                Some(v) => dmx_indices.push(v as usize),
-                None    => return -1,
+    fn parse(c: &mut Cursor) -> Option<Vec<ChannelEntry>> {
+        let count = c.u16()? as usize;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let n = c.u16()? as usize;
+            let mut dmx_indices = Vec::with_capacity(n);
+            for _ in 0..n {
+                dmx_indices.push(c.u16()? as usize);
             }
+            entries.push(ChannelEntry { dmx_indices, chaser: c.chaser()? });
         }
-        let chaser = match c.read_chaser_config() { Some(v) => v, None => return -1 };
-        entries.push(ChannelEntry { dmx_indices, chaser });
+        Some(entries)
     }
-
-    let count = entries.len() as i32;
-    engine.sync_channels(entries);
-    count
+    match parse(&mut Cursor::new(data)) {
+        Some(entries) => {
+            let n = entries.len() as i32;
+            engine.sync_channels(entries);
+            n
+        }
+        None => -1,
+    }
 }
 
-/// TYPE_EFFECTS_BIN (0x16): effect parameters
-pub fn parse_effects_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
-    let mut c = Cursor::new(data);
-    let blend_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-    engine.stack_blend_mode = match blend_byte {
-        1 => BlendMode::Override,
-        2 => BlendMode::Multiply,
-        3 => BlendMode::Max,
-        4 => BlendMode::Min,
-        _ => BlendMode::Add,
-    };
-    let effect_count = match c.read_u8() { Some(v) => v as usize, None => return -1 };
-    let mut configs = Vec::with_capacity(effect_count);
+// ── Modifiers (0x16) ─────────────────────────────
 
-    for _ in 0..effect_count {
-        // Channel types: count=0 means all channel types
-        let ch_type_count = match c.read_u8() { Some(v) => v as usize, None => return -1 };
-        let mut target_channels = Vec::with_capacity(ch_type_count);
-        for _ in 0..ch_type_count {
-            match c.read_u8() {
-                Some(id) => target_channels.push(channel_type_name(id).to_string()),
-                None     => return -1,
-            }
+/// Parses modifier instances:
+/// `u8 version(2); u16 count; { u32 key; u16 plugin; u8 signature;
+/// u8 output; u8 blend; f32 strength; speed; distribution; u8 nTypes;
+/// u8[] types; u16 maskBytes (0 = all); u8[] mask; u16 nParams; f32[] params }`
+/// with `distribution = u8 scope; u8 mode; f32 originX, originY, endX, endY;
+/// u8 reverse; u8 groupingKind; u8 groupingN; u32 groupingSeed;
+/// u8 withinOffset; u16 rankEntries; { u16 fixtureIndex; u16 rank }`.
+/// Version 1 (direction block instead of distribution) is mapped.
+pub fn parse_modifiers_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
+    fn parse(c: &mut Cursor) -> Option<Vec<ModifierInstance>> {
+        let version = c.u8()?;
+        if version != MODIFIERS_BIN_VERSION && version != MODIFIERS_BIN_VERSION_V1 {
+            return None;
         }
-
-        // Fixture bitmask — size derived from layout (same formula as encoder).
-        // Bit i set → fixture with group_index i is targeted.
-        let layout_fixture_count = engine.targets.iter().map(|t| t.group_index).max()
-            .map(|m| m + 1).unwrap_or(0);
-        let bitmask_bytes = (layout_fixture_count + 7) / 8;
-        let mut targeted = Vec::new();
-        for byte_idx in 0..bitmask_bytes {
-            let byte = match c.read_u8() { Some(v) => v, None => return -1 };
-            for bit in 0..8u8 {
-                if byte & (1 << bit) != 0 {
-                    let group_idx = byte_idx * 8 + bit as usize;
-                    if group_idx < layout_fixture_count {
-                        targeted.push(group_idx);
+        let count = c.u16()? as usize;
+        let mut out = Vec::with_capacity(count);
+        for _ in 0..count {
+            let key = c.u32()?;
+            let plugin = c.u16()? as u32;
+            let signature = Signature::from_id(c.u8()?)?;
+            let output = OutputMode::from_id(c.u8()?);
+            let blend = BlendMode::from_id(c.u8()?);
+            let strength = c.f32()?.clamp(0.0, 1.0);
+            let speed = c.speed()?;
+            let distribution = if version == MODIFIERS_BIN_VERSION_V1 { c.legacy_direction()? } else { c.distribution()? };
+            let n_types = c.u8()? as usize;
+            let mut channel_types = Vec::with_capacity(n_types);
+            for _ in 0..n_types {
+                channel_types.push(c.u8()?);
+            }
+            let mask_bytes = c.u16()? as usize;
+            let fixture_mask = if mask_bytes == 0 {
+                None
+            } else {
+                let mut mask = Vec::with_capacity(mask_bytes * 8);
+                for _ in 0..mask_bytes {
+                    let b = c.u8()?;
+                    for bit in 0..8 {
+                        mask.push(b & (1 << bit) != 0);
                     }
                 }
-            }
-        }
-        let target_group_indices = if targeted.len() == layout_fixture_count || targeted.is_empty() {
-            None  // All fixtures targeted (or no layout yet) → no filter
-        } else {
-            Some(targeted)
-        };
-
-        let direction_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-        let direction = match direction_byte {
-            1 => EffectDirection::Linear,
-            2 => EffectDirection::Radial,
-            3 => EffectDirection::Symmetrical,
-            4 => EffectDirection::Angular,
-            _ => EffectDirection::None,
-        };
-
-        let origin_x         = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let origin_y         = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let angle            = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let strength         = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let reverse          = match c.read_u8()     { Some(v) => v != 0, None => return -1 };
-        let fanning          = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-        let shape_byte        = match c.read_u8()     { Some(v) => v, None => return -1 };
-        let shape_param       = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_start       = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_end         = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_offset      = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let shape_floor       = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let waveform_shape = match shape_byte {
-            0 => WaveformShape::Sine,
-            1 => WaveformShape::Square,
-            2 => WaveformShape::Triangle,
-            3 => WaveformShape::Sawtooth,
-            4 => WaveformShape::Bounce,
-            5 => WaveformShape::Ramp,
-            6 => WaveformShape::Smooth,
-            _ => WaveformShape::Sine,
-        };
-        let speed = match c.read_speed_config() { Some(v) => v, None => return -1 };
-
-        let effect_type_byte    = match c.read_u8()     { Some(v) => v, None => return -1 };
-        let noise_type_byte     = match c.read_u8()     { Some(v) => v, None => return -1 };
-        let noise_scale         = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let channel_mode_byte   = match c.read_u8()     { Some(v) => v, None => return -1 };
-        let color_variation     = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let fade                = match c.read_f32_le() { Some(v) => v, None => return -1 };
-        let threshold           = match c.read_f32_le() { Some(v) => v, None => return -1 };
-
-        let (effect_type, noise_params) = if effect_type_byte == 1 {
-            let np = NoiseParams {
-                noise_type: match noise_type_byte {
-                    0 => NoiseType::White,
-                    1 => NoiseType::Perlin,
-                    _ => NoiseType::Step,
-                },
-                scale: noise_scale,
-                channel_mode: if channel_mode_byte == 1 { ChannelMode::Independent } else { ChannelMode::Linked },
-                color_variation,
-                fade,
-                threshold,
+                Some(mask)
             };
-            ("NoiseEffect".to_string(), Some(np))
-        } else {
-            (String::new(), None)
-        };
-
-        // Sequencer fields
-        let is_sequencer_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-        let sequencer_params = if is_sequencer_byte == 1 {
-            let pattern_byte   = match c.read_u8()     { Some(v) => v,      None => return -1 };
-            let seq_origin_x   = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_origin_y   = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_angle      = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_scale      = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_count             = match c.read_u8()     { Some(v) => v,      None => return -1 };
-            let seq_density           = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_density_variation = match c.read_f32_le() { Some(v) => v,      None => return -1 };
-            let seq_invert            = match c.read_u8()     { Some(v) => v != 0, None => return -1 };
-            Some(SequencerParams {
-                pattern_type: match pattern_byte {
-                    1 => SequencerPatternType::Checkerboard,
-                    2 => SequencerPatternType::Sections,
-                    3 => SequencerPatternType::Scatter,
-                    4 => SequencerPatternType::Flow,
-                    _ => SequencerPatternType::Split,
-                },
-                origin_x: seq_origin_x,
-                origin_y: seq_origin_y,
-                angle: seq_angle,
-                scale: seq_scale,
-                count: seq_count,
-                density: seq_density,
-                density_variation: seq_density_variation,
-                invert: seq_invert,
-            })
-        } else {
-            None
-        };
-
-        // Color parameters (hue shift + saturation post-process)
-        let is_color_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-        let color_params = if is_color_byte == 1 {
-            let hue_shift  = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let saturation = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let hue_range  = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let sat_range  = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            Some(ColorParams { hue_shift, saturation, hue_range, sat_range })
-        } else {
-            None
-        };
-
-        // Displacement parameters
-        let is_displacement_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-        let displacement_params = if is_displacement_byte == 1 {
-            let pattern_byte = match c.read_u8()     { Some(v) => v, None => return -1 };
-            let amount_x     = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let amount_y     = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let scale        = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let seed         = match c.read_u32_le() { Some(v) => v, None => return -1 };
-            Some(DisplacementParams {
-                pattern_type: if pattern_byte == 1 { DisplacementPatternType::White } else { DisplacementPatternType::Perlin },
-                amount_x,
-                amount_y,
-                scale,
-                seed,
-            })
-        } else {
-            None
-        };
-
-        // Speed curve parameters
-        let is_speed_curve_byte = match c.read_u8() { Some(v) => v, None => return -1 };
-        let speed_curve_params = if is_speed_curve_byte == 1 {
-            let point_count = match c.read_u8() { Some(v) => v as usize, None => return -1 };
-            let mut points = Vec::with_capacity(point_count);
-            for _ in 0..point_count {
-                let px = match c.read_f32_le() { Some(v) => v, None => return -1 };
-                let py = match c.read_f32_le() { Some(v) => v, None => return -1 };
-                points.push(CurvePoint { x: px, y: py });
+            let n_params = c.u16()? as usize;
+            let mut params = Vec::with_capacity(n_params);
+            for _ in 0..n_params {
+                params.push(c.f32()?);
             }
-            let max_multiplier = match c.read_f32_le() { Some(v) => v, None => return -1 };
-            let cycle_beats    = match c.read_u8()     { Some(v) => v, None => return -1 };
-            Some(SpeedCurveParams { points, max_multiplier, cycle_beats })
-        } else {
-            None
-        };
-
-        let effect_type = if speed_curve_params.is_some() {
-            "SpeedCurveEffect".to_string()
-        } else if displacement_params.is_some() {
-            "DisplacementEffect".to_string()
-        } else if color_params.is_some() {
-            "ColorEffect".to_string()
-        } else if sequencer_params.is_some() {
-            "SequencerEffect".to_string()
-        } else {
-            effect_type
-        };
-
-        configs.push(EffectConfig {
-            target_channels,
-            target_group_indices,
-            direction,
-            origin_x,
-            origin_y,
-            angle,
-            strength,
-            reverse,
-            fanning,
-            speed,
-            waveform_shape,
-            waveform_params: WaveformShapeParams { param: shape_param, start: shape_start, end: shape_end, offset: shape_offset, floor: shape_floor },
-            noise_params,
-            sequencer_params,
-            color_params,
-            displacement_params,
-            speed_curve_params,
-            effect_type,
-        });
+            out.push(ModifierInstance {
+                key, plugin, signature, output, blend, strength, speed, distribution, channel_types, fixture_mask, params,
+                disabled: false,
+            });
+        }
+        Some(out)
     }
-
-    let count = configs.len() as i32;
-    engine.sync_effects(configs);
-    count
+    match parse(&mut Cursor::new(data)) {
+        Some(instances) => {
+            let n = instances.len() as i32;
+            engine.sync_modifiers(instances);
+            n
+        }
+        None => -1,
+    }
 }

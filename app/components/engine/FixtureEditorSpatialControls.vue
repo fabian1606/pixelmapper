@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { Effect, SpatialVector } from '~/utils/engine/types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import SpatialHandle from './SpatialHandle.vue';
+import PaletteStopsOverlay from './distribution/PaletteStopsOverlay.vue';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 
 const liveBus = useLiveBusStore();
@@ -11,42 +12,74 @@ const props = defineProps<{
   editorWidth: number;
   editorHeight: number;
   camera: { x: number; y: number; scale: number };
-  activeModifier: Effect | null | undefined;
+  activeModifier: ModifierInstance | null | undefined;
   worldWidth: number;
   worldHeight: number;
   worldToViewport: (wx: number, wy: number) => { x: number; y: number };
 }>();
 
 const emit = defineEmits<{
-  (e: 'modifierChange', modifier: Effect, changes: Partial<Effect>): void;
-  (e: 'modifierDragEnd', modifier: Effect): void;
+  (e: 'modifierChange', modifier: ModifierInstance, changes: Partial<ModifierInstance>): void;
+  (e: 'modifierDragEnd', modifier: ModifierInstance): void;
   (e: 'dragStart', type: 'origin' | 'endpoint'): void;
   (e: 'redraw'): void;
 }>();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function isSequencer(m: Effect): boolean {
-  return !!(m as any).sequencerParams;
+
+/** Point-valued param shape. */
+type Point = { x: number; y: number };
+
+/**
+ * True when the plugin owns its spatial layout through an `origin` point
+ * param (plus `angle`/`scale`, e.g. the sequencer). The handles then edit
+ * those params instead of the host's phase-distribution fields.
+ */
+function hasSpatialParams(m: ModifierInstance): boolean {
+  const o = m.params?.origin as Point | undefined;
+  return !!o && typeof o === 'object' && 'x' in o;
+}
+
+/** Origin and end of the handle in normalized world units. */
+function handleOf(m: ModifierInstance): { origin: Point; end: Point } {
+  if (hasSpatialParams(m)) {
+    const o = m.params.origin as Point;
+    const angle = Number(m.params.angle ?? 0);
+    const scale = Number(m.params.scale ?? 0.1);
+    return { origin: o, end: { x: o.x + Math.cos(angle) * scale, y: o.y + Math.sin(angle) * scale * props.worldWidth / props.worldHeight } };
+  }
+  return { origin: m.distribution.origin, end: m.distribution.end };
 }
 
 // ─── Gradient handle viewport positions ───────────────────────────────────────
-function getOriginViewportPos(m: Effect) {
-  const sp = (m as any).sequencerParams;
-  const ox = sp ? (sp.originX ?? 0.5) : (m.originX ?? 0.5);
-  const oy = sp ? (sp.originY ?? 0.5) : (m.originY ?? 0.5);
-  return props.worldToViewport(ox * props.worldWidth, oy * props.worldHeight);
+function getOriginViewportPos(m: ModifierInstance) {
+  const { origin } = handleOf(m);
+  return props.worldToViewport(origin.x * props.worldWidth, origin.y * props.worldHeight);
 }
 
-function getEndViewportPos(m: Effect) {
-  const sp = (m as any).sequencerParams;
-  const ox = sp ? (sp.originX ?? 0.5) : (m.originX ?? 0.5);
-  const oy = sp ? (sp.originY ?? 0.5) : (m.originY ?? 0.5);
-  const angle = sp ? (sp.angle ?? 0) : (m.angle ?? 0);
-  const magnitude = sp ? (sp.scale ?? 0.1) : (m.fanning ?? 0.1);
-  const ex = ox * props.worldWidth  + Math.cos(angle) * magnitude * props.worldWidth;
-  const ey = oy * props.worldHeight + Math.sin(angle) * magnitude * props.worldWidth;
-  return props.worldToViewport(ex, ey);
+function getEndViewportPos(m: ModifierInstance) {
+  const { end } = handleOf(m);
+  return props.worldToViewport(end.x * props.worldWidth, end.y * props.worldHeight);
 }
+
+/** Mode guide: radial circle (radius |end − origin|) or conical ray. */
+const guide = computed(() => {
+  const m = props.activeModifier;
+  if (!m || hasSpatialParams(m)) return null;
+  const { origin, end } = handleOf(m);
+  const c = props.worldToViewport(origin.x * props.worldWidth, origin.y * props.worldHeight);
+  const e = props.worldToViewport(end.x * props.worldWidth, end.y * props.worldHeight);
+  const len = Math.hypot(end.x - origin.x, end.y - origin.y);
+  const scale = props.camera.scale;
+  if (m.distribution.mode === 'radial') {
+    return { kind: 'radial' as const, cx: c.x, cy: c.y, rx: len * props.worldWidth * scale, ry: len * props.worldHeight * scale };
+  }
+  if (m.distribution.mode === 'conical') {
+    const k = 4;
+    return { kind: 'conical' as const, cx: c.x, cy: c.y, x2: c.x + (e.x - c.x) * k, y2: c.y + (e.y - c.y) * k };
+  }
+  return null;
+});
 
 // ─── Gradient handle drag (window-global for reliable capture) ─────────────────
 type HandleDragType = 'origin' | 'endpoint' | null;
@@ -78,48 +111,27 @@ function handleWindowMouseMove(e: MouseEvent) {
   const wx = (vx - props.camera.x) / props.camera.scale;
   const wy = (vy - props.camera.y) / props.camera.scale;
 
-  if (isSequencer(m)) {
-    const sp = (m as any).sequencerParams;
-    if (spatialDragType === 'origin') {
-      sp.originX = wx / props.worldWidth;
-      sp.originY = wy / props.worldHeight;
-    } else if (spatialDragType === 'endpoint') {
-      const ox = (sp.originX ?? 0.5) * props.worldWidth;
-      const oy = (sp.originY ?? 0.5) * props.worldHeight;
-      const dx = wx - ox;
-      const dy = wy - oy;
-      sp.angle = Math.atan2(dy, dx);
-      sp.scale = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / props.worldWidth);
-    }
-  } else if (spatialDragType === 'origin') {
-    // Directly mutate the reactive effect object (it lives in effectEngine.effects which is reactive)
-    m.originX = wx / props.worldWidth;
-    m.originY = wy / props.worldHeight;
-  } else if (spatialDragType === 'endpoint') {
-    const ox = (m.originX ?? 0.5) * props.worldWidth;
-    const oy = (m.originY ?? 0.5) * props.worldHeight;
-    const dx = wx - ox;
-    const dy = wy - oy;
-    m.angle = Math.atan2(dy, dx);
-    // fanning = one wavelength = raw normalized distance from origin to endpoint
-    m.fanning = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / props.worldWidth);
-  }
+  const { origin } = handleOf(m);
+  const dx = wx - origin.x * props.worldWidth;
+  const dy = wy - origin.y * props.worldHeight;
 
-  // Broadcast live spatial change so other clients see the modifier preview move
-  if ((m as any).id) {
-    if (isSequencer(m)) {
-      const sp = (m as any).sequencerParams;
-      liveBus.dispatch('modifier.update', {
-        effectId: (m as any).id,
-        changes: {},
-        sequencerChanges: { originX: sp.originX, originY: sp.originY, angle: sp.angle, scale: sp.scale },
-      });
-    } else {
-      liveBus.dispatch('modifier.update', {
-        effectId: (m as any).id,
-        changes: { originX: m.originX, originY: m.originY, angle: m.angle, fanning: m.fanning },
-      });
-    }
+  if (hasSpatialParams(m)) {
+    // Plugin-owned spatial params (origin point, angle, scale).
+    const paramChanges: Record<string, unknown> = spatialDragType === 'origin'
+      ? { origin: { x: wx / props.worldWidth, y: wy / props.worldHeight } }
+      : { angle: Math.atan2(dy, dx), scale: Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / props.worldWidth) };
+    emit('modifierChange', m, { params: { ...m.params, ...paramChanges } as ModifierInstance['params'] });
+    liveBus.dispatch('modifier.update', { effectId: m.id, changes: {}, paramChanges });
+  } else {
+    // Distribution gradient handle: origin moves the whole handle, end sets direction and length.
+    const p = { x: wx / props.worldWidth, y: wy / props.worldHeight };
+    const d = m.distribution;
+    const distribution = spatialDragType === 'origin'
+      ? { ...d, origin: p, end: { x: d.end.x + p.x - d.origin.x, y: d.end.y + p.y - d.origin.y } }
+      : { ...d, end: p };
+    const changes: Partial<ModifierInstance> = { distribution };
+    emit('modifierChange', m, changes);
+    liveBus.dispatch('modifier.update', { effectId: m.id, changes });
   }
 
   emit('redraw');
@@ -139,6 +151,20 @@ function handleWindowMouseUp() {
   <template v-if="activeModifier">
     <!-- SVG line connects origin to endpoint -->
     <svg class="gradient-svg" :width="editorWidth" :height="editorHeight">
+      <!-- Radial: the circle where spatial = 1 (normalized space → ellipse in world px) -->
+      <ellipse
+        v-if="guide?.kind === 'radial'"
+        :cx="guide.cx" :cy="guide.cy" :rx="guide.rx" :ry="guide.ry"
+        fill="none" stroke="var(--primary)" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="4 4"
+        data-guide="radial"
+      />
+      <!-- Conical: the ray where the sweep starts -->
+      <line
+        v-if="guide?.kind === 'conical'"
+        :x1="guide.cx" :y1="guide.cy" :x2="guide.x2" :y2="guide.y2"
+        stroke="var(--primary)" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="4 4"
+        data-guide="conical"
+      />
       <line
         :x1="getOriginViewportPos(activeModifier).x"
         :y1="getOriginViewportPos(activeModifier).y"
@@ -156,6 +182,18 @@ function handleWindowMouseUp() {
       :x="getOriginViewportPos(activeModifier).x"
       :y="getOriginViewportPos(activeModifier).y"
       @dragstart="handleOriginDragStart($event)"
+    />
+
+    <!-- Palette stops of a gradient param on the handle line (plan M7.6) -->
+    <PaletteStopsOverlay
+      :modifier="activeModifier"
+      :world-width="worldWidth"
+      :world-height="worldHeight"
+      :world-to-viewport="worldToViewport"
+      :viewport-el="viewportEl"
+      :camera="camera"
+      @change="params => { emit('modifierChange', activeModifier!, { params }); liveBus.dispatch('modifier.update', { effectId: activeModifier!.id, changes: {}, paramChanges: params }); emit('redraw'); }"
+      @commit="emit('modifierDragEnd', activeModifier!)"
     />
 
     <!-- ② Endpoint handle -->

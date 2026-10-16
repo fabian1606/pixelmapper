@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { modifierName } from '~/utils/engine/modifiers';
+import { getManifest } from '~/utils/plugins/plugin-store';
 import { computed } from 'vue';
 import type { LiveMapping, GlobalFunctionType, SpeedConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { defaultStrobeConfig, defaultBlindConfig, defaultSpeedConfig } from '~/utils/live/types';
@@ -25,6 +27,13 @@ const emit = defineEmits<{
 }>();
 
 const engineStore = useEngineStore();
+
+/** Number/int/bool params of the mapped modifier's plugin (mappable to a 0–1 control). */
+const mappableParams = computed(() => {
+  const m = engineStore.modifiers.find(e => e.id === props.mapping.effectId);
+  const manifest = m ? getManifest(m.plugin) : undefined;
+  return (manifest?.params ?? []).filter(p => p.type === 'number' || p.type === 'int' || p.type === 'bool');
+});
 const store = useLiveModeStore();
 
 function patch(mapping: LiveMapping) {
@@ -394,8 +403,8 @@ function setDimmerGroup(raw: string) {
         @change="(e) => patch({ type: 'effect-param', effectId: (e.target as HTMLSelectElement).value })"
       >
         <option value="">— choose effect —</option>
-        <option v-for="eff in engineStore.activeEffects" :key="eff.id" :value="eff.id">
-          {{ eff.id }}
+        <option v-for="eff in engineStore.modifiers" :key="eff.id" :value="eff.id">
+          {{ modifierName(eff) }} · {{ eff.id.slice(0, 4) }}
         </option>
       </select>
       <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Parameter</span>
@@ -408,9 +417,7 @@ function setDimmerGroup(raw: string) {
         <option value="strength">Strength</option>
         <option value="speed">Speed</option>
         <option value="fanning">Fanning</option>
-        <option value="waveformParams.param">Waveform Param</option>
-        <option value="waveformParams.start">Waveform Start</option>
-        <option value="waveformParams.end">Waveform End</option>
+        <option v-for="p in mappableParams" :key="p.key" :value="`params.${p.key}`">{{ p.label }}</option>
       </select>
     </div>
   </div>

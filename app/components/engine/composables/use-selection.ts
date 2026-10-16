@@ -1,11 +1,12 @@
 import { ref } from 'vue';
-import type { Fixture, StripPoint } from '~/utils/engine/core/fixture';
+import type { Json } from '@pixelmapper/extension-api';
+import type { Fixture } from '~/utils/engine/core/fixture';
 import type { Point } from './use-camera';
 import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { FixtureRotationSnapshot } from '../commands/rotate-fixture-command';
-import type { StripPointsSnapshot } from '../commands/reshape-strip-command';
-import { syncStripBounds, enforceStripLength } from '~/utils/engine/neopixel-strip-factory';
+import { cloneJson, getKind, kindContext, rebuildKindFixture, worldToKind } from '~/utils/kinds/kind-host';
+import { hasEditHandles } from '~/utils/kinds/kind-canvas';
 import { resolveSnapSpacing, type ZoomTier } from '~/utils/engine/snap-policy';
 import {
   NEAR_ZOOM_SCALE_THRESHOLD,
@@ -14,6 +15,7 @@ import {
   WORLD_WIDTH,
   STAGE_SIZE_METERS,
 } from '~/utils/engine/constants';
+import { useDistributionToolStore } from '~/stores/distribution-tool-store';
 import { useEngineStore } from '~/stores/engine-store';
 import {
   isAdditiveModifier,
@@ -42,30 +44,30 @@ export type Interaction =
   | {
       type: 'drag';
       startWorld: Point;
-      /** Pre-drag fixturePosition in world-pixels — for non-strip selected fixtures. */
+      /** Pre-drag fixturePosition in world-pixels of every selected fixture. */
       startPositions: Map<string | number, Point>;
-      /** Pre-drag polyline snapshot — for strip selected fixtures. */
-      startStripPoints: Map<string | number, StripPoint[]>;
     }
   | { type: 'rotate'; startWorld: Point; startAngles: Map<string | number, number>; centerWorld: Point }
   | {
-      /** Drag a single polyline vertex of a strip freely in world space. */
-      type: 'strip-vertex';
+      /** Drag a fixture-kind handle; the kind's `onHandleMove` maps it to a config. */
+      type: 'kind-handle';
       fixtureId: string | number;
-      vertexIndex: number;
-      /** Pre-drag deep copy of the strip's points for the undo command. */
-      startPoints: StripPoint[];
+      handleId: string;
+      /** Config at drag start (onHandleMove is always applied to it). JSON; typed `unknown` to keep ref unwrapping shallow. */
+      startConfig: unknown;
     };
 
 export interface CanvasHitTester {
   hitTest: (x: number, y: number) => string | undefined;
   hitTestRotationZone: (x: number, y: number) => string | undefined;
-  /**
-   * Returns one of:
-   *   "<fixtureId>:vertex:<idx>"  → vertex handle hit (drag to move)
-   *   "<fixtureId>:mid:<idx>"     → mid-segment handle hit (click to insert vertex)
-   */
-  hitTestStripEndpoint?: (x: number, y: number) => string | undefined;
+  /** Active fixture-kind handle under the point (anchors when selected, all in edit mode). */
+  hitTestHandle?: (x: number, y: number) => { fixtureId: string; handleId: string } | undefined;
+}
+
+/** A focused kind handle (highlight ring, Delete target). */
+export interface FocusedHandle {
+  fixtureId: string | number;
+  handleId: string;
 }
 
 const DOT_SPACING = 25;
@@ -86,10 +88,6 @@ function toNormalized(px: number, max: number): number {
   return px / max;
 }
 
-function clonePoints(pts: StripPoint[]): StripPoint[] {
-  return pts.map(p => ({ x: p.x, y: p.y }));
-}
-
 /** Ctrl/Cmd trigger additive/toggle multi-select; Shift is reserved for the line-select tool. */
 function isAdditiveClick(event: MouseEvent): boolean {
   return isAdditiveModifier(event);
@@ -104,7 +102,8 @@ export function useSelection(
   onRotateComplete?: (before: FixtureRotationSnapshot[], after: FixtureRotationSnapshot[]) => void,
   externalSelectedIds?: import('vue').Ref<Set<string | number>>,
   getCanvas?: () => CanvasHitTester | null,
-  onReshapeStrip?: (before: StripPointsSnapshot, after: StripPointsSnapshot) => void,
+  /** Commits a kind config change (one undo step). */
+  onKindConfigChange?: (fixture: Fixture, before: Json, after: Json, description: string) => void,
   getScale?: () => number,
   getSceneNodes?: () => SceneNode[],
   getViewportSize?: () => { width: number; height: number },
@@ -113,19 +112,18 @@ export function useSelection(
   const selectedIds = externalSelectedIds ?? ref<Set<string | number>>(new Set());
   const interaction = ref<Interaction>({ type: 'idle' });
   /**
-   * Id of the strip currently in "edit mode" — at most one at a time.
-   * Set when the user clicks an already-selected strip; cleared whenever the
-   * selection changes to a different/no fixture. Vertex/mid-handles are only
-   * rendered + hit-tested for the editing strip.
+   * Id of the kind fixture currently in edit mode — at most one at a time.
+   * Entered by clicking an already-selected kind fixture that has non-anchor
+   * handles; cleared when the selection moves elsewhere. Non-anchor handles
+   * are only drawn and hit-tested for this fixture.
    */
   const editingId = ref<string | number | null>(null);
   /**
-   * The currently focused vertex inside the editing strip — set when the user
-   * clicks a vertex handle, and consumed by `deleteEditingVertex()` to remove
-   * that vertex via keyboard (Delete / Backspace). Cleared whenever the
-   * editing strip changes or the user clicks outside it.
+   * The focused handle — set when the user grabs a handle, consumed by
+   * `deleteFocusedHandle()` (Delete / Backspace). Cleared when the user
+   * clicks elsewhere.
    */
-  const editingVertex = ref<{ fixtureId: string | number; idx: number } | null>(null);
+  const focusedHandle = ref<FocusedHandle | null>(null);
 
   const doubleClickTracker = createDoubleClickTracker();
   /**
@@ -138,8 +136,6 @@ export function useSelection(
   let shiftDownFixtureId: string | number | null = null;
   let beforeSnapshot: FixturePositionSnapshot[] = [];
   let beforeRotationSnapshot: FixtureRotationSnapshot[] = [];
-  /** Pre-drag strip-points snapshots, keyed by fixture id — populated alongside `beforeSnapshot` for selected strip fixtures. */
-  let beforeStripSnapshots: StripPointsSnapshot[] = [];
   /** Figma-style alignment guides: per-axis sorted candidate centers, built once per drag. */
   let alignSession: AlignmentSession | null = null;
   /** Live guide/spacing data for the SVG overlay — null except while a drag has active matches. */
@@ -153,7 +149,6 @@ export function useSelection(
   function beginAlignmentSession(
     effectiveSelectedIds: Set<string | number>,
     startPositions: Map<string | number, Point>,
-    startStripPoints: Map<string | number, StripPoint[]>,
   ): void {
     alignSession = null;
     const sceneNodes = getSceneNodes?.();
@@ -176,17 +171,17 @@ export function useSelection(
       });
     if (candidates.length === 0) return;
 
-    // Selection center = bbox center over everything that moves: fixture
-    // centers plus every strip vertex (strips move by their points).
+    // Selection center = bbox center over every moving fixture center.
     const points: number[][] = [];
     for (const p of startPositions.values()) points.push([p.x, p.y]);
-    for (const pts of startStripPoints.values()) for (const p of pts) points.push([p.x, p.y]);
     if (points.length === 0) return;
 
     alignSession = buildAlignmentSession(candidates, bboxCenter(points), points);
   }
 
   function onViewportMouseDown(event: MouseEvent, rect: DOMRect) {
+    // A distribution order tool owns the pointer (plan M4.5): no selection or drags.
+    if (useDistributionToolStore().modifierId) return;
     if (event.button === 2) {
       const vx = event.clientX - rect.left;
       const vy = event.clientY - rect.top;
@@ -216,24 +211,14 @@ export function useSelection(
       return;
     }
 
-    // Strip handles take priority — only fires for the editing strip (gated
-    // in WASM by the editing flag).
-    const handleHit = getCanvas?.()?.hitTestStripEndpoint?.(vx, vy);
-    if (handleHit) {
-      const parts = handleHit.split(':');
-      const fixId = parts[0]!;
-      const kind = parts[1]!; // 'vertex' | 'mid'
-      const idx = parseInt(parts[2]!, 10);
-      const fixture = getFixtures().find(f => String(f.id) === fixId);
-      if (fixture && event.button !== 2) {
-        if (kind === 'vertex') {
-          onStripVertexStart(event, fixture, idx, rect);
-          return;
-        }
-        if (kind === 'mid') {
-          onStripMidHandleStart(event, fixture, idx, rect);
-          return;
-        }
+    // Kind handles take priority (gated in WASM: anchors when selected,
+    // everything in edit mode).
+    const handleHit = getCanvas?.()?.hitTestHandle?.(vx, vy);
+    if (handleHit && event.button !== 2) {
+      const fixture = getFixtures().find(f => String(f.id) === handleHit.fixtureId);
+      if (fixture) {
+        onKindHandleStart(fixture, handleHit.handleId);
+        return;
       }
     }
 
@@ -253,7 +238,7 @@ export function useSelection(
     if (!isAdditiveClick(event)) {
       selectedIds.value = new Set();
       editingId.value = null;
-      editingVertex.value = null;
+      focusedHandle.value = null;
     }
     interaction.value = { type: 'marquee', start: { ...world }, end: { ...world } };
   }
@@ -274,53 +259,34 @@ export function useSelection(
     const effectiveSelectedIds = nextSelected;
     selectedIds.value = effectiveSelectedIds;
 
-    // Two-click model for strips: 1st click selects, 2nd click enters edit mode.
-    // ONLY for bezier strips — line/circle have no edit mode (LED-dot hit-tests
-    // handle direct endpoint/center grabs, see hit_test_strip_endpoint).
-    if (
-      fixture.stripConfig &&
-      fixture.stripConfig.shapeType === 'bezier' &&
-      wasAlreadySelected &&
-      !additive
-    ) {
+    // Two-click model for kind fixtures: 1st click selects, 2nd click enters
+    // edit mode — only when the kind has non-anchor handles.
+    if (hasEditHandles(fixture) && wasAlreadySelected && !additive) {
       editingId.value = fixture.id;
     } else if (editingId.value !== null && editingId.value !== fixture.id) {
       editingId.value = null;
-      editingVertex.value = null;
     }
-    // Body-click on the strip (i.e. not a vertex handle hit) clears any
-    // previously focused vertex so Delete doesn't accidentally remove one.
-    if (editingVertex.value && editingVertex.value.fixtureId !== fixture.id) {
-      editingVertex.value = null;
-    }
+    // A body click (not a handle) clears the focused handle so Delete
+    // doesn't remove one by accident.
+    focusedHandle.value = null;
 
     if (event.button === 2) return;
 
+    // Every fixture moves by its origin (kind geometry is origin-relative).
     const startPositions = new Map<string | number, Point>();
-    const startStripPoints = new Map<string | number, StripPoint[]>();
     const w = getWidth();
     const h = getHeight();
     beforeSnapshot = [];
-    beforeStripSnapshots = [];
     for (const f of getFixtures()) {
       let isSelected = false;
       let c: SceneNode | null = f as unknown as SceneNode;
       while (c) { if (effectiveSelectedIds.has(c.id)) { isSelected = true; break; } c = c.parent; }
       if (!isSelected) continue;
-
-      if (f.stripConfig) {
-        // For strips, points are the source of truth — snapshot them. fixturePosition
-        // is derived (centroid), so we don't snapshot it for strips.
-        const snap = clonePoints(f.stripConfig.points);
-        startStripPoints.set(f.id, snap);
-        beforeStripSnapshots.push({ id: f.id, points: snap });
-      } else {
-        startPositions.set(f.id, { x: f.fixturePosition.x * w, y: f.fixturePosition.y * h });
-        beforeSnapshot.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
-      }
+      startPositions.set(f.id, { x: f.fixturePosition.x * w, y: f.fixturePosition.y * h });
+      beforeSnapshot.push({ id: f.id, x: f.fixturePosition.x, y: f.fixturePosition.y });
     }
-    beginAlignmentSession(effectiveSelectedIds, startPositions, startStripPoints);
-    interaction.value = { type: 'drag', startWorld: world, startPositions, startStripPoints };
+    beginAlignmentSession(effectiveSelectedIds, startPositions);
+    interaction.value = { type: 'drag', startWorld: world, startPositions };
   }
 
   function onRotateStart(event: MouseEvent, fixture: Fixture, rect: DOMRect) {
@@ -351,67 +317,12 @@ export function useSelection(
     interaction.value = { type: 'rotate', startWorld: world, startAngles, centerWorld };
   }
 
-  /** Begins a vertex drag on a strip's polyline. The vertex follows the cursor freely. */
-  function onStripVertexStart(
-    event: MouseEvent,
-    fixture: Fixture,
-    vertexIndex: number,
-    rect: DOMRect,
-  ) {
-    if (event.button === 2 || !fixture.stripConfig) return;
-    void rect;
+  /** Begins dragging a kind handle; the fixture becomes the sole selection. */
+  function onKindHandleStart(fixture: Fixture, handleId: string) {
+    if (!fixture.kind) return;
     selectedIds.value = new Set([fixture.id]);
-    editingVertex.value = { fixtureId: fixture.id, idx: vertexIndex };
-
-    const snap = clonePoints(fixture.stripConfig.points);
-    beforeStripSnapshots = [{ id: fixture.id, points: snap }];
-
-    interaction.value = {
-      type: 'strip-vertex',
-      fixtureId: fixture.id,
-      vertexIndex,
-      startPoints: snap,
-    };
-  }
-
-  /**
-   * Mid-segment handle click: inserts a new vertex at the segment midpoint, then
-   * immediately starts dragging the new vertex so the user can position it.
-   */
-  function onStripMidHandleStart(
-    event: MouseEvent,
-    fixture: Fixture,
-    segIndex: number,
-    rect: DOMRect,
-  ) {
-    if (event.button === 2 || !fixture.stripConfig) return;
-    void rect;
-    const points = fixture.stripConfig.points;
-    if (segIndex < 0 || segIndex >= points.length - 1) return;
-
-    selectedIds.value = new Set([fixture.id]);
-
-    // Capture pre-insertion snapshot for undo.
-    const beforeSnap = clonePoints(points);
-    beforeStripSnapshots = [{ id: fixture.id, points: beforeSnap }];
-
-    // Insert a new vertex at the segment midpoint.
-    const p0 = points[segIndex]!;
-    const p1 = points[segIndex + 1]!;
-    const mid: StripPoint = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-    points.splice(segIndex + 1, 0, mid);
-    syncStripBounds(fixture);
-    // The freshly inserted vertex becomes the focused one — pressing Delete
-    // right after inserting therefore removes it again, which matches Figma's
-    // behaviour and gives users an obvious "undo via keyboard" path.
-    editingVertex.value = { fixtureId: fixture.id, idx: segIndex + 1 };
-
-    interaction.value = {
-      type: 'strip-vertex',
-      fixtureId: fixture.id,
-      vertexIndex: segIndex + 1,
-      startPoints: beforeSnap, // before-snapshot includes the pre-insert state
-    };
+    focusedHandle.value = { fixtureId: fixture.id, handleId };
+    interaction.value = { type: 'kind-handle', fixtureId: fixture.id, handleId, startConfig: cloneJson(fixture.kind.config) };
   }
 
   function onMouseMove(event: MouseEvent, rect: DOMRect) {
@@ -454,11 +365,6 @@ export function useSelection(
           f.fixturePosition.x = toNormalized(start.x + snappedDx, w);
           f.fixturePosition.y = toNormalized(start.y + snappedDy, h);
         }
-        const stripStart = iv.startStripPoints.get(f.id);
-        if (stripStart && f.stripConfig) {
-          f.stripConfig.points = stripStart.map(p => ({ x: p.x + snappedDx, y: p.y + snappedDy }));
-          syncStripBounds(f);
-        }
       }
       // Fixture position fields are plain (non-reactive), mutated directly above
       // for drag performance — bump layoutRevision so the position panel (and
@@ -479,21 +385,18 @@ export function useSelection(
         }
       }
       engineStore.triggerCanvasSync();
-    } else if (iv.type === 'strip-vertex') {
+    } else if (iv.type === 'kind-handle') {
       const f = getFixtures().find(fx => fx.id === iv.fixtureId);
-      if (!f || !f.stripConfig) return;
-      const p = f.stripConfig.points[iv.vertexIndex];
-      if (!p) return;
-      p.x = event.shiftKey ? snapWorld(world.x, DOT_SPACING) : world.x;
-      p.y = event.shiftKey ? snapWorld(world.y, DOT_SPACING) : world.y;
-      // For bezier, the renderer trims/extends the curve to target length;
-      // no in-place enforcement needed (matches existing behavior). For line,
-      // the user drags one endpoint and we snap the OTHER endpoint along the
-      // current direction so the visible length stays exactly target_length.
-      if (f.stripConfig.shapeType === 'line') {
-        enforceStripLength(f, iv.vertexIndex);
-      } else {
-        syncStripBounds(f);
+      const kind = f?.kind ? getKind(f.kind.id) : undefined;
+      if (!f?.kind || !kind?.def.onHandleMove) return;
+      const pos = event.shiftKey ? { x: snapWorld(world.x, DOT_SPACING), y: snapWorld(world.y, DOT_SPACING) } : world;
+      try {
+        // Pure: always from the drag-start config.
+        f.kind.config = kind.def.onHandleMove(cloneJson(iv.startConfig) as Json, iv.handleId, worldToKind(f, pos), kindContext(f.id));
+        rebuildKindFixture(f);
+      }
+      catch (err) {
+        console.error(`[kinds] ${f.kind.id} onHandleMove failed:`, err);
       }
       engineStore.triggerCanvasSync();
     }
@@ -558,7 +461,7 @@ export function useSelection(
       }
       shiftDownFixtureId = null;
     } else if (iv.type === 'drag') {
-      // Non-strip moves → MoveFixtureCommand.
+      // Moves → MoveFixtureCommand.
       if (beforeSnapshot.length > 0 && onDragComplete) {
         const afterSnapshot = beforeSnapshot.map(snap => {
           const f = getFixtures().find(f => f.id === snap.id);
@@ -567,19 +470,7 @@ export function useSelection(
         const didMove = beforeSnapshot.some((b, i) => { const a = afterSnapshot[i]; return a && (b.x !== a.x || b.y !== a.y); });
         if (didMove) onDragComplete(beforeSnapshot, afterSnapshot);
       }
-      // Strip reshapes → one ReshapeStripCommand per strip.
-      if (beforeStripSnapshots.length > 0 && onReshapeStrip) {
-        for (const before of beforeStripSnapshots) {
-          const f = getFixtures().find(fx => fx.id === before.id);
-          if (!f || !f.stripConfig) continue;
-          const after: StripPointsSnapshot = { id: before.id, points: clonePoints(f.stripConfig.points) };
-          const changed = before.points.length !== after.points.length
-            || before.points.some((p, i) => p.x !== after.points[i]!.x || p.y !== after.points[i]!.y);
-          if (changed) onReshapeStrip(before, after);
-        }
-      }
       beforeSnapshot = [];
-      beforeStripSnapshots = [];
     } else if (iv.type === 'rotate' && beforeRotationSnapshot.length > 0 && onRotateComplete) {
       const afterSnapshot = beforeRotationSnapshot.map(snap => {
         const f = getFixtures().find(f => f.id === snap.id);
@@ -588,18 +479,11 @@ export function useSelection(
       const didRotate = beforeRotationSnapshot.some((b, i) => afterSnapshot[i] && b.rotation !== afterSnapshot[i]!.rotation);
       if (didRotate) onRotateComplete(beforeRotationSnapshot, afterSnapshot);
       beforeRotationSnapshot = [];
-    } else if (iv.type === 'strip-vertex') {
-      if (beforeStripSnapshots.length > 0 && onReshapeStrip) {
-        const before = beforeStripSnapshots[0]!;
-        const f = getFixtures().find(fx => fx.id === before.id);
-        if (f && f.stripConfig) {
-          const after: StripPointsSnapshot = { id: before.id, points: clonePoints(f.stripConfig.points) };
-          const changed = before.points.length !== after.points.length
-            || before.points.some((p, i) => !after.points[i] || p.x !== after.points[i]!.x || p.y !== after.points[i]!.y);
-          if (changed) onReshapeStrip(before, after);
-        }
+    } else if (iv.type === 'kind-handle') {
+      const f = getFixtures().find(fx => fx.id === iv.fixtureId);
+      if (f?.kind && JSON.stringify(f.kind.config) !== JSON.stringify(iv.startConfig)) {
+        onKindConfigChange?.(f, iv.startConfig as Json, cloneJson(f.kind.config) as Json, `Edit ${f.name}`);
       }
-      beforeStripSnapshots = [];
     }
 
     interaction.value = { type: 'idle' };
@@ -607,62 +491,51 @@ export function useSelection(
     alignmentGuides.value = null;
   }
 
-  /**
-   * Right-click a vertex to delete it (only when the strip has > 2 vertices).
-   * Returns true if a vertex was deleted, so the caller can suppress the
-   * subsequent context menu / selection update.
-   */
-  function tryDeleteVertexAt(vx: number, vy: number): boolean {
-    const handleHit = getCanvas?.()?.hitTestStripEndpoint?.(vx, vy);
-    if (!handleHit) return false;
-    const parts = handleHit.split(':');
-    if (parts[1] !== 'vertex') return false;
-    const fixId = parts[0]!;
-    const idx = parseInt(parts[2]!, 10);
-    const fixture = getFixtures().find(f => String(f.id) === fixId);
-    if (!fixture || !fixture.stripConfig) return false;
-    if (fixture.stripConfig.points.length <= 2) return false;
-
-    const before: StripPointsSnapshot = { id: fixture.id, points: clonePoints(fixture.stripConfig.points) };
-    fixture.stripConfig.points.splice(idx, 1);
-    syncStripBounds(fixture);
-    const after: StripPointsSnapshot = { id: fixture.id, points: clonePoints(fixture.stripConfig.points) };
-    onReshapeStrip?.(before, after);
+  /** Applies the kind's `onHandleDelete`; returns true when the config changed. */
+  function deleteHandle(fixture: Fixture, handleId: string): boolean {
+    const kind = fixture.kind ? getKind(fixture.kind.id) : undefined;
+    if (!fixture.kind || !kind?.def.onHandleDelete) return false;
+    const before = cloneJson(fixture.kind.config) as Json;
+    let after: Json;
+    try {
+      after = kind.def.onHandleDelete(cloneJson(before), handleId, kindContext(fixture.id));
+    }
+    catch (err) {
+      console.error(`[kinds] ${fixture.kind.id} onHandleDelete failed:`, err);
+      return false;
+    }
+    if (JSON.stringify(after) === JSON.stringify(before)) return false;
+    fixture.kind.config = after;
+    rebuildKindFixture(fixture);
+    onKindConfigChange?.(fixture, before, cloneJson(after), `Edit ${fixture.name}`);
     return true;
   }
 
   /**
-   * Removes the currently focused vertex (set when the user last clicked a
-   * vertex handle). Returns true if a vertex was actually removed. Guards
-   * against deleting the anchor (vertex 0) and against collapsing a strip
-   * below 2 vertices.
+   * Right-click on a handle deletes it when the kind allows it. Returns true
+   * if something was deleted, so the caller can suppress the context menu.
    */
-  function deleteEditingVertex(): boolean {
-    const ev = editingVertex.value;
-    if (!ev) return false;
-    const fixture = getFixtures().find(f => f.id === ev.fixtureId);
-    if (!fixture || !fixture.stripConfig) return false;
-    if (fixture.stripConfig.points.length <= 2) return false;
-    // Don't delete the anchor — it defines the strip's start.
-    if (ev.idx === 0) return false;
-    const idx = Math.min(ev.idx, fixture.stripConfig.points.length - 1);
+  function tryDeleteHandleAt(vx: number, vy: number): boolean {
+    const hit = getCanvas?.()?.hitTestHandle?.(vx, vy);
+    if (!hit) return false;
+    const fixture = getFixtures().find(f => String(f.id) === hit.fixtureId);
+    return fixture ? deleteHandle(fixture, hit.handleId) : false;
+  }
 
-    const before: StripPointsSnapshot = { id: fixture.id, points: clonePoints(fixture.stripConfig.points) };
-    fixture.stripConfig.points.splice(idx, 1);
-    syncStripBounds(fixture);
-    const after: StripPointsSnapshot = { id: fixture.id, points: clonePoints(fixture.stripConfig.points) };
-    onReshapeStrip?.(before, after);
-    // After deletion, focus shifts to the vertex that took the deleted one's
-    // place (or the new last vertex if we deleted the tail).
-    const newIdx = Math.min(idx, fixture.stripConfig.points.length - 1);
-    editingVertex.value = { fixtureId: fixture.id, idx: newIdx };
+  /** Deletes the focused handle (Delete / Backspace). */
+  function deleteFocusedHandle(): boolean {
+    const fh = focusedHandle.value;
+    if (!fh) return false;
+    const fixture = getFixtures().find(f => f.id === fh.fixtureId);
+    if (!fixture || !deleteHandle(fixture, fh.handleId)) return false;
+    focusedHandle.value = null;
     return true;
   }
 
   return {
     selectedIds,
     editingId,
-    editingVertex,
+    focusedHandle,
     interaction,
     alignmentGuides,
     onViewportMouseDown,
@@ -670,7 +543,7 @@ export function useSelection(
     onRotateStart,
     onMouseMove,
     onMouseUp,
-    tryDeleteVertexAt,
-    deleteEditingVertex,
+    tryDeleteHandleAt,
+    deleteFocusedHandle,
   };
 }

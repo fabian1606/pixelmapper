@@ -1,34 +1,37 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, computed, watch, watchEffect, markRaw, triggerRef } from 'vue';
+import { ref, reactive, shallowRef, computed, watch, watchEffect, markRaw, triggerRef } from 'vue';
 import type { Preset } from '~/utils/engine/preset-types';
+import type { ModifierInstance } from '~/utils/engine/types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
-import { WebSocketConnector } from '~/utils/connectors/websocket-connector';
-import { ArtNetConnector } from '~/utils/connectors/artnet-connector';
 import {
-  TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_FX_BIN,
-  buildLayoutBin, buildChannelsBin, buildEffectsBin,
+  TYPE_LAYOUT_BIN, TYPE_CHAN_BIN,
+  buildLayoutBin, buildChannelsBin, buildModifiersBin,
 } from '~/utils/connectors/binary-encoder';
 import {
   serializeProject,
   deserializeProject,
+  IncompatibleProjectError,
   type ProjectSnapshot,
 } from '~/utils/engine/serialize';
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
-import { SetModifiersCommand, cloneEffectsList } from '~/components/engine/commands/set-modifiers-command';
+import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
+import { cloneModifiers } from '~/utils/engine/modifiers';
+import { getManifest, loadWasm, resolve as resolvePlugin, resolveErrors } from '~/utils/plugins/plugin-store';
+import { BUILTIN_PLUGINS } from '~/utils/plugins/builtin-index';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
 // Side-effect import — registers 'connector.add' / 'connector.remove' /
 // 'connector.update' factories so the tail replay can recreate connector
 // mutations on project load even before any UI page has been visited.
-import '~/components/engine/commands/connector-commands';
 // Side-effect import — registers the 'SetChannelRange' factory so per-channel
 // range edits replay correctly on project load.
 import '~/components/engine/commands/set-channel-range-command';
+import '~/components/engine/commands/set-fixture-kind-config-command';
 // Side-effect import — registers all live-op handlers (section.setActive,
 // preset-ops, etc.) so getLiveOpConfig() resolves during tail replay even
 // before any live-mode UI component has been mounted.
@@ -50,6 +53,19 @@ import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
+import { liveHub, type SignatureFrame } from '~/utils/extensions/live-hub';
+import { getExtension } from '~/utils/extensions/registry';
+import { extensionsReady } from '~/utils/extensions/loader';
+import { getKind } from '~/utils/kinds/kind-host';
+import {
+  addRequirements, extensionDataOwners, missingRequirements, recomputeRequirements, requirementsOfCommand, requirementsToOpen,
+  type MissingRequirement, type ProjectRequirement, type RequiresSources,
+} from '~/utils/extensions/requires';
+import semver from 'semver';
+import '~/components/engine/commands/set-extension-data-command';
+import { bumpModelTick } from '~/utils/extensions/model-tick';
+import { notify } from '~/composables/use-notifications';
+import { isBuiltinHash } from '~/utils/plugins/builtin-index';
 
 export const useEngineStore = defineStore('engine', () => {
   const savedPresets = ref<Preset[]>([]);
@@ -76,7 +92,7 @@ export const useEngineStore = defineStore('engine', () => {
    */
   type ChannelSnap = { stepValues: number[]; stepsCount: number; isPlaying: boolean };
   let baseSnapshot: Map<string, ChannelSnap> | null = null;
-  let baseEffectsSnapshot: import('~/utils/engine/types').Effect[] | null = null;
+  let baseModifiersSnapshot: import('~/utils/engine/types').ModifierInstance[] | null = null;
 
   /** Strobe needs a timer to alternate dimmer values. Only the top-of-stack strobe is active. */
   let strobeTimer: ReturnType<typeof setInterval> | null = null;
@@ -103,10 +119,10 @@ export const useEngineStore = defineStore('engine', () => {
     return snap;
   }
 
-  function _restoreEffectsSnapshot(snap: import('~/utils/engine/types').Effect[]) {
-    const cloned = cloneEffectsList(snap);
-    activeEffects.value.splice(0, activeEffects.value.length, ...cloned);
-    engine.effects = activeEffects.value;
+  function _restoreModifiersSnapshot(snap: import('~/utils/engine/types').ModifierInstance[]) {
+    const cloned = cloneModifiers(snap);
+    modifiers.value.splice(0, modifiers.value.length, ...cloned);
+    engine.modifiers = modifiers.value;
   }
 
   function _restoreBaseSnapshot(snap: Map<string, ChannelSnap>) {
@@ -178,12 +194,12 @@ export const useEngineStore = defineStore('engine', () => {
           ch.currentBaseValue = 0;
         }
       }
-      activeEffects.value.splice(0, activeEffects.value.length);
+      modifiers.value.splice(0, modifiers.value.length);
       // Use the exact same code path as the preset Play button so the result
       // matches what the user programmed (type-checks snapshots, sets base
       // values, reconstructs modifiers).
-      applyPreset(overwritePreset, fixtures, activeEffects.value);
-      engine.effects = activeEffects.value;
+      applyPreset(overwritePreset, fixtures, modifiers.value);
+      engine.modifiers = modifiers.value;
       return;
     }
 
@@ -238,11 +254,11 @@ export const useEngineStore = defineStore('engine', () => {
     if (existingIdx !== -1) overwriteStack.value.splice(existingIdx, 1);
     if (wasEmpty) {
       baseSnapshot = _captureBaseSnapshot();
-      baseEffectsSnapshot = cloneEffectsList(activeEffects.value);
+      baseModifiersSnapshot = cloneModifiers(modifiers.value);
     }
     overwriteStack.value.push({ key, type, config });
     if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
-    if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
+    if (baseModifiersSnapshot) _restoreModifiersSnapshot(baseModifiersSnapshot);
     _applyTopOverwrite();
     flushEngineOutput();
   }
@@ -254,14 +270,14 @@ export const useEngineStore = defineStore('engine', () => {
     _stopStrobeTimer();
     if (overwriteStack.value.length === 0) {
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
-      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
+      if (baseModifiersSnapshot) _restoreModifiersSnapshot(baseModifiersSnapshot);
       baseSnapshot = null;
-      baseEffectsSnapshot = null;
+      baseModifiersSnapshot = null;
     } else {
       // Restore base first so a different overwrite type (e.g. strobe → blind)
       // doesn't leak the previous overwrite's values into untouched channels.
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
-      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
+      if (baseModifiersSnapshot) _restoreModifiersSnapshot(baseModifiersSnapshot);
       _applyTopOverwrite();
     }
     flushEngineOutput();
@@ -271,11 +287,11 @@ export const useEngineStore = defineStore('engine', () => {
     _stopStrobeTimer();
     if (overwriteStack.value.length > 0) {
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
-      if (baseEffectsSnapshot) _restoreEffectsSnapshot(baseEffectsSnapshot);
+      if (baseModifiersSnapshot) _restoreModifiersSnapshot(baseModifiersSnapshot);
     }
     overwriteStack.value.splice(0);
     baseSnapshot = null;
-    baseEffectsSnapshot = null;
+    baseModifiersSnapshot = null;
     flushEngineOutput();
   }
 
@@ -291,8 +307,53 @@ export const useEngineStore = defineStore('engine', () => {
 
   // Create a reactive array for effects that the UI can track,
   // and bind it into the engine so the render loop uses it.
-  const activeEffects = ref<import('~/utils/engine/types').Effect[]>([]);
-  engine.effects = activeEffects.value;
+  const modifiers = ref<import('~/utils/engine/types').ModifierInstance[]>([]);
+
+  // ── Extensions: project dependencies + project-level data (ADR D20, §5.8) ──
+  /** Extensions the project cannot be opened without. */
+  const requires = ref<ProjectRequirement[]>([]);
+  /** Holder of project-level namespaced extension data. */
+  const projectExtension = reactive<{ extensionData?: Record<string, Record<string, unknown>> }>({});
+
+  /** Host lookups for the requires rules. */
+  const requiresSources: RequiresSources = {
+    extensionVersion: id => getExtension(id)?.manifest.version,
+    kindOwner: (kindId) => {
+      const k = getKind(kindId);
+      return k ? { extensionId: k.extensionId, required: k.def.requiredWhenUsed !== false } : undefined;
+    },
+  };
+
+  /** Recomputes `requires` from the state (snapshot writes); returns removed ids. */
+  function recomputeRequires(): string[] {
+    const liveStore = useLiveModeStore();
+    const { next, removed } = recomputeRequirements(requires.value, {
+      fixtureKinds: flatFixtures.value.map(f => f.kind?.id),
+      extensionDataOwners: extensionDataOwners([
+        projectExtension.extensionData,
+        ...flatFixtures.value.map(f => f.extensionData),
+        ...liveStore.pages.flatMap(p => p.widgets.map(w => w.extensionData)),
+      ]),
+    }, requiresSources);
+    requires.value = next;
+    return removed;
+  }
+
+  /**
+   * Adds the extensions a persisted command depends on. A new requirement
+   * is written to a snapshot right away so clients opening the project see
+   * it before replaying the command (ADR §5.10 gate).
+   */
+  function noteCommandRequirements(commandType: string, payload: object) {
+    const ids = requirementsOfCommand(commandType, payload, requiresSources,
+      id => flatFixtures.value.find(f => f.id === id)?.kind?.id);
+    if (ids.length === 0) return;
+    const next = addRequirements(requires.value, ids, requiresSources);
+    if (next.length === requires.value.length) return;
+    requires.value = next;
+    void triggerSaveSnapshotInternal().catch(err => console.warn('[engine] requires snapshot failed:', err));
+  }
+  engine.modifiers = modifiers.value;
 
   const sceneNodes = shallowRef<SceneNode[]>([]);
   const selectedIds = shallowRef<Set<string | number>>(new Set());
@@ -350,11 +411,39 @@ export const useEngineStore = defineStore('engine', () => {
 
   let layoutPacket:   Uint8Array = new Uint8Array(0);
   let channelsPacket: Uint8Array = new Uint8Array(0);
-  let effectsPacket:  Uint8Array = new Uint8Array(0);
+  let modifiersPacket: Uint8Array = new Uint8Array(0);
+  /** Plugin table (index → hash) of the current modifiers packet. */
+  let modifierPlugins: string[] = [];
 
   const layoutRevision   = ref(0);
   const channelsRevision = ref(0);
   const effectsRevision  = ref(0);
+
+  /**
+   * Recipe preview (preset picker hover): one instance replaced in the engine
+   * packet only — not saved, not synced to collaborators, no history.
+   */
+  let modifierPreview: ModifierInstance | null = null;
+
+  /** The modifiers the engine renders (with the preview swapped in). */
+  function engineModifiers(): ModifierInstance[] {
+    const p = modifierPreview;
+    return p ? modifiers.value.map(m => (m.id === p.id ? p : m)) : modifiers.value;
+  }
+
+  /** Rebuilds the modifiers packet (the render loop dispatches it). */
+  function rebuildModifiersPacket(): void {
+    ({ packet: modifiersPacket, plugins: modifierPlugins } = trace('packet.modifiers', () =>
+      buildModifiersBin(engineModifiers(), flatFixtures.value, getManifest)));
+    effectsRevision.value++;
+  }
+
+  /** Shows `m` on the fixtures in place of the instance with its id (null ends the preview). */
+  function setModifierPreview(m: ModifierInstance | null): void {
+    if (!m && !modifierPreview) return;
+    modifierPreview = m ? JSON.parse(JSON.stringify(m)) as ModifierInstance : null;
+    rebuildModifiersPacket();
+  }
 
   // ── Override layer ────────────────────────────────────────────────────────
 
@@ -388,6 +477,9 @@ export const useEngineStore = defineStore('engine', () => {
    * No-op until a project is loaded (hooks wired in loadProject).
    */
   function saveSnapshotNow() { return triggerSaveSnapshotInternal(); }
+  /** Builds the current project snapshot (export); null before a project is loaded. */
+  let snapshotBuilder: (() => import('~/utils/engine/serialize').ProjectSnapshot) | null = null;
+  function currentSnapshot() { return snapshotBuilder?.() ?? null; }
 
   // ── Time-triggered snapshot persistence ───────────────────────────────────
   // The snapshot captures all "live" state that has no dedicated Command
@@ -456,7 +548,7 @@ export const useEngineStore = defineStore('engine', () => {
     // Route effects clear through history so it's pushed to the Supabase tail
     // and survives page reloads. Without this, the tail still contains the
     // SetModifiers command that added the effect, which gets replayed on load.
-    const before = cloneEffectsList(activeEffects.value);
+    const before = cloneModifiers(modifiers.value);
     const history = useHistory();
     history.execute(new SetModifiersCommand(engine, before, [], 'Clear all'));
   }
@@ -472,6 +564,9 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   // ── Render loop state ─────────────────────────────────────────────────────
+
+  // Extension scope views re-project when the (mostly non-reactive) model changes.
+  watch([layoutRevision, channelsRevision, sceneNodes], bumpModelTick);
 
   const clockEpoch = ref(Date.now());
   function setClockEpoch(ms: number) { clockEpoch.value = ms; engine.postEpoch(ms); }
@@ -502,13 +597,9 @@ export const useEngineStore = defineStore('engine', () => {
       // positionZ/tiltX/rollZ are 3D-only (the worker layout ignores them) but
       // are included so layoutRevision doubles as the 3D scene's rebuild signal.
       fp += `${f.id};${f.startAddress};${f.fixturePosition.x};${f.fixturePosition.y};${f.rotation ?? 0};${f.positionZ ?? 0};${f.tiltX ?? 0};${f.rollZ ?? 0};${f.fixtureSize.x};${f.fixtureSize.y};`;
-      // Strip vertices feed per-pixel layout (binary-encoder.ts arc-length sampling),
-      // so any polyline mutation must bust the layout cache even when the AABB
-      // happens not to move.
-      if (f.stripConfig) {
-        fp += `s${f.stripConfig.shapeType}:${f.stripConfig.lengthMeters}:`;
-        for (const p of f.stripConfig.points) fp += `${p.x},${p.y};`;
-      }
+      // Kind geometry (curves, shapes) moves beams without changing channels
+      // or the AABB, so the config must bust the layout cache too.
+      if (f.kind) fp += `k${JSON.stringify(f.kind.config)};`;
       for (const ch of f.channels) {
         fp += `${ch.addressOffset};${ch.type};${ch.beamId ?? ''};${ch.rangeMin ?? 0};${ch.rangeMax ?? 255};`;
       }
@@ -521,10 +612,39 @@ export const useEngineStore = defineStore('engine', () => {
     }
     channelsPacket = trace('packet.channels', () => buildChannelsBin(flatFixtures.value));
     channelsRevision.value++;
-    effectsPacket = trace('packet.effects', () =>
-      buildEffectsBin(activeEffects.value, flatFixtures.value, engine.stackBlendMode.value),
-    );
+    ({ packet: modifiersPacket, plugins: modifierPlugins } = trace('packet.modifiers', () =>
+      buildModifiersBin(engineModifiers(), flatFixtures.value, getManifest)));
+    ensurePluginsLoaded(modifierPlugins);
+    resolveUnknownPlugins(modifiers.value);
     effectsRevision.value++;
+  }
+
+  /**
+   * Sends plugin modules the worker does not have yet. When a module arrives
+   * the worker re-prepares instances that were disabled for lack of it.
+   */
+  function ensurePluginsLoaded(hashes: string[]): void {
+    for (const hash of hashes) {
+      if (engine.hasPlugin(hash)) continue;
+      void loadWasm(hash).then((wasm) => {
+        if (wasm && !engine.hasPlugin(hash)) engine.loadPlugin(hash, wasm);
+      });
+    }
+  }
+
+  /**
+   * Resolves plugins referenced by modifiers whose manifest is unknown here
+   * (shared projects, live collaboration). The modifiers packet skips such
+   * instances; once a plugin resolves the packet is rebuilt.
+   */
+  function resolveUnknownPlugins(list: readonly import('~/utils/engine/types').ModifierInstance[]): void {
+    for (const m of list) {
+      // Known, or already failed (no retry storm on every flush).
+      if (getManifest(m.plugin) || resolveErrors.value.has(m.plugin)) continue;
+      void resolvePlugin(m.plugin).then((known) => {
+        if (known) flushEngineOutput();
+      });
+    }
   }
 
   const initEngine = async () => {
@@ -550,9 +670,9 @@ export const useEngineStore = defineStore('engine', () => {
       triggerRef(sceneNodes);
 
       // History undo/redo replaces the effects array entirely in SetModifiersCommand
-      if (engine.effects !== activeEffects.value) {
-        activeEffects.value.splice(0, activeEffects.value.length, ...engine.effects);
-        engine.effects = activeEffects.value;
+      if (engine.modifiers !== modifiers.value) {
+        modifiers.value.splice(0, modifiers.value.length, ...engine.modifiers);
+        engine.modifiers = modifiers.value;
       }
 
       flushEngineOutput();
@@ -628,9 +748,64 @@ export const useEngineStore = defineStore('engine', () => {
       engine.globalBpm.value = base * mult;
     });
 
+    // Built-in modifier plugins are loaded up front so adding one is instant.
+    ensurePluginsLoaded(BUILTIN_PLUGINS.map(p => p.hash));
+
+    // Plugin runtime events: errors disable the instance in the worker; tell the user.
+    engine.isTrustedPlugin = isBuiltinHash;
+    engine.onPluginEvent = (ev) => {
+      if (ev.type === 'plugin-error') {
+        notify({ variant: 'error', title: 'Modifier stopped', description: ev.message });
+      }
+      else if (import.meta.dev) {
+        console.info(`[plugin ${ev.hash.slice(7, 15)}] ${ev.message}`);
+      }
+    };
+    engine.onRespawn = (suspended) => {
+      notify({
+        variant: 'warning',
+        title: 'Engine restarted',
+        description: suspended.length > 0
+          ? `The render engine stopped responding. ${suspended.length} generated modifier(s) were suspended.`
+          : 'The render engine stopped responding and was restarted.',
+      });
+    };
+
+    // Live-value hub (extension API): channel addresses are cached per layout
+    // revision so per-frame lookups are O(1).
+    let addressCacheRevision = -1;
+    const addressCache = new Map<string | number, Fixture>();
+    liveHub.configure({
+      resolveChannelAddress(fixtureId, channelIndex) {
+        if (addressCacheRevision !== layoutRevision.value) {
+          addressCache.clear();
+          for (const f of flatFixtures.value) addressCache.set(f.id, f);
+          addressCacheRevision = layoutRevision.value;
+        }
+        const fixture = addressCache.get(fixtureId);
+        const ch = fixture?.channels[channelIndex];
+        return fixture && ch ? fixture.startAddress + ch.addressOffset : null;
+      },
+      beatSource: () => ({ bpm: engine.globalBpm.value, clockEpoch: clockEpoch.value }),
+      // Signature tuples are read by the worker; fixtures map to their layout
+      // group index (position in flatFixtures).
+      requestSignatures(targets, generation) {
+        const index = new Map(flatFixtures.value.map((f, i) => [f.id, i]));
+        const ids = { scalar: 0, rgb: 1, panTilt: 2 } as const;
+        const flat = new Uint32Array(targets.length * 2);
+        targets.forEach((t, i) => {
+          flat[i * 2] = index.get(t.fixtureId) ?? 0xffffffff;
+          flat[i * 2 + 1] = ids[t.signature];
+        });
+        engine.requestSignatures(flat, generation);
+      },
+    });
+    // Group indexes change with the layout.
+    watch(layoutRevision, () => liveHub.refreshSignatureRequests());
+
     // Frame-receive handler: called by the worker engine on every rendered frame.
     // Runs off the main-thread render loop — Vue cascade can't block it.
-    engine.onFrame = (dmx: Uint8Array, elapsedMs: number) => {
+    engine.onFrame = (dmx: Uint8Array, elapsedMs: number, signatures?: SignatureFrame) => {
       bufferLength.value = dmx.length;
       bufferRevision.value++;
       currentElapsed.value = elapsedMs;
@@ -648,24 +823,14 @@ export const useEngineStore = defineStore('engine', () => {
       }
 
       connectionsStore.sendFrame(outputBuffer);
-      try {
-        connectionsStore.notifyEngineState({
-          bpm: engine.globalBpm.value,
-          elapsedMs,
-          layoutRevision: layoutRevision.value,
-          channelsRevision: channelsRevision.value,
-          effectsRevision: effectsRevision.value,
-          layoutPacket,
-          channelsPacket,
-          effectsPacket,
-          dmxBuffer: outputBuffer,
-          fixtures: flatFixtures.value,
-          effects: activeEffects.value,
-          blendMode: engine.stackBlendMode.value,
-        });
-      } catch (e) {
-        console.warn('[engine] notifyEngineState threw:', e);
-      }
+      // Extension live values (no-op without subscribers).
+      liveHub.ingest(outputBuffer, elapsedMs, Date.now(), signatures);
+      connectionsStore.notifyEngineState({
+        bpm: engine.globalBpm.value,
+        elapsedMs,
+        beatTime: Math.max(0, (elapsedMs * engine.globalBpm.value) / 60000),
+        dmxBuffer: outputBuffer,
+      });
     };
 
     // Lightweight rAF loop: only dispatches changed packets to the worker.
@@ -677,7 +842,7 @@ export const useEngineStore = defineStore('engine', () => {
       const er = effectsRevision.value;
       if (lr !== lastDispatchedLayout)   { engine.dispatch(TYPE_LAYOUT_BIN,  layoutPacket.subarray(5));  lastDispatchedLayout   = lr; }
       if (cr !== lastDispatchedChannels) { engine.dispatch(TYPE_CHAN_BIN,     channelsPacket.subarray(5)); lastDispatchedChannels = cr; }
-      if (er !== lastDispatchedEffects)  { engine.dispatch(TYPE_FX_BIN,      effectsPacket.subarray(5));  lastDispatchedEffects  = er; }
+      if (er !== lastDispatchedEffects)  { engine.syncModifiers(modifiersPacket.subarray(5), modifierPlugins); lastDispatchedEffects = er; }
       animFrameId = requestAnimationFrame(renderLoop);
     };
 
@@ -697,7 +862,7 @@ export const useEngineStore = defineStore('engine', () => {
       }
       engine.dispatch(TYPE_CHAN_BIN, channelsPacket.subarray(5));
       lastDispatchedChannels = channelsRevision.value;
-      engine.dispatch(TYPE_FX_BIN, effectsPacket.subarray(5));
+      engine.syncModifiers(modifiersPacket.subarray(5), modifierPlugins);
       lastDispatchedEffects  = effectsRevision.value;
     });
   }
@@ -747,12 +912,14 @@ export const useEngineStore = defineStore('engine', () => {
 
   const currentProjectId = ref<string | null>(null);
   const projectLoading = ref(false);
-  const projectError = ref<'unauthorized' | 'error' | null>(null);
+  const projectError = ref<'unauthorized' | 'error' | 'incompatible' | 'missing-extensions' | null>(null);
+  /** Extensions a project needs but this client lacks (ADR §5.10 gate). */
+  const missingExtensions = ref<MissingRequirement[]>([]);
 
   // Register SetModifiers replay here to avoid circular imports
   registerCommand('SetModifiers', (payload, _ctx) => {
-    const before = cloneEffectsList(payload.before ?? []);
-    const after  = cloneEffectsList(payload.after  ?? []);
+    const before = cloneModifiers(payload.before ?? []);
+    const after  = cloneModifiers(payload.after  ?? []);
     return new SetModifiersCommand(engine, before, after, 'SetModifiers (replay)');
   });
 
@@ -760,7 +927,7 @@ export const useEngineStore = defineStore('engine', () => {
     return {
       sceneNodes: sceneNodes.value,
       flatFixtures: flatFixtures.value,
-      activeEffects: activeEffects.value,
+      modifiers: modifiers.value,
       savedPresets: savedPresets.value,
       setSavedPresets: (p) => { savedPresets.value = p; },
       getSelectedPresetId: () => selectedPresetId.value,
@@ -769,14 +936,13 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   function applyProjectSnapshot(snapshot: ProjectSnapshot) {
-    const connectionsStore = useConnectionsStore();
-    connectionsStore.restoreFromSnapshots(snapshot.connectors ?? []);
-    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, activeEffects: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = deserializeProject(snapshot);
+    const restored = deserializeProject(snapshot);
+    const { sceneNodes: nodes, savedPresets: presets, globalBases: bases, modifiers: effects, livePages, selectedPresetId: restoredPresetId, globalBpm: restoredBpm, clockEpoch: restoredEpoch, activeSectionMembers: restoredSectionMembers, savedPositions: restoredPositions } = restored;
     sceneNodes.value = nodes;
     savedPresets.value = presets;
     globalBases.value = bases;
-    activeEffects.value = effects;
-    engine.effects = activeEffects.value;
+    modifiers.value = effects;
+    engine.modifiers = modifiers.value;
     selectedPresetId.value = restoredPresetId;
     // Restore global engine state captured in the snapshot (BPM + shared clock).
     // Snapshot stores the effective BPM at save time; treat it as the base.
@@ -800,6 +966,8 @@ export const useEngineStore = defineStore('engine', () => {
     );
     liveStore.loadLiveControllers(snapshot.liveControllers ?? []);
     liveStore.loadPositions(restoredPositions);
+    requires.value = restored.requires;
+    projectExtension.extensionData = restored.extensionData;
     // Reset the worker engine so no stale state from a previous project leaks
     // into the first frames, then dispatch fresh packets.
     engine.reset();
@@ -812,6 +980,9 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
+    // Installed extension bundles must be registered before fixtures (kinds)
+    // are deserialized and `requires` is checked (ADR §5.9 boot order).
+    await extensionsReady();
 
     // Reset snapshot timer state in case a previous project was loaded.
     if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
@@ -882,6 +1053,22 @@ export const useEngineStore = defineStore('engine', () => {
       return;
     }
 
+    // Gate (ADR §5.10): a project whose required extensions are missing or
+    // incompatible is not opened; the layout offers install/update instead.
+    {
+      const required = requirementsToOpen(
+        data.snapshot?.requires ?? [],
+        (data.tail ?? []).map((c: { command_type: string }) => c.command_type),
+      );
+      const missing = missingRequirements(required, id => getExtension(id)?.manifest.version, (v, r) => semver.satisfies(v, r));
+      missingExtensions.value = missing;
+      if (missing.length > 0) {
+        projectError.value = 'missing-extensions';
+        projectLoading.value = false;
+        return;
+      }
+    }
+
     // Clear default fixtures so the project starts from a clean slate
     sceneNodes.value = [];
     savedPresets.value = [];
@@ -890,14 +1077,22 @@ export const useEngineStore = defineStore('engine', () => {
     // Disconnect any hardware-controller instances from the previous project
     // so MIDI/HID ports don't leak across project loads. Bindings cleared too.
     await useControllerStore().reset();
-    // Same idea for output connectors — kill their websockets + retry timers
-    // before applyProjectSnapshot() recreates the (possibly differently-shaped)
-    // connector list from the new project's snapshot.
-    await useConnectionsStore().reset();
+    // Output connectors are per user/device (ADR D18) and survive project switches.
 
-    // Apply the base snapshot if present
+    // Apply the base snapshot if present. Version-1 projects are rejected (ADR D24).
     if (data.snapshot) {
-      applyProjectSnapshot(data.snapshot);
+      try {
+        applyProjectSnapshot(data.snapshot);
+      }
+      catch (err) {
+        if (err instanceof IncompatibleProjectError) {
+          console.warn('[engine] incompatible project snapshot:', err.found);
+          projectError.value = 'incompatible';
+          projectLoading.value = false;
+          return;
+        }
+        throw err;
+      }
     }
 
     // Replay the tail: changes after the snapshot's sequence_number.
@@ -962,20 +1157,6 @@ export const useEngineStore = defineStore('engine', () => {
       }
     }
 
-    // Auto-connect WebSocket strip connectors that are fully configured. One
-    // attempt per connector; the per-connector autoReconnect flag arms only on
-    // a successful 'connected', so failed initial attempts leave the card
-    // showing "Verbinden" instead of spinning forever. Serial is intentionally
-    // skipped — requestPort() needs a user gesture.
-    for (const c of useConnectionsStore().connectors) {
-      if (c instanceof WebSocketConnector && c.url.value && c.fixtureId != null) {
-        c.connect().catch((e: unknown) => console.warn('[engine] ws auto-connect failed:', c.id, e));
-      }
-      if (c instanceof ArtNetConnector && c.bridgeUrl.value) {
-        c.connect().catch((e: unknown) => console.warn('[engine] artnet auto-connect failed:', c.id, e));
-      }
-    }
-
     // ── Persistence: unified queue ──────────────────────────────────────────
     // Both history commands AND persistent live-ops flow through the LiveBus
     // persist queue. A single in-flight guard there serializes the push-change
@@ -1018,27 +1199,33 @@ export const useEngineStore = defineStore('engine', () => {
     // persist queue first (via flushPersistQueue) so lastSeenSequenceNumber
     // matches the state about to be captured.
     function buildSnapshot() {
+      // Extensions no longer used leave `requires` with this snapshot, so the
+      // change log after it contains none of their commands (ADR §5.8).
+      const removed = recomputeRequires();
+      if (removed.length > 0) console.info('[engine] extensions no longer required:', removed.join(', '));
       const pinnedStore = usePinnedModifiersStore();
       const liveStore = useLiveModeStore();
-      const connectionsStore = useConnectionsStore();
       return serializeProject(
         sceneNodes.value,
         savedPresets.value,
         pinnedStore.pinnedModifiers,
         globalBases.value,
-        activeEffects.value,
+        modifiers.value,
         liveStore.pages,
         liveStore.liveControllers,
         selectedPresetId.value,
-        connectionsStore.getSnapshots(),
         engine.globalBpm.value,
         clockEpoch.value,
         Object.fromEntries(
           [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
         ),
         liveStore.savedPositions,
+        requires.value,
+        projectExtension.extensionData,
       );
     }
+
+    snapshotBuilder = buildSnapshot;
 
     async function doSaveSnapshot() {
       await flushPersistQueue();
@@ -1065,6 +1252,7 @@ export const useEngineStore = defineStore('engine', () => {
       markDirty: markEngineDirty,
       walAppend: (entry) => walAppend(entry),
       currentProjectId: () => currentProjectId.value,
+      onPersist: noteCommandRequirements,
     });
 
     // Allow markEngineDirty() to arm its timers and bind the snapshot trigger
@@ -1120,7 +1308,8 @@ export const useEngineStore = defineStore('engine', () => {
             headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
             body: changesBody,
             keepalive: true,
-          });
+            // Best effort (64 KB keepalive cap); the WAL recovery covers a dropped push.
+          }).catch(err => console.warn('[engine] beforeunload push failed:', err));
         }
 
         // (b) Final snapshot — but ONLY if there are no pending entries left.
@@ -1150,7 +1339,8 @@ export const useEngineStore = defineStore('engine', () => {
               headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
               body: snapBody,
               keepalive: true,
-            });
+              // Best effort: keepalive bodies are capped at 64 KB, so big projects are rejected here.
+            }).catch(err => console.warn('[engine] beforeunload snapshot failed:', err));
           } catch (err) {
             console.warn('[engine] beforeunload snapshot failed:', err);
           }
@@ -1160,6 +1350,7 @@ export const useEngineStore = defineStore('engine', () => {
   }
 
   return {
+    setModifierPreview,
     savedPresets,
     selectedPresetId,
     flashStack,
@@ -1175,8 +1366,11 @@ export const useEngineStore = defineStore('engine', () => {
     speedMultiplier,
     setSpeedMultiplier,
     engine,
-    activeEffects,
+    modifiers,
     sceneNodes,
+    requires,
+    projectExtension,
+    recomputeRequires,
     selectedIds,
     flatFixtures,
     globalBases,
@@ -1199,11 +1393,13 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId,
     projectLoading,
     projectError,
+    missingExtensions,
     loadProject,
     applyProjectSnapshot,
     getReplayContext,
     commitPendingPersistence,
     saveSnapshotNow,
+    currentSnapshot,
     markEngineDirty,
   };
 });

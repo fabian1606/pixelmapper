@@ -201,7 +201,7 @@ export class SetActivePresetCommand implements SerializableCommand {
       {
         savedPresets: this.ctx.savedPresets,
         flatFixtures: this.ctx.flatFixtures,
-        activeEffects: this.ctx.activeEffects,
+        modifiers: this.ctx.modifiers,
         getSelectedPresetId: this.ctx.getSelectedPresetId,
         setSelectedPresetId: this.ctx.setSelectedPresetId,
         triggerCanvasSync: () => {},

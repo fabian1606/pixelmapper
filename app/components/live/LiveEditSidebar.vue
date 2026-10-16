@@ -925,7 +925,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
         />
 
         <!-- Moving Head Positions (XY-Pad only) -->
-        <div v-if="selectedButton.type === 'xy-pad'" class="flex flex-col gap-2 pt-4 mt-1 border-t border-border">
+        <div v-if="selectedButton.type === 'xy'" class="flex flex-col gap-2 pt-4 mt-1 border-t border-border">
           <div class="flex items-center gap-1.5">
             <MapPin class="size-3 text-muted-foreground" />
             <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Positionen</span>
