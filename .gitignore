@@ -50,3 +50,6 @@ src-tauri/gen/schemas
 # Bundled firmware of the desktop app (scripts/tauri/firmware-bundle.ts)
 src-tauri/resources/firmware/firmware.bin
 src-tauri/resources/firmware/firmware-meta.json
+
+# Supabase CLI link state
+supabase/.temp/
