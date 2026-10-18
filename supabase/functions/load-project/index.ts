@@ -1,6 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, callerRole } from '../_shared/auth.ts';
 import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
+import { LOADABLE_SNAPSHOT_FILTER } from '../_shared/snapshots.ts';
+import { parseProjectId } from '../_shared/validate.ts';
 
 // Loads the latest snapshot plus the change tail after it.
 //
@@ -14,7 +16,9 @@ import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.
 // The tail is subject to PostgREST `max_rows` (default 1000): if its last
 // sequence_number is below `latestSequence`, the client continues with
 // pull-changes from there.
-// 403 when the caller is not an accepted collaborator.
+// 400 for a non-UUID projectId, 403 when the caller is not an accepted
+// collaborator. `before offline sync` safety snapshots are never loaded
+// from (see _shared/snapshots.ts).
 
 Deno.serve(async (req: Request) => {
   const early = preflight(req);
@@ -23,21 +27,23 @@ Deno.serve(async (req: Request) => {
   const caller = await authenticate(req);
   if (caller instanceof Response) return caller;
 
-  const body = await readJsonObject(req);
-  const projectId = body?.projectId;
-  if (typeof projectId !== 'string' || projectId === '') return errorResponse('projectId required', 400);
+  const parsed = parseProjectId(await readJsonObject(req));
+  if (!parsed.ok) return errorResponse(parsed.error, 400);
+  const { projectId } = parsed.value;
 
   // Explicit access check: RLS alone would return an empty project.
   const access = await callerRole(caller, projectId);
   if (access.error) return errorResponse(access.error, 500);
   if (!access.role) return errorResponse('Forbidden', 403);
 
-  // Several snapshots can share a sequence_number (restore-snapshot inserts at
-  // the head); the newest one wins.
+  // Several snapshots can share a sequence_number (a retried upload stores
+  // another seq-0 snapshot; restore-snapshot stores the restored copy at its
+  // marker); the newest one wins.
   const { data: snapRow, error: snapError } = await caller.supabase
     .from('project_snapshots')
     .select('snapshot, sequence_number')
     .eq('project_id', projectId)
+    .or(LOADABLE_SNAPSHOT_FILTER)
     .order('sequence_number', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(1)

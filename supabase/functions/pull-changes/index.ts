@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, callerRole } from '../_shared/auth.ts';
 import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
+import { LOADABLE_SNAPSHOT_FILTER } from '../_shared/snapshots.ts';
 import { parsePullChanges } from '../_shared/validate.ts';
 
 // Pulls the change log of a project after a cursor (ADR 0004 §3.2 step 1).
@@ -17,6 +18,18 @@ import { parsePullChanges } from '../_shared/validate.ts';
 //
 // A client far behind can compare `latestSequence - afterSequence` with the
 // snapshot position and reload the snapshot via load-project instead.
+//
+// Ordering guarantee (migration 009): every write to the change log goes
+// through `push_changes` / `restore_snapshot`, which hold a per-project
+// advisory lock until COMMIT. So within one project, a row becomes visible
+// only after every row with a lower sequence_number did: once a pull has
+// seen sequence N, no row <= N of this project can appear later, and
+// `sequence_number > afterSequence` cannot skip a late commit.
+// The client still re-pulls `PULL_OVERLAP` sequence numbers below its
+// cursor and dedupes by change id (app/utils/sync/sync-position.ts). That
+// stays as a second safety net: rows written by older function deployments
+// or direct table inserts are not serialized, and the overlap costs only a
+// few duplicate rows per pull.
 
 const CHANGE_COLUMNS = 'sequence_number, change_id, user_id, command_type, payload, created_at';
 
@@ -58,6 +71,7 @@ Deno.serve(async (req: Request) => {
       .from('project_snapshots')
       .select('sequence_number')
       .eq('project_id', projectId)
+      .or(LOADABLE_SNAPSHOT_FILTER)
       .order('sequence_number', { ascending: false })
       .limit(1)
       .maybeSingle(),
