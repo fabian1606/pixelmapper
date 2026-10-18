@@ -9,6 +9,14 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
+
+// Lightweight reachability probe (ADR 0004 D20): the frontend gates its AI
+// features on this route. Registered after CORS (so browsers may call it)
+// but before body parsing and any heavy middleware, so it stays cheap.
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use(express.json({ limit: "50mb" })); // Increased limit for larger manuals
 
 // New endpoint: Upload a PDF and run the extraction
