@@ -90,7 +90,7 @@ pixelmapper/
 - **Decisions:** [ADR 0001 — Extension & Content-Plugin System](architecture/adr/0001-extension-and-content-plugin-system.md)
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - **Decisions:** [ADR 0002 — Operations, Observation & Agent Layer](architecture/adr/0002-agent-and-operations-layer.md)
-- **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the plugin plan)
+- **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the ADR 0003 Tauri steps)
 - **Decisions:** [ADR 0003 — Platform Layer: Web First, Native Where It Pays Off](architecture/adr/0003-native-platform-layer.md) (Tauri 2, `#platform`, `getPlatform()`, migration steps)
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
