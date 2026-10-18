@@ -294,6 +294,65 @@ fn draw_kind_fixture(
     }
 }
 
+// ── Label placement ─────────────────────────────────────────────────────────
+
+/// Returns the label anchor in WORLD pixels: (center x, lower edge y) of the
+/// shape actually drawn for the fixture, so the label sits right below it
+/// regardless of shape, aspect ratio or rotation.
+fn label_anchor_world(fixture: &FixtureCanvasData, state: &RenderState) -> (f32, f32) {
+    let wx = fixture.world_x * state.world_w;
+    let wy = fixture.world_y * state.world_h;
+
+    if fixture.is_kind() {
+        // Kind geometry is already in world pixels → use its bounding box.
+        let (mut min_x, mut max_x, mut max_y) = (f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut add = |x: f32, y: f32| {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        };
+        for p in &fixture.body {
+            match p {
+                BodyPrimitive::Polyline { points, width, .. } => {
+                    for q in points { add(q[0], q[1] + width / 2.0); }
+                }
+                BodyPrimitive::Polygon { points, .. } => {
+                    for q in points { add(q[0], q[1]); }
+                }
+                BodyPrimitive::Circle { center, radius, .. } => {
+                    add(center[0] - radius, center[1] + radius);
+                    add(center[0] + radius, center[1] + radius);
+                }
+                BodyPrimitive::Rect { rect, .. } => {
+                    add(rect[0], rect[1] + rect[3]);
+                    add(rect[0] + rect[2], rect[1] + rect[3]);
+                }
+            }
+        }
+        for beam in &fixture.beams {
+            let r = if beam.emitter_radius > 0.0 { beam.emitter_radius } else { 4.0 };
+            for e in &beam.emitters { add(e[0], e[1] + r); }
+        }
+        if max_y.is_finite() {
+            return ((min_x + max_x) / 2.0, max_y);
+        }
+        // No geometry at all → AABB outline used for the selection ring.
+        return (wx, wy + fixture.height * 18.0);
+    }
+
+    let (sin, cos) = fixture.rotation.to_radians().sin_cos();
+    let half_extent_y = if fixture.svg.is_some() || fixture.beams.len() > 1 {
+        // Rotated rectangle (half sizes 18·w / 18·h).
+        let (hw, hh) = (18.0 * fixture.width, 18.0 * fixture.height);
+        (hw * sin).abs() + (hh * cos).abs()
+    } else {
+        // Rotated ellipse (radii 16·w / 16·h).
+        let (rx, ry) = (16.0 * fixture.width, 16.0 * fixture.height);
+        ((rx * sin).powi(2) + (ry * cos).powi(2)).sqrt()
+    };
+    (wx, wy + half_extent_y)
+}
+
 pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[FixtureCanvasData], svg_cache: &HashMap<String, SvgCachedFixture>, dmx_buffer: &[u8], t_sec: f64) {
     canvas.set_size(state.viewport_w as u32, state.viewport_h as u32, 1.0);
     canvas.clear_rect(0, 0, state.viewport_w as u32, state.viewport_h as u32, Color::rgba(0, 0, 0, 0));
@@ -462,15 +521,10 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             paint.set_font_size(13.0); // Exactly 13px on screen!
 
             for fixture in fixtures {
-                let wx = fixture.world_x * state.world_w;
-                let wy = fixture.world_y * state.world_h;
-                let rx = fixture.width * 16.0;
-                let ry = fixture.height * 16.0;
-                let max_r = f32::max(rx, ry);
-
-                // Calculate screen position
-                let screen_x = wx * state.scale + state.cam_x;
-                let screen_y = wy * state.scale + state.cam_y + (max_r * state.scale) + 18.0; // Pushed even further down
+                // Anchor below the drawn shape; 14px = half label box (10) + 4px gap.
+                let (ax, ay) = label_anchor_world(fixture, state);
+                let screen_x = ax * state.scale + state.cam_x;
+                let screen_y = ay * state.scale + state.cam_y + 14.0;
 
                 // Frustum Culling
                 if screen_x + 50.0 < 0.0 || screen_x - 50.0 > state.viewport_w ||
