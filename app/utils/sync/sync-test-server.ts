@@ -55,6 +55,8 @@ export class FakeSyncServer {
   tailCap = Number.POSITIVE_INFINITY;
   /** Change ids the server refuses to confirm (`sequenceNumber: null`). */
   unconfirm = new Set<string>();
+  /** Edge functions that answer with this HTTP status (e.g. `save-snapshot` → 500). */
+  failing = new Map<string, number>();
   private nextSeq = 1;
   private nextSnapshotId = 1;
 
@@ -116,6 +118,11 @@ export class FakeSyncServer {
   private async invoke(name: string, body: Record<string, any>): Promise<{ data: unknown; error: unknown }> {
     this.calls.push({ name, body: JSON.parse(JSON.stringify(body)) });
     if (this.offline) throw new TypeError('Failed to fetch');
+    const status = this.failing.get(name);
+    if (status) {
+      // Like supabase-js: an HTTP error carrying the response.
+      return { data: null, error: Object.assign(new Error(`${name} failed`), { context: new Response('{"error":"boom"}', { status }) }) };
+    }
     switch (name) {
       case 'pull-changes': return { data: this.pull(body), error: null };
       case 'push-change': return { data: this.push(body), error: null };

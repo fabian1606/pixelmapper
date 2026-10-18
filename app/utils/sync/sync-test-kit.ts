@@ -22,7 +22,8 @@ export function clone<T>(value: T): T {
 
 /**
  * Port over an in-memory snapshot. `replay` is a small reducer for the
- * change types the tests use; every replay is recorded in `replayed`.
+ * change types the tests use (scene changes: top-level nodes only); every
+ * replay is recorded in `replayed`.
  */
 export class FakePort implements ProjectStatePort {
   state: ProjectSnapshot;
@@ -57,6 +58,15 @@ export class FakePort implements ProjectStatePort {
         if (p.paramChanges) target.params = { ...target.params, ...clone(p.paramChanges) };
         return true;
       }
+      case 'RenameNode': {
+        const node = this.state.sceneNodes.find(n => n.id === p.nodeId);
+        if (!node) throw new Error(`node ${p.nodeId} missing`);
+        node.name = p.newName;
+        return true;
+      }
+      case 'DeleteNodes':
+        this.state.sceneNodes = this.state.sceneNodes.filter(n => !(p.nodeIds as unknown[]).includes(n.id));
+        return true;
       default:
         return false;
     }

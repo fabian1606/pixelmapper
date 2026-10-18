@@ -63,6 +63,13 @@ export async function pullStep(deps: SyncDeps, state: SyncState): Promise<PullOu
   const { changes, nextAfterSequence } = pulled.data;
   const ownAcked = changes.filter(c => pendingIds.has(c.changeId));
   const ownAckedIds = new Set(ownAcked.map(c => c.changeId));
+  // Pulled own rows are confirmed (e.g. an ack lost in a crash): hand their
+  // sequence numbers to the persist queue like push acks, and treat their
+  // realtime echo as own.
+  for (const c of ownAcked) {
+    state.ownIds.add(c.changeId);
+    state.ackedSeq.set(c.changeId, c.sequenceNumber);
+  }
   const stillPending = pending.filter(p => !ownAckedIds.has(p.id));
   const foreignUnseen = changes.filter(c =>
     !pendingIds.has(c.changeId) && !state.ownIds.has(c.changeId) && !state.live.reflects(c.changeId, c.sequenceNumber));
