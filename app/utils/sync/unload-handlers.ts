@@ -40,10 +40,27 @@ function keepalive(url: string, token: string, body: unknown): void {
   }).catch(err => console.warn('[sync] keepalive request failed:', err));
 }
 
+/** Working-snapshot flush of the open project (set while handlers are installed). */
+let openSessionFlush: (() => Promise<void>) | null = null;
+
+/**
+ * Write everything pending of the open project to IndexedDB: outbox rows,
+ * then the working snapshot. Used by the desktop quit hook, which (unlike
+ * `beforeunload`) can await it. Never rejects; failures are logged.
+ */
+export async function flushOpenSession(): Promise<void> {
+  try { await flushOutboxWrites(); }
+  catch (err) { console.warn('[sync] outbox flush before quit failed:', err); }
+  try { await openSessionFlush?.(); }
+  catch (err) { console.warn('[sync] working snapshot flush before quit failed:', err); }
+}
+
 /** Install the handlers; returns a disposer (project switch). */
 export function installUnloadHandlers(opts: UnloadOptions): () => void {
   if (typeof window === 'undefined') return () => {};
   const { session } = opts;
+  const flushSession = () => session.writer.flush();
+  openSessionFlush = flushSession;
 
   const onHidden = () => {
     if (document.visibilityState !== 'hidden') return;
@@ -84,6 +101,7 @@ export function installUnloadHandlers(opts: UnloadOptions): () => void {
   document.addEventListener('visibilitychange', onHidden);
   window.addEventListener('beforeunload', onUnload);
   return () => {
+    if (openSessionFlush === flushSession) openSessionFlush = null;
     document.removeEventListener('visibilitychange', onHidden);
     window.removeEventListener('beforeunload', onUnload);
   };

@@ -18,6 +18,49 @@ export const isOnline = readonly(online);
 
 const reconnectListeners = new Set<() => void>();
 
+/**
+ * Minimum spacing of reconnect notifications. Every listener fans out into
+ * real work (list refresh, session refresh, mirror, records sync, autosave),
+ * so quick offline/online flaps must not re-run all of it every second.
+ */
+export const RECONNECT_MIN_INTERVAL_MS = 5_000;
+
+/**
+ * The probe backoff is only reset once the connection stayed up this long;
+ * a drop right after a reconnect keeps growing the backoff instead.
+ */
+export const STABLE_ONLINE_MS = 30_000;
+
+/** `Date.now()` of the last offline → online edge (-∞ = online since start). */
+let onlineSince = Number.NEGATIVE_INFINITY;
+/** `Date.now()` of the last reconnect notification. */
+let lastReconnectAt = Number.NEGATIVE_INFINITY;
+/** Pending (throttled) reconnect notification. */
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Run every reconnect listener (each isolated from the others' errors). */
+function notifyReconnect(): void {
+  lastReconnectAt = Date.now();
+  for (const cb of reconnectListeners) {
+    try { cb(); }
+    catch (err) { console.warn('[connectivity] reconnect listener failed:', err); }
+  }
+}
+
+/**
+ * Notify reconnect listeners now, or — within `RECONNECT_MIN_INTERVAL_MS` of
+ * the last notification — once the interval has passed, if still online.
+ */
+function scheduleReconnect(): void {
+  const wait = lastReconnectAt + RECONNECT_MIN_INTERVAL_MS - Date.now();
+  if (wait <= 0) { notifyReconnect(); return; }
+  if (reconnectTimer != null) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (online.value) notifyReconnect();
+  }, wait);
+}
+
 /** Switch state and notify reconnect listeners on an offline → online edge. */
 function setOnline(next: boolean): void {
   const wasOnline = online.value;
@@ -25,10 +68,8 @@ function setOnline(next: boolean): void {
   // Online → offline: start the (optional) recovery probe, see setConnectivityProbe.
   if (wasOnline && !next) startProbing();
   if (!wasOnline && next) {
-    for (const cb of reconnectListeners) {
-      try { cb(); }
-      catch (err) { console.warn('[connectivity] reconnect listener failed:', err); }
-    }
+    onlineSince = Date.now();
+    scheduleReconnect();
   }
 }
 
@@ -74,9 +115,19 @@ export function backoffDelay(attempt: number): number {
   return Math.round(exp + jitter);
 }
 
+/**
+ * TypeError messages of programming errors (not network failures), e.g.
+ * "x is not a function", "Cannot read properties of undefined".
+ */
+const CODE_BUG_TYPE_ERROR = /is not a (?:function|constructor)|is not iterable|cannot (?:read|set|convert|destructure)|of (?:undefined|null)\b|(?:undefined|null) is not|is read-only|not extensible|is not defined/i;
+
 /** True when an error looks like a network failure rather than an HTTP error. */
 export function isNetworkError(err: unknown): boolean {
-  if (err instanceof TypeError) return true; // fetch() rejects with TypeError when offline
+  // fetch() rejects with TypeError when offline ("Failed to fetch", "Load
+  // failed", "NetworkError …", "fetch failed"). Wrappers may rethrow other
+  // messages as TypeError, so every TypeError counts — except obvious code
+  // bugs, which would otherwise flap the app offline/online forever.
+  if (err instanceof TypeError) return !CODE_BUG_TYPE_ERROR.test(err.message);
   const name = (err as { name?: string } | null)?.name ?? '';
   const msg = String((err as { message?: string } | null)?.message ?? err ?? '');
   return name === 'FunctionsFetchError' || /failed to fetch|network|load failed/i.test(msg);
@@ -104,9 +155,13 @@ export function setConnectivityProbe(fn: (() => Promise<boolean>) | null): void 
   if (fn && !online.value) startProbing();
 }
 
-/** Reset the probe backoff and schedule the first probe. */
+/**
+ * Schedule the first probe after going offline. The backoff restarts only
+ * when the connection had been stable (`STABLE_ONLINE_MS`); quick flaps keep
+ * growing it, so a persistent failure cannot cause ~1 s offline/online cycles.
+ */
 function startProbing(): void {
-  probeAttempt = 0;
+  if (Date.now() - onlineSince >= STABLE_ONLINE_MS) probeAttempt = 0;
   scheduleProbe();
 }
 
