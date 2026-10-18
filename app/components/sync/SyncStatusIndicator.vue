@@ -38,17 +38,19 @@ const lastSyncedAbsolute = computed(() => {
 
 // ── Restore ──────────────────────────────────────────────────────────────────
 
-/** Entry waiting for confirmation (dialog open while set). */
+/**
+ * Entry waiting for confirmation. Kept separate from `dialogOpen`: reka's
+ * AlertDialogAction closes the dialog BEFORE our click handler runs, so
+ * clearing the entry on close would make the confirm a silent no-op.
+ */
 const confirmEntry = ref<SnapshotListEntry | null>(null);
-const dialogOpen = computed({
-  get: () => confirmEntry.value !== null,
-  set: (v: boolean) => { if (!v) confirmEntry.value = null; },
-});
+const dialogOpen = ref(false);
 
 /** Popover → confirmation dialog. */
 function requestRestore(entry: SnapshotListEntry): void {
   open.value = false;
   confirmEntry.value = entry;
+  dialogOpen.value = true;
 }
 
 /** Toast per outcome. */
