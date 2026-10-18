@@ -1,3 +1,4 @@
+import { getAccountPolicy } from '#platform';
 import { hasAuthenticatedUser, readCachedSession, type AuthLike, type CachedSession } from '~/utils/auth/session-recovery';
 
 /**
@@ -35,7 +36,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return navigateTo('/');
   }
 
-  if (!signedIn && to.path.startsWith('/project/')) {
+  // Desktop: the account is optional (ADR 0004 D3) — projects open signed out.
+  if (!signedIn && getAccountPolicy().accountRequired && to.path.startsWith('/project/')) {
     return navigateTo(`/auth/login?redirect=${encodeURIComponent(to.fullPath)}`);
   }
 });

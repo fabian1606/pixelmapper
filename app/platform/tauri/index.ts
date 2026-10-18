@@ -11,6 +11,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createTauriUdp } from './udp';
 import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
+import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
 
 /**
  * Width reserved for the macOS traffic lights (positioned in tauri.conf.json):
@@ -64,6 +65,11 @@ function watchFullscreen(callback: (fullscreen: boolean) => void): () => void {
     disposed = true;
     unlisten?.();
   };
+}
+
+/** Account optional, cloud projects mirrored (ADR 0004 D3, D13–D15). */
+export function getAccountPolicy(): AccountPolicy {
+  return DESKTOP_ACCOUNT_POLICY;
 }
 
 /** Native menu bar and file dialogs. */

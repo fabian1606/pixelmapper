@@ -45,17 +45,25 @@
         <NuxtLink to="/auth/register" class="text-muted-foreground hover:text-foreground block">
           No account? <span class="text-foreground">Create one</span>
         </NuxtLink>
+        <!-- Desktop: the account is optional (ADR 0004 D3). -->
+        <NuxtLink v-if="!accountRequired" to="/" class="text-muted-foreground hover:text-foreground block">
+          Continue without an account
+        </NuxtLink>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { getAccountPolicy } from '#platform'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 
 definePageMeta({ layout: false })
+
+/** Whether this platform needs an account to use the app at all. */
+const { accountRequired } = getAccountPolicy()
 
 const supabase = useSupabaseClient()
 const route = useRoute()
