@@ -1,9 +1,10 @@
 /**
  * Web platform (ADR 0003): what the browser can do on its own.
  *
- * No UDP (Art-Net falls back to the local bridge); serial and MIDI where the
- * browser supports them. The Tauri platform starts from this one and
- * replaces capabilities with native implementations (ADR 0003 D4).
+ * No UDP (Art-Net falls back to the local bridge), no native HTTP and no
+ * bundled resources; serial and MIDI where the browser supports them. The
+ * Tauri platform starts from this one and replaces capabilities with
+ * native implementations (ADR 0003 D4).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebSerial } from './serial';
@@ -17,6 +18,9 @@ export function createWebPlatform(): Platform {
     udp: null,
     serial: createWebSerial(),
     midi: createWebMidi(),
+    // The browser has neither CORS-free HTTP nor bundled files.
+    http: null,
+    resources: null,
   };
 }
 

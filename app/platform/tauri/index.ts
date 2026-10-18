@@ -2,13 +2,14 @@
  * Tauri platform (ADR 0003 D4): the web platform plus native overrides.
  *
  * Every capability not yet ported keeps its web implementation (or `null`
- * where WKWebView lacks it). Ported so far: `udp` (step 2). Next: `serial`
- * and `midi` (step 3).
+ * where WKWebView lacks it). Ported so far: `udp` (step 2), `http` and
+ * `resources` (ADR 0004 D19). Next: `serial` and `midi` (step 3).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebPlatform } from '../web';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createTauriUdp } from './udp';
+import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 
 /**
@@ -23,6 +24,8 @@ export function createPlatform(): Platform {
     ...createWebPlatform(),
     kind: 'tauri',
     udp: createTauriUdp(),
+    http: createTauriHttp(),
+    resources: createTauriResources(),
   };
 }
 
