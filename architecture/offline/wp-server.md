@@ -19,6 +19,9 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/list-snapshots/` | rewritten (010): paged version-history list with SQL summaries, shared helpers |
 | `supabase/functions/_shared/snapshot-list.ts` | Pure row → response mapping of `list-snapshots` (cursor of the last row) |
 | `supabase/migrations/010_snapshot_summary.sql` | `snapshot_summary(jsonb)`, `list_snapshot_summaries()` (both `security invoker`) |
+| `supabase/migrations/013_snapshot_retention.sql` | Snapshot retention: `prune_project_snapshots()`, `prune_project_snapshot_ids()`, `prune_all_project_snapshots()` (see "Snapshot retention") |
+| `supabase/functions/_shared/snapshot-retention.ts` | Best-effort prune call after `save-snapshot` (`pruneSnapshotsBestEffort`, `runAfterResponse`, `edgeWaitUntil`) |
+| `supabase/tests/` | SQL tests in a throwaway `postgres:16` container (`run-sql-tests.sh`, Supabase stub, `013_snapshot_retention.test.sql`) |
 | `app/utils/sync/remote-api-snapshots.ts` | Typed wrapper `listSnapshots()` |
 | `supabase/functions/snapshot-details/` | **new** (012): two snapshots + aggregated activity for the version-history details |
 | `supabase/functions/_shared/snapshot-details.ts` | Pure request parser + row → response mapping of `snapshot-details` |
@@ -139,6 +142,7 @@ Request: `{ "projectId", "snapshot": { … }, "sequenceNumber": 42, "label"?: "b
 Response 200: `{ "id", "sequence_number", "label", "created_at" }` (`label` is new).
 New: CORS headers + OPTIONS; 400 for a negative/non-integer `sequenceNumber` or non-object snapshot; 403 for viewers/non-members (was an RLS 500).
 009: 400 for a non-UUID `projectId`, and for a `sequenceNumber` above the project's latest change (a snapshot cannot reflect changes that do not exist; `load-project` would skip later changes below that number).
+013: after a successful insert the function calls `prune_project_snapshots(projectId)` with the caller's client — in the background (`EdgeRuntime.waitUntil`) and best effort (errors are logged as `[save-snapshot] prune failed …` and ignored). The response is unchanged.
 
 ### `push-change` (changed in 009, response shape unchanged)
 
@@ -183,6 +187,45 @@ Response 200: `{ "snapshot": { "id", "sequenceNumber", "label", "createdAt", "da
 - All three are `security invoker` (RLS applies) with `revoke … from public, anon` + `grant execute … to authenticated` (see 011 for why the grants are explicit). 400 invalid ids, 403 non-collaborators (viewers may read), 404 unknown snapshot.
 - Pure parts in `_shared/snapshot-details.ts` (`parseSnapshotDetails`, `splitPair`, `detailRanges`, `toSnapshotDetailsResponse`); tests in `_shared/snapshot-details.test.ts`. The 012 SQL was verified against a throwaway `postgres:16` container (explicit/neighbour/missing compare, equal sequence numbers, other projects' rows, invalid marker ids).
 
+## Snapshot retention (migration 013)
+
+Autosave stores a full snapshot every 10–30 s (one dev project had 1,397 snapshots / 57 MB). Snapshots are thinned per project; **`project_changes` is never pruned** (the full change log is kept).
+
+| Age (`now() - created_at`) | Kept |
+|---|---|
+| < 24 h | every snapshot |
+| 24 h – 7 days | newest per UTC hour |
+| 7 – 30 days | newest per UTC day |
+| ≥ 30 days | newest per ISO week (Monday 00:00 UTC) |
+
+The tier is part of the bucket key (an hour straddling the 7-day line is thinned in both tiers separately). "Newest" = `created_at desc, id desc`, computed over all rows of the bucket, so a protected row also counts as the bucket's representative.
+
+**Always kept**, regardless of age:
+
+- the newest snapshot by `(sequence_number, created_at)` and by `created_at`;
+- the load base: newest by `sequence_number desc, created_at desc` among the loadable snapshots (all but `before offline sync`, `LOADABLE_SNAPSHOT_FILTER`) — the row `load-project`, `load-shared-project` and `pull-changes` (`snapshotSequence`) pick; rows tied with it are kept too, so pruning never changes what they return;
+- every snapshot with a `label` (`before offline sync`, `Uploaded`, `Imported`, `Restored from snapshot …`, named versions);
+- snapshots referenced by a `restore-snapshot` marker (`payload.snapshotId`, compared as text, so a malformed payload is harmless) and snapshots at a marker's sequence number (restore results);
+- rows with `created_at` NULL.
+
+**Functions** (all `security definer`, `search_path = public`; clients have no delete policy on `project_snapshots`):
+
+| Function | Who | Notes |
+|---|---|---|
+| `prune_project_snapshots(p_project_id) → integer` | `authenticated` (owner/editor of the project, else `42501`), `service_role` | Deleted count. Called by `save-snapshot`. |
+| `prune_project_snapshot_ids(p_project_id) → setof uuid` | same | Deleted ids — **thumbnail hook**: a caller that stores per-snapshot objects (e.g. `<projectId>/<snapshotId>.webp`) deletes exactly these from storage. `prune_project_snapshots` is `count(*)` over it. |
+| `prune_all_project_snapshots() → table(project_id, deleted)` | `service_role` or a direct DB session without JWT claims (psql / SQL editor) | One-off backfill; one row per project with deletions. |
+| `prune_project_snapshots_core(p_project_id, p_now, p_wait)` | nobody (execute revoked; definer only) | The policy, with an explicit "now" (tests). |
+| `prune_caller_allowed(p_project_id)` | nobody | Access check of the wrappers. |
+
+Execute is revoked from `public`/`anon` and granted explicitly (see 011: objects created by the CLI role do not get Supabase's default grants). Partial index `project_changes_restore_markers` finds the markers without scanning the change log.
+
+**Concurrency / idempotence:** pruning takes the per-project advisory lock of 009 (`project_lock_key`). The per-request wrappers only *try* it and return 0 when another writer (`push_changes`, `restore_snapshot`, another prune) holds it — the next autosave prunes; the backfill waits per project. A second run at the same time deletes nothing. A concurrent `save-snapshot` insert is invisible to the running prune and is never deleted (it is the newest). A `restore_snapshot` that read its source before a prune deleted it still succeeds (it copies the JSON).
+
+**Tests:** `bash supabase/tests/run-sql-tests.sh` (Docker; applies a Supabase stub + all migrations to `postgres:16`, never a remote DB): every bucket boundary (exactly 24 h / 7 d / 30 d, UTC day and Monday week edges with a non-UTC session zone), labeled / newest / load-base / safety / restore source / restore result / NULL `created_at` kept, unchanged load base, idempotence, returned ids = deleted rows, access (stranger/viewer/anon `42501`, editor/owner/service role ok, core + backfill not callable by `authenticated`), busy lock → 0, backfill idempotent. `_shared/snapshot-retention.test.ts` (bun) covers the best-effort call.
+
+Synthetic dataset (10 days × one 47-min session of 140 autosaves every 20 s = 1,400 snapshots, 2 safety + 1 upload label), pruned at 2 h after the newest session: **1,400 → 152** (140 of the last 24 h + 6 hourly + 3 daily + 3 labeled; −89 %). The same data 40 days later: **152 → 5** (2 weeks + 3 labeled). Steady state per project is bounded by the last 24 h of autosaves + ≤ 144 hourly + ≤ 23 daily + one per week + labeled rows.
+
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
 ```ts
@@ -222,7 +265,8 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 #    009 (push_changes / restore_snapshot RPCs, projects.created_by,
 #    user_records LWW fix), 010 (snapshot_summary /
 #    list_snapshot_summaries for the version history), 012
-#    (snapshot_details_pair / snapshot_activity / snapshot_restore_markers).
+#    (snapshot_details_pair / snapshot_activity / snapshot_restore_markers),
+#    013 (snapshot retention functions).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
@@ -232,13 +276,23 @@ supabase functions deploy create-project       # needs 009 (projects.created_by)
 supabase functions deploy pull-changes
 supabase functions deploy load-project
 supabase functions deploy load-shared-project
-supabase functions deploy save-snapshot
+supabase functions deploy save-snapshot        # needs 013 (prune_project_snapshots); without it every save logs a prune warning
 supabase functions deploy list-projects-sync
 supabase functions deploy list-snapshots       # needs 010 (list_snapshot_summaries)
 supabase functions deploy snapshot-details     # needs 012 (snapshot_details_pair, …)
 ```
 
 All functions keep the default JWT verification. **Migration 009 must be applied before** `push-change`, `restore-snapshot` and `create-project` are deployed (they call the new RPCs / write `created_by`); the others work against the existing schema. Clients of the previous build keep working: the response shapes are unchanged (`restore-snapshot` only adds fields), and an older client ignores the `restore-snapshot` marker row with a "no handler" warning.
+
+**One-off retention backfill (after 013 is applied):** prunes every existing project once (waits for each project's lock; run it as a single statement, ideally at a quiet time — locks are held until the statement commits). Run it in the dashboard SQL editor (as `postgres`), or with `psql "<connection string from Project Settings → Database>"`:
+
+```sql
+select * from prune_all_project_snapshots();  -- one row per project with deletions
+-- optional: reclaim space of the deleted TOASTed snapshots
+vacuum (analyze) project_snapshots;
+```
+
+Afterwards every `save-snapshot` keeps the project thinned.
 
 **Type-check:** `deno check supabase/functions/<name>/index.ts` (needs a deno config with `"nodeModulesDir": "auto"` outside the repo root, because the root `package.json` otherwise makes Deno look for `npm:openai` in `node_modules`), e.g. from a scratch dir containing `{ "nodeModulesDir": "auto" }` as `deno.json`: `bunx deno check --config ./deno.json <repo>/supabase/functions/push-change/index.ts …`.
 
