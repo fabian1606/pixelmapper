@@ -11,6 +11,7 @@
 import { computed, ref, toRef } from 'vue';
 import { notify } from '~/composables/use-notifications';
 import { useSyncStatusView } from '~/composables/sync/use-sync-status-view';
+import { useVersionDetails } from '~/composables/sync/use-version-details';
 import { useVersionHistory } from '~/composables/sync/use-version-history';
 import { syncStatus } from '~/utils/sync/project-sync-service';
 import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
@@ -28,6 +29,7 @@ const props = defineProps<{ projectId: string }>();
 
 const { shownState, view, pending, inlineText, details, ariaLabel, now } = useSyncStatusView();
 const history = useVersionHistory(toRef(props, 'projectId'));
+const versionDetails = useVersionDetails(toRef(props, 'projectId'));
 
 const open = ref(false);
 const isLocal = computed(() => shownState.value === 'local-only');
@@ -85,7 +87,7 @@ async function confirmRestore(): Promise<void> {
         <span v-if="inlineText">{{ inlineText }}</span>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="bottom" align="end" class="w-80 p-2" data-testid="sync-status-popover">
+    <PopoverContent side="bottom" align="end" class="w-96 max-w-[calc(100vw-1rem)] p-2" data-testid="sync-status-popover">
       <div class="flex items-start gap-2 px-2 py-1.5">
         <component :is="view.icon" :size="16" class="mt-0.5 shrink-0" :class="[view.tone, shownState === 'syncing' ? 'animate-spin' : '']" aria-hidden="true" />
         <div class="min-w-0">
@@ -97,7 +99,7 @@ async function confirmRestore(): Promise<void> {
         </div>
       </div>
       <Separator class="my-1.5" />
-      <VersionHistoryPanel :history="history" :local="isLocal" :now="now" @restore="requestRestore" />
+      <VersionHistoryPanel :history="history" :local="isLocal" :now="now" :details="versionDetails" @restore="requestRestore" />
     </PopoverContent>
   </Popover>
 

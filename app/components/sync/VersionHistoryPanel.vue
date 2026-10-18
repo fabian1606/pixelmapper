@@ -3,12 +3,15 @@
  * "Version history" section of the sync status popover (ADR 0004 D17):
  * the project's server snapshots, newest first, with collapsed autosave
  * runs and "Load more". Restore requests are emitted; the parent confirms
- * and runs them (the dialog must outlive this popover content).
+ * and runs them (the dialog must outlive this popover content). With a
+ * details loader, entries expand to show what changed since the next older
+ * entry of the (uncollapsed) list.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
 import { isOnline } from '~/utils/sync/connectivity';
 import { collapseAutosaves } from '~/utils/sync/version-history';
+import type { VersionDetails } from '~/utils/sync/version-details-controller';
 import type { VersionHistory } from '~/utils/sync/version-history-controller';
 import VersionHistoryItem from '~/components/sync/VersionHistoryItem.vue';
 import { Button } from '@/components/ui/button';
@@ -19,6 +22,8 @@ const props = defineProps<{
   /** Local-only project: no server, no history. */
   local: boolean;
   now: number;
+  /** "What changed" loader; entries are not expandable without it. */
+  details?: VersionDetails | null;
 }>();
 
 const emit = defineEmits<{ restore: [entry: SnapshotListEntry] }>();
@@ -28,6 +33,15 @@ const expanded = ref(new Set<string>());
 
 const h = computed(() => props.history);
 const rows = computed(() => (h.value ? collapseAutosaves(h.value.entries.value, expanded.value) : []));
+
+/**
+ * Entry id → id of the next older entry (diff base). The last loaded entry
+ * gets none: the server finds its older neighbour (or reports the first version).
+ */
+const olderIds = computed(() => {
+  const list = h.value?.entries.value ?? [];
+  return new Map(list.map((e, i) => [e.id, list[i + 1]?.id ?? null]));
+});
 
 /** Note below the heading (offline / viewer / error). */
 const note = computed(() => {
@@ -72,6 +86,8 @@ watch(isOnline, (online) => { if (online) void h.value?.refresh(); });
             :now="now"
             :can-restore="h.canRestore.value"
             :restoring="h.restoringId.value === row.entry.id"
+            :details="details"
+            :compare-to-id="olderIds.get(row.entry.id)"
             @restore="emit('restore', $event)"
           />
           <li v-else>
