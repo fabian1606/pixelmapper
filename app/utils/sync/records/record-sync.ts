@@ -34,6 +34,26 @@ export interface RecordSyncContext {
   remote: RecordRemote;
   kind: string;
   userId: string;
+  /**
+   * False once the round's account is no longer the signed-in one (account
+   * switch or logout). Checked before every local write; the round then
+   * stops with `RecordSyncAbortedError` instead of filing rows of the new
+   * session under the old account. Omitted = always current.
+   */
+  isCurrent?: () => boolean;
+}
+
+/** Thrown when a round stops because its account was switched. */
+export class RecordSyncAbortedError extends Error {
+  constructor() {
+    super('record sync aborted: account changed');
+    this.name = 'RecordSyncAbortedError';
+  }
+}
+
+/** Throws `RecordSyncAbortedError` once the round's account is stale. */
+function assertCurrent(isCurrent: (() => boolean) | undefined): void {
+  if (isCurrent && !isCurrent()) throw new RecordSyncAbortedError();
 }
 
 // ── Conversions ──────────────────────────────────────────────────────────────
@@ -60,15 +80,21 @@ export function cursorKey(userId: string, kind: string): string {
 /**
  * Applies one server row locally (LWW). With `force`, the row replaces the
  * local record unless that changed again after `expectedUpdatedAt` (used for
- * pushes the server rejected because its row is newer).
+ * pushes the server rejected because its row is newer). With `isCurrent`,
+ * the write is skipped (and `RecordSyncAbortedError` thrown) once the
+ * account changed — checked inside the transaction, right before writing.
  */
 export async function applyRemoteRow(
   row: UserRecordRow,
   userId: string,
   force?: { expectedUpdatedAt: number },
+  isCurrent?: () => boolean,
 ): Promise<void> {
   const remoteUpdatedAt = Date.parse(row.updated_at);
+  assertCurrent(isCurrent);
+  let stale = false;
   await mutateRecord(row.id, (local) => {
+    if (isCurrent && !isCurrent()) { stale = true; return undefined; }
     if (local) {
       if (force) {
         if (local.updatedAt !== force.expectedUpdatedAt) return undefined; // edited meanwhile
@@ -91,6 +117,7 @@ export async function applyRemoteRow(
       ownerUserId: userId,
     };
   });
+  if (stale) throw new RecordSyncAbortedError();
 }
 
 // ── Push ─────────────────────────────────────────────────────────────────────
@@ -111,6 +138,9 @@ export async function pushDirtyRecords(ctx: RecordSyncContext): Promise<number> 
     const chunk = dirty.slice(i, i + PUSH_CHUNK);
     const accepted = new Set(await ctx.remote.upsert(chunk.map(r => toRow(r, ctx.userId))));
     const rejected = chunk.filter(r => !accepted.has(r.id));
+    // Marking accepted records clean is right even after a switch (they are
+    // the old account's own records), but after a logout clear it must not run.
+    assertCurrent(ctx.isCurrent);
     for (const record of chunk) {
       if (accepted.has(record.id)) await markPushed(record);
     }
@@ -119,7 +149,7 @@ export async function pushDirtyRecords(ctx: RecordSyncContext): Promise<number> 
     const rows = await ctx.remote.fetchByIds(rejected.map(r => r.id));
     for (const row of rows) {
       const pushed = rejected.find(r => r.id === row.id);
-      if (pushed) await applyRemoteRow(row, ctx.userId, { expectedUpdatedAt: pushed.updatedAt });
+      if (pushed) await applyRemoteRow(row, ctx.userId, { expectedUpdatedAt: pushed.updatedAt }, ctx.isCurrent);
     }
   }
   return dirty.length;
@@ -139,7 +169,7 @@ export async function pullRemoteRecords(ctx: RecordSyncContext): Promise<number>
 
   for (;;) {
     const rows = await ctx.remote.pullPage(ctx.kind, after, PULL_PAGE);
-    for (const row of rows) await applyRemoteRow(row, ctx.userId);
+    for (const row of rows) await applyRemoteRow(row, ctx.userId, undefined, ctx.isCurrent);
     applied += rows.length;
     const tail = rows[rows.length - 1];
     if (tail) {
@@ -149,7 +179,10 @@ export async function pullRemoteRecords(ctx: RecordSyncContext): Promise<number>
     }
     if (rows.length < PULL_PAGE) break;
   }
-  if (last && last !== stored) await setMeta(key, last);
+  if (last && last !== stored) {
+    assertCurrent(ctx.isCurrent);
+    await setMeta(key, last);
+  }
   return applied;
 }
 

@@ -6,6 +6,7 @@ export { createRecordCollection } from './record-collection';
 export type { RecordCollection, RecordCollectionOptions, RecordSyncStatus } from './record-collection';
 export {
   adoptLocalRecords,
+  clearForeignRecords,
   clearLocalRecords,
   configureRecordRemote,
   countPendingRecords,
@@ -14,5 +15,7 @@ export {
   setRecordUser,
   syncAllRecords,
 } from './record-session';
+export type { ClearForeignRecordsResult } from './record-session';
 export { createSupabaseRecordRemote } from './record-remote';
+export { bindRecordUserToAuth } from './record-auth-binding';
 export type { RecordItem, RecordRemote, UserRecord, UserRecordRow, UserRecordRowInput } from './types';

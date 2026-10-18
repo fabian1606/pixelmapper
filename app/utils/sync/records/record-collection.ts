@@ -15,12 +15,13 @@ import {
   reportNetworkSuccess,
 } from '../connectivity';
 import { hasIndexedDb, listRecords, mutateRecord, putRecords } from './record-db';
-import { syncRecordKind } from './record-sync';
+import { RecordSyncAbortedError, syncRecordKind } from './record-sync';
 import { createSyncScheduler } from './sync-scheduler';
 import {
   getRecordRemote,
   getRecordUser,
   getRegisteredCollection,
+  noteOwnerlessWrites,
   registerCollection,
 } from './record-session';
 import type { RegisteredCollection } from './record-session';
@@ -105,13 +106,19 @@ export function createRecordCollection<T>(kind: string, options: RecordCollectio
     status.value = 'syncing';
     let ok = true;
     try {
-      await syncRecordKind({ remote, kind, userId });
+      // The account may switch mid-round: stop writing as soon as it does.
+      await syncRecordKind({ remote, kind, userId, isCurrent: () => getRecordUser() === userId });
       status.value = 'idle';
       reportNetworkSuccess();
     }
     catch (err) {
       ok = false;
-      if (isNetworkError(err)) {
+      if (err instanceof RecordSyncAbortedError) {
+        // Not a failure: the next account's round (from setRecordUser) takes over.
+        ok = true;
+        status.value = 'idle';
+      }
+      else if (isNetworkError(err)) {
         reportNetworkFailure();
         status.value = 'offline';
       }
@@ -135,9 +142,10 @@ export function createRecordCollection<T>(kind: string, options: RecordCollectio
 
   async function putMany(entries: ReadonlyArray<{ data: T; id?: string }>): Promise<string[]> {
     const ids = entries.map(e => e.id ?? crypto.randomUUID());
+    let owner: string | null;
     if (ids.length === 1) {
       // Single write: atomic read-modify-write keeps the owner and clock.
-      await mutateRecord(ids[0]!, current => ({
+      const written = await mutateRecord(ids[0]!, current => ({
         id: ids[0]!,
         kind,
         data: entries[0]!.data,
@@ -146,14 +154,17 @@ export function createRecordCollection<T>(kind: string, options: RecordCollectio
         dirty: true,
         ownerUserId: current ? current.ownerUserId : getRecordUser(),
       }));
+      owner = written ? written.ownerUserId : null;
     }
     else {
       const now = Date.now();
-      const owner = getRecordUser();
+      owner = getRecordUser();
       await putRecords(entries.map((e, i) => ({
         id: ids[i]!, kind, data: e.data, updatedAt: now, deletedAt: null, dirty: true, ownerUserId: owner,
       })));
     }
+    // Written before the account was known: adopted once it is (setRecordUser).
+    if (owner === null) noteOwnerlessWrites(ids);
     await reload();
     scheduleDebounced();
     return ids;

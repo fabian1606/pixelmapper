@@ -70,6 +70,7 @@ describe('without login', () => {
   });
 
   it('adoptLocalRecords binds local records to the account and uploads them', async () => {
+    await setRecordUser(null); // really signed out (not "account still unknown")
     const c = await notes();
     const id = await c.put({ text: 'local' });
     await setRecordUser(USER);
