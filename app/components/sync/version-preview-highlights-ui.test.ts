@@ -96,7 +96,7 @@ describe('VersionPreviewCard highlights', () => {
     const card = w.get('[data-testid="version-preview-card"]');
     expect(card.attributes('data-view')).toBe('live');
     expect(w.findAll('[role="group"] button').map(b => b.text().replace(/\s+/g, ' '))).toEqual(['Live view 1', 'Effects 1', 'Presets 1', 'Fixtures 2']);
-    expect(w.get('[data-testid="version-live-preview"]').exists()).toBe(true);
+    expect(w.find('[data-testid="version-live-preview"]').exists()).toBe(true);
     expect(w.get('[data-testid="version-preview-chip-live"]').attributes('aria-pressed')).toBe('true');
 
     await w.get('[data-testid="version-preview-chip-effect"]').trigger('click');
