@@ -53,6 +53,14 @@ describe('reconcileRemoteHeads', () => {
     expect(await store.getProject('fresh')).not.toBeNull();
   });
 
+  it('leaves a copy uploaded while the list request ran alone (old createdAt)', async () => {
+    // Upload binds an old local project: createdAt stays, lastSyncedAt is now.
+    await store.putProject(cloudMeta('uploaded', 'u1', { createdAt: 1000, lastSyncedAt: 5500 }));
+    const res = await reconcileRemoteHeads(store, [], 'u1', OPTS);
+    expect(res.removed).toEqual([]);
+    expect(await store.getProject('uploaded')).not.toBeNull();
+  });
+
   it('never touches other accounts or local-only projects', async () => {
     const other = cloudMeta('other', 'u2', { name: 'Theirs' });
     const local = meta('local');
