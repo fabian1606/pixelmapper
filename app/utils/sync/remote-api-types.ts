@@ -13,6 +13,7 @@ import type { ProjectSnapshot } from '~/utils/engine/serialize';
  * - `auth` (401), `forbidden` (403), `not-found` (404), `conflict` (409), `bad-request` (400/422).
  * - `server`: 5xx or relay failure → retry with backoff.
  * - `invalid-response`: 2xx with an unexpected body (e.g. function not deployed yet).
+ * - `aborted`: the caller cancelled the request (`AbortSignal`); says nothing about connectivity.
  * - `unknown`: anything else.
  */
 export type RemoteErrorKind =
@@ -24,6 +25,7 @@ export type RemoteErrorKind =
   | 'bad-request'
   | 'server'
   | 'invalid-response'
+  | 'aborted'
   | 'unknown';
 
 export interface RemoteError {

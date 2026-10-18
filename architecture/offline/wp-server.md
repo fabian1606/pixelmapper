@@ -28,6 +28,9 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/_shared/snapshot-details.ts` | Pure request parser + row → response mapping of `snapshot-details` |
 | `supabase/migrations/012_snapshot_details.sql` | `snapshot_details_pair()`, `snapshot_activity()`, `snapshot_restore_markers()` (all `security invoker`, explicit grants) |
 | `app/utils/sync/remote-api-snapshot-details.ts` | Typed wrapper `getSnapshotDetails()` |
+| `supabase/functions/snapshot-preview/` | **new** (014): compact scene schematic for version-history hover previews |
+| `supabase/functions/_shared/snapshot-preview.ts` | Pure request parser + defensive layout normalization of `snapshot-preview` |
+| `supabase/migrations/014_snapshot_preview.sql` | `snapshot_preview_layout()` (`security invoker`, explicit grants) |
 | `app/utils/sync/remote-restore.ts` | Client reaction to a pulled / realtime `restore-snapshot` marker (reload from the server) |
 | `supabase/functions/create-project/` | changed: client id, idempotency, initial snapshot |
 | `supabase/functions/pull-changes/` | **new**: paged change log after a cursor |
@@ -236,6 +239,41 @@ Execute is revoked from `public`/`anon` and granted explicitly (see 011: objects
 
 Synthetic dataset (10 days × one 47-min session of 140 autosaves every 20 s = 1,400 snapshots, 2 safety + 1 upload label), pruned at 2 h after the newest session: **1,400 → 152** (140 of the last 24 h + 6 hourly + 3 daily + 3 labeled; −89 %). The same data 40 days later: **152 → 5** (2 weeks + 3 labeled). The same sessions where only every third autosave changes the content: **1,400 → 60** (47 distinct states of the last 24 h + the newest row as load base + 6 + 3 + 3). Steady state per project is bounded by the last 24 h of autosaves + ≤ 144 hourly + ≤ 23 daily + one per week + labeled rows.
 
+### `snapshot-preview` (new, migration 014)
+
+Request: `POST { "projectId": "<uuid>", "snapshotId": "<uuid>" }`.
+Response 200:
+
+```jsonc
+{
+  "snapshotId": "<uuid>",
+  "layout": {
+    "fixtures": [[x, y, w, h, r, c, s, b, g], …], // scene order, ≤ 400
+    "groups": [["Truss"], …],                    // top-level groups, scene order, ≤ 100
+    "total": 1200,                               // all drawable fixtures
+    "truncated": true                            // total > fixtures.length
+  }
+}
+```
+
+Fixture tuple (world = 3000 × 3000 px, `FIXTURE_RADIUS` = 18 px):
+
+| Field | Meaning |
+|---|---|
+| `x`, `y` | Centre, normalized 0…1 (`fixturePosition`), 3 decimals (≈ 3 world px; trailing zeros dropped). Fixtures without a numeric position are skipped and not counted in `total`. |
+| `w`, `h` | Size multipliers (`fixtureSize`, default 1), 2 decimals. |
+| `r` | Rotation in degrees, integer, mod 360. |
+| `c` | Base colour `#rrggbb`: the `colorValue` of the `role = 'COLOR'` channels when exactly one distinct valid value exists, else `null` (RGB multi-colour fixture or no colour channel → draw neutral). |
+| `s` | Shape: `0` single-beam (circle, radius 16·w), `1` multi-beam (> 1 beam; rounded rect, half-extent 18·w × 18·h, pixel grid), `2` kind fixture (rect). |
+| `b` | Beam count (`beams` length, capped at 256), for the pixel dots of multi-beam fixtures. |
+| `g` | Index into `groups` of the fixture's **top-level** group; `-1` when not grouped or the group is beyond the 100-group cap. The client draws group outlines as bounding boxes of the member fixtures. |
+
+- Hover preview of a version-history entry (WP-SYNC). The schematic is computed in SQL by `snapshot_preview_layout(project, snapshot, limit = 400)` — **the snapshot JSON never goes over the wire**. Walk like `snapshot_summary` (010): groups are `_type = 'group'` or nodes with a `children` array; an ordinality path per node makes the order deterministic (depth-first scene order).
+- Kind fixtures mirror the canvas (`kindCanvasFields` / `kindWorldAabb`): the tuple holds the axis-aligned bounding box of the rotated `kind.compiled.bounds` (centre normalized again, `w/h = max(half-extent, 8) / 18`, `r = 0`). The kind body is not reproduced — good enough for a schematic.
+- Limits: `p_limit` clamped to 1…1000 (the function uses the default 400), group names cut to 60 chars, 100 groups. Measured in a `postgres:16` container (x/y rounded to 3 decimals, float8 so no trailing zeros): 500 fixtures + 100 groups = **22.5 KB** compact JSON (≈ 1.8 KB gzipped), so the default cap of 400 stays ≈ 18 KB, ~55 ms for a 1200-fixture snapshot.
+- `security invoker` (RLS on `project_snapshots` applies) with `revoke … from public, anon` + `grant execute … to authenticated, service_role`. The RPC returns `null` for an unknown / invisible snapshot (also for a snapshot of another project) → **404** `Snapshot not found`. 400 invalid ids, 403 non-collaborators (viewers may read).
+- `normalizeLayout()` (`_shared/snapshot-preview.ts`) re-validates the RPC result defensively: drops tuples without finite `x`/`y`, clamps `x`/`y` to 0…1, `w`/`h` to 0.01…100, `b` to 0…256, invalid colours → `null`, invalid shapes → 0, out-of-range group indices → -1; malformed group entries keep their slot as `[""]` so indices stay aligned. Tests in `_shared/snapshot-preview.test.ts`.
+
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
 ```ts
@@ -278,6 +316,8 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 #    (snapshot_details_pair / snapshot_activity / snapshot_restore_markers),
 #    013 (snapshot retention, content_hash
 #    column + backfill, list_snapshot_summaries replaced).
+
+#    014 (snapshot_preview_layout for the version-history hover preview).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
@@ -291,6 +331,7 @@ supabase functions deploy save-snapshot        # needs 013 (prune_project_snapsh
 supabase functions deploy list-projects-sync
 supabase functions deploy list-snapshots       # needs 010 (list_snapshot_summaries)
 supabase functions deploy snapshot-details     # needs 012 (snapshot_details_pair, …)
+supabase functions deploy snapshot-preview     # needs 014 (snapshot_preview_layout)
 ```
 
 All functions keep the default JWT verification. **Migration 009 must be applied before** `push-change`, `restore-snapshot` and `create-project` are deployed (they call the new RPCs / write `created_by`); the others work against the existing schema. Clients of the previous build keep working: the response shapes are unchanged (`restore-snapshot` only adds fields), and an older client ignores the `restore-snapshot` marker row with a "no handler" warning.

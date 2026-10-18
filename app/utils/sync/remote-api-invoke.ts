@@ -18,7 +18,7 @@ export interface RemoteClient {
   functions: {
     invoke(
       functionName: string,
-      options?: { body?: Record<string, unknown> },
+      options?: { body?: Record<string, unknown>; signal?: AbortSignal },
     ): Promise<{ data: unknown; error: unknown }>;
   };
 }
@@ -28,21 +28,28 @@ export interface RemoteClient {
 /**
  * Calls `functionName` with a JSON body and validates the response with `parse`.
  * `parse` returns `null` for an unexpected body (→ `invalid-response`).
+ * With `options.signal`, an aborted call resolves to an `aborted` error
+ * without touching the connectivity state (a cancelled hover is no outage).
  */
 export async function invokeRemote<T>(
   client: RemoteClient,
   functionName: string,
   body: Record<string, unknown>,
   parse: (data: unknown) => T | null,
+  options: { signal?: AbortSignal } = {},
 ): Promise<RemoteResult<T>> {
+  const { signal } = options;
+  if (signal?.aborted) return abortedResult(functionName);
   let data: unknown;
   let error: unknown;
   try {
-    ({ data, error } = await client.functions.invoke(functionName, { body }));
+    // Only pass `signal` when given: existing callers/mocks see the old options shape.
+    ({ data, error } = await client.functions.invoke(functionName, signal ? { body, signal } : { body }));
   } catch (err) {
     error = err;
   }
 
+  if (signal?.aborted) return abortedResult(functionName);
   if (error) {
     const classified = await classifyError(error);
     if (classified.kind === 'network') reportNetworkFailure();
@@ -59,6 +66,11 @@ export async function invokeRemote<T>(
     };
   }
   return { ok: true, data: parsed };
+}
+
+/** Result of a call cancelled through its `AbortSignal`. */
+function abortedResult(functionName: string): { ok: false; error: RemoteError } {
+  return { ok: false, error: { kind: 'aborted', status: null, message: `${functionName} cancelled`, retryable: false } };
 }
 
 // ── Error classification ─────────────────────────────────────────────────────

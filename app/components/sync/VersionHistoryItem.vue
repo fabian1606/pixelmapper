@@ -4,6 +4,9 @@
  * absolute time, author, summary and a Restore button. With a details
  * loader, a chevron expands it to show what changed since the previous
  * version (`VersionHistoryDetails`, loaded lazily on first expand).
+ * With `previewable`, pointer hover and keyboard focus are reported to the
+ * panel (hover preview after a delay); on devices without hover an eye
+ * button toggles the preview instead.
  */
 import { computed, ref } from 'vue';
 import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
@@ -13,7 +16,7 @@ import { formatSummary, snapshotBadge } from '~/utils/sync/version-history';
 import VersionHistoryDetails from '~/components/sync/VersionHistoryDetails.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, LoaderCircle, RotateCcw } from 'lucide-vue-next';
+import { ChevronRight, Eye, LoaderCircle, RotateCcw } from 'lucide-vue-next';
 
 const props = defineProps<{
   entry: SnapshotListEntry;
@@ -25,9 +28,50 @@ const props = defineProps<{
   details?: VersionDetails | null;
   /** Id of the next older entry in the list (diff base). */
   compareToId?: string | null;
+  /** Report hover/focus for the layout preview. */
+  previewable?: boolean;
+  /** No hover on this device: show the preview button instead. */
+  touchPreview?: boolean;
+  /** This entry's preview is shown (button state). */
+  previewShown?: boolean;
 }>();
 
-const emit = defineEmits<{ restore: [entry: SnapshotListEntry] }>();
+const emit = defineEmits<{
+  'restore': [entry: SnapshotListEntry];
+  'preview-enter': [entry: SnapshotListEntry, anchor: HTMLElement];
+  'preview-leave': [entry: SnapshotListEntry];
+  'preview-toggle': [entry: SnapshotListEntry, anchor: HTMLElement];
+}>();
+
+const rootEl = ref<HTMLElement | null>(null);
+
+/** Mouse/pen entered the row (touch "hover" is ignored; it uses the button). */
+function onPointerEnter(e: PointerEvent): void {
+  if (!props.previewable || props.touchPreview || e.pointerType === 'touch' || !rootEl.value) return;
+  emit('preview-enter', props.entry, rootEl.value);
+}
+
+function onPointerLeave(e: PointerEvent): void {
+  if (!props.previewable || props.touchPreview || e.pointerType === 'touch') return;
+  emit('preview-leave', props.entry);
+}
+
+/** Keyboard focus inside the row counts like hover. */
+function onFocusIn(): void {
+  if (!props.previewable || !rootEl.value) return;
+  emit('preview-enter', props.entry, rootEl.value);
+}
+
+/** Focus left the row (not just moved between its buttons). */
+function onFocusOut(e: FocusEvent): void {
+  if (!props.previewable) return;
+  if (e.relatedTarget instanceof Node && rootEl.value?.contains(e.relatedTarget)) return;
+  emit('preview-leave', props.entry);
+}
+
+function onPreviewButton(): void {
+  if (rootEl.value) emit('preview-toggle', props.entry, rootEl.value);
+}
 
 const expanded = ref(false);
 const regionId = computed(() => `version-details-${props.entry.id}`);
@@ -40,7 +84,15 @@ const summary = computed(() => formatSummary(props.entry.summary));
 </script>
 
 <template>
-  <li class="rounded-md px-2 py-1.5 hover:bg-accent/50" data-testid="version-history-item">
+  <li
+    ref="rootEl"
+    class="rounded-md px-2 py-1.5 hover:bg-accent/50"
+    data-testid="version-history-item"
+    @pointerenter="onPointerEnter"
+    @pointerleave="onPointerLeave"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+  >
     <div class="flex items-start gap-1">
       <button
         v-if="details"
@@ -64,6 +116,18 @@ const summary = computed(() => formatSummary(props.entry.summary));
         </p>
         <p class="text-[11px] text-muted-foreground truncate">{{ summary }}</p>
       </div>
+      <Button
+        v-if="previewable && touchPreview"
+        variant="ghost"
+        size="sm"
+        class="h-7 w-7 p-0 shrink-0"
+        :aria-pressed="previewShown"
+        :aria-label="`${previewShown ? 'Hide' : 'Show'} preview of version from ${absolute}`"
+        data-testid="version-preview-button"
+        @click="onPreviewButton"
+      >
+        <Eye :size="13" aria-hidden="true" />
+      </Button>
       <Button
         variant="ghost"
         size="sm"
