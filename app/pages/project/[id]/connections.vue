@@ -17,6 +17,9 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { listConnectorTypes } from '~/utils/connectors/connector-registry';
 import ConnectorCard from '~/components/connectors/ConnectorCard.vue';
 
+// Same layout as Design/Live: keeps the header and the loaded project across tab switches.
+definePageMeta({ layout: 'project' });
+
 const route = useRoute();
 const initialTab = route.query.tab === 'inputs' ? 'inputs' : 'outputs';
 const connectionsTab = ref<'outputs' | 'inputs'>(initialTab);
@@ -96,6 +99,8 @@ function isUniverseUsed(u: number): boolean {
 </script>
 
 <template>
+  <!-- Scroll container: the project layout gives the page a fixed-height slot -->
+  <div class="h-full overflow-y-auto">
   <div class="p-6 flex flex-col gap-4 max-w-xl">
     <!-- Header row -->
     <div class="flex items-center justify-between">
@@ -260,5 +265,6 @@ function isUniverseUsed(u: number): boolean {
       </p>
       <ConnectorCard v-for="connector in store.connectors" :key="connector.id" :connector="connector" />
     </template><!-- end outputs tab -->
+  </div>
   </div>
 </template>

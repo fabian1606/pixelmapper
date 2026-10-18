@@ -30,9 +30,13 @@ const NO_EXTENSIONS = process.env.PM_NO_EXTENSIONS === '1';
  * sets `TAURI_ENV_PLATFORM` while it drives the build, everything else is
  * the web platform. Web bundles therefore never contain Tauri code.
  */
-const PLATFORM_DIR = process.env.TAURI_ENV_PLATFORM ? 'tauri' : 'web';
+const IS_TAURI = !!process.env.TAURI_ENV_PLATFORM;
+const PLATFORM_DIR = IS_TAURI ? 'tauri' : 'web';
 
 export default defineNuxtConfig({
+  // The desktop app loads static files from disk: build it as an SPA
+  // (`bun run generate` → `.output/public`, see src-tauri/tauri.conf.json).
+  ssr: !IS_TAURI,
   alias: {
     '#platform': fileURLToPath(new URL(`./app/platform/${PLATFORM_DIR}/index.ts`, import.meta.url)),
   },
@@ -75,6 +79,20 @@ export default defineNuxtConfig({
     },
     optimizeDeps: {
       exclude: ['rs-engine-canvas', 'rs-engine-core'],
+      // Pre-bundle deps the scanner only finds while the page loads. Otherwise a
+      // cold dev start re-optimizes mid-load and reloads; WKWebView (Tauri) can
+      // end up with two Vue module graphs (`currentRenderingInstance.ce` error).
+      include: [
+        '@vueuse/core',
+        'class-variance-authority',
+        'clsx',
+        'fflate',
+        'lucide-vue-next',
+        'reka-ui',
+        'semver',
+        'tailwind-merge',
+        ...(IS_TAURI ? ['@tauri-apps/api/core', '@tauri-apps/api/event', '@tauri-apps/api/window'] : []),
+      ],
     },
     server: {
       watch: {
@@ -86,6 +104,11 @@ export default defineNuxtConfig({
   modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt', '@nuxtjs/supabase'],
 
   supabase: {
+    // SSR cookies are `Secure`; WebKit (Tauri) drops Secure cookies on
+    // http://localhost and the app origin is tauri://localhost in release
+    // builds. The desktop app renders client-side only, so it keeps the
+    // session in localStorage instead.
+    useSsrCookies: !IS_TAURI,
     redirectOptions: {
       login: '/auth/login',
       callback: '/auth/confirm',

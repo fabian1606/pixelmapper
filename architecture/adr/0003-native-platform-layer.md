@@ -81,7 +81,7 @@ interface Platform {
 `app/platform/tauri` starts from `createWebPlatform()` and replaces individual capabilities with native ones as they are implemented. Anything not yet ported keeps working exactly as on the web (where WKWebView supports it). This keeps every migration step small and shippable.
 
 ### D5 — Native I/O lives in shared Rust crates
-Native implementations live in workspace crates (e.g. `rs-engine/io-artnet`, `rs-engine/io-touch`). The Tauri backend links them directly; the standalone bridges for the web (Art-Net bridge, touch bridge) become thin binaries over the same crates. There MUST be one implementation per protocol, not one per target.
+Native implementations that contain protocol or device logic live in workspace crates (e.g. `rs-engine/io-touch`); thin transports such as UDP sockets MAY live directly in `src-tauri/`. The Tauri backend links them directly; the standalone bridges for the web (Art-Net bridge, touch bridge) become thin binaries over the same crates. There MUST be one implementation per protocol, not one per target.
 
 ### D6 — Raw touch (planned)
 `touch: TouchSourceApi | null` streams normalized contacts (`id, x, y, w, h`). Web: `null` (pointer events are used directly; the WebSocket touch bridge remains an opt-in dev tool). Tauri: the `hidapi` reader from `gesture-lab/bridge`, delivered over a Tauri `Channel`. Consumers already use the `TouchSource` interface from the gesture lab.
@@ -96,7 +96,7 @@ Native implementations live in workspace crates (e.g. `rs-engine/io-artnet`, `rs
 | Step | Content | Web impact |
 |---|---|---|
 | **1** | Platform contract, `HostApi.platform`, `getPlatform()`, `#platform` alias, web implementations; ESP serial connectors, APC Mini driver and Art-Net connector use the contract (Art-Net gains a direct-UDP path, falls back to the bridge) | none (same behaviour) |
-| **2** | Tauri 2 shell (`src-tauri/`, Nuxt as SPA via `bun run generate`), native `udp` via `io-artnet` | none |
+| **2** | Tauri 2 shell (`src-tauri/`, Nuxt as SPA via `bun run generate`), native `udp` (generic socket commands; ArtDMX encoding stays in TS per D2) | none |
 | **3** | Native `serial` (`serialport`) and `midi` (`midir`) in Tauri | none |
 | **4** | Native `touch` (D6) | none |
 | **5** | Native engine + native output sinks (D7, own ADR) | none |
@@ -111,4 +111,6 @@ Open points for step 2:
 
 ## 5. Status
 
+- **Step 2 implemented** (2026-10-16): Tauri 2 shell in `src-tauri/` (`udp_bind`/`udp_send`/`udp_close` in `src/udp.rs`, raw IPC bodies, target in headers), `app/platform/tauri/udp.ts`, `ssr: false` when `TAURI_ENV_PLATFORM` is set, scripts `dev:tauri`/`build:tauri`. The Art-Net connector sends directly from the desktop app. The web bundle contains no Tauri code (checked). Icons in `src-tauri/icons` are placeholders. macOS window uses an overlay title bar (`titleBarStyle: Overlay`, traffic lights positioned in `tauri.conf.json`); the app header doubles as the title bar (`data-tauri-drag-region`, left inset from `getWindowChrome()` exported by each `#platform` entry, dropped in native fullscreen via `onFullscreenChange` since the traffic lights hide there, `WindowDragStrip.vue` for pages without the header). WebKit pitfalls fixed in `nuxt.config.ts`: deps the Vite scanner misses are listed in `optimizeDeps.include` (a mid-load re-optimization left WKWebView with two Vue module graphs), and Supabase uses `useSsrCookies: false` in Tauri builds (WebKit drops `Secure` cookies on `http://localhost`, so edge functions got no session and returned 401). Known gap: in release builds the Nitro routes (`/api/fixtures`, `/api/firmware-proxy`) are missing (they work in `dev:tauri`, which runs the Nuxt dev server).
+- **App menu** (2026-10-16): each `#platform` entry exports `getAppShell()` (`app/platform/app-shell.ts`): native menu bar (`src-tauri/src/menu.rs`, items emit `app-menu` events with command ids) and `.pmproject` dialogs (`src-tauri/src/files.rs`, `tauri-plugin-dialog`, raw IPC bodies); web: no menu, download / file input. Commands live in `app/composables/app-menu` (File: New ⌘N, Open… ⌘O, Open Recent, Save ⌘S, Export… ⌘⇧E; View: All Projects ⌘⇧H, Design/Live/Connections ⌘1–3). Open Recent is a per-device list in localStorage, names synced from `get-projects`. In the browser only ⌘O and ⌘⇧E are bound (the browser keeps ⌘N, ⌘1–3). The header export button was removed.
 - **Step 1 implemented** (2026-10-16): `packages/extension-api/src/platform.ts` (API 1.1.0), `app/platform/{web,tauri}`, `#platform` alias in `nuxt.config.ts`/`vitest.config.ts`, `HostApi.platform`. Migrated: `connector-esp/serial-base.ts`, `controller-akai-apc-mini-mk2/driver.ts`, `connector-artnet` (direct-UDP path + shared `art-dmx.ts`, also used by `tools/artnet-bridge`).

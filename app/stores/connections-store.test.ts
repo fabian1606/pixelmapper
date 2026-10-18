@@ -65,6 +65,21 @@ describe('connections store', () => {
     expect(readStoredConnectors('u1').map(s => s.id).sort()).toEqual(['x', 'y']);
   });
 
+  it('connects always-connected instances as soon as they are added', async () => {
+    const store = useConnectionsStore();
+    await store.load(null);
+    class DirectConnector extends FakeConnector {
+      override alwaysConnected() { return true; }
+    }
+    const direct = new DirectConnector('d');
+    const manual = new FakeConnector('m');
+    store.add(direct);
+    store.add(manual);
+    await Promise.resolve();
+    expect(direct.status.value).toBe('connected');
+    expect(manual.status.value).toBe('disconnected');
+  });
+
   it('routes mapped universes to connected outputs', async () => {
     const store = useConnectionsStore();
     await store.load(null);

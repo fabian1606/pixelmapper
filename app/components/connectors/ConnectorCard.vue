@@ -39,6 +39,9 @@ const statusLabel = computed(() => {
 /** True while the connector is connected or retrying (shows Disconnect). */
 const active = computed(() => props.connector.status.value === 'connected' || props.connector.autoReconnect.value);
 
+/** Connectors without a user-managed connection (e.g. direct UDP) only offer Retry after an error. */
+const alwaysConnected = computed(() => props.connector.alwaysConnected?.() ?? false);
+
 /** Applies and persists a config patch. */
 function change(patch: Record<string, unknown>) {
   store.update(props.connector.id, patch);
@@ -67,7 +70,15 @@ function setOutput(index: number, universe: number) {
         <div v-else class="text-xs text-muted-foreground">{{ connector.meta.label }} · {{ statusLabel }}</div>
       </div>
       <button
-        v-if="active"
+        v-if="alwaysConnected && connector.status.value === 'error'"
+        class="px-2 py-1 rounded text-xs border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+        @click="connector.connect()"
+      >
+        Retry
+      </button>
+      <template v-else-if="alwaysConnected" />
+      <button
+        v-else-if="active"
         class="px-2 py-1 rounded text-xs border border-border hover:bg-accent transition-colors"
         @click="connector.disconnect()"
       >

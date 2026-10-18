@@ -88,6 +88,11 @@ export class ArtNetConnector extends ConnectorBase {
     this.errorMessage.value = null;
   }
 
+  /** Direct UDP has no connection to manage: connected as soon as it exists. */
+  override alwaysConnected(): boolean {
+    return this.directUdp;
+  }
+
   override canAutoConnect(): boolean {
     return this.directUdp || !!this.bridgeUrl.value;
   }
