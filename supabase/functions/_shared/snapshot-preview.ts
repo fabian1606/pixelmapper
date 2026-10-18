@@ -4,6 +4,7 @@
 // `bun test supabase/functions/_shared`. Used by `snapshot-preview`
 // (version-history hover previews, migration 014).
 
+import type { SnapshotHighlights } from './snapshot-highlights.ts';
 import { isUuid, type Parsed } from './validate.ts';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -30,18 +31,31 @@ const COLOR_RE = /^#[0-9a-f]{6}$/i;
 export interface SnapshotPreviewRequest {
   projectId: string;
   snapshotId: string;
+  /** Older snapshot the highlights compare against; null = the older list neighbour (015). */
+  compareToId: string | null;
 }
 
-/** `{ projectId, snapshotId }` — both UUIDs (lower-cased). */
+/** `{ projectId, snapshotId, compareToId? }` — all UUIDs (lower-cased). */
 export function parseSnapshotPreview(body: Record<string, unknown> | null): Parsed<SnapshotPreviewRequest> {
   const projectId = body?.projectId;
   const snapshotId = body?.snapshotId;
+  const compareToId = body?.compareToId;
   if (typeof projectId !== 'string' || typeof snapshotId !== 'string' || !projectId || !snapshotId) {
     return { ok: false, error: 'projectId and snapshotId required' };
   }
   if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
   if (!isUuid(snapshotId)) return { ok: false, error: 'snapshotId must be a UUID' };
-  return { ok: true, value: { projectId: projectId.toLowerCase(), snapshotId: snapshotId.toLowerCase() } };
+  if (compareToId !== undefined && compareToId !== null && !isUuid(compareToId)) {
+    return { ok: false, error: 'compareToId must be a UUID' };
+  }
+  return {
+    ok: true,
+    value: {
+      projectId: projectId.toLowerCase(),
+      snapshotId: snapshotId.toLowerCase(),
+      compareToId: typeof compareToId === 'string' ? compareToId.toLowerCase() : null,
+    },
+  };
 }
 
 // ── Layout ───────────────────────────────────────────────────────────────────
@@ -70,6 +84,8 @@ export interface PreviewLayout {
 export interface SnapshotPreviewResponse {
   snapshotId: string;
   layout: PreviewLayout;
+  /** Comparison with the previous version (015); absent when the RPC is unavailable. */
+  highlights?: SnapshotHighlights;
 }
 
 /** Clamps a number into [min, max]. */

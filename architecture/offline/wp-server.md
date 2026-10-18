@@ -31,6 +31,9 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/snapshot-preview/` | **new** (014): compact scene schematic for version-history hover previews |
 | `supabase/functions/_shared/snapshot-preview.ts` | Pure request parser + defensive layout normalization of `snapshot-preview` |
 | `supabase/migrations/014_snapshot_preview.sql` | `snapshot_preview_layout()` (`security invoker`, explicit grants) |
+| `supabase/migrations/015_snapshot_highlights.sql` | `snapshot_preview_highlights()` + pure `snapshot_highlights_compare()` and helpers (per-entity hashes; `security invoker`, explicit grants) |
+| `supabase/functions/_shared/snapshot-highlights.ts` | Defensive `normalizeHighlights()` of the highlights RPC result |
+| `supabase/tests/015_snapshot_highlights.test.sql` | SQL tests of 015 (categories, layout indices, pairing, cap, access) |
 | `app/utils/sync/remote-restore.ts` | Client reaction to a pulled / realtime `restore-snapshot` marker (reload from the server) |
 | `supabase/functions/create-project/` | changed: client id, idempotency, initial snapshot |
 | `supabase/functions/pull-changes/` | **new**: paged change log after a cursor |
@@ -274,6 +277,45 @@ Fixture tuple (world = 3000 × 3000 px, `FIXTURE_RADIUS` = 18 px):
 - `security invoker` (RLS on `project_snapshots` applies) with `revoke … from public, anon` + `grant execute … to authenticated, service_role`. The RPC returns `null` for an unknown / invisible snapshot (also for a snapshot of another project) → **404** `Snapshot not found`. 400 invalid ids, 403 non-collaborators (viewers may read).
 - `normalizeLayout()` (`_shared/snapshot-preview.ts`) re-validates the RPC result defensively: drops tuples without finite `x`/`y`, clamps `x`/`y` to 0…1, `w`/`h` to 0.01…100, `b` to 0…256, invalid colours → `null`, invalid shapes → 0, out-of-range group indices → -1; malformed group entries keep their slot as `[""]` so indices stay aligned. Tests in `_shared/snapshot-preview.test.ts`.
 
+### `snapshot-preview` highlights (migration 015)
+
+"What is special about this version" for the hover card (WP-SYNC "Hover preview"). Request: `POST { projectId, snapshotId, compareToId? }` (`compareToId` optional UUID or null; anything else → 400). The response adds `highlights`; all 014 fields are unchanged. The previous version is the one of `snapshot-details` (`snapshot_details_pair`): `compareToId` when it exists in the project and is not the snapshot itself, else the older list neighbour (`sequence_number desc, created_at desc, id desc`); none = first version (`previousId: null`, no categories).
+
+```jsonc
+"highlights": {
+  "previousId": "<uuid>" | null,
+  "categories": {                                   // only changed kinds
+    "live": { "added": 0, "changed": 1, "removed": 0 },
+    "effect": {…}, "preset": {…},
+    "fixtures": { "added": 1, "changed": 3, "removed": 0, "moved": 2, "groups": 1 },
+    "settings": { "added": 0, "changed": 1, "removed": 0 }
+  },
+  "live":    { "pages": [{ "status": "added|changed", "page": <LivePage>, "widgets": { "added": [id], "changed": [id], "removed": [{ "id", "type", "label" }] }, "sectionsChanged": false }], "removed": [{ "id", "name" }] },
+  "effects": { "items": [{ "status", "modifier": <ModifierInstance>, "changedKeys": ["params.color", "strength"], "before": { "strength": 0.5 } }], "removed": [{ "id", "name": <plugin hash> }] },
+  "presets": { "items": [{ "status", "preset": <Preset>, "changedKeys": [...] }], "removed": [{ "id", "name" }] },
+  "fixtures": { "added": [layoutIdx], "changed": [layoutIdx], "moved": [layoutIdx], "removed": 2 },
+  "fixtureIndex": { "<fixture id>": layoutIdx },    // ids referenced by returned items / changed fixtures
+  "settings": ["globalBpm"],
+  "truncated": false
+}
+```
+
+- `snapshot_preview_highlights(project, snapshot, compareTo = null, limit = 400, maxBytes = 30000) → jsonb`, `security invoker` (RLS applies; `null` = not found / not visible), built on the pure `snapshot_highlights_compare(prev, cur, limit, maxBytes)` and small helpers (`snapshot_scene_walk`, `snapshot_layout_index`, `snapshot_id_key`, `snapshot_scene_hashes`, `snapshot_entity_list`, `snapshot_list_diff`, `snapshot_changed_keys`, `snapshot_live_widget_diff`, `snapshot_fixture_refs`). `revoke … from public, anon`; `grant execute … to authenticated, service_role`. 015 also grants `snapshot_details_pair` to `service_role` (012 granted `authenticated` only).
+- **Comparison:** entities by id (string or number compared as text; first wins), hash = `md5(jsonb::text)`; only changed entities are returned. Scene flattened at any depth, a fixture's hash includes its parent group; *moved* = `fixturePosition`/`fixtureSize`/`rotation`/`positionZ`/`tiltX`/`rollZ` changed (moved ⊆ changed); group hash = name + parent + ordered members (`expanded` ignored). Modifiers: `params` expands to `params.<key>` when both sides are objects, `before` holds old values (missing keys and values > 2 KB omitted), keys sorted. Presets ignore `createdAt`. Live pages: widgets diffed by id + `sectionsChanged`; an added page lists all widgets as added. Settings: top-level keys except the entity lists, `clockEpoch`, `schemaVersion` (missing `globalBpm` = 120, missing `selectedPresetId` = null, `[]`/`{}` = missing).
+- **Layout indices** use exactly the walk, drawable filter, order and cap of `snapshot_preview_layout` (014 unchanged); fixtures beyond the cap are omitted.
+- **Caps:** budget `octet_length(highlights::text)` ≤ 30 KB. The base (counts, index lists ≤ 400, removed ≤ 20 per kind, names ≤ 60 chars, settings ≤ 50, widget ids ≤ 200, removed widgets ≤ 50) is always returned; then live pages (added first, then most widget changes), effects, presets and finally `fixtureIndex` entries of changed fixtures are added while they fit — an item's referenced `fixtureIndex` entries count towards its cost. What does not fit is dropped (counts stay complete) and `truncated = true` (also when a fixed list cap cut something).
+- **Measured** (Docker `postgres:16`; 400 fixtures with UUID ids, 8 channels, 20 groups, 8 modifiers, 10 presets × 50 fixtures, 3 pages × 30 widgets; 593 KB snapshot; jsonb text sizes; layout alone 18.0 KB):
+
+  | Scenario | highlights | full response | time |
+  |---|---|---|---|
+  | one widget changed | 6.0 KB | 24.2 KB | 62 ms |
+  | one modifier param changed | 5.1 KB | 23.2 KB | 62 ms |
+  | one preset added | 5.1 KB | 23.2 KB | 66 ms |
+  | 20 fixtures moved | 1.4 KB | 19.6 KB | 143 ms |
+  | everything changed | 30.0 KB (truncated: 3 pages, 1/8 effects, 1/10 presets) | 48.1 KB | 126 ms |
+- The edge function runs the layout and highlights RPCs in parallel; if the highlights RPC fails (e.g. 015 not applied yet) it logs and omits `highlights`. `normalizeHighlights()` (`_shared/snapshot-highlights.ts`) re-validates the result (indices in range, malformed items dropped). Tests: `_shared/snapshot-highlights.test.ts`, `_shared/snapshot-preview.test.ts` (`compareToId`), `supabase/tests/015_snapshot_highlights.test.sql` (all categories and no-ops, layout indices vs. `snapshot_preview_layout` incl. cap, pairing incl. equal sequence numbers / foreign / self compareTo, payload cap, access: viewer ok, stranger null under RLS, anon denied, service_role ok).
+- Known limits: wide changes drop most payloads (counts stay); an item bigger than the budget is never sent; hashes are formatting-sensitive (`1` vs `1.0`, as in 013); the snapshot pair is walked three times (60–140 ms for a 600 KB pair).
+
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
 ```ts
@@ -318,6 +360,7 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 #    column + backfill, list_snapshot_summaries replaced).
 
 #    014 (snapshot_preview_layout for the version-history hover preview).
+#    015 (snapshot_preview_highlights: what changed, for the hover preview).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
@@ -331,7 +374,7 @@ supabase functions deploy save-snapshot        # needs 013 (prune_project_snapsh
 supabase functions deploy list-projects-sync
 supabase functions deploy list-snapshots       # needs 010 (list_snapshot_summaries)
 supabase functions deploy snapshot-details     # needs 012 (snapshot_details_pair, …)
-supabase functions deploy snapshot-preview     # needs 014 (snapshot_preview_layout)
+supabase functions deploy snapshot-preview     # needs 014 (snapshot_preview_layout); 015 for highlights (without it they are omitted)
 ```
 
 All functions keep the default JWT verification. **Migration 009 must be applied before** `push-change`, `restore-snapshot` and `create-project` are deployed (they call the new RPCs / write `created_by`); the others work against the existing schema. Clients of the previous build keep working: the response shapes are unchanged (`restore-snapshot` only adds fields), and an older client ignores the `restore-snapshot` marker row with a "no handler" warning.

@@ -9,7 +9,13 @@ const SID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 describe('parseSnapshotPreview', () => {
   test('accepts ids and lower-cases them', () => {
     expect(parseSnapshotPreview({ projectId: PID.toUpperCase(), snapshotId: SID.toUpperCase() }))
-      .toEqual({ ok: true, value: { projectId: PID, snapshotId: SID } });
+      .toEqual({ ok: true, value: { projectId: PID, snapshotId: SID, compareToId: null } });
+  });
+  test('optional compareToId (null / missing / UUID)', () => {
+    expect(parseSnapshotPreview({ projectId: PID, snapshotId: SID, compareToId: null }))
+      .toEqual({ ok: true, value: { projectId: PID, snapshotId: SID, compareToId: null } });
+    expect(parseSnapshotPreview({ projectId: PID, snapshotId: SID, compareToId: PID.toUpperCase() }))
+      .toEqual({ ok: true, value: { projectId: PID, snapshotId: SID, compareToId: PID } });
   });
   test.each([
     [null, 'projectId and snapshotId required'],
@@ -17,6 +23,8 @@ describe('parseSnapshotPreview', () => {
     [{ projectId: PID, snapshotId: 5 }, 'projectId and snapshotId required'],
     [{ projectId: 'x', snapshotId: SID }, 'projectId must be a UUID'],
     [{ projectId: PID, snapshotId: 'x' }, 'snapshotId must be a UUID'],
+    [{ projectId: PID, snapshotId: SID, compareToId: 'x' }, 'compareToId must be a UUID'],
+    [{ projectId: PID, snapshotId: SID, compareToId: 5 }, 'compareToId must be a UUID'],
   ])('rejects %j', (body, error) => {
     expect(parseSnapshotPreview(body as Record<string, unknown> | null)).toEqual({ ok: false, error });
   });
