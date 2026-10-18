@@ -16,6 +16,10 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/push-change/` | changed (009): writes through the `push_changes` RPC |
 | `supabase/functions/restore-snapshot/` | changed (009): writes through the `restore_snapshot` RPC (marker change + snapshot) |
 | `supabase/migrations/009_push_changes_rpc.sql` | `push_changes()`, `restore_snapshot()`, `project_lock_key()`, `projects.created_by`, `user_records` LWW guard fix |
+| `supabase/functions/list-snapshots/` | rewritten (010): paged version-history list with SQL summaries, shared helpers |
+| `supabase/functions/_shared/snapshot-list.ts` | Pure row → response mapping of `list-snapshots` (cursor of the last row) |
+| `supabase/migrations/010_snapshot_summary.sql` | `snapshot_summary(jsonb)`, `list_snapshot_summaries()` (both `security invoker`) |
+| `app/utils/sync/remote-api-snapshots.ts` | Typed wrapper `listSnapshots()` |
 | `app/utils/sync/remote-restore.ts` | Client reaction to a pulled / realtime `restore-snapshot` marker (reload from the server) |
 | `supabase/functions/create-project/` | changed: client id, idempotency, initial snapshot |
 | `supabase/functions/pull-changes/` | **new**: paged change log after a cursor |
@@ -153,6 +157,16 @@ Response 200: `{ "snapshot", "meta": { "id", "sequence_number", "created_at" }, 
 - Client: a pulled or realtime marker is never replayed; `remote-restore.ts` schedules one reload of the open project from the server (engine store: wait for the sync engine to be idle, then `loadProject(id, …, fromServer)`), and blocks server snapshots until then. The restoring client ignores its own marker echo (`runLocalRestore`).
 - 400 for non-UUID ids, **403** unless owner/editor (was an RLS 500), 404 for an unknown snapshot.
 
+### `list-snapshots` (rewritten, migration 010)
+
+Request: `POST { "projectId": "<uuid>", "before"?: "<cursor>", "limit"?: 1…100 }` (default 30).
+Response 200: `{ "snapshots": [{ "id", "sequenceNumber", "label", "createdAt", "createdBy", "authorName", "summary": { "fixtures", "groups", "modifiers" } }], "nextCursor": string | null }`, newest first.
+
+- Version-history list (WP-SYNC "Version history"). Never returns the snapshot JSON: the RPC `list_snapshot_summaries` (010, `security invoker`, RLS applies) computes the counts with `snapshot_summary(jsonb)` — fixtures and groups counted recursively through group `children`, modifiers = `jsonb_array_length(modifiers)`; `authorName` = `profiles.display_name`.
+- Order `sequence_number desc, created_at desc, id desc` (several snapshots can share a sequence number). `nextCursor` is an opaque keyset cursor `<seq>~<createdAt>~<id>` of the last row; the function asks for `limit + 1` rows to know whether another page exists.
+- Shared helpers (CORS, preflight, POST only, JSON errors); 400 for invalid input / cursor, 403 for non-collaborators (viewers may read). Breaking change to the old GET `?projectId=` array response, which no client used.
+- Pure parts: `_shared/validate.ts` (`parseListSnapshots`, cursor encode/decode), `_shared/snapshot-list.ts` (row → response); tests in `_shared/snapshot-list.test.ts`. The 010 SQL was verified against a throwaway `postgres:16` container (nested groups, malformed arrays, paging across equal sequence numbers).
+
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
 ```ts
@@ -190,7 +204,8 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 ```bash
 # 1. Schema first: 007 (project_sync_heads), 008 (user_records),
 #    009 (push_changes / restore_snapshot RPCs, projects.created_by,
-#    user_records LWW fix).
+#    user_records LWW fix), 010 (snapshot_summary /
+#    list_snapshot_summaries for the version history).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
@@ -202,6 +217,7 @@ supabase functions deploy load-project
 supabase functions deploy load-shared-project
 supabase functions deploy save-snapshot
 supabase functions deploy list-projects-sync
+supabase functions deploy list-snapshots       # needs 010 (list_snapshot_summaries)
 ```
 
 All functions keep the default JWT verification. **Migration 009 must be applied before** `push-change`, `restore-snapshot` and `create-project` are deployed (they call the new RPCs / write `created_by`); the others work against the existing schema. Clients of the previous build keep working: the response shapes are unchanged (`restore-snapshot` only adds fields), and an older client ignores the `restore-snapshot` marker row with a "no handler" warning.
@@ -259,6 +275,6 @@ Expected: both `push_changes` calls return the same `(idx, ack_change_id, ack_se
 - Client: `pullStep` counts any pulled row whose change id is in the outbox as "own, acknowledged", regardless of `user_id`. With client-generated UUIDs a foreign row with the same id only occurs on purpose; the server no longer acknowledges such pushes.
 - **`load-project` tail is capped** by PostgREST `max_rows` (default 1000). Signalled via `latestSequence` / `tailTruncated`; the current `engine-store` client ignores it (WP-SYNC should continue with `pull-changes`).
 - **Orphan projects:** if the compensating rollback in `create-project` fails, the id stays occupied without an owner. Since 009 the creating user adopts it on retry (`created_by`); see `create-project`.
-- `get-projects`, `list-snapshots` still lack CORS headers (unchanged; out of scope).
+- `get-projects` still lacks CORS headers (unchanged; out of scope). `list-snapshots` uses the shared helpers since 010.
 - Request size: an uploaded snapshot goes through one request; very large projects may hit the edge-function body limit.
 - Client bug seen while reading (not changed here, WP-SYNC): `engine-store.loadProject` falls back to `data.snapshot?.sequence_number` (inside the snapshot JSON) instead of `data.snapshotSequence` when the tail is empty.

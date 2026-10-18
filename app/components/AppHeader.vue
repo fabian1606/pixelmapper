@@ -103,7 +103,7 @@ const tabs = computed(() => projectId.value ? [
 
     <div class="ml-auto flex items-center gap-4" data-tauri-drag-region>
       <!-- Sync status of the open project (ADR 0004 D17) -->
-      <SyncStatusIndicator v-if="projectId" />
+      <SyncStatusIndicator v-if="projectId" :project-id="projectId" />
 
       <div class="relative">
         <button

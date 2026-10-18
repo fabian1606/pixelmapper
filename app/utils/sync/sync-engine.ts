@@ -130,6 +130,18 @@ export class SyncEngine {
     return this.requestSync();
   }
 
+  /**
+   * Restore server snapshot `snapshotId` (version history, D5/D17): the
+   * restore RPC appends a marker, then the session closes and the project
+   * reloads from the restored state. Resolves false when unavailable or
+   * failed. Not run under the lock: closing the session waits for it.
+   */
+  restoreSnapshot(snapshotId: string): Promise<boolean> {
+    const restore = this.deps.restoreBeforeSync;
+    if (!restore || !this.canSync()) return Promise.resolve(false);
+    return restore(snapshotId);
+  }
+
   /** Live position (written with the working snapshot). */
   livePosition(): SyncPosition {
     return this.state.live;
