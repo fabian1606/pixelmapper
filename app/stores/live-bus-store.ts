@@ -3,6 +3,7 @@ import { ref, shallowRef, triggerRef, nextTick } from 'vue';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useEngineStore } from '~/stores/engine-store';
 import { userColor } from '~/composables/live-ops/colors';
+import { enqueueLiveOp } from '~/utils/persistence/persist-queue';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,140 +102,23 @@ function isPersistent(config: LiveOpConfig): boolean {
 }
 
 // ─── Persist queue (DB-tail, shared between LiveBus and history commands) ────
-// Both `dispatch()` for persistent live-ops and the history layer push entries
-// here. A single in-flight guard (`inFlightFlush`) serializes the round-trip
-// to the push-change edge function so `lastSeenSequenceNumber` stays accurate
-// across snapshots. Coalescing (dedupKey) keeps per-frame ops like knob drags
-// from filling the event log with 60Hz junk — only the latest payload per key
-// inside a settle window is persisted.
+// Implemented in `~/utils/persistence/persist-queue` (WAL-backed, coalescing,
+// backoff + connectivity aware — ADR 0004 D8/D9). Re-exported here so existing
+// imports from the LiveBus store keep working.
 
-export interface PersistEntry {
-  type: string;
-  payload: any;
-  /** Client-generated idempotency key (UUID). Optional for legacy live-op
-   *  dispatches that don't go through the history layer; history-originated
-   *  entries always carry one so WAL ACK can target them precisely. */
-  changeId?: string;
-  dedupKey?: string;
-  resolve?: (seq: number | undefined) => void;
-  reject?: (err: unknown) => void;
-}
-
-export type PersistHook = (
-  entries: Array<{ type: string; payload: any; changeId?: string }>,
-) => Promise<Array<number | undefined>>;
-
-/** Called after a successful flush with all `changeId`s the server acknowledged. */
-export type PersistAckHook = (changeIds: string[]) => void;
-
-// Reduced from 250ms — the WAL makes correctness independent of this window, so
-// we only need enough batching to coalesce same-frame writes. 50ms gives ~3
-// animation frames of grace for back-to-back commands without spamming the
-// server with one request per command.
-const PERSIST_SETTLE_MS = 50;
-
-const persistByKey = new Map<string, PersistEntry>();
-const persistAppend: PersistEntry[] = [];
-let persistFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let inFlightFlush: Promise<void> | null = null;
-let persistHook: PersistHook | null = null;
-let persistAckHook: PersistAckHook | null = null;
-
-export function setPersistHook(hook: PersistHook | null): void {
-  persistHook = hook;
-}
-
-export function setPersistAckHook(hook: PersistAckHook | null): void {
-  persistAckHook = hook;
-}
-
-export function enqueuePersist(entry: PersistEntry): void {
-  if (entry.dedupKey) {
-    // Replacing an earlier entry: resolve its promise with undefined so the
-    // history layer's .then() can still increment its commands-since-snapshot
-    // counter without leaving an orphaned, never-resolving promise behind.
-    const prev = persistByKey.get(entry.dedupKey);
-    if (prev && prev !== entry) prev.resolve?.(undefined);
-    persistByKey.set(entry.dedupKey, entry);
-  } else {
-    persistAppend.push(entry);
-  }
-  if (persistFlushTimer != null) clearTimeout(persistFlushTimer);
-  persistFlushTimer = setTimeout(() => { flushPersistQueue(); }, PERSIST_SETTLE_MS);
-}
-
-/**
- * Drain pending persist entries to the configured hook. Serialized via
- * `inFlightFlush`: a second concurrent caller awaits the in-flight round-trip,
- * then runs its own pass. Safe to call from doSaveSnapshot, beforeunload, or
- * Cmd+S — guarantees that `lastSeenSequenceNumber` (updated synchronously
- * inside the hook) reflects every entry that was queued before the call.
- */
-export async function flushPersistQueue(): Promise<void> {
-  if (inFlightFlush) await inFlightFlush;
-  if (persistFlushTimer != null) { clearTimeout(persistFlushTimer); persistFlushTimer = null; }
-  if (persistByKey.size === 0 && persistAppend.length === 0) return;
-  if (!persistHook) return; // hook not wired yet — keep entries, next dispatch will re-arm timer
-
-  const batch: PersistEntry[] = [...persistByKey.values(), ...persistAppend];
-  persistByKey.clear();
-  persistAppend.length = 0;
-
-  inFlightFlush = (async () => {
-    try {
-      const seqs = await persistHook!(batch.map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId })));
-      for (let i = 0; i < batch.length; i++) batch[i].resolve?.(seqs[i]);
-      // Notify WAL that these changeIds are durable on the server now — but
-      // ONLY for entries where the server actually returned a sequence number.
-      // Entries with undefined seq either failed silently on the server or were
-      // dropped from the response; keep them in the WAL so the next loadProject
-      // recovery retries via the idempotent push-change endpoint.
-      if (persistAckHook) {
-        const ackedIds: string[] = [];
-        for (let i = 0; i < batch.length; i++) {
-          const e = batch[i];
-          if (e.changeId && seqs[i] != null) ackedIds.push(e.changeId);
-        }
-        if (ackedIds.length > 0) persistAckHook(ackedIds);
-      }
-    } catch (err) {
-      console.warn('[LiveBus] persist flush failed:', err);
-      // Re-queue dedup entries only if no newer payload has arrived since;
-      // append entries are unconditionally re-queued so history commands don't
-      // silently disappear. The rejected promises let callers see the failure.
-      for (const e of batch) {
-        if (e.dedupKey) {
-          if (!persistByKey.has(e.dedupKey)) persistByKey.set(e.dedupKey, e);
-        } else {
-          persistAppend.push(e);
-        }
-        e.reject?.(err);
-      }
-      if (persistByKey.size > 0 || persistAppend.length > 0) {
-        if (persistFlushTimer != null) clearTimeout(persistFlushTimer);
-        persistFlushTimer = setTimeout(() => { flushPersistQueue(); }, PERSIST_SETTLE_MS);
-      }
-    }
-  })();
-  try { await inFlightFlush; } finally { inFlightFlush = null; }
-}
-
-/** Snapshot of pending persist entries — used by beforeunload to drain via keepalive fetch. */
-export function getPersistQueueSnapshot(): Array<{ type: string; payload: any; changeId?: string }> {
-  return [...persistByKey.values(), ...persistAppend]
-    .map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId }));
-}
-
-/** Drop all pending entries without resolving callers. Used on project switch
- *  to discard ops queued against the previous project. Callers that care about
- *  not losing data must `await flushPersistQueue()` before calling this. */
-export function clearPersistQueue(): void {
-  for (const e of persistByKey.values()) e.resolve?.(undefined);
-  for (const e of persistAppend) e.resolve?.(undefined);
-  persistByKey.clear();
-  persistAppend.length = 0;
-  if (persistFlushTimer != null) { clearTimeout(persistFlushTimer); persistFlushTimer = null; }
-}
+export {
+  setPersistHook,
+  setPersistAckHook,
+  setPersistProjectId,
+  enqueuePersist,
+  enqueueLiveOp,
+  flushPersistQueue,
+  flushPersistWal,
+  getPersistQueueSnapshot,
+  hasPendingCommandPersist,
+  clearPersistQueue,
+} from '~/utils/persistence/persist-queue';
+export type { PersistEntry, PersistHook, PersistAckHook } from '~/utils/persistence/persist-queue';
 
 // ─── Pinia Store ──────────────────────────────────────────────────────────────
 
@@ -321,10 +205,15 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     const persist = isPersistent(config);
     const broadcast = config.broadcast ?? true;
 
+    // Coalescing key, shared by the persist queue/WAL and the broadcast batch:
+    // per target where the op defines `coalesceKey`, else per type.
+    const dedupKey = config.coalesceKey?.(payload)
+      ?? (config.merge !== 'append' ? type : undefined);
+
     if (persist) {
-      const dedupKey = config.coalesceKey?.(payload)
-        ?? (config.merge !== 'append' ? type : undefined);
-      enqueuePersist({ type, payload, dedupKey });
+      // Gets a client changeId and a WAL row (coalesced by dedupKey) before
+      // it is sent — survives tab close / offline (ADR 0004 D8).
+      enqueueLiveOp(type, payload, dedupKey);
       // Mark engine dirty so the snapshot timer also runs as a compaction
       // safety net. dispatch() is local-origin only, so no isApplyingRemote
       // guard needed.
@@ -347,7 +236,8 @@ export const useLiveBusStore = defineStore('live-bus', () => {
     if (config.merge === 'append') {
       pendingAppend.push(op);
     } else {
-      pendingReplace.set(type, op);
+      // Per-target key so two targets in one frame both reach the peers.
+      pendingReplace.set(dedupKey ?? type, op);
     }
 
     if (config.throttle === 'raf') {

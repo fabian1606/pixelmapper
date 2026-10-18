@@ -5,16 +5,13 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { extractCategories } from './preset-diff';
 import { resolvePreset } from './preset-resolve';
+import { newPrefixedId } from '~/utils/ids';
 
 // Re-export for consumers that import extractCategories from this module
 export { extractCategories } from './preset-diff';
 
 import { storeToRefs } from 'pinia';
 import { useEngineStore } from '~/stores/engine-store';
-
-// ─── Singleton state ──────────────────────────────────────────────────────────
-
-let nextPresetIndex = 1;
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -46,7 +43,8 @@ export function usePresets() {
 
 
   function savePreset(name: string, fixtures: Fixture[], effects: ModifierInstance[], nodes?: SceneNode[]): Preset {
-    const id = `preset-${Date.now()}-${nextPresetIndex++}`;
+    // UUID so presets created on different (offline) clients never collide (ADR 0004 D6).
+    const id = newPrefixedId('preset');
     const preset: Preset = {
       id,
       name,

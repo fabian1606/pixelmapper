@@ -1,14 +1,41 @@
-export default defineNuxtRouteMiddleware(async (to, from) => {
-  const supabase = useSupabaseClient()
+import { hasAuthenticatedUser, readCachedSession, type AuthLike, type CachedSession } from '~/utils/auth/session-recovery';
 
-  // getUser() validates server-side; getSession() only reads localStorage and can return stale/invalid sessions
-  const { data: { user } } = await supabase.auth.getUser()
+/**
+ * Global auth guard — offline-tolerant (ADR 0004 D10).
+ *
+ * The decision uses only the locally cached session: the `useSupabaseSession`
+ * state (filled by the Supabase plugins, SSR cookies or localStorage) and, on
+ * the client, the raw session supabase-js persisted (also when its access
+ * token is expired and could not be refreshed offline). On the client and
+ * while online, each access token is additionally validated against the auth
+ * server once, bounded by a timeout — a network failure never counts as
+ * "logged out". Works with `useSsrCookies` on (web) and off (Tauri SPA).
+ */
+export default defineNuxtRouteMiddleware(async (to) => {
+  const supabase = useSupabaseClient();
+  const sessionState = useSupabaseSession();
 
-  if (user && to.path.startsWith('/auth/')) {
-    return navigateTo('/')
+  let signedIn: boolean;
+  if (import.meta.server) {
+    // SSR (web): the Supabase server plugin already read the cookie session
+    // and verified its claims. A session whose claims could not be verified
+    // (e.g. transient JWKS/network error) still counts — the edge functions
+    // validate every request and a real 401 is handled by the engine store.
+    signedIn = !!useSupabaseUser().value || !!sessionState.value;
+  }
+  else {
+    // Local only: state first, then the persisted session.
+    let session = sessionState.value as CachedSession | null;
+    if (!session) session = await readCachedSession(supabase.auth);
+    // Validated against the server once per token while online (bounded).
+    signedIn = await hasAuthenticatedUser(session, supabase.auth as unknown as AuthLike, { validate: true });
   }
 
-  if (!user && to.path.startsWith('/project/')) {
-    return navigateTo(`/auth/login?redirect=${encodeURIComponent(to.fullPath)}`)
+  if (signedIn && to.path.startsWith('/auth/')) {
+    return navigateTo('/');
   }
-})
+
+  if (!signedIn && to.path.startsWith('/project/')) {
+    return navigateTo(`/auth/login?redirect=${encodeURIComponent(to.fullPath)}`);
+  }
+});
