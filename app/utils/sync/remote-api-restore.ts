@@ -4,7 +4,8 @@ import type { RemoteResult } from '~/utils/sync/remote-api-types';
 
 /**
  * Typed wrapper of the `restore-snapshot` edge function (ADR 0004 D5):
- * copies an older server snapshot to the head of the change log.
+ * appends a `restore-snapshot` marker change and stores the older server
+ * snapshot at the marker's sequence number.
  * Kept out of `remote-api.ts` to keep that file small; same conventions
  * (never throws, `RemoteResult`).
  */
@@ -14,7 +15,11 @@ export interface RestoreSnapshotResult {
   snapshot: ProjectSnapshot;
   /** Id of the newly inserted head snapshot. */
   id: string;
-  /** Sequence number the restored snapshot was stored at (latest change). */
+  /**
+   * Sequence number the restored snapshot was stored at: the server's
+   * `restore-snapshot` marker change (migration 009; older deployments: the
+   * latest change).
+   */
   sequenceNumber: number;
 }
 

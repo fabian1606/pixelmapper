@@ -10,6 +10,7 @@ import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 import { snapshotTwinStates } from '~/composables/live-ops/twin-state-hub';
 import { isNetworkError, isOnline, onReconnect, reportNetworkFailure } from '~/utils/sync/connectivity';
 import { getOpenSyncEngine } from '~/utils/sync/open-sync-engine';
+import { handleRestoreMarker } from '~/utils/sync/remote-restore';
 import type { RemoteInsert } from '~/utils/sync/sync-engine';
 
 // Side-effect imports: register all live ops and live widget commands
@@ -160,6 +161,8 @@ export function useCollaboration(projectId: string): CollaborationContext {
   // peers apply them from the LiveBus broadcast.
   /** Apply a foreign committed command (history, so it can be undone). */
   function applyRemoteRow(row: RemoteInsert) {
+    // A restore marker reloads the project from the server (remote-restore.ts).
+    if (handleRestoreMarker(row.commandType)) return;
     const cmd = commandFromPayload(row.commandType, row.payload as object, engineStore.getReplayContext());
     if (!cmd) return;
     history.executeRemote(cmd);

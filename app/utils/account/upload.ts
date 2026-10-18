@@ -15,6 +15,10 @@ export type UploadResult =
   | { ok: true; meta: LocalProjectMeta }
   | { ok: false; error: RemoteError | { kind: 'not-found' | 'not-local'; message: string } };
 
+/** Retries while the server reports a create in flight (503), and their base delay. */
+const UPLOAD_BUSY_RETRIES = 3;
+const UPLOAD_BUSY_DELAY_MS = 1_000;
+
 // ── Upload ───────────────────────────────────────────────────────────────────
 
 /**
@@ -35,12 +39,20 @@ export async function uploadLocalProject(
   }
 
   const snapshot = await store.getWorkingSnapshot(projectId);
-  const res = await createProject(client, {
+  const input = {
     id: meta.id,
     name: meta.name,
     ...(meta.description ? { description: meta.description } : {}),
     ...(snapshot ? { snapshot } : {}),
-  });
+  };
+  // 503 = a concurrent create of the same id is still running (lost
+  // response + retry): wait briefly and ask again. The server then returns
+  // the project with the snapshot it stored from THIS request.
+  let res = await createProject(client, input);
+  for (let attempt = 1; !res.ok && res.error.status === 503 && attempt <= UPLOAD_BUSY_RETRIES; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, UPLOAD_BUSY_DELAY_MS * attempt));
+    res = await createProject(client, input);
+  }
   if (!res.ok) return { ok: false, error: res.error };
 
   const cursor = res.data.snapshot?.sequenceNumber ?? 0;

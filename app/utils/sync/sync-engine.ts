@@ -128,6 +128,14 @@ export class SyncEngine {
     return run;
   }
 
+  /**
+   * Resolves once every network operation queued so far has finished (used
+   * before the project is reloaded after a remote restore).
+   */
+  whenIdle(): Promise<void> {
+    return this.exclusive(async () => {});
+  }
+
   // ── Sync cycle ─────────────────────────────────────────────────────────────
 
   /** Run a sync cycle; concurrent requests share one queued cycle. */

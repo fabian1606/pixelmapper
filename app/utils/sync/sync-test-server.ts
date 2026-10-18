@@ -7,7 +7,18 @@ import type { RemoteClient } from '~/utils/sync/remote-api';
  *
  * One change log with GLOBAL sequence numbers shared by all projects, like
  * `project_changes`. Sequence numbers can be reserved and committed later to
- * emulate two concurrent inserts that become visible out of order.
+ * emulate two concurrent inserts that become visible out of order (writes
+ * that bypass the serialized `push_changes` RPC of migration 009).
+ *
+ * Models the semantics of migration 009:
+ * - `push-change` is idempotent per (project, change id): a duplicate of the
+ *   caller's own row returns its stored sequence number; an id stored by
+ *   another user is never acknowledged (`null`);
+ * - `restore-snapshot` appends a `restore-snapshot` marker change and stores
+ *   the restored snapshot at the marker's sequence number;
+ * - `load-project` never loads `before offline sync` safety snapshots; among
+ *   the rest the highest sequence wins, then the newest;
+ * - `save-snapshot` rejects a sequence number above the latest change (400).
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -40,6 +51,20 @@ export interface ServerCall {
 }
 
 const NOW = '2026-10-18T10:00:00Z';
+
+/** Label of the D5 safety snapshot (never loaded from, like the server). */
+const SAFETY_LABEL = 'before offline sync';
+
+/** Marker change type of a restore (migration 009). */
+export const RESTORE_MARKER = 'restore-snapshot';
+
+/** Mimics supabase-js `FunctionsHttpError` (Response in `context`). */
+function httpError(status: number, message: string): Error & { context: Response } {
+  const err = new Error('Edge Function returned a non-2xx status code') as Error & { context: Response };
+  err.name = 'FunctionsHttpError';
+  err.context = new Response(JSON.stringify({ error: message }), { status });
+  return err;
+}
 
 // ── Server ───────────────────────────────────────────────────────────────────
 
@@ -119,7 +144,12 @@ export class FakeSyncServer {
     switch (name) {
       case 'pull-changes': return { data: this.pull(body), error: null };
       case 'push-change': return { data: this.push(body), error: null };
-      case 'save-snapshot': return { data: this.save(body), error: null };
+      case 'save-snapshot': {
+        if (body.sequenceNumber > this.latest(body.projectId)) {
+          return { data: null, error: httpError(400, 'sequenceNumber is beyond the latest change') };
+        }
+        return { data: this.save(body), error: null };
+      }
       case 'load-project': return { data: this.load(body), error: null };
       case 'restore-snapshot': return { data: this.restore(body), error: null };
       default: return { data: null, error: new Error(`unknown function ${name}`) };
@@ -131,10 +161,17 @@ export class FakeSyncServer {
     return this.rowsOf(projectId).reduce((m, r) => Math.max(m, r.sequence_number), 0);
   }
 
-  /** Latest snapshot of a project (last stored wins). */
-  private latestSnapshot(projectId: string): ServerSnapshot | null {
-    const own = this.snapshots.filter(s => s.project_id === projectId);
-    return own.length > 0 ? own[own.length - 1]! : null;
+  /**
+   * Snapshot a project loads from: no safety snapshots; highest sequence,
+   * then the newest (last stored).
+   */
+  latestSnapshot(projectId: string): ServerSnapshot | null {
+    let best: ServerSnapshot | null = null;
+    for (const s of this.snapshots) {
+      if (s.project_id !== projectId || s.label === SAFETY_LABEL) continue;
+      if (!best || s.sequence_number >= best.sequence_number) best = s;
+    }
+    return best;
   }
 
   /** `pull-changes`: one page after `afterSequence`. */
@@ -152,14 +189,18 @@ export class FakeSyncServer {
     };
   }
 
-  /** `push-change`: idempotent by change id; unconfirmed ids get `null`. */
+  /**
+   * `push-change`: idempotent by (project, change id) for the caller's own
+   * rows; another user's id and ids in `unconfirm` get `null`.
+   */
   private push(body: Record<string, any>) {
     const sequenceNumbers: Array<number | null> = [];
     const changeIds: string[] = [];
     for (const c of body.changes as Array<{ changeId: string; commandType: string; payload: unknown }>) {
       changeIds.push(c.changeId);
       if (this.unconfirm.has(c.changeId)) { sequenceNumbers.push(null); continue; }
-      const existing = this.rows.find(r => r.change_id === c.changeId);
+      const existing = this.rows.find(r => r.project_id === body.projectId && r.change_id === c.changeId);
+      if (existing && existing.user_id !== this.userId) { sequenceNumbers.push(null); continue; }
       const row = existing ?? this.insert(body.projectId, c.commandType, c.payload, { changeId: c.changeId, userId: this.userId });
       sequenceNumbers.push(row.sequence_number);
     }
@@ -185,11 +226,20 @@ export class FakeSyncServer {
     };
   }
 
-  /** `restore-snapshot`: copy an old snapshot to the head of the log. */
+  /**
+   * `restore-snapshot`: append a marker change (by the caller) and store the
+   * old snapshot at the marker's sequence number.
+   */
   private restore(body: Record<string, any>) {
-    const old = this.snapshots.find(s => s.id === body.snapshotId);
+    const old = this.snapshots.find(s => s.id === body.snapshotId && s.project_id === body.projectId);
     if (!old) return null;
-    const head = this.addSnapshot(body.projectId, old.snapshot, this.latest(body.projectId), 'restored');
-    return { snapshot: head.snapshot, meta: { id: head.id, sequence_number: head.sequence_number } };
+    const marker = this.insert(body.projectId, RESTORE_MARKER, { snapshotId: old.id }, { userId: this.userId });
+    const head = this.addSnapshot(body.projectId, old.snapshot, marker.sequence_number, `Restored from snapshot ${old.sequence_number}`);
+    return {
+      snapshot: head.snapshot,
+      meta: { id: head.id, sequence_number: head.sequence_number, created_at: head.created_at },
+      markerChangeId: marker.change_id,
+      sourceSequence: old.sequence_number,
+    };
   }
 }
