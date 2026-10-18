@@ -40,7 +40,119 @@
 -- Thumbnail hook: `prune_project_snapshot_ids()` returns the ids of the
 -- deleted rows, so a caller can delete per-snapshot storage objects
 -- (e.g. `<projectId>/<snapshotId>.webp`) for exactly those ids.
+--
+-- No-change autosaves:
+--   * `project_snapshots.content_hash` = sha256 of the NORMALIZED snapshot
+--     (set by a trigger on insert / update of `snapshot`, backfilled below).
+--     Normalization drops what the client's version diff ignores
+--     (app/utils/sync/version-diff/): the top-level `clockEpoch` and the
+--     `expanded` flag of every group in the `sceneNodes` tree (any depth;
+--     a group = `_type: 'group'` or a `children` array, as in 010).
+--     Everything else counts as content (see "Volatile fields" in
+--     architecture/offline/wp-server.md).
+--   * Pruning also deletes an UNLABELED, unprotected snapshot whose hash
+--     equals that of the next older remaining snapshot (list order
+--     `sequence_number, created_at, id`): of a run of identical snapshots the
+--     OLDEST survives (when the state appeared). Protected rows (newest, load
+--     base, restore source/result) are never deleted, so load-project is
+--     unchanged.
+--   * `list_snapshot_summaries` (010) hides unlabeled snapshots whose hash
+--     equals their older neighbour's.
 -- ============================================================
+
+-- ── Content hash ────────────────────────────────────────────
+-- Removes `expanded` from every group of a sceneNodes array (recursive).
+-- Non-arrays and non-object elements are returned unchanged.
+create or replace function snapshot_strip_group_ui(p_nodes jsonb)
+returns jsonb
+language plpgsql
+immutable
+security invoker
+set search_path = public
+as $$
+begin
+  if p_nodes is null or jsonb_typeof(p_nodes) <> 'array' then
+    return p_nodes;
+  end if;
+  return coalesce((
+    select jsonb_agg(
+             case
+               when jsonb_typeof(e.n) = 'object'
+                and (e.n->>'_type' = 'group' or jsonb_typeof(e.n->'children') = 'array') then
+                 case when jsonb_typeof(e.n->'children') = 'array'
+                      then jsonb_set(e.n - 'expanded', '{children}', snapshot_strip_group_ui(e.n->'children'))
+                      else e.n - 'expanded'
+                 end
+               else e.n
+             end
+             order by e.ord)
+      from jsonb_array_elements(p_nodes) with ordinality as e(n, ord)
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Snapshot without the volatile fields (top-level `clockEpoch`, group
+-- `expanded`). Non-object snapshots are returned unchanged.
+create or replace function snapshot_content_normalize(p_snapshot jsonb)
+returns jsonb
+language plpgsql
+immutable
+security invoker
+set search_path = public
+as $$
+declare
+  v jsonb;
+begin
+  if p_snapshot is null or jsonb_typeof(p_snapshot) <> 'object' then
+    return p_snapshot;
+  end if;
+  v := p_snapshot - 'clockEpoch';
+  if jsonb_typeof(v->'sceneNodes') = 'array' then
+    v := jsonb_set(v, '{sceneNodes}', snapshot_strip_group_ui(v->'sceneNodes'));
+  end if;
+  return v;
+end;
+$$;
+
+-- Hex sha256 of the normalized snapshot's jsonb text (jsonb text output is
+-- canonical: keys sorted, fixed spacing). NULL for a NULL snapshot.
+create or replace function snapshot_content_hash(p_snapshot jsonb)
+returns text
+language sql
+immutable
+security invoker
+set search_path = public
+as $$
+  select encode(sha256(convert_to(snapshot_content_normalize(p_snapshot)::text, 'UTF8')), 'hex');
+$$;
+
+grant execute on function snapshot_strip_group_ui(jsonb)     to authenticated, service_role;
+grant execute on function snapshot_content_normalize(jsonb)  to authenticated, service_role;
+grant execute on function snapshot_content_hash(jsonb)       to authenticated, service_role;
+
+alter table project_snapshots add column if not exists content_hash text;
+
+create or replace function project_snapshots_set_content_hash()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  new.content_hash := snapshot_content_hash(new.snapshot);
+  return new;
+end;
+$$;
+
+drop trigger if exists project_snapshots_content_hash on project_snapshots;
+create trigger project_snapshots_content_hash
+  before insert or update of snapshot on project_snapshots
+  for each row execute function project_snapshots_set_content_hash();
+
+-- Backfill existing rows (does not fire the trigger: `snapshot` is not set).
+update project_snapshots
+   set content_hash = snapshot_content_hash(snapshot)
+ where content_hash is null;
 
 -- Restore markers per project, without scanning the whole change log.
 create index if not exists project_changes_restore_markers
@@ -77,7 +189,7 @@ begin
 
   return query
   with snaps as (
-    select s.id, s.sequence_number, s.label, s.created_at,
+    select s.id, s.sequence_number, s.label, s.created_at, s.content_hash,
            -- Load-base candidates (same rule as LOADABLE_SNAPSHOT_FILTER).
            (s.label is distinct from 'before offline sync') as loadable,
            -- Tier: 0 = keep all, 1 = hourly, 2 = daily, 3 = weekly.
@@ -126,13 +238,33 @@ begin
                         where m.snapshot_ref = r.id::text
                            or m.sequence_number = r.sequence_number)) as protected
       from ranked r
+  ),
+  -- Rows surviving the bucket rule, each with the hash of the next older
+  -- surviving row (list order, oldest first).
+  survivors as (
+    select x.id, x.protected, r.label, r.content_hash,
+           lag(r.content_hash) over (order by r.sequence_number, r.created_at nulls last, r.id) as prev_hash
+      from decided x
+      join ranked r on r.id = x.id
+     where x.bucket_keep or x.protected
+  ),
+  doomed as (
+    -- Thinned by age bucket.
+    select x.id from decided x where not x.bucket_keep and not x.protected
+    union all
+    -- Same content as the next older survivor: keep only the oldest of a run.
+    -- (A run's rows are all compared with their direct predecessor, so the
+    -- chain ends at its first row, which survives.)
+    select v.id from survivors v
+     where not v.protected
+       and v.label is null
+       and v.content_hash is not null
+       and v.content_hash = v.prev_hash
   )
   delete from project_snapshots d
-   using decided x
+   using doomed x
    where d.id = x.id
      and d.project_id = p_project_id
-     and not x.bucket_keep
-     and not x.protected
   returning d.id;
 end;
 $$;
@@ -238,3 +370,62 @@ $$;
 
 revoke all on function prune_all_project_snapshots() from public, anon, authenticated;
 grant execute on function prune_all_project_snapshots() to service_role;
+
+-- ── list_snapshot_summaries (replaces 010) ──────────────────
+-- Same signature, order and keyset cursor as 010. New: an unlabeled snapshot
+-- whose content_hash equals that of its older neighbour (the next row in
+-- list order, hidden or not) is skipped, so a run of no-change autosaves
+-- shows only its oldest row. The filter runs before the LIMIT, and the
+-- cursor is the last RETURNED row, so paging stays gap- and duplicate-free.
+create or replace function list_snapshot_summaries(
+  p_project_id uuid,
+  p_limit      integer default 50,
+  p_before_seq bigint default null,
+  p_before_at  timestamptz default null,
+  p_before_id  uuid default null
+)
+returns table (
+  id              uuid,
+  sequence_number bigint,
+  label           text,
+  created_at      timestamptz,
+  created_by      uuid,
+  author_name     text,
+  fixtures        integer,
+  groups          integer,
+  modifiers       integer
+)
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select s.id, s.sequence_number, s.label, s.created_at, s.created_by,
+         p.display_name, sm.fixtures, sm.groups, sm.modifiers
+    from (
+      select ps.id, ps.sequence_number, ps.label, ps.created_at, ps.created_by, ps.snapshot
+        from project_snapshots ps
+       where ps.project_id = p_project_id
+         and (p_before_seq is null
+              or (ps.sequence_number, ps.created_at, ps.id) < (p_before_seq, p_before_at, p_before_id))
+         and not (
+           ps.label is null
+           and ps.content_hash is not null
+           and ps.content_hash is not distinct from (
+             select o.content_hash
+               from project_snapshots o
+              where o.project_id = ps.project_id
+                and (o.sequence_number, o.created_at, o.id) < (ps.sequence_number, ps.created_at, ps.id)
+              order by o.sequence_number desc, o.created_at desc, o.id desc
+              limit 1)
+         )
+       order by ps.sequence_number desc, ps.created_at desc, ps.id desc
+       limit greatest(1, least(coalesce(p_limit, 50), 200))
+    ) s
+    left join profiles p on p.id = s.created_by
+    cross join lateral snapshot_summary(s.snapshot) sm
+   order by s.sequence_number desc, s.created_at desc, s.id desc;
+$$;
+
+revoke all on function list_snapshot_summaries(uuid, integer, bigint, timestamptz, uuid) from public, anon;
+grant execute on function list_snapshot_summaries(uuid, integer, bigint, timestamptz, uuid) to authenticated, service_role;

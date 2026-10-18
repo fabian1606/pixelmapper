@@ -250,12 +250,165 @@ begin
 end $$;
 \echo '   access control: PASS'
 
+-- ── Content hash (normalization) ────────────────────────────
+do $$
+declare
+  base jsonb := '{"clockEpoch": 1, "globalBpm": 120, "sceneNodes": [
+     {"_type": "group", "id": "g1", "expanded": true, "children": [
+        {"_type": "fixture", "id": "f1", "expanded": true},
+        {"id": "g2", "expanded": false, "children": []}]},
+     {"_type": "group", "id": "g3", "expanded": true}]}';
+  same jsonb := '{"globalBpm": 120, "clockEpoch": 99, "sceneNodes": [
+     {"_type": "group", "id": "g1", "expanded": false, "children": [
+        {"_type": "fixture", "id": "f1", "expanded": true},
+        {"id": "g2", "children": []}]},
+     {"_type": "group", "id": "g3"}]}';
+  v_id uuid;
+begin
+  if snapshot_content_hash(base) <> snapshot_content_hash(same) then
+    raise exception 'clockEpoch / group expanded must not change the hash';
+  end if;
+  -- A fixture's `expanded` is content (the diff only ignores it on groups).
+  if snapshot_content_hash(base) = snapshot_content_hash(jsonb_set(base, '{sceneNodes,0,children,0,expanded}', 'false')) then
+    raise exception 'fixture expanded must change the hash';
+  end if;
+  if snapshot_content_hash(base) = snapshot_content_hash(jsonb_set(base, '{globalBpm}', '121')) then
+    raise exception 'a content change must change the hash';
+  end if;
+  if snapshot_content_hash(base) = snapshot_content_hash(jsonb_set(base, '{sceneNodes,0,children,1,id}', '"g9"')) then
+    raise exception 'a nested content change must change the hash';
+  end if;
+  if snapshot_content_normalize('[1]') <> '[1]' or snapshot_content_normalize('{"sceneNodes": 5}') <> '{"sceneNodes": 5}' then
+    raise exception 'malformed snapshots must pass through';
+  end if;
+  -- Trigger: insert and update of `snapshot` set the column.
+  insert into project_snapshots (project_id, snapshot) values ('10000000-0000-4000-8000-000000000004', base)
+    returning id into v_id;
+  if (select content_hash from project_snapshots where id = v_id) <> snapshot_content_hash(same) then
+    raise exception 'trigger did not set content_hash on insert';
+  end if;
+  update project_snapshots set snapshot = '{"x": 1}' where id = v_id;
+  if (select content_hash from project_snapshots where id = v_id) <> snapshot_content_hash('{"x": 1}') then
+    raise exception 'trigger did not set content_hash on update';
+  end if;
+  delete from project_snapshots where id = v_id;
+end $$;
+\echo '   content hash normalization + trigger: PASS'
+
+-- ── Project 5: no-change autosaves ──────────────────────────
+-- All < 24 h old (no bucket thinning), list order = time order:
+--   A h1 (oldest of the run) kept · B, C h1 deleted · D h2 kept ·
+--   E h1 labeled kept · F h1 deleted (same as E) · R h1 restore source kept ·
+--   G h1 newest kept (load base) — G is protected although it equals R.
+-- Sequence numbers 1001+ stay clear of the marker's (small) number.
+insert into projects (id, name) values ('10000000-0000-4000-8000-000000000005', 'dedupe');
+delete from expect;
+select pg_temp.snap('A', '2026-10-18 08:00:00Z', true,  1001, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('B', '2026-10-18 08:01:00Z', false, 1002, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('C', '2026-10-18 08:02:00Z', false, 1003, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('D', '2026-10-18 08:03:00Z', true,  1004, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('E', '2026-10-18 08:04:00Z', true,  1005, 'Mark','10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('F', '2026-10-18 08:05:00Z', false, 1006, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('R', '2026-10-18 08:06:00Z', true,  1007, null,  '10000000-0000-4000-8000-000000000005');
+select pg_temp.snap('G', '2026-10-18 08:07:00Z', true,  1008, null,  '10000000-0000-4000-8000-000000000005');
+-- Same content per run; the volatile fields differ on every row.
+update project_snapshots s
+   set snapshot = jsonb_build_object('clockEpoch', e.tag, 'globalBpm', case when e.tag = 'D' then 130 else 120 end,
+                                     'sceneNodes', jsonb_build_array(jsonb_build_object(
+                                       '_type', 'group', 'id', 'g', 'expanded', e.tag in ('B', 'F'), 'children', '[]'::jsonb)))
+  from expect e where e.id = s.id;
+insert into project_changes (project_id, user_id, command_type, payload, change_id)
+select '10000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-0000000000a1', 'restore-snapshot',
+       jsonb_build_object('snapshotId', (select id from expect where tag = 'R')), gen_random_uuid();
+
+-- List before pruning: B, C (same as A), F (same as E), R, G hidden.
+create temp table listed as
+select l.id from list_snapshot_summaries('10000000-0000-4000-8000-000000000005', 200) l;
+do $$
+declare v text;
+begin
+  select string_agg(e.tag, ',' order by e.tag) into v from listed l join expect e on e.id = l.id;
+  if v <> 'A,D,E' then raise exception 'list skip: expected A,D,E, got %', v; end if;
+end $$;
+
+-- Paging with limit 1 walks the same visible rows, newest first.
+do $$
+declare
+  v_seq bigint; v_at timestamptz; v_id uuid; v_tags text := ''; r record;
+begin
+  loop
+    select l.* into r from list_snapshot_summaries('10000000-0000-4000-8000-000000000005', 1, v_seq, v_at, v_id) l;
+    exit when not found;
+    v_tags := v_tags || (select tag from expect where id = r.id);
+    v_seq := r.sequence_number; v_at := r.created_at; v_id := r.id;
+  end loop;
+  if v_tags <> 'EDA' then raise exception 'list paging: expected EDA, got %', v_tags; end if;
+end $$;
+\echo '   list skips no-change autosaves, paging intact: PASS'
+
+create temp table base5 as
+select id from project_snapshots
+ where project_id = '10000000-0000-4000-8000-000000000005'
+   and (label is null or label <> 'before offline sync')
+ order by sequence_number desc, created_at desc limit 1;
+select count(*) from prune_project_snapshots_core('10000000-0000-4000-8000-000000000005', '2026-10-18 12:00:00Z', true);
+do $$
+declare r record; v_bad text := '';
+begin
+  for r in select e.tag, e.keep, exists (select 1 from project_snapshots s where s.id = e.id) as present
+             from expect e order by e.tag loop
+    if r.keep <> r.present then
+      v_bad := v_bad || format(' %s(expected %s)', r.tag, case when r.keep then 'kept' else 'deleted' end);
+    end if;
+  end loop;
+  if v_bad <> '' then raise exception 'dedupe test failed:%', v_bad; end if;
+  if (select id from base5) is distinct from (
+      select id from project_snapshots
+       where project_id = '10000000-0000-4000-8000-000000000005'
+         and (label is null or label <> 'before offline sync')
+       order by sequence_number desc, created_at desc limit 1) then
+    raise exception 'dedupe changed the load base';
+  end if;
+  if (select count(*) from prune_project_snapshots_core('10000000-0000-4000-8000-000000000005', '2026-10-18 12:00:00Z', true)) <> 0 then
+    raise exception 'dedupe not idempotent';
+  end if;
+end $$;
+\echo '   dedupe keeps the oldest of a run, labeled / protected rows, load base: PASS'
+
+-- Dedupe after bucket thinning: hour 2026-10-16 10:00 keeps its newest row
+-- (same content as the older survivor at 09:xx) → deleted as a duplicate;
+-- 11:xx differs → kept. Newest row (12:xx) differs → kept.
+insert into projects (id, name) values ('10000000-0000-4000-8000-000000000006', 'dedupe+buckets');
+delete from expect;
+select pg_temp.snap('h09',   '2026-10-16 09:30:00Z', true,  1, null, '10000000-0000-4000-8000-000000000006');
+select pg_temp.snap('h10a',  '2026-10-16 10:10:00Z', false, 2, null, '10000000-0000-4000-8000-000000000006');
+select pg_temp.snap('h10b',  '2026-10-16 10:40:00Z', false, 3, null, '10000000-0000-4000-8000-000000000006');
+select pg_temp.snap('h11',   '2026-10-16 11:30:00Z', true,  4, null, '10000000-0000-4000-8000-000000000006');
+select pg_temp.snap('h12',   '2026-10-16 12:30:00Z', true,  5, null, '10000000-0000-4000-8000-000000000006');
+update project_snapshots s set snapshot = jsonb_build_object('v', case when e.tag like 'h10%' then 'h09' else e.tag end)
+  from expect e where e.id = s.id;
+update project_snapshots s set snapshot = '{"v": "h10a-different"}'
+  from expect e where e.id = s.id and e.tag = 'h10a';  -- loser of its bucket anyway
+select count(*) from prune_project_snapshots_core('10000000-0000-4000-8000-000000000006', '2026-10-18 12:00:00Z', true);
+do $$
+declare r record; v_bad text := '';
+begin
+  for r in select e.tag, e.keep, exists (select 1 from project_snapshots s where s.id = e.id) as present
+             from expect e order by e.tag loop
+    if r.keep <> r.present then
+      v_bad := v_bad || format(' %s(expected %s)', r.tag, case when r.keep then 'kept' else 'deleted' end);
+    end if;
+  end loop;
+  if v_bad <> '' then raise exception 'dedupe+buckets test failed:%', v_bad; end if;
+end $$;
+\echo '   dedupe after bucket thinning: PASS'
+
 -- ── Synthetic dataset: ~1,400 autosaves over 10 days ────────
 -- 10 work sessions (one per day, 14:00 UTC), 140 autosaves every 20 s,
 -- sequence numbers rising; 2 labeled safety snapshots and 1 upload.
 insert into project_snapshots (project_id, snapshot, sequence_number, label, created_at)
 select '10000000-0000-4000-8000-000000000003',
-       '{"sceneNodes":[]}',
+       jsonb_build_object('sceneNodes', '[]'::jsonb, 'rev', d * 1000 + i),  -- every save differs
        (9 - d) * 1000 + i,          -- older days → lower sequence numbers
        case when i = 70 and d in (3, 7) then 'before offline sync'
             when i = 1 and d = 9 then 'Uploaded' end,
@@ -291,6 +444,36 @@ begin
   if v_40 <> 5 then raise exception 'synthetic +40 d: expected 5 rows, got %', v_40; end if;
 end $$;
 \echo '   synthetic counts: PASS'
+
+-- Same sessions, but only every third autosave changes the content (the
+-- other two are no-change autosaves): 47 distinct states in the last 24 h.
+insert into projects (id, name) values ('10000000-0000-4000-8000-000000000007', 'synthetic no-change');
+insert into project_snapshots (project_id, snapshot, sequence_number, label, created_at)
+select '10000000-0000-4000-8000-000000000007',
+       jsonb_build_object('sceneNodes', '[]'::jsonb, 'rev', d * 1000 + i / 3, 'clockEpoch', i),
+       (9 - d) * 1000 + i,
+       case when i = 70 and d in (3, 7) then 'before offline sync'
+            when i = 1 and d = 9 then 'Uploaded' end,
+       timestamptz '2026-10-18 12:00:00Z' - d * interval '1 day' + interval '2 hours' + i * interval '20 seconds'
+  from generate_series(0, 9) d, generate_series(1, 140) i;
+insert into synth select 'nochange_before', count(*) from project_snapshots
+ where project_id = '10000000-0000-4000-8000-000000000007';
+insert into synth select 'nochange_deleted', count(*)
+  from prune_project_snapshots_core('10000000-0000-4000-8000-000000000007', '2026-10-18 16:00:00Z', true);
+insert into synth select 'nochange_after', count(*) from project_snapshots
+ where project_id = '10000000-0000-4000-8000-000000000007';
+\o
+select step, n from synth where step like 'nochange%' order by n desc;
+\o /dev/null
+do $$
+begin
+  -- 47 (last 24 h, one per distinct state) + the newest row (load base; it
+  -- repeats the state of the run's oldest row) + 6 hourly + 3 daily + 3 labeled.
+  if (select n from synth where step = 'nochange_after') <> 60 then
+    raise exception 'synthetic no-change: expected 60 rows, got %', (select n from synth where step = 'nochange_after');
+  end if;
+end $$;
+\echo '   synthetic with no-change autosaves: PASS'
 
 -- ── Backfill helper ─────────────────────────────────────────
 -- Direct DB session (no JWT claims) may run it; returns one row per project

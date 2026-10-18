@@ -31,10 +31,25 @@ run_psql() { docker exec -i "$NAME" psql -U postgres -v ON_ERROR_STOP=1 -q "$@";
 
 echo "== schema"
 run_psql < "$HERE/supabase-stub.sql"
+SEED_SNAPSHOT_ID='88888888-0000-4000-8000-000000000001'
 for f in "$ROOT"/migrations/*.sql; do
+  # 013 backfills content_hash: seed a row that exists before it.
+  if [ "$(basename "$f")" = "013_snapshot_retention.sql" ]; then
+    run_psql <<SQL
+insert into projects (id, name) values ('88888888-0000-4000-8000-000000000000', 'pre-013');
+insert into project_snapshots (id, project_id, snapshot)
+  values ('$SEED_SNAPSHOT_ID', '88888888-0000-4000-8000-000000000000', '{"clockEpoch": 5, "a": 1}');
+SQL
+  fi
   echo "   $(basename "$f")"
   run_psql < "$f"
 done
+
+echo "== 013 content_hash backfill"
+backfilled=$(docker exec "$NAME" psql -U postgres -At -c \
+  "select content_hash = snapshot_content_hash('{\"a\": 1}') from project_snapshots where id = '$SEED_SNAPSHOT_ID';")
+[ "$backfilled" = "t" ] || { echo "FAIL content_hash backfill ($backfilled)"; exit 1; }
+echo "   PASS"
 
 for t in "$HERE"/*.test.sql; do
   echo "== $(basename "$t")"
