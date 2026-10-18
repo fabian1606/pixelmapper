@@ -175,6 +175,8 @@ describe('persist queue — backoff + connectivity (D9)', () => {
   });
 
   it('retries server errors with exponential backoff instead of 50 ms', async () => {
+    // Pin the backoff jitter to 0 so the timing windows below are deterministic.
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const { hook } = wireHook(async () => { throw Object.assign(new Error('500'), { name: 'FunctionsHttpError' }); });
 
     pq.enqueuePersist({ type: 'Cmd', payload: {}, changeId: 'c1' });
@@ -204,6 +206,7 @@ describe('persist queue — backoff + connectivity (D9)', () => {
     await vi.advanceTimersByTimeAsync(100);
     await settle();
     expect(hook).toHaveBeenCalledTimes(3);
+    random.mockRestore();
   });
 
   it('keeps unacknowledged outbox rows when the server returns no sequence number', async () => {

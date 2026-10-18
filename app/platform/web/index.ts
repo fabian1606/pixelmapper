@@ -1,14 +1,16 @@
 /**
  * Web platform (ADR 0003): what the browser can do on its own.
  *
- * No UDP (Art-Net falls back to the local bridge); serial and MIDI where the
- * browser supports them. The Tauri platform starts from this one and
- * replaces capabilities with native implementations (ADR 0003 D4).
+ * No UDP (Art-Net falls back to the local bridge), no native HTTP and no
+ * bundled resources; serial and MIDI where the browser supports them. The
+ * Tauri platform starts from this one and replaces capabilities with
+ * native implementations (ADR 0003 D4).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebSerial } from './serial';
 import { createWebMidi } from './midi';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
+import { WEB_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
 
 /** Creates the web platform for the current browser. */
 export function createWebPlatform(): Platform {
@@ -17,6 +19,9 @@ export function createWebPlatform(): Platform {
     udp: null,
     serial: createWebSerial(),
     midi: createWebMidi(),
+    // The browser has neither CORS-free HTTP nor bundled files.
+    http: null,
+    resources: null,
   };
 }
 
@@ -28,5 +33,13 @@ export function getWindowChrome(): WindowChrome {
   return NO_WINDOW_CHROME;
 }
 
+/** Account mandatory; logout clears the local cache (ADR 0004 D3, D16). */
+export function getAccountPolicy(): AccountPolicy {
+  return WEB_ACCOUNT_POLICY;
+}
+
 /** No menu bar; project files via download / file input. */
 export { createWebAppShell as getAppShell } from './app-shell';
+
+/** OFL library from the Nitro routes `/api/fixtures` (ADR 0004 D18). */
+export { createWebFixtureLibrary as getFixtureLibrary } from './fixture-library';

@@ -4,7 +4,8 @@
  * project-only items. Call once, from `app.vue`.
  */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { getAppShell } from '#platform';
+import { getAccountPolicy, getAppShell } from '#platform';
+import { getProjectStore } from '~/utils/persistence/project-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { triggerSaveSnapshot } from '~/components/engine/composables/use-history';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
@@ -37,11 +38,22 @@ export function useAppMenu(): void {
   /** Open project, from the route (`/project/:id/...`). */
   const projectId = computed(() => route.path.startsWith('/project/') ? (route.params.id as string | undefined) ?? null : null);
 
-  /** Refreshes recent names from the project list (drops deleted projects). */
+  /**
+   * Refreshes recent names from the project list (drops deleted projects).
+   * Local projects (ADR 0004 D3) count too, so they are never dropped.
+   */
   async function refreshNames() {
-    if (!user.value) return;
+    const locals = await getProjectStore()
+      .then(store => store.listProjects())
+      .then(list => list.map(m => ({ id: m.id, name: m.name })))
+      .catch(() => null);
+    if (!user.value) {
+      // Signed out on desktop the local store is the whole list.
+      if (locals && !getAccountPolicy().accountRequired) syncRecentNames(locals);
+      return;
+    }
     const { data, error } = await supabase.functions.invoke('get-projects');
-    if (!error && Array.isArray(data)) syncRecentNames(data);
+    if (!error && Array.isArray(data)) syncRecentNames([...(locals ?? []), ...data]);
   }
 
   const ctx: AppCommandContext = {

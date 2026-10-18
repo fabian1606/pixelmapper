@@ -26,6 +26,12 @@ export interface LocalProjectMeta {
   createdAt: number;
   updatedAt: number;
   lastSyncedAt: number | null;
+  /**
+   * Set when the cloud project vanished from the account's project list
+   * (deleted on the server or access revoked) while the local copy still had
+   * pending changes; the copy is kept so they are not lost (WP-ACCOUNT).
+   */
+  remoteDeletedAt?: number | null;
 }
 
 // ── Outbox ───────────────────────────────────────────────────────────────────

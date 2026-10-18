@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pixelmapper",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "app.pixelmapper.desktop",
   "build": {
     "beforeDevCommand": "bun run dev:nuxt",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "bun run generate",
+    "beforeBuildCommand": "bun run scripts/tauri/firmware-bundle.ts && bun run generate",
     "frontendDist": "../.output/public"
   },
   "app": {
@@ -40,6 +40,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/firmware/*": "resources/firmware/"
+    }
   }
 }

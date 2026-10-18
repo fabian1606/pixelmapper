@@ -1,5 +1,8 @@
 import { ref } from 'vue';
 import type { OflFixture } from '~/utils/ofl/types';
+import {
+  AI_UNREACHABLE_HINT, reportAiFailure, reportAiSuccess, useAiReachability,
+} from '~/composables/use-ai-reachability';
 
 export interface ShutterProposal {
   kind: 'shutter';
@@ -78,26 +81,38 @@ export function useAiFixtureEnrichment() {
   const enrichStatus = ref('');
   const enrichError = ref('');
   const proposals = ref<EnrichmentProposal[]>([]);
+  // Shared AI endpoint reachability (ADR 0004 D20); read during setup so the
+  // runtime config is available.
+  const { aiBaseUrl, probeAi } = useAiReachability();
 
   async function enrichFromManual(existingFixture: OflFixture, file: File) {
     isEnriching.value = true;
-    enrichStatus.value = 'Uploading manual...';
+    enrichStatus.value = 'Checking AI backend...';
     enrichError.value = '';
     proposals.value = [];
 
     try {
+      // Refuse early when the AI endpoint is not reachable (cached probe).
+      if (!(await probeAi())) {
+        enrichError.value = AI_UNREACHABLE_HINT;
+        return;
+      }
+      enrichStatus.value = 'Uploading manual...';
+
       const formData = new FormData();
       formData.append('manualPdf', file);
       formData.append('existingOfl', JSON.stringify(existingFixture));
 
-      const runtimeConfig = useRuntimeConfig();
-      const baseUrl = runtimeConfig.public.aiBackendUrl || 'http://localhost:4000';
-      const response = await fetch(`${baseUrl}/enrich-fixture-pdf`, { method: 'POST', body: formData });
+      const response = await fetch(`${aiBaseUrl}/enrich-fixture-pdf`, { method: 'POST', body: formData });
+      // The request reached the backend; keep the reachability cache fresh.
+      reportAiSuccess();
 
       const data = await readSseStream(response, (status) => { enrichStatus.value = status; });
       proposals.value = data?.proposals ?? [];
     } catch (err: any) {
       console.error('AI Enrichment Error:', err);
+      // Network-level failures trigger a re-probe so the UI gates correctly.
+      reportAiFailure(err);
       enrichError.value = err.message || 'An error occurred during enrichment.';
     } finally {
       isEnriching.value = false;

@@ -15,6 +15,7 @@ import { listKinds } from '~/utils/kinds/kind-host';
 import { iconByName } from '~/utils/extensions/icons';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
+import { useFixtureLibrary } from '~/composables/use-fixture-library';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
 import { useCustomFixtureLibrary } from '~/composables/use-custom-fixture-library';
@@ -201,7 +202,7 @@ async function handleSelect(summary: FixtureSummary) {
   config.value.modeIndex = '0';
   try {
     const [mf, fix] = summary.key.split('/');
-    const data = await $fetch<OflFixture>(`/api/fixtures/${mf}/${fix}`);
+    const data = await useFixtureLibrary().getFixture(mf ?? '', fix ?? '');
     fullFixtureData.value = data;
     autoAssignFreeAddress();
   } catch (err) {

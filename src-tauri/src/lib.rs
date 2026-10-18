@@ -6,6 +6,7 @@
 
 mod files;
 mod menu;
+mod net;
 mod udp;
 
 /// Builds and runs the Tauri app.
@@ -24,6 +25,8 @@ pub fn run() {
             menu::menu_set_project_open,
             files::save_project_file,
             files::open_project_file,
+            net::http_get_bytes,
+            net::resource_read,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Pixelmapper desktop app");

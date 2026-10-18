@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import type { FixtureSummary, ManufacturerSummary } from '~/utils/ofl/types';
+import { useFixtureLibrary } from '~/composables/use-fixture-library';
 import { Search, Loader2, ChevronRight, Plus, Sparkles } from 'lucide-vue-next';
 import {
   Accordion,
@@ -72,10 +73,13 @@ const CATEGORIES = computed(() => [...new Set([...BASE_CATEGORIES, ...listKinds(
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
+/** OFL source of the platform: Nitro routes (web) or the bundled copy (desktop). */
+const library = useFixtureLibrary();
+
 async function fetchManufacturers() {
   loadingManufacturers.value = true;
   try {
-    const data = await $fetch<ManufacturerSummary[]>('/api/fixtures?mode=manufacturers');
+    const data = await library.listManufacturers();
     manufacturers.value = data;
     data.forEach(m => {
       if (!fixtureCache.value[m.key]) {
@@ -96,7 +100,7 @@ async function loadManufacturerFixtures(mfKey: string) {
   }
   fixtureCache.value[mfKey]!.loading = true;
   try {
-    const data = await $fetch<{ items: FixtureSummary[] }>(`/api/fixtures?mode=fixtures&manufacturer=${mfKey}`);
+    const data = await library.queryFixtures({ manufacturer: mfKey });
     fixtureCache.value[mfKey]!.items = data.items;
   } catch (err) {
     console.error(`Failed to load fixtures for ${mfKey}:`, err);
@@ -113,15 +117,10 @@ async function performSearch() {
   }
 
   loadingSearch.value = true;
-  const params = new URLSearchParams({ mode: 'fixtures' });
-  if (search.value.trim()) params.set('search', search.value.trim());
-  if (categoryFilter.value && categoryFilter.value !== 'All') {
-    params.set('category', categoryFilter.value);
-  }
-  params.set('limit', '100');
+  const category = categoryFilter.value && categoryFilter.value !== 'All' ? categoryFilter.value : undefined;
 
   try {
-    const data = await $fetch<{ items: FixtureSummary[], total: number }>(`/api/fixtures?${params.toString()}`);
+    const data = await library.queryFixtures({ search: search.value.trim() || undefined, category, limit: 100 });
     searchResults.value = { items: data.items, total: data.total };
   } catch (err) {
     console.error('Search failed:', err);

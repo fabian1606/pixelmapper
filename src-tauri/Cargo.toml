@@ -20,3 +20,5 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
+# Native HTTP for firmware downloads (net.rs, ADR 0004 D19); rustls, no OpenSSL.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
