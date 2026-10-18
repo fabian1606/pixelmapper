@@ -15,6 +15,15 @@ The single source of truth for the workspace. Owns:
 
 Also holds the binary packet cache (`layoutPacket`, `channelsPacket`, `effectsPacket`) and revision counters (`layoutRevision`, `channelsRevision`, `effectsRevision`). See [Engine & Render Loop](engine.md) for details.
 
+### Project persistence (local-first, ADR 0004)
+
+`engine-store.ts` only wires its state into the sync layer (`app/utils/sync/`):
+
+- **Open** (`loadProject`): the local working snapshot (IndexedDB `ProjectStore`) is applied first — the project opens offline — plus outbox rows written after it. Without a local copy the project is downloaded once (`load-project` + `pull-changes`); offline that shows *Not available offline*. Local-only projects never call the server.
+- **Live-state port** (`engine-state-port.ts`): `capture` = `serializeProject`, `apply` = `applyProjectSnapshot`, `replay` = command registry, then live-op registry. The sync engine computes base / rebased / working states only through it.
+- **Persist path**: history commands and persistent live-ops → persist queue → outbox row (durable) → SyncEngine push. `markEngineDirty` also schedules the debounced working-snapshot write.
+- Details: [offline/wp-sync.md](offline/wp-sync.md).
+
 ### connections-store.ts
 
 Registry of active connectors. Called by the render loop each frame:

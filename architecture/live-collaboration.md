@@ -32,15 +32,15 @@ Every undoable mutation is a `SerializableCommand` (`app/components/engine/comma
 Flow:
 
 1. UI action runs `useHistory().execute(cmd)`
-2. `useHistory` calls `persistenceHooks.pushChange(commandType, payload)` (set by `engine-store.ts`)
-3. The hook calls the `push-change` Edge Function (`supabase/functions/push-change/index.ts`), which inserts a row into `public.project_changes` and returns the assigned `sequence_number`
+2. `useHistory` calls `persistenceHooks.pushChange(commandType, payload, changeId)` (set by `engine-store.ts`); the persist queue appends the change to the local **outbox** (`ProjectStore`, IndexedDB) before anything is sent (ADR 0004 D8)
+3. The queue's push hook is the project's **SyncEngine** (`app/utils/sync/sync-engine.ts`). It pushes the outbox rows in order through the `push-change` Edge Function, which inserts rows into `public.project_changes` (idempotent by `change_id`) and returns the assigned `sequence_number`s; acknowledged rows leave the outbox
 4. Postgres CDC fires an INSERT event on the table (publication enabled by `supabase/migrations/002_enable_realtime.sql`)
-5. The CDC listener in `app/composables/use-collaboration.ts` receives the event and:
-   - skips it if `sequence_number <= lastSeenSequenceNumber` (already processed)
-   - skips it if `user_id === user.value?.id` (own command, already in local history)
-   - otherwise reconstructs the command via `commandFromPayload(...)` with `engineStore.getReplayContext()` and runs `history.executeRemote(cmd)` — which executes locally without re-pushing
+5. The CDC listener in `app/composables/use-collaboration.ts` hands the row to `SyncEngine.handleRemoteInsert`, which:
+   - skips it if its `change_id` is already reflected (pulled before, or seen) or was sent by this tab (own echo — also another tab of the same user is applied now, the old `user_id` filter is gone)
+   - records it in the live sync position, so a later pull never applies it twice
+   - otherwise calls the collaboration applier, which reconstructs the command via `commandFromPayload(...)` and runs `history.executeRemote(cmd)` — executes locally without re-pushing. Live-op rows are only recorded; peers apply them from the broadcast (Tier 2)
 
-`lastSeenSequenceNumber` is also bumped on local pushes so a self-CDC event is silently absorbed.
+Realtime is the fast path; **pulls are authoritative** (`pull-changes`, on open, on reconnect, after a realtime (re)subscribe and every 60 s). Rows that arrive during a running sync cycle are deferred until it finished. Offline editing, rebase and conflict handling: [offline/wp-sync.md](offline/wp-sync.md).
 
 ## Tier 2 — LiveOp Bus
 
