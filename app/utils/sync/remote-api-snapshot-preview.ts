@@ -1,5 +1,7 @@
 import { invokeRemote, type RemoteClient } from '~/utils/sync/remote-api-invoke';
 import type { RemoteResult } from '~/utils/sync/remote-api-types';
+import { parseSnapshotHighlights } from '~/utils/sync/remote-api-snapshot-highlights';
+import type { SnapshotHighlights } from '~/utils/sync/version-preview/highlight-types';
 
 /**
  * Typed wrapper of the `snapshot-preview` edge function (version-history
@@ -52,11 +54,15 @@ export interface SnapshotLayout {
 export interface SnapshotPreview {
   snapshotId: string;
   layout: SnapshotLayout;
+  /** What changed since the previous version (migration 015); null from older servers. */
+  highlights: SnapshotHighlights | null;
 }
 
 export interface SnapshotPreviewInput {
   projectId: string;
   snapshotId: string;
+  /** Diff base (next older list entry); omitted → the server picks the older neighbour. */
+  compareToId?: string | null;
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -70,7 +76,9 @@ export function getSnapshotPreview(
   return invokeRemote(
     client,
     'snapshot-preview',
-    { projectId: input.projectId, snapshotId: input.snapshotId },
+    input.compareToId
+      ? { projectId: input.projectId, snapshotId: input.snapshotId, compareToId: input.compareToId }
+      : { projectId: input.projectId, snapshotId: input.snapshotId },
     parseSnapshotPreviewResponse,
     { signal },
   );
@@ -98,6 +106,7 @@ export function parseSnapshotPreviewResponse(data: unknown): SnapshotPreview | n
       total: Number.isFinite(total) && total >= fixtures.length ? Math.floor(total) : fixtures.length,
       truncated: layout.truncated === true,
     },
+    highlights: parseSnapshotHighlights(d.highlights, fixtures.length),
   };
 }
 

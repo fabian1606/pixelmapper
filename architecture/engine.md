@@ -110,6 +110,7 @@ v1.1 and v1.2 are additive: older plugins read only the slots they know. Output:
 `app/utils/plugins/preview-pool.ts` runs the same plugins on the main thread:
 - the endless strip (`renderStrip`: 256 virtual pixels with continuous `spatial`), recipe thumbnails and the Add-menu thumbnails;
 - noise history traces (`renderTraces`);
+- the version-history effect preview (`renderPoints`: one sample per fixture / pixel at its layout position with fixture rank and head index, distribution per point as in the engine; `PreviewOptions.instanceKey` gives the preview its own pool slot so it never shares state with the modifier card's instance — release it with `releasePreview(key)`; seeds come from the point index, not the engine's fixture hash);
 - the canvas field overlay while dragging the distribution handle (`renderField`). It mirrors the engine's phase/seed computation and host mapping; a trapping plugin is marked broken there, the worker remains authoritative.
 
 ## engine-store.ts — packets and dispatch

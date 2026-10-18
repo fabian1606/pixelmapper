@@ -6,8 +6,10 @@
  * and runs them (the dialog must outlive this popover content). With a
  * details loader, entries expand to show what changed since the next older
  * entry of the (uncollapsed) list. With a preview loader, hovering or
- * focusing an entry for 300 ms shows a live layout preview next to the
- * popover (below the entry when there is no room on the left).
+ * focusing an entry for 300 ms shows what is special about the version next
+ * to the popover (below the entry when there is no room on the left); the
+ * pointer may move onto the card to switch its change chips (← / → from the
+ * keyboard).
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
@@ -130,6 +132,24 @@ function onPreviewToggle(entry: SnapshotListEntry, anchor: HTMLElement): void {
   intent.toggle(entry.id);
 }
 
+/** The shown card (chip switching from the keyboard). */
+const cardRef = ref<InstanceType<typeof VersionPreviewCard> | null>(null);
+
+/** Pointer on the card keeps it open (chips are clickable); leaving hides after the grace. */
+function onCardEnter(): void {
+  if (shown.value) intent.enter(shown.value.entry.id);
+}
+function onCardLeave(): void {
+  if (shown.value) intent.leave(shown.value.entry.id);
+}
+
+/** ← / → on the focused entry switch the preview's change chips. */
+function onListKeydown(event: KeyboardEvent): void {
+  if (!shown.value || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+  cardRef.value?.cycle(event.key === 'ArrowRight' ? 1 : -1);
+  event.preventDefault();
+}
+
 // The row moved away under the card: hide instead of pointing at the wrong entry.
 function onListScroll(): void {
   intent.cancel();
@@ -162,7 +182,7 @@ watch(isOnline, (online) => { if (online) void h.value?.refresh(); });
       </div>
       <p v-else-if="h.loaded.value && !h.entries.value.length" class="px-2 py-2 text-xs text-muted-foreground">No versions saved yet.</p>
 
-      <ul v-if="rows.length" class="max-h-80 overflow-y-auto -mx-1 px-1" @scroll.passive="onListScroll">
+      <ul v-if="rows.length" class="max-h-80 overflow-y-auto -mx-1 px-1" @scroll.passive="onListScroll" @keydown="onListKeydown">
         <template v-for="row in rows" :key="row.type === 'entry' ? row.entry.id : `c-${row.key}`">
           <VersionHistoryItem
             v-if="row.type === 'entry'"
@@ -211,10 +231,14 @@ watch(isOnline, (online) => { if (online) void h.value?.refresh(); });
         v-if="preview && shown"
         :key="shown.entry.id"
         class="absolute z-10"
-        :class="shown.side ? 'right-full mr-4 pointer-events-none' : 'left-0'"
+        ref="cardRef"
+        :class="shown.side ? 'right-full mr-4' : 'left-0'"
         :style="{ top: `${shown.top}px` }"
         :preview="preview"
         :entry="shown.entry"
+        :compare-to-id="olderIds.get(shown.entry.id) ?? null"
+        @pointerenter="onCardEnter"
+        @pointerleave="onCardLeave"
         :now="now"
         :renderer="previewRenderer"
       />

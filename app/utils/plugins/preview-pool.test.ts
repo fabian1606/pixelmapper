@@ -6,7 +6,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BUILTIN_ALIASES, builtinHash, createModifier } from '~/utils/engine/modifiers';
-import { previewRevision, renderCycle, renderField, renderStrip } from './preview-pool';
+import { previewRevision, releasePreview, renderCycle, renderField, renderPoints, renderStrip } from './preview-pool';
+import type { PreviewPoint } from './preview-pool';
 
 const DIR = join(__dirname, '../../../public/plugins');
 const built = existsSync(DIR);
@@ -77,5 +78,68 @@ describe.skipIf(!built)('preview pool', () => {
     // Ranks 0 and 2 (group 0) equal, ranks 1 and 3 (group 1) equal.
     expect(r.values[0]).toBeCloseTo(r.values[4]!);
     expect(r.values[2]).toBeCloseTo(r.values[6]!);
+  });
+
+  // ── renderPoints (version preview of an effect on fixtures) ──
+
+  /** `n` single-head fixtures in a row, ranked left to right. */
+  const row = (n: number): PreviewPoint[] => Array.from({ length: n }, (_, i) => ({ x: 0.1 + 0.1 * i, y: 0.5, fixtureRank: i, head: 0, headCount: 1, fixture: i, fixtureCount: n }));
+
+  it('renders fixture points with order ranks (equal ranks → equal values)', async () => {
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), {
+      targetChannels: ['DIMMER'],
+      distribution: { mode: 'order' },
+    });
+    const before = previewRevision.value;
+    expect(renderPoints(m, row(4), { rankCount: 4 })).toBeNull();
+    await ready(before);
+    const pts = row(4);
+    pts.push({ ...pts[1]!, x: 0.9 }); // same rank as #1 elsewhere
+    const r = renderPoints(m, pts, { rankCount: 4, timeMs: 250 })!;
+    expect(r.values.length).toBe(5);
+    expect(r.values[4]).toBeCloseTo(r.values[1]!);
+    expect(new Set(Array.from(r.values.slice(0, 4)).map(v => v.toFixed(3))).size).toBeGreaterThan(1);
+  });
+
+  it('spreads heads of a multi-beam fixture with scope within', async () => {
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.waveform), {
+      targetChannels: ['DIMMER'],
+      distribution: { scope: 'within' },
+    });
+    const heads: PreviewPoint[] = Array.from({ length: 8 }, (_, h) => ({ x: 0.5, y: 0.5, fixtureRank: -1, head: h, headCount: 8 }));
+    const before = previewRevision.value;
+    renderPoints(m, heads);
+    await ready(before);
+    const r = renderPoints(m, heads, { timeMs: 100 })!;
+    expect(new Set(Array.from(r.values).map(v => v.toFixed(3))).size).toBeGreaterThan(2);
+  });
+
+  it('uses a separate instance slot per instanceKey with the same seeds', async () => {
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.noise), { targetChannels: ['DIMMER'] });
+    let before = previewRevision.value;
+    renderPoints(m, row(6));
+    await ready(before);
+    const own = renderPoints(m, row(6), { timeMs: 500 })!;
+    // The keyed slot is separate: first call loads.
+    before = previewRevision.value;
+    expect(renderPoints(m, row(6), { timeMs: 500, instanceKey: 'version-preview' })).toBeNull();
+    await ready(before);
+    const keyed = renderPoints(m, row(6), { timeMs: 500, instanceKey: 'version-preview' })!;
+    expect(Array.from(keyed.values)).toEqual(Array.from(own.values));
+    releasePreview('version-preview');
+  });
+
+  it('applies per-point bases for rgb modifiers', async () => {
+    const m = createModifier(builtinHash(BUILTIN_ALIASES.colorAdjust), { signature: 'rgb' });
+    const pts: PreviewPoint[] = [
+      { x: 0.2, y: 0.5, fixtureRank: -1, head: 0, headCount: 1, base: [1, 0, 0] },
+      { x: 0.2, y: 0.5, fixtureRank: -1, head: 0, headCount: 1, base: [0, 0, 1] },
+    ];
+    const before = previewRevision.value;
+    renderPoints(m, pts);
+    await ready(before);
+    const r = renderPoints(m, pts)!;
+    expect(r.arity).toBe(3);
+    expect(Array.from(r.values.slice(0, 3))).not.toEqual(Array.from(r.values.slice(3, 6)));
   });
 });
