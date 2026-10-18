@@ -2,8 +2,9 @@
  * Platform contract (ADR 0003).
  *
  * Transport-shaped access to I/O that differs between the web app and the
- * native (Tauri) app: UDP datagrams, serial ports and MIDI ports. Protocol
- * logic stays in the callers; implementations only move bytes.
+ * native (Tauri) app: UDP datagrams, serial ports, MIDI ports, native HTTP
+ * and bundled resources. Protocol logic stays in the callers;
+ * implementations only move bytes.
  *
  * A capability the current platform cannot provide is `null`. Callers must
  * check for it and fall back or show a clear message.
@@ -110,6 +111,32 @@ export interface MidiApi {
   requestAccess(options?: { sysex?: boolean }): Promise<MidiAccessHandle>;
 }
 
+// ── HTTP ────────────────────────────────────────────
+
+/**
+ * Native HTTP GET without browser CORS restrictions (API 1.3).
+ * Native implementations MAY restrict the allowed hosts (the desktop app
+ * allows the GitHub release hosts only).
+ */
+export interface HttpApi {
+  /** Downloads a URL (redirects followed); rejects on network errors and non-2xx answers. */
+  getBytes(url: string): Promise<Uint8Array>;
+}
+
+// ── Bundled resources ───────────────────────────────
+
+/**
+ * Read-only files shipped inside the app bundle (API 1.3), e.g. the
+ * firmware matching the app release (ADR 0004 D19).
+ */
+export interface ResourcesApi {
+  /**
+   * Reads a bundled file by its relative path (e.g. `firmware/firmware.bin`).
+   * Resolves `null` when the file was not bundled.
+   */
+  read(path: string): Promise<Uint8Array | null>;
+}
+
 // ── Platform ────────────────────────────────────────
 
 /** Platform-dependent capabilities. `null` = not available here. */
@@ -118,6 +145,10 @@ export interface Platform {
   readonly udp: UdpApi | null;
   readonly serial: SerialApi | null;
   readonly midi: MidiApi | null;
+  /** Native HTTP (desktop). Optional: hosts before API 1.3 omit it — treat absent as `null`. */
+  readonly http?: HttpApi | null;
+  /** Files bundled with the app (desktop). Optional: absent = `null` (API 1.3). */
+  readonly resources?: ResourcesApi | null;
 }
 
 /** Returns the platform of the running host (connectors, drivers, components). */

@@ -43,3 +43,10 @@ docs/ai/.slots.collected.json
 # Tauri build output
 src-tauri/target
 src-tauri/gen/schemas
+
+# Desktop-only public files generated at build time (OFL bundle, ADR 0004 D18)
+.tauri-public
+
+# Bundled firmware of the desktop app (scripts/tauri/firmware-bundle.ts)
+src-tauri/resources/firmware/firmware.bin
+src-tauri/resources/firmware/firmware-meta.json
