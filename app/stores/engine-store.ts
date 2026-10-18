@@ -54,6 +54,7 @@ import {
 import { isNetworkError, isOnline, reportNetworkFailure, reportNetworkSuccess } from '~/utils/sync/connectivity';
 import { createRetryScheduler } from '~/utils/sync/retry-scheduler';
 import { resolveUnauthorized } from '~/utils/auth/session-recovery';
+import { endSession } from '~/utils/account/sign-out';
 import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -1093,7 +1094,9 @@ export const useEngineStore = defineStore('engine', () => {
         projectLoading.value = false;
         if (action === 'sign-out') {
           const router = useRouter();
-          await supabase.auth.signOut();
+          // Rejected session: end it without touching local data, which
+          // stays bound to the account until it signs in again (WP-ACCOUNT).
+          await endSession(supabase.auth);
           router.push(`/auth/login?redirect=/project/${projectId}`);
         } else {
           projectError.value = 'error';
