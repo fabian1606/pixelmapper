@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IndexedDbProjectStore, InMemoryProjectStore, type ProjectStore } from '~/utils/persistence/project-store';
 import { reportNetworkSuccess } from '~/utils/sync/connectivity';
 import { uploadLocalProject, uploadLocalProjects } from './upload';
@@ -25,6 +25,7 @@ function createOk(seq = 0): InvokeHandler {
 }
 
 let store: ProjectStore;
+afterEach(() => { vi.useRealTimers(); });
 beforeEach(async () => {
   reportNetworkSuccess();
   store = new InMemoryProjectStore();
@@ -76,6 +77,36 @@ describe('uploadLocalProject', () => {
     expect(await uploadLocalProject(client, store, 'c', 'u1')).toMatchObject({ ok: false, error: { kind: 'not-local' } });
     expect(await uploadLocalProject(client, store, 'bound', 'u1')).toMatchObject({ ok: false, error: { kind: 'not-local' } });
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('retries while the server reports a concurrent create (503), then binds', async () => {
+    vi.useFakeTimers();
+    const ok = createOk(0);
+    let calls = 0;
+    const { client, invoke } = mockClient((name, body) => {
+      calls++;
+      if (calls === 1) return { data: null, error: httpError(503, 'project is being created, retry') };
+      return ok(name, body);
+    });
+    const pending = uploadLocalProject(client, store, 'p1', 'u1');
+    await vi.advanceTimersByTimeAsync(5_000);
+    const res = await pending;
+    vi.useRealTimers();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(res.ok).toBe(true);
+    expect(await store.getProject('p1')).toMatchObject({ origin: 'cloud', ownerUserId: 'u1' });
+  });
+
+  it('gives up after a few 503 answers and leaves the project local', async () => {
+    vi.useFakeTimers();
+    const { client, invoke } = mockClient(() => ({ data: null, error: httpError(503, 'busy') }));
+    const pending = uploadLocalProject(client, store, 'p1', 'u1');
+    await vi.advanceTimersByTimeAsync(60_000);
+    const res = await pending;
+    vi.useRealTimers();
+    expect(invoke).toHaveBeenCalledTimes(4);
+    expect(!res.ok && res.error.kind).toBe('server');
+    expect((await store.getProject('p1'))!.origin).toBe('local');
   });
 
   it('works with the IndexedDB store', async () => {

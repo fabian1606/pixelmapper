@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { adminClient, authenticate } from '../_shared/auth.ts';
+import { planExistingProject } from '../_shared/create-project-plan.ts';
 import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
 import { parseCreateProject, type CreateProjectRequest } from '../_shared/validate.ts';
 
@@ -12,8 +13,11 @@ import { parseCreateProject, type CreateProjectRequest } from '../_shared/valida
 //           snapshot, or null).
 //
 // With a client id the call is idempotent: if the project already exists and
-// the caller owns it, it is returned (and a missing initial snapshot is added)
-// instead of failing. An id owned by someone else yields 409.
+// the caller owns it, it is returned instead of failing; a supplied snapshot
+// is stored again while the project has no changes (see
+// _shared/create-project-plan.ts). An id owned by someone else yields 409; a
+// project whose create is still in flight (no owner row yet) yields 503
+// (retry); an old orphan created by the caller is adopted.
 
 /** Postgres unique_violation. */
 const UNIQUE_VIOLATION = '23505';
@@ -42,7 +46,14 @@ Deno.serve(async (req: Request) => {
   // ── Insert project ────────────────────────────────────────────────────────
   const { data: project, error: projectError } = await admin
     .from('projects')
-    .insert({ ...(input.id ? { id: input.id } : {}), name: input.name, description: input.description })
+    .insert({
+      ...(input.id ? { id: input.id } : {}),
+      name: input.name,
+      description: input.description,
+      // Lets a later retry of this user adopt the project if it stays
+      // without an owner row (migration 009).
+      created_by: caller.user.id,
+    })
     .select()
     .single();
 
@@ -51,20 +62,14 @@ Deno.serve(async (req: Request) => {
     if (projectError.code === UNIQUE_VIOLATION && input.id) {
       const existing = await returnExisting(admin, input, caller.user.id);
       if (existing) return existing;
-      return errorResponse('project is being created, retry', 409);
+      // Deleted again in between (rollback of the concurrent attempt).
+      return errorResponse('project is being created, retry', 503);
     }
     return errorResponse(projectError.message, 500);
   }
 
   // ── Owner row + initial snapshot (rolled back on failure) ─────────────────
-  const { error: collabError } = await admin
-    .from('project_collaborators')
-    .insert({
-      project_id: project.id,
-      user_id: caller.user.id,
-      role: 'owner',
-      accepted_at: new Date().toISOString(),
-    });
+  const collabError = await insertOwner(admin, project.id, caller.user.id);
 
   if (collabError) {
     await rollback(admin, project.id);
@@ -85,9 +90,9 @@ Deno.serve(async (req: Request) => {
 });
 
 /**
- * Response for a project that already exists under `input.id`:
- * the project (200) if the caller owns it, 409 if it belongs to someone else,
- * `null` if it does not exist.
+ * Response for a project that already exists under `input.id`, or `null` if
+ * it does not exist. The decision is `planExistingProject`; this gathers the
+ * facts and executes it.
  */
 async function returnExisting(
   admin: SupabaseClient,
@@ -102,32 +107,59 @@ async function returnExisting(
   if (error) return errorResponse(error.message, 500);
   if (!project) return null;
 
-  const { data: owner } = await admin
-    .from('project_collaborators')
-    .select('user_id')
-    .eq('project_id', project.id)
-    .eq('role', 'owner')
-    .maybeSingle();
-  if (owner?.user_id !== userId) return errorResponse('project id already in use', 409);
+  const [collabRes, headRes] = await Promise.all([
+    admin.from('project_collaborators').select('user_id, role').eq('project_id', project.id),
+    admin.from('project_changes').select('sequence_number').eq('project_id', project.id)
+      .order('sequence_number', { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const failed = collabRes.error ?? headRes.error;
+  if (failed) return errorResponse(failed.message, 500);
+  const collaborators = (collabRes.data ?? []) as Array<{ user_id: string; role: string }>;
 
-  // A previous attempt may have failed between the project insert and the
-  // snapshot insert; complete it so the retry has the same effect.
+  const plan = planExistingProject({
+    callerId: userId,
+    ownerIds: collaborators.filter(c => c.role === 'owner').map(c => c.user_id),
+    collaboratorCount: collaborators.length,
+    createdBy: (project.created_by as string | null | undefined) ?? null,
+    ageMs: Date.now() - Date.parse(project.created_at as string),
+    snapshotSupplied: !!input.snapshot,
+    headSequence: headRes.data?.sequence_number ?? 0,
+  });
+  if (plan.kind === 'conflict') return errorResponse(plan.error, 409);
+  if (plan.kind === 'retry') return errorResponse(plan.error, 503);
+
+  if (plan.adopt) {
+    const adoptError = await insertOwner(admin, project.id, userId);
+    if (adoptError) return errorResponse(adoptError.message, 500);
+  }
+
+  // Store the CURRENT local state the client sent (a retry may carry newer
+  // edits than the first attempt). Newest seq-0 snapshot wins in load-project.
   let snapshotMeta = null;
-  if (input.snapshot) {
-    const { data: anySnapshot } = await admin
-      .from('project_snapshots')
-      .select('id')
-      .eq('project_id', project.id)
-      .limit(1)
-      .maybeSingle();
-    if (!anySnapshot) {
-      const result = await insertInitialSnapshot(admin, project.id, input, userId);
-      if ('error' in result) return errorResponse(result.error, 500);
-      snapshotMeta = result.meta;
-    }
+  if (plan.storeSnapshot) {
+    const result = await insertInitialSnapshot(admin, project.id, input, userId);
+    if ('error' in result) return errorResponse(result.error, 500);
+    snapshotMeta = result.meta;
   }
 
   return json({ ...project, created: false, snapshot: snapshotMeta });
+}
+
+/**
+ * Owner row of the caller. `ON CONFLICT DO NOTHING`: a concurrent retry may
+ * have adopted the project already (same row), which must not fail the
+ * create and trigger its rollback.
+ */
+async function insertOwner(admin: SupabaseClient, projectId: string, userId: string): Promise<{ message: string } | null> {
+  const { error } = await admin
+    .from('project_collaborators')
+    .upsert({
+      project_id: projectId,
+      user_id: userId,
+      role: 'owner',
+      accepted_at: new Date().toISOString(),
+    }, { onConflict: 'project_id,user_id', ignoreDuplicates: true });
+  return error ? { message: error.message } : null;
 }
 
 /** Stores the uploaded local state as snapshot at sequence 0. */

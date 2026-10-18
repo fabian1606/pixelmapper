@@ -10,6 +10,7 @@ import type { OpenedProject } from '~/utils/sync/open-flow';
 import type { OutboxAccess } from '~/utils/sync/sync-context';
 import { SyncEngine } from '~/utils/sync/sync-engine';
 import { restoreBeforeSync } from '~/utils/sync/sync-restore';
+import { isRemoteRestorePending } from '~/utils/sync/remote-restore';
 import { createWorkingSnapshotWriter, type WorkingSnapshotWriter } from '~/utils/sync/working-snapshot-writer';
 
 /**
@@ -131,7 +132,8 @@ export function startProjectSession(input: SessionInput): ProjectSession {
     // cloud copy) or are not written at all (local-only project).
     pushHook: entries => (engine ? engine.pushForQueue(entries.map(e => e.changeId)) : Promise.resolve(entries.map(() => undefined))),
     async canSaveServerSnapshot() {
-      if (!engine || !isOnline.value) return false;
+      // A remote restore is pending: the live state predates it (remote-restore.ts).
+      if (!engine || !isOnline.value || isRemoteRestorePending()) return false;
       return (await store.countPending(projectId)) === 0;
     },
     async close(discard = false) {

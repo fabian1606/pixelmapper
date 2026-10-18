@@ -69,6 +69,7 @@ import { createEngineStatePort } from '~/utils/sync/engine-state-port';
 import { readLocalProject } from '~/utils/sync/open-project';
 import { openFromLocal, openFromServer, type OpenResult } from '~/utils/sync/open-flow';
 import { startProjectSession, type ProjectSession } from '~/utils/sync/project-session';
+import { setRemoteRestoreHandler } from '~/utils/sync/remote-restore';
 import { installUnloadHandlers } from '~/utils/sync/unload-handlers';
 import { resolveCurrentUserId } from '~/utils/sync/current-user';
 import { ensureLegacyWalMigrated } from '~/utils/sync/legacy-wal';
@@ -1125,11 +1126,13 @@ export const useEngineStore = defineStore('engine', () => {
    * Open a project local-first: the working snapshot when one exists (also
    * offline), else download it (first open). Then start the sync session.
    * `allowAuthRetry` permits one reload after a 401 was fixed by a token
-   * refresh; internal — callers pass only the project id.
+   * refresh; `fromServer` ignores the local copy and downloads the project
+   * (after a remote restore; falls back to the local copy when the download
+   * fails). Internal — callers pass only the project id.
    */
-  async function loadProject(projectId: string, allowAuthRetry = true): Promise<void> {
+  async function loadProject(projectId: string, allowAuthRetry = true, fromServer = false): Promise<void> {
     try {
-      await loadProjectUnguarded(projectId, allowAuthRetry);
+      await loadProjectUnguarded(projectId, allowAuthRetry, fromServer);
     }
     catch (err) {
       // IndexedDB or other unexpected failures: show the error state instead
@@ -1142,8 +1145,8 @@ export const useEngineStore = defineStore('engine', () => {
     }
   }
 
-  /** `loadProject` body; may throw. */
-  async function loadProjectUnguarded(projectId: string, allowAuthRetry: boolean): Promise<void> {
+  /** `loadProject` body; may throw. `fromServer` skips the local copy (remote restore). */
+  async function loadProjectUnguarded(projectId: string, allowAuthRetry: boolean, fromServer: boolean): Promise<void> {
     const supabase = useSupabaseClient();
     // Write the previous project's working copy before its state is replaced.
     await closeSession();
@@ -1172,8 +1175,10 @@ export const useEngineStore = defineStore('engine', () => {
     await ensureLegacyWalMigrated();
     const store = await getProjectStore();
     const userId = await resolveCurrentUserId(useSupabaseUser().value as { id?: string; sub?: string } | null, supabase.auth);
-    let local = await readLocalProject(store, projectId);
-    let meta = local?.meta ?? await store.getProject(projectId);
+    const localCopy = await readLocalProject(store, projectId);
+    let meta = localCopy?.meta ?? await store.getProject(projectId);
+    // Remote restore: the local copy is the pre-restore state → download.
+    let local = fromServer && userId && meta?.origin !== 'local' ? null : localCopy;
     // Web (D16): a stale copy of another account with nothing pending (left
     // by an automatic sign-out) is dropped so the project opens from the
     // server for the signed-in account.
@@ -1188,11 +1193,17 @@ export const useEngineStore = defineStore('engine', () => {
 
     const host = { port: getStatePort(), reset: resetForLoad, gate: gateRequirements };
     const client = supabase as unknown as RemoteClient;
-    const result: OpenResult = local || origin === 'local'
+    let result: OpenResult = local || origin === 'local'
       ? await openFromLocal(host, local, meta)
       : userId
         ? await openFromServer(host, { store, client, projectId, userId, meta })
         : { ok: false, error: 'offline-unavailable' };
+    // Download after a remote restore failed (e.g. offline): keep working on
+    // the local copy; the restore is picked up on the next fresh open.
+    if (!result.ok && local !== localCopy && localCopy && (result.error === 'offline-unavailable' || result.error === 'error')) {
+      console.warn('[engine] reload after remote restore failed, opening the local copy:', result.error);
+      result = await openFromLocal(host, localCopy, meta);
+    }
 
     if (!result.ok) {
       if (result.error === 'auth') {
@@ -1200,7 +1211,7 @@ export const useEngineStore = defineStore('engine', () => {
         // it could not be refreshed (offline period). Refresh first; sign out
         // only if the auth server definitively rejects the session.
         const action = await resolveUnauthorized(supabase.auth);
-        if (action === 'retry' && allowAuthRetry) return loadProject(projectId, false);
+        if (action === 'retry' && allowAuthRetry) return loadProject(projectId, false, fromServer);
         projectLoading.value = false;
         if (action === 'sign-out') {
           const router = useRouter();
@@ -1248,6 +1259,25 @@ export const useEngineStore = defineStore('engine', () => {
     wirePersistence(projectId, current, supabase as unknown as ReturnType<typeof useSupabaseClient>);
     projectLoading.value = false;
   }
+
+  /**
+   * A collaborator restored a snapshot (a `restore-snapshot` marker arrived,
+   * see remote-restore.ts): wait until the sync engine is idle (its running
+   * cycle must not write the local base after the reload), then reopen the
+   * project from the server, which starts at the restored snapshot.
+   * Pending local changes stay in the outbox and are replayed on top.
+   */
+  async function reloadAfterRemoteRestore(): Promise<void> {
+    const projectId = currentProjectId.value;
+    const engine = session?.engine;
+    if (!projectId || !engine || engine.projectId !== projectId) return;
+    await engine.whenIdle();
+    // Project switched meanwhile: nothing to do.
+    if (currentProjectId.value !== projectId || session?.engine !== engine) return;
+    notify({ title: 'Earlier version restored', description: 'A collaborator restored an earlier version. Reloading the project.' });
+    await loadProject(projectId, true, true);
+  }
+  setRemoteRestoreHandler(reloadAfterRemoteRestore);
 
   /** Persist queue + history hooks, server-snapshot autosave, unload handling. */
   function wirePersistence(projectId: string, current: ProjectSession, supabase: ReturnType<typeof useSupabaseClient>): void {

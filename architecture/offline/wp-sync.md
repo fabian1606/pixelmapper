@@ -119,7 +119,7 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - Rows discarded after a permanent rejection stay applied in the local live state (and in the next checkpoint) until the server state overwrites those values or the project is reloaded from the server.
 - `pushHeadless` does not isolate rejected rows (a rejection keeps the closed project's rows until it is opened).
 - A successful outbox write retry does not trigger a push by itself; the rows go out with the next push, cycle or periodic sync.
-- `restore-snapshot` inserts a snapshot at the head but no change row: other open clients do not see the restore until they reload (pre-existing).
+- Since migration 009 a restore appends a `restore-snapshot` marker change and stores the snapshot at its sequence. Clients never replay the marker: `remote-restore.ts` (called from `engine-state-port.replayChange` for pulls/rebases and from the realtime applier in `use-collaboration.ts`) schedules one reload of the open project from the server and blocks server snapshots until it finished. If the download fails (offline), the local copy is opened and the restore is only picked up on the next fresh open.
 - Headless mirroring stores the server snapshot only; changes after it need an online open (or arrive with the next sync while open).
 - `load-project` does not return the project name: a first open without meta stores `name: ''` until mirroring / the project list updates it.
 - Not verified in a real browser / Tauri yet (see the report of this package).

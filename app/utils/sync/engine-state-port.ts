@@ -2,6 +2,7 @@ import type { ProjectSnapshot } from '~/utils/engine/serialize';
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
 import { getLiveOpConfig, type LiveContext } from '~/stores/live-bus-store';
 import type { ProjectStatePort, ReplayableChange } from '~/utils/sync/project-state-port';
+import { handleRestoreMarker } from '~/utils/sync/remote-restore';
 
 /**
  * `ProjectStatePort` over the engine store (ADR 0004 §3.2): the same snapshot
@@ -42,8 +43,13 @@ export function createReplayLiveContext(engineStore: LiveContext['engineStore'])
   };
 }
 
-/** Replay one change: history command registry first, then live-ops. */
+/**
+ * Replay one change: restore markers first (they schedule a reload from the
+ * server instead of changing the state), then the history command registry,
+ * then live-ops.
+ */
 export function replayChange(change: ReplayableChange, ctx: ReplayContext, liveCtx: LiveContext): boolean {
+  if (handleRestoreMarker(change.type)) return true;
   const cmd = commandFromPayload(change.type, change.payload as object, ctx);
   if (cmd) {
     cmd.execute();

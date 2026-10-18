@@ -102,14 +102,89 @@ export interface SaveSnapshotRequest {
 /** `{ projectId, snapshot, sequenceNumber, label? }`. */
 export function parseSaveSnapshot(body: Record<string, unknown>): Parsed<SaveSnapshotRequest> {
   const { projectId, snapshot, sequenceNumber, label } = body;
-  // projectId is only checked for presence: legacy callers may pass any id string.
   if (typeof projectId !== 'string' || projectId === '' || !isPlainObject(snapshot) || sequenceNumber === undefined) {
     return { ok: false, error: 'projectId, snapshot, sequenceNumber required' };
   }
+  // projects.id is a uuid column: anything else would fail in Postgres (22P02 → 500).
+  if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
   if (!isSequence(sequenceNumber)) return { ok: false, error: 'sequenceNumber must be a non-negative integer' };
   const parsedLabel = parseLabel(label);
   if (!parsedLabel.ok) return parsedLabel;
   return { ok: true, value: { projectId, snapshot, sequenceNumber, label: parsedLabel.value } };
+}
+
+// ── load-project ─────────────────────────────────────────────────────────────
+
+/** `{ projectId }` (load-project). */
+export function parseProjectId(body: Record<string, unknown> | null): Parsed<{ projectId: string }> {
+  const projectId = body?.projectId;
+  if (typeof projectId !== 'string' || projectId === '') return { ok: false, error: 'projectId required' };
+  if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
+  return { ok: true, value: { projectId } };
+}
+
+// ── restore-snapshot ─────────────────────────────────────────────────────────
+
+export interface RestoreSnapshotRequest {
+  projectId: string;
+  snapshotId: string;
+}
+
+/** `{ projectId, snapshotId }` — both UUIDs. */
+export function parseRestoreSnapshot(body: Record<string, unknown> | null): Parsed<RestoreSnapshotRequest> {
+  const projectId = body?.projectId;
+  const snapshotId = body?.snapshotId;
+  if (typeof projectId !== 'string' || typeof snapshotId !== 'string' || !projectId || !snapshotId) {
+    return { ok: false, error: 'projectId and snapshotId required' };
+  }
+  if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
+  if (!isUuid(snapshotId)) return { ok: false, error: 'snapshotId must be a UUID' };
+  return { ok: true, value: { projectId, snapshotId } };
+}
+
+// ── push-change ──────────────────────────────────────────────────────────────
+
+/** One change as sent to the `push_changes` RPC. */
+export interface PushChangeItem {
+  changeId: string;
+  commandType: string;
+  payload: unknown;
+}
+
+export interface PushChangesRequest {
+  projectId: string;
+  changes: PushChangeItem[];
+}
+
+/**
+ * Single form `{ projectId, commandType, payload, changeId? }` or array form
+ * `{ projectId, changes: [...] }`. A missing `changeId` gets a server UUID
+ * (back-compat with old clients; such a push is not idempotent). Change ids
+ * are lower-cased, like Postgres returns them.
+ */
+export function parsePushChanges(
+  body: Record<string, unknown>,
+  newId: () => string = () => crypto.randomUUID(),
+): Parsed<PushChangesRequest> {
+  const projectId = body.projectId;
+  if (typeof projectId !== 'string' || projectId === '') return { ok: false, error: 'projectId required' };
+  if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
+
+  let raw: unknown[];
+  if (Array.isArray(body.changes)) raw = body.changes;
+  else if (body.commandType && body.payload !== undefined) raw = [{ commandType: body.commandType, payload: body.payload, changeId: body.changeId }];
+  else return { ok: false, error: 'either { commandType, payload } or { changes: [...] } required' };
+
+  const changes: PushChangeItem[] = [];
+  for (const [i, item] of raw.entries()) {
+    if (!isPlainObject(item)) return { ok: false, error: `changes[${i}] must be an object` };
+    const { changeId, commandType, payload } = item;
+    if (typeof commandType !== 'string' || commandType === '') return { ok: false, error: `changes[${i}].commandType required` };
+    if (payload === undefined) return { ok: false, error: `changes[${i}].payload required` };
+    if (changeId !== undefined && changeId !== null && !isUuid(changeId)) return { ok: false, error: `changes[${i}].changeId must be a UUID` };
+    changes.push({ changeId: ((changeId as string | null | undefined) ?? newId()).toLowerCase(), commandType, payload });
+  }
+  return { ok: true, value: { projectId, changes } };
 }
 
 /** Optional label: string up to SNAPSHOT_LABEL_MAX chars, or null. */
