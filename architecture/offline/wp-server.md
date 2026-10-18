@@ -20,6 +20,10 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/_shared/snapshot-list.ts` | Pure row → response mapping of `list-snapshots` (cursor of the last row) |
 | `supabase/migrations/010_snapshot_summary.sql` | `snapshot_summary(jsonb)`, `list_snapshot_summaries()` (both `security invoker`) |
 | `app/utils/sync/remote-api-snapshots.ts` | Typed wrapper `listSnapshots()` |
+| `supabase/functions/snapshot-details/` | **new** (012): two snapshots + aggregated activity for the version-history details |
+| `supabase/functions/_shared/snapshot-details.ts` | Pure request parser + row → response mapping of `snapshot-details` |
+| `supabase/migrations/012_snapshot_details.sql` | `snapshot_details_pair()`, `snapshot_activity()`, `snapshot_restore_markers()` (all `security invoker`, explicit grants) |
+| `app/utils/sync/remote-api-snapshot-details.ts` | Typed wrapper `getSnapshotDetails()` |
 | `app/utils/sync/remote-restore.ts` | Client reaction to a pulled / realtime `restore-snapshot` marker (reload from the server) |
 | `supabase/functions/create-project/` | changed: client id, idempotency, initial snapshot |
 | `supabase/functions/pull-changes/` | **new**: paged change log after a cursor |
@@ -167,6 +171,18 @@ Response 200: `{ "snapshots": [{ "id", "sequenceNumber", "label", "createdAt", "
 - Shared helpers (CORS, preflight, POST only, JSON errors); 400 for invalid input / cursor, 403 for non-collaborators (viewers may read). Breaking change to the old GET `?projectId=` array response, which no client used.
 - Pure parts: `_shared/validate.ts` (`parseListSnapshots`, cursor encode/decode), `_shared/snapshot-list.ts` (row → response); tests in `_shared/snapshot-list.test.ts`. The 010 SQL was verified against a throwaway `postgres:16` container (nested groups, malformed arrays, paging across equal sequence numbers).
 
+### `snapshot-details` (new, migration 012)
+
+Request: `POST { "projectId": "<uuid>", "snapshotId": "<uuid>", "compareToId"?: "<uuid>" }`.
+Response 200: `{ "snapshot": { "id", "sequenceNumber", "label", "createdAt", "data" }, "previous": same | null, "activity": [{ "userId", "authorName", "commandType", "count" }], "restores": [{ "sequenceNumber", "createdAt", "userId", "authorName", "snapshotId", "sourceSequence", "sourceCreatedAt", "sourceLabel" }], "restoredFrom": restore | null }`.
+
+- "What changed" of a version-history entry (WP-SYNC "Version history" › Change details). The client diffs `previous.data` → `snapshot.data`.
+- `snapshot_details_pair(project, snapshot, compareTo)`: the snapshot plus `compareTo` when it exists in the project (and is not the snapshot itself), otherwise its older neighbour in the list order (`sequence_number desc, created_at desc, id desc`); no previous = first version.
+- `snapshot_activity(project, after, upto)`: `project_changes` with `sequence_number` in `(previous.seq, snapshot.seq]` grouped by `user_id, command_type` (+ `profiles.display_name`), restore markers excluded, max 500 groups. No payloads are returned.
+- `snapshot_restore_markers(project, after, upto)`: `restore-snapshot` markers in that range (only the payload's `snapshotId` is read, when it is a UUID) joined with the restored snapshot's metadata, max 50. For the first version only the snapshot's own sequence is queried; `restoredFrom` = the marker at `snapshot.sequenceNumber`.
+- All three are `security invoker` (RLS applies) with `revoke … from public, anon` + `grant execute … to authenticated` (see 011 for why the grants are explicit). 400 invalid ids, 403 non-collaborators (viewers may read), 404 unknown snapshot.
+- Pure parts in `_shared/snapshot-details.ts` (`parseSnapshotDetails`, `splitPair`, `detailRanges`, `toSnapshotDetailsResponse`); tests in `_shared/snapshot-details.test.ts`. The 012 SQL was verified against a throwaway `postgres:16` container (explicit/neighbour/missing compare, equal sequence numbers, other projects' rows, invalid marker ids).
+
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
 ```ts
@@ -205,7 +221,8 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 # 1. Schema first: 007 (project_sync_heads), 008 (user_records),
 #    009 (push_changes / restore_snapshot RPCs, projects.created_by,
 #    user_records LWW fix), 010 (snapshot_summary /
-#    list_snapshot_summaries for the version history).
+#    list_snapshot_summaries for the version history), 012
+#    (snapshot_details_pair / snapshot_activity / snapshot_restore_markers).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
@@ -218,6 +235,7 @@ supabase functions deploy load-shared-project
 supabase functions deploy save-snapshot
 supabase functions deploy list-projects-sync
 supabase functions deploy list-snapshots       # needs 010 (list_snapshot_summaries)
+supabase functions deploy snapshot-details     # needs 012 (snapshot_details_pair, …)
 ```
 
 All functions keep the default JWT verification. **Migration 009 must be applied before** `push-change`, `restore-snapshot` and `create-project` are deployed (they call the new RPCs / write `created_by`); the others work against the existing schema. Clients of the previous build keep working: the response shapes are unchanged (`restore-snapshot` only adds fields), and an older client ignores the `restore-snapshot` marker row with a "no handler" warning.
