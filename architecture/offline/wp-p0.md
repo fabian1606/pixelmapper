@@ -80,9 +80,40 @@ The same key is used in the queue, in the WAL and in the LiveBus broadcast batch
   - A network failure only reports offline and shows the generic error. The local-first open is WP-SYNC.
   - A 401 runs `resolveUnauthorized`: on `'retry'` the project is loaded once more (`allowAuthRetry`), on `'keep'` the error view is shown, and only on `'sign-out'` the user is signed out and redirected.
 
+### Offline boot never waits for a token refresh
+
+**Problem.** auth-js 2.104 refreshes an expired access token inside `getSession()` (`__loadSession` → `_callRefreshToken`). Offline, `_refreshAccessToken` retries with 200 ms · 2ⁿ backoff for up to one auto-refresh tick (30 s), and every attempt goes through the module's 3× `fetchWithRetry`. `_initialize()` (`_recoverAndRefresh`) already does this once when `autoRefreshToken` is on, and `getSession()` awaits `initializePromise` and then does it again. Nuxt runs plugins one after another, so every plugin that awaited `getSession()` added ~30 s of blank window: the `@nuxtjs/supabase` client plugin in SPA mode (`useSsrCookies: false`, Tauri) and `03.extension-loader`. `getSession()` then returned `{ session: null }`, so the extension loader used the anonymous installed list and a project's required extensions (e.g. `connector-esp`) were missing offline. Every Supabase data call (`_getAccessToken` → `getSession()`) pays the same wait.
+
+**Boot helpers** (`app/utils/auth/boot-session.ts`):
+- `resolveBootSession(auth, { online, timeoutMs = 3000 })`: offline → the stored session (`readCachedSession`) without calling `getSession()`; online → `getSession()` raced against the timeout. A fresh session wins (online boots behave as before). On timeout, a throw or a refresh error the stored session is used. The pending call keeps running and later updates state through `TOKEN_REFRESHED`.
+- `shouldKeepCachedIdentity(auth, event)`: a missing session or missing claims only clears state on `SIGNED_OUT` or when supabase-js no longer stores a session.
+- `bindAutoRefreshToConnectivity(auth, isOnline)`: runs the refresh ticker only while online.
+
+**Desktop replacement of the module client plugin** (`app/runtime/supabase-spa.client.ts`). In desktop builds the `app:resolve` hook in `nuxt.config.ts` replaces the plugin whose `src` is `@nuxtjs/supabase/dist/runtime/plugins/supabase.client.js`. The module registers that plugin with `addPlugin`, `name: 'supabase'`, `enforce: 'pre'`. The build fails if the plugin cannot be found. The replacement keeps the module's contract:
+- same plugin name, so `dependsOn: ['supabase']` still works;
+- provides `$supabase.client` from `createClient(url, key, { ...clientOptions, global: { fetch: fetchWithRetry } })` (`fetchWithRetry` is copied to `app/utils/auth/fetch-retry.ts` because the package does not export it);
+- fills `useSupabaseSession()` (`useState('supabase_session')`) and sets `useSupabaseUser()` from `getClaims()` on `page:start` and after auth events.
+
+Differences from the module plugin:
+- It uses `resolveBootSession` instead of an unbounded `getSession()`.
+- `INITIAL_SESSION`/`null` after a failed offline refresh and failed `getClaims()` keep the cached identity.
+- With `clientOptions.auth.autoRefreshToken: false` (desktop only, set in `nuxt.config.ts`) the ticker is started/stopped by connectivity. auth-js then skips the refresh in `_initialize()`, and the visibility handler does not start the ticker. While online the ticker (`startAutoRefresh`) refreshes 3 ticks before expiry, and `getSession()` still refreshes lazily. Offline no tick holds the auth lock for 30 s.
+
+The web build keeps the module plugin, which does not await `getSession()` in SSR-cookie mode.
+
+**Extension loader.**
+- `03.extension-loader` uses `resolveLoaderBootConfig(supabase, useSupabaseUser().value)` (`app/utils/extensions/boot-config.ts`). It resolves the account through `resolveCurrentUserId`: the module user, else the stored session, with no network. So the signed-in user's installed list (Supabase `user_extensions`, mirrored in localStorage) is used offline too.
+- `supabaseInstalledStore.list()` returns the mirror when offline and races the query against `REMOTE_TIMEOUT_MS` (4 s) otherwise.
+- `listAvailableExtensions` bounds each source listing with the same timeout. `startLoading` shares one listing across all installed extensions.
+- `registrySource` (`extension-sources.ts`) fails fast offline.
+
+**Plugin remote** (`app/utils/plugins/plugin-remote.ts`):
+- `userId()` reads the stored session instead of `getUser()`.
+- `fetch`/`publish`/`list`/`findByAlias` throw `offline` right away when offline. Callers already treat throws as "not available".
+
 ## Tests
 
-`app/utils/ids.test.ts`, `app/utils/persistence/wal.test.ts`, `app/utils/persistence/persist-queue.test.ts`, `app/utils/sync/retry-scheduler.test.ts` (includes the probe), `app/utils/sync/connectivity.test.ts` (flap protection), `app/utils/auth/session-recovery.test.ts`, `app/composables/live-ops/coalesce-keys.test.ts`.
+`app/utils/auth/boot-session.test.ts`, `app/utils/extensions/boot-config.test.ts` (offline boot picks the user's installed list without `getSession()`; hanging backend bounded by the timeout), `app/utils/plugins/plugin-remote.test.ts`, `app/utils/ids.test.ts`, `app/utils/persistence/persist-queue.test.ts`, `app/utils/sync/retry-scheduler.test.ts` (includes the probe), `app/utils/sync/connectivity.test.ts` (flap protection), `app/utils/auth/session-recovery.test.ts`, `app/composables/live-ops/coalesce-keys.test.ts`.
 
 ## Known limits / follow-ups
 

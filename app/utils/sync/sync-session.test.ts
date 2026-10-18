@@ -157,3 +157,27 @@ describe('unbound cloud copy', () => {
     expect(syncStatus.value.error).toBe(syncBlocker(meta, userId));
   });
 });
+
+// ── Close (project switch, sign-out) ─────────────────────────────────────────
+
+describe('close', () => {
+  it('writes the working copy once, then nothing can write it back (web clear after sign-out)', async () => {
+    const meta = cloudMeta(PID);
+    await store.putProject(meta);
+    const s = start(meta, 'u-me');
+    await settle();
+    await s.close();
+    expect(await readWorking(store, PID)).not.toBeNull();
+    expect(getOpenSyncEngine(PID)).toBeNull();
+
+    // D16: the cache is cleared after the session closed ...
+    await store.clearAll();
+    // ... and a late writer flush (visibilitychange / beforeunload) is a no-op.
+    s.writer.schedule();
+    await s.writer.flush();
+    expect(await store.getWorkingSnapshot(PID)).toBeNull();
+    await expect(s.engine!.requestSync()).resolves.toBeUndefined();
+    expect(s.engine!.canSync()).toBe(false);
+    session = null;
+  });
+});

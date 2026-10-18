@@ -52,4 +52,24 @@ describe('createSyncScheduler', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(run).toHaveBeenCalledTimes(3);
   });
+
+  it('neither starts rounds nor polls while offline, and resumes on syncNow after reconnect', async () => {
+    let online = true;
+    const run = vi.fn(async () => false);
+    const s = createSyncScheduler({ run, debounceMs: 100, isOnline: () => online });
+    await s.syncNow();
+    expect(run).toHaveBeenCalledTimes(1);
+    // The failed round found the network gone: no retry timer.
+    online = false;
+    await s.syncNow();
+    s.scheduleDebounced();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    // Reconnect: the owner calls syncNow (onReconnect).
+    online = true;
+    run.mockResolvedValueOnce(true);
+    await s.syncNow();
+    expect(run).toHaveBeenCalledTimes(2);
+    s.dispose();
+  });
 });

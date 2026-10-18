@@ -55,6 +55,21 @@ describe('flushBeforeSignOut', () => {
     expect(records.countPendingRecords).toHaveBeenCalledWith('u1');
   });
 
+  it('web adopts local-only records before syncing (the clear would delete them); desktop does not', async () => {
+    const web = deps(WEB_ACCOUNT_POLICY);
+    const adoptWeb = vi.fn(async (_u: string) => 1);
+    web.d.records = { ...web.records, adoptLocalRecords: adoptWeb };
+    await flushBeforeSignOut(web.d, 'u1');
+    expect(adoptWeb).toHaveBeenCalledWith('u1');
+    expect(adoptWeb.mock.invocationCallOrder[0]!).toBeLessThan(web.records.syncAllRecords.mock.invocationCallOrder[0]!);
+
+    const desktop = deps(DESKTOP_ACCOUNT_POLICY);
+    const adoptDesktop = vi.fn(async (_u: string) => 1);
+    desktop.d.records = { ...desktop.records, adoptLocalRecords: adoptDesktop };
+    await flushBeforeSignOut(desktop.d, 'u1');
+    expect(adoptDesktop).not.toHaveBeenCalled();
+  });
+
   it('without a sync service counts the outbox of the account\'s cloud projects only', async () => {
     const { d } = deps(WEB_ACCOUNT_POLICY, null);
     expect((await flushBeforeSignOut(d, 'u1')).projects).toBe(2);
@@ -88,6 +103,22 @@ describe('finishSignOut', () => {
     expect((await store.listProjects()).map(m => m.id).sort()).toEqual(['local', 'mine', 'theirs']);
     expect(records.clearLocalRecords).not.toHaveBeenCalled();
     expect(auth.signOut).toHaveBeenCalled();
+  });
+
+  it('tears the account session down before the cache is cleared', async () => {
+    const { d } = deps(WEB_ACCOUNT_POLICY);
+    const order: string[] = [];
+    // The open project's writer would flush a working snapshot on close.
+    d.teardown = vi.fn(async () => {
+      order.push('teardown');
+      await store.putWorkingSnapshot('mine', { version: 1 } as never);
+    });
+    const clearAll = store.clearAll.bind(store);
+    store.clearAll = vi.fn(async () => { order.push('clear'); await clearAll(); });
+    await finishSignOut(d, 'u1', { keepLocalCopies: true });
+    expect(order).toEqual(['teardown', 'clear']);
+    // Nothing of the account survives the web clear.
+    expect(await store.getWorkingSnapshot('mine')).toBeNull();
   });
 
   it('desktop remove: only cloud copies bound to the account are deleted', async () => {

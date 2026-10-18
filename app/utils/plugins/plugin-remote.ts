@@ -8,6 +8,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ContentPluginManifest, ContentPluginPackage } from '@pixelmapper/plugin-toolchain/types';
 import type { Database, Json } from '~/types/database.types';
+import { resolveCurrentUserId } from '~/utils/sync/current-user';
+import { isOnline } from '~/utils/sync/connectivity';
 
 /** Who can read a published plugin. */
 export type PluginVisibility = 'private' | 'project' | 'public';
@@ -55,17 +57,27 @@ function info(row: Row): RemotePluginInfo {
   };
 }
 
+/**
+ * Throws when connectivity tracking reports offline: every Supabase data call
+ * first awaits `auth.getSession()`, which retries an expired-token refresh for
+ * ~30 s offline (ADR 0004 D10). Callers already treat throws as unavailable.
+ */
+function assertOnline(): void {
+  if (!isOnline.value) throw new Error('offline');
+}
+
 /** Supabase-backed remote. */
 export function createSupabaseRemote(supabase: SupabaseClient<Database>): PluginRemote {
   const bucket = () => supabase.storage.from('content-plugins');
 
   return {
     async userId() {
-      const { data } = await supabase.auth.getUser();
-      return data.user?.id ?? null;
+      // From the stored session — no network round-trip (works offline).
+      return resolveCurrentUserId(null, supabase.auth);
     },
 
     async fetch(hash) {
+      assertOnline();
       const { data: row, error } = await supabase.from('content_plugins').select('*').eq('hash', hash).maybeSingle();
       if (error) throw error;
       if (!row) return null;
@@ -90,6 +102,7 @@ export function createSupabaseRemote(supabase: SupabaseClient<Database>): Plugin
     },
 
     async publish(pkg, visibility, projectId = null) {
+      assertOnline();
       const { error } = await supabase.from('content_plugins').insert({
         hash: pkg.hash,
         alias: pkg.manifest.alias,
@@ -114,6 +127,7 @@ export function createSupabaseRemote(supabase: SupabaseClient<Database>): Plugin
     },
 
     async list(filter) {
+      assertOnline();
       const out = new Map<string, RemotePluginInfo>();
       const add = (rows: Row[] | null) => rows?.forEach(r => out.set(r.hash, info(r)));
       const uid = filter.mine ? await this.userId() : null;
@@ -124,6 +138,7 @@ export function createSupabaseRemote(supabase: SupabaseClient<Database>): Plugin
     },
 
     async findByAlias(alias) {
+      assertOnline();
       const { data, error } = await supabase.from('content_plugins').select('*').eq('alias', alias).order('created_at', { ascending: false }).limit(20);
       if (error) throw error;
       return (data ?? []).map(info);

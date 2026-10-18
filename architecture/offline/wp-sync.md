@@ -77,13 +77,28 @@ Lock: every network operation of an engine (cycle or push) runs serialized. Trig
 
 **Realtime**: CDC rows go to `handleRemoteInsert`; known ids (reflected, own) are only recorded; foreign command rows are applied via the collaboration applier (`history.executeRemote`); rows the applier does not handle (it returns `false`, e.g. live-ops) and all rows without an applier are replayed through the state port — a peer that edited offline never broadcast them, and live-op values are absolute, so a second application via broadcast is harmless. During a cycle rows are deferred and decided afterwards.
 
+## Session lifecycle and account binding
+
+A session ends on every project switch, when the project page unmounts (`layouts/project.vue` → `engineStore.closeSession()`), on sign-out (`finishSignOut` → `teardownAccountSession`, before any cache clear) and on `SIGNED_OUT` / an account switch (`05.account.client.ts` via `account-events.ts`). `closeSession` is idempotent and:
+
+- bumps a load generation, so a `loadProject` still in flight does not start its session afterwards;
+- removes the unload handlers and unsubscribes the per-load token listener (`onAuthStateChange`);
+- clears the undo/redo history (`clearHistory()`), which belongs to the closed project;
+- awaits `ProjectSession.close()`: stop the engine first, then flush and dispose the working-snapshot writer (later `flush()` calls are no-ops, so a cleared cache is never refilled).
+
+`SyncEngine.stop()` is async: it removes the triggers and waits for the running cycle/push (at most 5 s). As a backstop the engine wraps its `SyncDeps` (`sync-guard.ts`): once stopped, or once the signed-in account differs from `boundUserId`, remote calls, store writes and live-state access through the shared port throw `SyncBlockedError`, and `writeWorking` / `onLiveChanged` / `onSequence` / `onRebased` become no-ops. A late step of project A therefore never captures or replays into project B, and never pushes with account B's token.
+
+The signed-in account is published synchronously by the account plugin (`utils/auth/current-account.ts`; `undefined` before the first auth event = not blocking). `cycle()`, `pushAndSettle()` and `pushForQueue()` (throws like offline, rows stay in the outbox) check `canSync()`; the unload keepalive is skipped when `!engine.canSync()`. The token cached for keepalive is cleared on sign-out.
+
+After a rebase the engine calls `deps.onRebased()` (from `pullStep`'s `rebased` flag, no change in `sync-cycle.ts`); the engine store clears the undo/redo stacks then, because their before/after payloads predate the merged peer changes.
+
 ## Server snapshots (autosave)
 
 Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only for sessions with an engine, online, with an empty persist queue and outbox (`canSaveServerSnapshot`). Uses `remote-api.saveSnapshot`.
 
 ## Service (`ProjectSyncService`)
 
-- `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
+- `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows (also without meta: legacy-WAL rows have no account and are bound by the first signed-in open, never by a background pass); nothing is written when `userId` is no longer the signed-in account after the download; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
 - `flushAll(userId)`: cloud projects with `ownerUserId === userId` and no `remoteDeletedAt`. Open → `engine.flushNow()`. Closed → `pushHeadless`: pushes only if there is no foreign change since the base (no rebase needed) and records the acked ids in the working snapshot's position — only rows with `order <= outboxOrder` (contained in the snapshot); newer rows are pulled as server changes on the next open; otherwise the rows stay (rebased on the next open). Returns the pending count of all projects bound to the account.
 - `countPending(projectId?)`: outbox count.
 
@@ -93,6 +108,7 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - `use-history.setPersistenceHooks`: `walAppend` / `currentProjectId` removed (the queue writes the outbox row); `WalEntryForHooks` removed.
 - `engine-store`: `projectOrigin`, `scheduleWorkingSnapshot()`, `projectError: 'offline-unavailable'`.
 - `ProjectSyncService` signatures unchanged; `SyncEngine.boundUserId`, `flushNow()`.
+- `SyncEngine.stop()` returns a promise; `SyncEngine.canSync()`; `SyncDeps.onRebased?()`; `SessionInput.onRebased?`; `engine-store.closeSession()` exported; `use-history.clearHistory()`.
 - `restore-snapshot` edge function: CORS + JSON errors (needs deployment).
 
 ## Known limits
@@ -103,7 +119,6 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - Rows discarded after a permanent rejection stay applied in the local live state (and in the next checkpoint) until the server state overwrites those values or the project is reloaded from the server.
 - `pushHeadless` does not isolate rejected rows (a rejection keeps the closed project's rows until it is opened).
 - A successful outbox write retry does not trigger a push by itself; the rows go out with the next push, cycle or periodic sync.
-- `engine-store`'s `onLiveChanged` does not schedule a working snapshot; realtime rows replayed through the port are persisted with the next working write.
 - `restore-snapshot` inserts a snapshot at the head but no change row: other open clients do not see the restore until they reload (pre-existing).
 - Headless mirroring stores the server snapshot only; changes after it need an online open (or arrive with the next sync while open).
 - `load-project` does not return the project name: a first open without meta stores `name: ''` until mirroring / the project list updates it.
@@ -124,6 +139,9 @@ Fake port + in-memory fake server (`sync-test-kit.ts`, `sync-test-server.ts`: gl
 | `mirrorProject` (closed, other account, open project: delegation, concurrent requests apply once), `flushAll` binding rules | `sync-service.test.ts` |
 | Crash recovery on fake-indexeddb: restart, offline reopen, lost ack, idempotent re-push | `sync-recovery.test.ts` |
 | Realtime live-ops, failed outbox writes, headless ack vs. `outboxOrder`, rejected pushes | `sync-hardening.test.ts` |
+| Session lifecycle: stop waits for an in-flight push; a step finishing after stop cannot touch the next project; no sync as another account / signed out / after a switch mid-cycle; `onRebased` | `sync-engine-lifecycle.test.ts` |
+| Headless mirror: legacy rows without meta stay unbound; no write-back after sign-out | `project-mirror-account.test.ts` |
+| Close: final working write, disposed writer never writes again | `sync-session.test.ts` › close |
 
 Also `persist-queue.test.ts` (outbox, no false "online"), `describe-conflicts.test.ts`, adapter tests in `merge/`.
 

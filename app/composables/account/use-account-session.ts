@@ -2,9 +2,10 @@ import { computed } from 'vue';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountPolicy } from '#platform';
 import { getProjectStore } from '~/utils/persistence/project-store';
-import { clearLocalRecords, countPendingRecords, syncAllRecords } from '~/utils/sync/records';
+import { adoptLocalRecords, clearLocalRecords, countPendingRecords, syncAllRecords } from '~/utils/sync/records';
 import { identityFromUser } from '~/utils/account/known-accounts';
 import { tryGetProjectSyncService } from '~/utils/account/sync-service';
+import { teardownAccountSession } from '~/utils/account/session-teardown';
 import { bumpLocalProjects } from './account-state';
 import { createSignOutFlow, type SignOutFlow } from './sign-out-flow';
 
@@ -33,8 +34,9 @@ export function useAccountSession() {
         policy,
         store: await getProjectStore(),
         sync: tryGetProjectSyncService(),
-        records: { syncAllRecords, countPendingRecords, clearLocalRecords },
+        records: { syncAllRecords, countPendingRecords, clearLocalRecords, adoptLocalRecords },
         auth: supabase.auth,
+        teardown: teardownAccountSession,
       }),
       userId: () => identityFromUser(userState.value)?.id ?? null,
       onSignedOut: async () => {

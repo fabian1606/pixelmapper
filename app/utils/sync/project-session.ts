@@ -5,7 +5,7 @@ import { isOnline } from '~/utils/sync/connectivity';
 import type { RemoteClient } from '~/utils/sync/remote-api';
 import type { ProjectStatePort } from '~/utils/sync/project-state-port';
 import { setSyncStatus } from '~/utils/sync/project-sync-service';
-import { setOpenSyncEngine } from '~/utils/sync/open-sync-engine';
+import { getOpenSyncEngine, setOpenSyncEngine } from '~/utils/sync/open-sync-engine';
 import type { OpenedProject } from '~/utils/sync/open-flow';
 import type { OutboxAccess } from '~/utils/sync/sync-context';
 import { SyncEngine } from '~/utils/sync/sync-engine';
@@ -32,6 +32,8 @@ export interface SessionInput {
   hasQueuedEntries(): boolean;
   /** Remote changes changed / replaced the live state (UI refresh). */
   onLiveChanged(): void;
+  /** A rebase replaced the live state (clear undo/redo). */
+  onRebased?(): void;
   /** A server sequence number is reflected (`lastSeenSequenceNumber`). */
   onSequence(seq: number): void;
   /** Stop the session without writing the working snapshot (restore). */
@@ -100,6 +102,7 @@ export function startProjectSession(input: SessionInput): ProjectSession {
       hasQueuedEntries: input.hasQueuedEntries,
       writeWorking: () => writer.flush(),
       onLiveChanged: input.onLiveChanged,
+      onRebased: input.onRebased,
       onSequence: input.onSequence,
       restoreBeforeSync: snapshotId => restoreBeforeSync({
         client: input.client, store, projectId, snapshotId, closeSession: input.discardSession, reload: input.reload,
@@ -132,11 +135,13 @@ export function startProjectSession(input: SessionInput): ProjectSession {
       return (await store.countPending(projectId)) === 0;
     },
     async close(discard = false) {
+      // Stop syncing first and wait for a running cycle/push: it may still
+      // apply to the live state, which must be this project's when it ends.
+      stopWritten();
+      if (getOpenSyncEngine() === engine) setOpenSyncEngine(null);
+      await engine?.stop();
       if (!discard) await writer.flush();
       writer.dispose();
-      stopWritten();
-      engine?.stop();
-      setOpenSyncEngine(null);
     },
   };
 }

@@ -32,6 +32,11 @@ The routing difference also needs one build-time switch. `nuxt.config.ts` sets `
 | `app/utils/account/mirror-scheduler.ts` | Runs a pass on start, on reconnect and every 5 min. Uses backoff and never overlaps passes |
 | `app/utils/account/sign-out.ts` | `flushBeforeSignOut()`, `finishSignOut()`, `endSession()` |
 | `app/utils/account/login-transition.ts` | `createLoginTracker()`: tells a real sign-in apart from a session refresh or restore |
+| `app/utils/account/account-events.ts` | `createAccountEventHandler()`: the plugin's reactions to auth events (testable without Nuxt) |
+| `app/utils/account/session-teardown.ts` | Registry to stop mirroring and close the open project from the sign-out flow and auth events |
+| `app/utils/account/foreign-cache.ts` | Web: `clearForeignCopies()` and `dropForeignCopyForOpen()` for copies an automatic sign-out left behind |
+| `app/utils/auth/auth-event-user.ts` | `resolveAuthEventUser()`: account of an auth event, cached session on a null non-`SIGNED_OUT` event |
+| `app/utils/auth/current-account.ts` | Synchronous "signed-in account" for sync guards |
 | `app/utils/account/sync-service.ts` | `tryGetProjectSyncService()` (returns `null` until WP-SYNC registers) |
 | `app/composables/account/account-state.ts` | Shared refs: `pendingLoginReview`, `localProjectsRevision`, mirror trigger |
 | `app/composables/account/sign-out-flow.ts` | Sign-out state machine (dependencies injected, so it is testable) |
@@ -84,7 +89,11 @@ Further badges: `N pending` (outbox count) and `Deleted on server`.
 
 ## Login (D14)
 
-`05.account.client.ts` watches `onAuthStateChange`.
+`05.account.client.ts` watches `onAuthStateChange` through `createAccountEventHandler`.
+
+- The account of an event is `session.user`; a null session counts as signed out only for `SIGNED_OUT`. Offline with an expired token auth-js emits `INITIAL_SESSION` without a session; the account then comes from the cached session (`resolveAuthEventUser`), so mirroring starts and nothing is torn down.
+- The account is published synchronously (`setCurrentAccountId`) inside the callback; everything else runs deferred and in event order.
+- `SIGNED_OUT` or a different account than the last event: mirroring stops and the open project's session closes (`closeOpenProject`) before the new account starts.
 
 - `createLoginTracker` persists the last account in `localStorage['pm:account:last-user']`. A session for a different account, or the first session after a `SIGNED_OUT`, counts as a real sign-in. Refreshes, restored sessions and a missing session at an offline boot do not.
 - On a real sign-in, both platforms call `adoptLocalRecords(userId)` (custom fixtures). On desktop, the sign-in also sets `pendingLoginReview`.
@@ -108,13 +117,19 @@ Every deliberate sign-out goes through `useAccountSession().signOut()`, which dr
 3. **copies** (desktop only, when copies bound to the account exist): asks "Keep local copies?".
    - Keep: projects stay bound to `ownerUserId`.
    - Remove: deletes only the cloud copies of that account. Local-only projects and other accounts' copies always stay.
+   On the web, `adoptLocalRecords(userId)` runs first: local-only records (written while the account was unknown) would otherwise be deleted by the clear.
 4. **finish:**
+   - First `teardownAccountSession()`: stop mirroring and wait for a running pass (no restart until `SIGNED_OUT`), then close the open project (its working snapshot is flushed, then the writer, unload handlers, token listener and engine are disposed). Nothing can write the account's data back afterwards.
    - Web: `store.clearAll()` + `clearLocalRecords()`.
    - Then, on both: `endSession()`, then navigation (web → `/auth/login`, desktop → `/`).
 
 `endSession()` calls `auth.signOut({ scope: 'local' })`, which signs out this device only (before, it was the default global scope). supabase-js keeps the session when the revoke request fails at the network level. In that case `endSession` removes the stored session locally through `auth._removeSession()`, a private but stable supabase-js v2 API, so an offline logout still works. It emits `SIGNED_OUT`.
 
-When the auth server rejects the session (the 401 path in `engine-store.ts` `loadProject`), the store calls `endSession()` directly and keeps local data. Syncing is impossible at that point, and the data stays bound to the account until it signs in again.
+When the auth server rejects the session (the 401 path in `engine-store.ts` `loadProject`, or a refresh rejected by supabase-js, which emits `SIGNED_OUT`), the session ends without the D16 clear and local data is kept. Syncing is impossible at that point, and the data stays bound to the account until it signs in again. The open session is closed on `SIGNED_OUT` like on every sign-out.
+
+On the web this would leave the previous account's copies in the cache, so:
+- on a real sign-in of an account, `clearForeignCopies()` removes cloud copies bound to other accounts that have nothing pending, and `clearForeignRecords()` the other accounts' synced records. Copies or records with unsynced changes are kept (hidden on the web) and a warning names them; they sync when their owner signs in again;
+- opening a project whose local copy is bound to another account and has nothing pending drops that copy first (`dropForeignCopyForOpen`), so it opens from the server for the signed-in account.
 
 ## Owner binding (D15)
 
@@ -133,7 +148,7 @@ The plugin starts a `MirrorScheduler` per signed-in account (`setMirrorUser`). I
 - with `backoffDelay` after a failure. No timer runs while offline, and passes never overlap.
 
 A pass (`runMirrorPass`):
-1. Calls `listProjectsForSync`.
+1. Calls `listProjectsForSync`. (Copies bound or uploaded after the request started are never treated as deleted: the guard uses `max(createdAt, lastSyncedAt)`, since an upload keeps `createdAt`.)
 2. Runs `reconcileRemoteHeads`.
 3. For each stale head (no local copy, or `latestSequence > serverCursor`), calls `mirrorProject(head, userId)` sequentially and stops if the account changes.
 4. Projects deleted remotely are removed, or kept and marked when they have pending changes (with a warning toast).
@@ -170,6 +185,10 @@ Covered:
 - the logout steps per policy, including the offline `endSession` fallback
 - the login tracker
 - the sign-out state machine
+- teardown before the web clear, web adoption of local-only records
+- auth events: offline `INITIAL_SESSION` falls back to the cached account, `SIGNED_OUT` / account switch close the open project
+- foreign copies on the web (kept when pending)
+- reconcile keeps a copy uploaded while the list request ran
 
 ## Not verified / follow-ups
 

@@ -1,4 +1,5 @@
 import { watch } from 'vue';
+import { isCurrentAccount } from '~/utils/auth/current-account';
 import { isOnline, onReconnect } from '~/utils/sync/connectivity';
 import { setSyncStatus } from '~/utils/sync/project-sync-service';
 import { reportSyncConflicts } from '~/utils/sync/sync-conflicts';
@@ -7,6 +8,7 @@ import { pullStep } from '~/utils/sync/sync-cycle';
 import type { SyncPosition } from '~/utils/sync/sync-position';
 import { checkpointBase, pushOutbox, touchLastSynced } from '~/utils/sync/sync-push';
 import { describeStatus } from '~/utils/sync/sync-status';
+import { guardSyncDeps } from '~/utils/sync/sync-guard';
 import { RealtimeIntake, type RemoteApplier, type RemoteInsert } from '~/utils/sync/sync-realtime';
 
 export type { RemoteApplier, RemoteInsert } from '~/utils/sync/sync-realtime';
@@ -41,6 +43,9 @@ class OfflineError extends TypeError {
 /** Default fallback pull interval while a project is open. */
 const PERIODIC_MS = 60_000;
 
+/** Longest wait in `stop()` for a running operation (hanging requests). */
+const STOP_WAIT_MS = 5_000;
+
 // ── Engine ───────────────────────────────────────────────────────────────────
 
 export class SyncEngine {
@@ -56,7 +61,9 @@ export class SyncEngine {
   private disposers: Array<() => void> = [];
 
   constructor(deps: SyncDeps, init: SyncEngineInit) {
-    this.deps = deps;
+    // Every side effect is gated: nothing runs after stop() or once another
+    // account (or nobody) is signed in, even from an operation in flight.
+    this.deps = guardSyncDeps(deps, () => this.canSync());
     this.projectId = deps.projectId;
     this.state = {
       base: init.base,
@@ -70,7 +77,7 @@ export class SyncEngine {
       lastError: null,
       lastSyncedAt: null,
     };
-    this.realtime = new RealtimeIntake(() => this.state, deps);
+    this.realtime = new RealtimeIntake(() => this.state, this.deps);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -88,10 +95,24 @@ export class SyncEngine {
     void this.requestSync();
   }
 
-  /** Stop all triggers (project closed). Running operations finish. */
-  stop(): void {
+  /**
+   * Stop all triggers (project closed, sign-out) and wait for the running
+   * operation, at most `STOP_WAIT_MS`. Whatever is still in flight after
+   * that can no longer touch the live state, the store or the server (the
+   * guarded deps throw), so the next project is never written to.
+   */
+  async stop(): Promise<void> {
     this.stopped = true;
     for (const d of this.disposers.splice(0)) d();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, STOP_WAIT_MS); });
+    await Promise.race([this.lock, timeout]);
+    clearTimeout(timer);
+  }
+
+  /** Not stopped and the bound account is (still) the signed-in one. */
+  canSync(): boolean {
+    return !this.stopped && isCurrentAccount(this.deps.userId);
   }
 
   /** Account this engine syncs as (the project's `ownerUserId`). */
@@ -144,13 +165,16 @@ export class SyncEngine {
 
   /** Pull → apply/rebase → push → checkpoint (§3.2). Lock held. */
   private async cycle(): Promise<void> {
-    if (this.stopped) return;
+    // Stopped, or another account signed in on this tab: never sync as it.
+    if (!this.canSync()) return;
     if (!isOnline.value) { await this.refreshStatus(); return; }
     this.cycleRunning = true;
     setSyncStatus({ state: 'syncing' });
     try {
       const pulled = await pullStep(this.deps, this.state);
-      if (!pulled.ok) return;
+      // The live state was rebased: undo/redo entries refer to the old one.
+      if (pulled.ok && pulled.rebased) this.deps.onRebased?.();
+      if (!pulled.ok || !this.canSync()) return;
       await this.pushAndSettle();
     }
     catch (err) {
@@ -158,14 +182,16 @@ export class SyncEngine {
     }
     finally {
       this.cycleRunning = false;
-      this.realtime.drain();
+      if (this.canSync()) this.realtime.drain();
       await this.refreshStatus();
     }
   }
 
   /** Push the outbox; on success clear the backlog, report conflicts, checkpoint. */
   private async pushAndSettle(): Promise<boolean> {
+    if (!this.canSync()) return false;
     const pushed = await pushOutbox(this.deps, this.state);
+    if (!this.canSync()) return false;
     if (!pushed) {
       if (this.state.lastError?.kind === 'network') this.state.backlog = true;
       return false;
@@ -203,7 +229,8 @@ export class SyncEngine {
    * network error while offline so the queue waits for reconnect.
    */
   async pushForQueue(changeIds: Array<string | undefined>): Promise<Array<number | undefined>> {
-    if (!isOnline.value) throw new OfflineError();
+    // Like offline: the rows stay in the outbox for the owner's next session.
+    if (!isOnline.value || !this.canSync()) throw new OfflineError();
     await this.exclusive(async () => {
       if (this.state.backlog || !this.initialSyncDone) await this.cycle();
       else {

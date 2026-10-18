@@ -52,7 +52,10 @@ export async function reconcileRemoteHeads(
       await refreshMeta(store, meta, head);
       continue;
     }
-    if (meta.createdAt >= opts.requestStartedAt) continue;
+    // Bound (created, uploaded or synced) after the list was requested: the
+    // head list cannot know it yet. An upload keeps the old `createdAt` but
+    // sets `lastSyncedAt`, so both count.
+    if (Math.max(meta.createdAt, meta.lastSyncedAt ?? 0) >= opts.requestStartedAt) continue;
     if ((await store.countPending(meta.id)) > 0) {
       if (meta.remoteDeletedAt) continue;
       const marked = { ...meta, remoteDeletedAt: now };
