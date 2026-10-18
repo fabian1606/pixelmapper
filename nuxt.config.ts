@@ -109,6 +109,10 @@ export default defineNuxtConfig({
     // builds. The desktop app renders client-side only, so it keeps the
     // session in localStorage instead.
     useSsrCookies: !IS_TAURI,
+    // The desktop app boots without an account (ADR 0004 D3): the module's
+    // global login redirect is off there and `auth.global.ts` decides per
+    // route via `getAccountPolicy()`. The web app keeps mandatory login.
+    redirect: !IS_TAURI,
     redirectOptions: {
       login: '/auth/login',
       callback: '/auth/confirm',
