@@ -19,7 +19,8 @@ Provides the server side of the sync cycle and a typed client wrapper. Client ca
 | `supabase/functions/list-snapshots/` | rewritten (010): paged version-history list with SQL summaries, shared helpers |
 | `supabase/functions/_shared/snapshot-list.ts` | Pure row → response mapping of `list-snapshots` (cursor of the last row) |
 | `supabase/migrations/010_snapshot_summary.sql` | `snapshot_summary(jsonb)`, `list_snapshot_summaries()` (both `security invoker`) |
-| `supabase/migrations/013_snapshot_retention.sql` | Snapshot retention: `prune_project_snapshots()`, `prune_project_snapshot_ids()`, `prune_all_project_snapshots()` (see "Snapshot retention") |
+| `supabase/migrations/013_snapshot_retention.sql` | Snapshot retention: `content_hash` column + trigger, `prune_project_snapshots()`, `prune_project_snapshot_ids()`, `prune_all_project_snapshots()`, `list_snapshot_summaries()` without no-change autosaves (see "Snapshot retention") |
+| `app/utils/sync/snapshot-content-hash.ts` | Client content hash (same normalization as 013) + per-session skip of no-change autosaves |
 | `supabase/functions/_shared/snapshot-retention.ts` | Best-effort prune call after `save-snapshot` (`pruneSnapshotsBestEffort`, `runAfterResponse`, `edgeWaitUntil`) |
 | `supabase/tests/` | SQL tests in a throwaway `postgres:16` container (`run-sql-tests.sh`, Supabase stub, `013_snapshot_retention.test.sql`) |
 | `app/utils/sync/remote-api-snapshots.ts` | Typed wrapper `listSnapshots()` |
@@ -173,6 +174,7 @@ Response 200: `{ "snapshots": [{ "id", "sequenceNumber", "label", "createdAt", "
 - Version-history list (WP-SYNC "Version history"). Never returns the snapshot JSON: the RPC `list_snapshot_summaries` (010, `security invoker`, RLS applies) computes the counts with `snapshot_summary(jsonb)` — fixtures and groups counted recursively through group `children`, modifiers = `jsonb_array_length(modifiers)`; `authorName` = `profiles.display_name`.
 - Order `sequence_number desc, created_at desc, id desc` (several snapshots can share a sequence number). `nextCursor` is an opaque keyset cursor `<seq>~<createdAt>~<id>` of the last row; the function asks for `limit + 1` rows to know whether another page exists.
 - Shared helpers (CORS, preflight, POST only, JSON errors); 400 for invalid input / cursor, 403 for non-collaborators (viewers may read). Breaking change to the old GET `?projectId=` array response, which no client used.
+- Since 013, unlabeled snapshots with the same content hash as their older neighbour are skipped (see "Snapshot retention").
 - Pure parts: `_shared/validate.ts` (`parseListSnapshots`, cursor encode/decode), `_shared/snapshot-list.ts` (row → response); tests in `_shared/snapshot-list.test.ts`. The 010 SQL was verified against a throwaway `postgres:16` container (nested groups, malformed arrays, paging across equal sequence numbers).
 
 ### `snapshot-details` (new, migration 012)
@@ -208,6 +210,14 @@ The tier is part of the bucket key (an hour straddling the 7-day line is thinned
 - snapshots referenced by a `restore-snapshot` marker (`payload.snapshotId`, compared as text, so a malformed payload is harmless) and snapshots at a marker's sequence number (restore results);
 - rows with `created_at` NULL.
 
+**No-change autosaves** (an autosave whose content equals the previous version — "No changes to the project content." in the details view):
+
+- **Content hash:** `project_snapshots.content_hash` (text, hex SHA-256) is set by the trigger `project_snapshots_content_hash` (before insert / update of `snapshot`) from `snapshot_content_hash(snapshot)`; 013 backfills existing rows. `snapshot_content_normalize(jsonb)` removes the fields the client diff (`app/utils/sync/version-diff/`) ignores: the top-level `clockEpoch` and `expanded` of every group in the `sceneNodes` tree at any depth (`snapshot_strip_group_ui`, recursive plpgsql; group = `_type: 'group'` or a `children` array, as in 010). The hash is taken over the normalized jsonb's text, which is canonical (sorted keys, fixed spacing).
+- **Volatile fields that still count as content:** everything else, e.g. `selectedPresetId`, `activeSectionMembers` and `liveControllers` (the diff reports them as settings, so they are content by definition); a fixture's `expanded` (only group flags are ignored, like the diff); numeric formatting differences (`1` vs `1.0`) — the client always sends `JSON.stringify` output, so these do not occur in practice.
+- **Pruning:** after the bucket rule, an unprotected, **unlabeled** survivor whose `content_hash` equals that of the next older survivor (list order `sequence_number, created_at, id`) is deleted too: of a run of identical snapshots the **oldest** stays (when the state appeared). The newest snapshot / load base are protected, so the load base never changes; labeled rows and restore sources/results always stay. Rows with a NULL hash are never deduplicated.
+- **List:** `list_snapshot_summaries` is replaced (same signature, re-granted to `authenticated, service_role`) and skips an unlabeled row whose hash equals its older neighbour's (the next row in list order, hidden or not). The filter runs before the `LIMIT` and the cursor is the last returned row, so paging has no gaps or duplicates. Details (012) are unaffected: the client passes the previous *visible* entry as `compareToId`.
+- **Client skip:** `doSaveSnapshot` (`app/stores/engine-store.ts`) hashes the snapshot it is about to send (`app/utils/sync/snapshot-content-hash.ts`: JSON round trip, same normalization, keys sorted, SHA-256 via WebCrypto) and skips the save when the hash equals the last snapshot **this session** saved successfully (memory per `wirePersistence`, i.e. per opened project; a failed save or a hashing error never suppresses the next one). The JS hash is not byte-compatible with the server's and is never compared with it. The unload-time keepalive save and the `before offline sync` safety snapshot are not deduplicated (the server prune/list handle them).
+
 **Functions** (all `security definer`, `search_path = public`; clients have no delete policy on `project_snapshots`):
 
 | Function | Who | Notes |
@@ -222,9 +232,9 @@ Execute is revoked from `public`/`anon` and granted explicitly (see 011: objects
 
 **Concurrency / idempotence:** pruning takes the per-project advisory lock of 009 (`project_lock_key`). The per-request wrappers only *try* it and return 0 when another writer (`push_changes`, `restore_snapshot`, another prune) holds it — the next autosave prunes; the backfill waits per project. A second run at the same time deletes nothing. A concurrent `save-snapshot` insert is invisible to the running prune and is never deleted (it is the newest). A `restore_snapshot` that read its source before a prune deleted it still succeeds (it copies the JSON).
 
-**Tests:** `bash supabase/tests/run-sql-tests.sh` (Docker; applies a Supabase stub + all migrations to `postgres:16`, never a remote DB): every bucket boundary (exactly 24 h / 7 d / 30 d, UTC day and Monday week edges with a non-UTC session zone), labeled / newest / load-base / safety / restore source / restore result / NULL `created_at` kept, unchanged load base, idempotence, returned ids = deleted rows, access (stranger/viewer/anon `42501`, editor/owner/service role ok, core + backfill not callable by `authenticated`), busy lock → 0, backfill idempotent. `_shared/snapshot-retention.test.ts` (bun) covers the best-effort call.
+**Tests:** `bash supabase/tests/run-sql-tests.sh` (Docker; applies a Supabase stub + all migrations to `postgres:16`, never a remote DB): every bucket boundary (exactly 24 h / 7 d / 30 d, UTC day and Monday week edges with a non-UTC session zone), labeled / newest / load-base / safety / restore source / restore result / NULL `created_at` kept, unchanged load base, idempotence, returned ids = deleted rows, access (stranger/viewer/anon `42501`, editor/owner/service role ok, core + backfill not callable by `authenticated`), busy lock → 0, backfill idempotent; content hash (clockEpoch / nested group `expanded` ignored, fixture `expanded` and nested changes not; trigger on insert/update; backfill of a row inserted before 013), dedupe (oldest of a run kept, labeled / restore-source / newest kept, load base unchanged, idempotent, dedupe after bucket thinning), list skip + paging with `limit 1`. `_shared/snapshot-retention.test.ts` (bun) covers the best-effort call; `app/utils/sync/snapshot-content-hash.test.ts` (Vitest) the client hash and skip.
 
-Synthetic dataset (10 days × one 47-min session of 140 autosaves every 20 s = 1,400 snapshots, 2 safety + 1 upload label), pruned at 2 h after the newest session: **1,400 → 152** (140 of the last 24 h + 6 hourly + 3 daily + 3 labeled; −89 %). The same data 40 days later: **152 → 5** (2 weeks + 3 labeled). Steady state per project is bounded by the last 24 h of autosaves + ≤ 144 hourly + ≤ 23 daily + one per week + labeled rows.
+Synthetic dataset (10 days × one 47-min session of 140 autosaves every 20 s = 1,400 snapshots, 2 safety + 1 upload label), pruned at 2 h after the newest session: **1,400 → 152** (140 of the last 24 h + 6 hourly + 3 daily + 3 labeled; −89 %). The same data 40 days later: **152 → 5** (2 weeks + 3 labeled). The same sessions where only every third autosave changes the content: **1,400 → 60** (47 distinct states of the last 24 h + the newest row as load base + 6 + 3 + 3). Steady state per project is bounded by the last 24 h of autosaves + ≤ 144 hourly + ≤ 23 daily + one per week + labeled rows.
 
 ## Client wrapper (`app/utils/sync/remote-api.ts`)
 
@@ -266,7 +276,8 @@ From the repository root, linked to the project (`supabase link --project-ref <r
 #    user_records LWW fix), 010 (snapshot_summary /
 #    list_snapshot_summaries for the version history), 012
 #    (snapshot_details_pair / snapshot_activity / snapshot_restore_markers),
-#    013 (snapshot retention functions).
+#    013 (snapshot retention, content_hash
+#    column + backfill, list_snapshot_summaries replaced).
 supabase db push
 
 # 2. Functions (each bundles ../_shared).
