@@ -56,10 +56,11 @@ Snapshots in the `ProjectStore` carry `pmSync` (`StoredSyncSnapshot`):
 
 ## Open (`engine-store.loadProject` → `open-flow.ts`)
 
-1. Close the previous session (working snapshot written first), reset queue/hooks, `ensureLegacyWalMigrated()`.
+1. Close the previous session (working snapshot written first; persist gate closed), `extensionsReady()`, **await `initEngine()`** (WASM ready, bounded 15 s), reset queue/hooks, `ensureLegacyWalMigrated()`.
 2. Local copy (working, else base) → extension gate → apply → replay outbox rows above `outboxOrder`. Works offline and signed out. A local project with meta only opens with `emptyProjectSnapshot()`.
 3. No local copy, cloud: signed out → `offline-unavailable`; else `load-project` (+ `pull-changes` when `tailTruncated`; cursor from `snapshotSequence`/last tail row — the old `snapshot.sequence_number` bug is gone). Network error → `offline-unavailable` ("Not available offline" view in `layouts/project.vue`), 401 → `resolveUnauthorized` (+ `endSession` from WP-ACCOUNT), 403 → `unauthorized`. Stores meta (`origin: 'cloud'`, `ownerUserId` = user), base and working. Outbox rows already present (legacy WAL) are acked when in the tail; the others are pushed once (`open-legacy-rows.ts`, idempotent by change id): a sequence ≤ `snapshotSequence` means the snapshot already contains the row (ack, no replay — previously it was applied twice), a higher one makes it a server change of the base (replayed after the tail, recorded in the position), an unconfirmed one stays pending on top. Like older builds, these rows are pushed as recorded (no rebase).
-4. `startProjectSession`: writer, and a `SyncEngine` only if `origin === 'cloud'` and `syncBlocker(meta, userId)` is null. Collaboration (`useCollaboration.connect`) only for cloud projects.
+4. Persist gate opens (`setPersistProjectId(projectId, …)`, dirty flag reset) — only after the apply. Before that, and after `closeSession`, the persist queue drops entries and no server snapshot is saved.
+5. `startProjectSession`: writer, and a `SyncEngine` only if `origin === 'cloud'` and `syncBlocker(meta, userId)` is null. Collaboration (`useCollaboration.connect`) only for cloud projects.
 
 ## Sync cycle (§3.2)
 
@@ -123,6 +124,8 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - Headless mirroring stores the server snapshot only; changes after it need an online open (or arrive with the next sync while open).
 - `load-project` does not return the project name: a first open without meta stores `name: ''` until mirroring / the project list updates it.
 - Not verified in a real browser / Tauri yet (see the report of this package).
+- Desktop mirroring (`mirrorProject`) treats a project as closed until its session registered the sync engine; a mirror pass running while that project is opening may store a newer server snapshot as base + working behind the open (skipped when rows are pending). The open session rewrites the working copy and the next cycle pulls from the live floor, so nothing is lost, but the base is briefly ahead of the live position.
+- On a peer's presence join, `use-collaboration.ts` re-dispatches the whole local state as **persistent** live-ops (`fixture.drag` for all fixtures, `modifier.sync` with the full list). They become outbox rows/server changes of this client; `modifier.sync` replaces the whole modifier list when replayed (ADR §1). Gated by the persist gate, but a design issue on its own.
 
 ## Tests
 
@@ -142,11 +145,13 @@ Fake port + in-memory fake server (`sync-test-kit.ts`, `sync-test-server.ts`: gl
 | Session lifecycle: stop waits for an in-flight push; a step finishing after stop cannot touch the next project; no sync as another account / signed out / after a switch mid-cycle; `onRebased` | `sync-engine-lifecycle.test.ts` |
 | Headless mirror: legacy rows without meta stay unbound; no write-back after sign-out | `project-mirror-account.test.ts` |
 | Close: final working write, disposed writer never writes again | `sync-session.test.ts` › close |
+| Reload on `/project/<id>`: WASM ready after the local open — scene, working copy, outbox and server snapshot keep the project; nothing persisted while loading or after close (real engine store, stubbed worker, fake-indexeddb, fake server) | `app/stores/engine-store-load-race.test.ts` |
 
 Also `persist-queue.test.ts` (outbox, no false "online"), `describe-conflicts.test.ts`, adapter tests in `merge/`.
 
 ### Bugs fixed by these tests
 
+- **Data loss: demo grid overwrote the opened project** (`engine-store.ts`, test `app/stores/engine-store-load-race.test.ts`). `initEngine()` awaited `engine.ready` and then unconditionally set a 20-fixture demo grid (numeric ids 0–19). Since the local-first open finishes almost instantly, a hard reload on `/project/<id>` (Tauri webview reload after a WebContent crash, Cmd+R) applied the project before WASM was ready; the demo grid then replaced it while the sync session was already active, so edits on it were pushed as the project's changes (`fixture.drag` with numeric ids) and the autosave uploaded it as the project's server snapshot. Fix: `initEngine` is idempotent, returns a shared promise and never touches project state (demo seeding removed); `loadProject` awaits it before applying; persist gate (see Open, step 4) — `persist-queue.test.ts` › safety gate.
 - Realtime row received during a backlog made the cycle skip the rebase and push stale payloads (`sync-cycle.ts`, rebase decided on the base).
 - Skip-only rebase left `state.safety` set → stale `before offline sync` snapshot on a later push (`sync-push.ts`).
 - Conflicts of a later rebase offered the snapshot of an earlier one for restore (`sync-cycle.ts` resets `safetySnapshotId`).

@@ -3,7 +3,7 @@ import { ref, reactive, shallowRef, computed, watch, watchEffect, markRaw, trigg
 import type { Preset } from '~/utils/engine/preset-types';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { EffectEngine } from '~/utils/engine/engine';
-import { Fixture } from '~/utils/engine/core/fixture';
+import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber, clearHistory } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
@@ -539,14 +539,24 @@ export const useEngineStore = defineStore('engine', () => {
     engineDirty = true;
     // The local working copy follows every change (debounced, ADR 0004 §3.1).
     session?.writer.schedule();
-    // Setting the flag pre-wiring is harmless — the first dirty event after
-    // loadProject() finishes wiring will arm both timers.
+    // Pre-wiring (no session / project loading) the flag is reset before the
+    // session starts: only edits of the applied project arm the timers.
     if (!persistenceHooksReady) return;
     if (idleTimer != null) clearTimeout(idleTimer);
     idleTimer = setTimeout(flushSnapshotIfDirty, SNAPSHOT_IDLE_MS);
     if (hardCapTimer == null) {
       hardCapTimer = setTimeout(flushSnapshotIfDirty, SNAPSHOT_HARDCAP_MS);
     }
+  }
+
+  /** Disarm the server-snapshot autosave (session closed / next load). */
+  function stopSnapshotAutosave(): void {
+    if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
+    if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
+    snapshotRetry.cancel();
+    persistenceHooksReady = false;
+    triggerSaveSnapshotInternal = async () => {};
+    engineDirty = false;
   }
 
   async function flushSnapshotIfDirty() {
@@ -618,7 +628,10 @@ export const useEngineStore = defineStore('engine', () => {
   const clockEpoch = ref(Date.now());
   function setClockEpoch(ms: number) { clockEpoch.value = ms; engine.postEpoch(ms); }
 
+  /** True once `initEngine` was called (flushes are dispatched from then on). */
   let initialized = false;
+  /** Engine wiring started by `initEngine` (null until the first call). */
+  let initPromise: Promise<void> | null = null;
   let animFrameId: number;
   let lastDispatchedLayout   = -1;
   let lastDispatchedChannels = -1;
@@ -694,10 +707,22 @@ export const useEngineStore = defineStore('engine', () => {
     }
   }
 
-  const initEngine = async () => {
-    if (initialized || typeof window === 'undefined') return;
+  /**
+   * Start the engine wiring once (idempotent): wait for WASM, then install
+   * watchers, plugin hooks and the render loop. Returns the same promise to
+   * every caller, so `loadProject` can await it before applying a project.
+   * MUST NOT touch project state (scene, presets, modifiers, pages, bases,
+   * BPM): it may finish after a project was applied.
+   */
+  const initEngine = (): Promise<void> => {
+    if (typeof window === 'undefined') return Promise.resolve();
     initialized = true;
+    initPromise ??= startEngine();
+    return initPromise;
+  };
 
+  /** Body of `initEngine` (runs once). */
+  async function startEngine(): Promise<void> {
     // Wait for WASM to be fully loaded before setting up watches and render loop
     await engine.ready;
 
@@ -725,36 +750,10 @@ export const useEngineStore = defineStore('engine', () => {
       flushEngineOutput();
     });
 
-    // Create default fixtures
-    const COLS = 5;
-    const ROWS = 4;
-    const fixtureCount = COLS * ROWS;
-    const stepX = 0.04;
-    const stepY = 0.06;
-    const startX = 0.5 - (9 * stepX) / 2;
-    const startY = 0.5 - (3 * stepY) / 2;
-
-    const fixtures = Array.from({ length: fixtureCount }, (_, i) => {
-      const row = Math.floor(i / COLS);
-      const col = i % COLS;
-
-      const fixture = Fixture.createRGBFixture(i);
-      fixture.startAddress = (i * 4) + 1;
-
-      if (i === 0) fixture.name = 'Front Left';
-      if (i === 9) fixture.name = 'Front Right';
-      if (i === 30) fixture.name = 'Back Left';
-      if (i === 39) fixture.name = 'Back Right';
-
-      fixture.fixturePosition = {
-        x: startX + col * stepX,
-        y: startY + row * stepY,
-      };
-      fixture.fixtureSize = { x: 1, y: 1 };
-      return fixture;
-    });
-
-    sceneNodes.value = [...fixtures];
+    // No default/demo fixtures: the engine never seeds or replaces project
+    // state. Every route that shows the engine loads a project, and a load may
+    // already have applied its snapshot while WASM was still starting (fast
+    // local open, ADR 0004 D1) — seeding here overwrote that project.
 
     // Auto-sync global bases into channel stepValues
     watchEffect(() => {
@@ -771,7 +770,7 @@ export const useEngineStore = defineStore('engine', () => {
       }
     });
 
-    // Initial packet build after default fixtures have been created. Subsequent
+    // Initial packet build for whatever state is present. Subsequent
     // rebuilds happen explicitly from `_doFlush()` (preset/flash/color paths),
     // `markChannelsDirty()` (drag paths), or direct callers of
     // `flushEngineOutput()` (fixture add/remove/move/address-edit, undo/redo,
@@ -894,7 +893,7 @@ export const useEngineStore = defineStore('engine', () => {
     };
 
     animFrameId = requestAnimationFrame(renderLoop);
-  };
+  }
 
   /**
    * Inner flush: rebuild packets and dispatch to the worker engine.
@@ -1115,6 +1114,12 @@ export const useEngineStore = defineStore('engine', () => {
     loadGeneration++;
     const prev = session;
     session = null;
+    // Safety gate: no project state is applied → nothing may be persisted
+    // (outbox rows of live-ops / commands) until the next load applied its own.
+    setPersistProjectId(null);
+    // The closed session's server-snapshot autosave must not capture the live
+    // state of whatever comes next (Cmd+S / timers during the next load).
+    stopSnapshotAutosave();
     registerOpenProjectCloser(null);
     disposeUnload?.();
     disposeUnload = null;
@@ -1145,6 +1150,25 @@ export const useEngineStore = defineStore('engine', () => {
     }
   }
 
+  /** Upper bound for waiting on WASM before a project is applied anyway. */
+  const ENGINE_READY_TIMEOUT_MS = 15_000;
+
+  /**
+   * Await `initEngine()` (bounded). On timeout the load continues: the engine
+   * wiring never touches project state, so finishing later is harmless.
+   */
+  async function waitForEngine(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), ENGINE_READY_TIMEOUT_MS); });
+    try {
+      const late = await Promise.race([initEngine().then(() => false), timedOut]);
+      if (late) console.warn('[engine] engine not ready after 15 s; opening the project anyway');
+    }
+    finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** `loadProject` body; may throw. `fromServer` skips the local copy (remote restore). */
   async function loadProjectUnguarded(projectId: string, allowAuthRetry: boolean, fromServer: boolean): Promise<void> {
     const supabase = useSupabaseClient();
@@ -1157,6 +1181,9 @@ export const useEngineStore = defineStore('engine', () => {
     // Installed extension bundles must be registered before fixtures (kinds)
     // are deserialized and `requires` is checked (ADR §5.9 boot order).
     await extensionsReady();
+    // The engine wiring must be in place before project state is applied:
+    // the local open is fast and used to finish before WASM was ready.
+    await waitForEngine();
 
     // Reset snapshot timer state in case a previous project was loaded.
     if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
@@ -1188,8 +1215,6 @@ export const useEngineStore = defineStore('engine', () => {
     }
     const origin = meta?.origin ?? 'cloud';
     projectOrigin.value = origin;
-    // Changes made from now on are outbox rows of this project (cloud only, D8).
-    setPersistProjectId(projectId, { outbox: origin === 'cloud' });
 
     const host = { port: getStatePort(), reset: resetForLoad, gate: gateRequirements };
     const client = supabase as unknown as RemoteClient;
@@ -1233,6 +1258,13 @@ export const useEngineStore = defineStore('engine', () => {
       projectLoading.value = false;
       return;
     }
+    // Safety gate: only now — the project's state is applied — may changes
+    // become this project's outbox rows (cloud only, D8). Until here the
+    // persist queue dropped them (`setPersistProjectId(null)` in closeSession).
+    setPersistProjectId(projectId, { outbox: origin === 'cloud' });
+    // Dirty marks from before the apply (load, replay) describe no user edit.
+    engineDirty = false;
+
     triggerRef(sceneNodes);
     flushEngineOutput();
     connectProjectControllers();
@@ -1289,7 +1321,8 @@ export const useEngineStore = defineStore('engine', () => {
 
     /** Server snapshot: cloud projects only, online, nothing pending (D9). */
     async function doSaveSnapshot() {
-      if (!current.engine) return;
+      // Only the open session may save its project's state (safety gate).
+      if (!current.engine || session !== current) return;
       await flushPersistQueue();
       // A history command still queued has no sequence number yet: a snapshot
       // now would make a later replay apply it twice. Retry later.

@@ -137,6 +137,24 @@ describe('persist queue — outbox (D8)', () => {
     expect(await outboxRows()).toEqual([]);
   });
 
+  it('drops entries while no project state is applied (safety gate)', async () => {
+    const { hook } = wireHook();
+    pq.setPersistProjectId(null);
+    const resolved = vi.fn();
+    pq.enqueueLiveOp('engine.bpm', { bpm: 90 }, 'engine.bpm');
+    pq.enqueuePersist({ type: 'CmdA', payload: {}, changeId: 'cmd-a', resolve: resolved });
+    expect(resolved).toHaveBeenCalledWith(undefined);
+    expect(pq.getPersistQueueSnapshot()).toEqual([]);
+    await pq.flushPersistQueue();
+    expect(hook).not.toHaveBeenCalled();
+    expect(await outboxRows()).toEqual([]);
+    // Applied again: entries flow normally.
+    pq.setPersistProjectId(projectId);
+    pq.enqueuePersist({ type: 'CmdB', payload: {}, changeId: 'cmd-b' });
+    await pq.flushPersistQueue();
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
   it('reports pending history commands (not live-ops)', () => {
     pq.enqueueLiveOp('x', {}, 'x');
     expect(pq.hasPendingCommandPersist()).toBe(false);

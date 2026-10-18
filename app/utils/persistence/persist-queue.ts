@@ -79,6 +79,12 @@ let persistAckHook: PersistAckHook | null = null;
 
 /** Project outbox rows belong to; null → no outbox rows are written. */
 let outboxProjectId: string | null = null;
+/**
+ * Project whose state is applied (safety gate). Null before the first load,
+ * while a project loads and after its session closed: entries are dropped
+ * then, so nothing that is not the project's state is ever persisted for it.
+ */
+let activeProjectId: string | null = null;
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -97,8 +103,11 @@ export function setPersistAckHook(hook: PersistAckHook | null): void {
  * Set the project outbox rows are scoped to. Captured per entry at enqueue
  * time, so switching projects never re-labels pending rows. With
  * `{ outbox: false }` (local-only projects) no outbox rows are written.
+ * Call it only once the project's state is applied; `null` closes the gate
+ * (load in progress, session closed) and new entries are dropped.
  */
 export function setPersistProjectId(projectId: string | null, options: { outbox?: boolean } = {}): void {
+  activeProjectId = projectId;
   outboxProjectId = options.outbox === false ? null : projectId;
 }
 
@@ -120,6 +129,12 @@ function queueRow(entry: PersistEntry): void {
 
 /** Queue an entry for the next flush (coalescing by `dedupKey`). */
 export function enqueuePersist(entry: PersistEntry): void {
+  // Safety gate: without an applied project the change belongs to none.
+  if (!activeProjectId) {
+    console.warn(`[persist] "${entry.type}" dropped: no project state is applied`);
+    entry.resolve?.(undefined);
+    return;
+  }
   if (entry.dedupKey) {
     const prev = byKey.get(entry.dedupKey);
     if (prev && prev !== entry) {
