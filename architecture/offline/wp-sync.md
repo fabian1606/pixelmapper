@@ -96,7 +96,7 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - **Snapshot-only state** (mutations that only mark the engine dirty, no command/live-op) is part of the working snapshot but not of the outbox; a rebase rebuilds the state from base + outbox and drops it.
 - `previous[i]` ignores remote rows the live state already had above the base (rare: base is checkpointed whenever the outbox drains).
 - A missed realtime **live-op** row is recorded as seen but only applied by the broadcast; if the broadcast was missed too, the value is stale until a reload from the server.
-- `restore-snapshot` inserts a snapshot at the head but no change row: other open clients do not see the restore until they reload (pre-existing).
+- ~~`restore-snapshot` invisible to others~~ — since migration 009 a restore appends a `restore-snapshot` marker change and stores the snapshot at its sequence. Clients never replay the marker: `remote-restore.ts` (called from `engine-state-port.replayChange` for pulls/rebases and from the realtime applier in `use-collaboration.ts`) schedules one reload of the open project from the server and blocks server snapshots until it finished. If the download fails (offline), the local copy is opened and the restore is only picked up on the next fresh open.
 - Headless mirroring stores the server snapshot only; changes after it need an online open (or arrive with the next sync while open).
 - `load-project` does not return the project name: a first open without meta stores `name: ''` until mirroring / the project list updates it.
 - Not verified in a real browser / Tauri yet (see the report of this package).
