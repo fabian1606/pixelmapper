@@ -1,5 +1,7 @@
 import { ref, computed } from 'vue';
 import { isSerializable, type SerializableCommand } from '../commands/serializable-command';
+import { newUuid } from '~/utils/ids';
+import { walNextEnqueuedAt } from '~/utils/persistence/wal';
 
 export interface Command {
   description: string;
@@ -28,6 +30,8 @@ export interface WalEntryForHooks {
   commandType: string;
   payload: unknown;
   enqueuedAt: number;
+  /** Always 'command' for history entries (live-ops are logged by the persist queue). */
+  kind?: 'command' | 'live-op';
 }
 
 const persistenceHooks = {
@@ -79,9 +83,7 @@ function persistOne(commandType: string, payload: object, label: string) {
   catch (err) {
     console.warn(`[history] onPersist failed (${label}):`, err);
   }
-  const changeId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const changeId = newUuid();
 
   // WAL FIRST — durable before any network call. The promise is not awaited so
   // local apply stays synchronous, but the IDB transaction is already queued.
@@ -92,7 +94,9 @@ function persistOne(commandType: string, payload: object, label: string) {
       projectId,
       commandType,
       payload,
-      enqueuedAt: Date.now(),
+      // Shared monotonic clock with live-op WAL rows → recovery keeps order.
+      enqueuedAt: walNextEnqueuedAt(),
+      kind: 'command',
     }).catch(err => console.warn(`[history] WAL append failed (${label}):`, err));
   }
 
