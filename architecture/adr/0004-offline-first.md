@@ -126,3 +126,14 @@ Command adapters map a whole-list command payload (`before`, `after`) onto `base
 | **WP-RECORDS** user record sync | migration `user_records`, generic record sync, custom fixture library on IndexedDB with UUIDs | — |
 | **WP-SYNC** sync engine | SyncEngine, local-first `loadProject`, rebase with merge library, pre-sync snapshot, sync status icon, conflict toast | P0, MERGE, STORE, SERVER |
 | **WP-ACCOUNT** optional account | local projects list/create/rename/delete, Tauri boot without login, upload dialog on login, logout dialogs, owner binding, background mirroring, web logout clears cache | SYNC |
+
+---
+
+## 5. Amendments after implementation (2026-10-18)
+
+- **Merge ordering (§3.3):** if only the local side reordered shared entities, the local order wins (otherwise an offline reorder would be dropped silently); both sides reordered → local wins and an `order` conflict is reported; otherwise remote order.
+- **Server ordering (§3.2):** pushes go through the `push_changes` RPC (migration 009), which serializes inserts per project with an advisory lock and is idempotent (`ON CONFLICT DO NOTHING`, returns stored sequence numbers). Within a project, commit order equals sequence order; the client's 200-number pull overlap stays as a second safety net.
+- **Restore (D5):** `restore-snapshot` appends a `restore-snapshot` marker change and stores the snapshot at its sequence number; clients never replay the marker but reload the open project from the server. Safety snapshots (`before offline sync`) are never used as a load base.
+- **Session lifecycle (D10, D15, D16):** a project's sync session is closed when the project is left, on sign-out and on account switch; the sync engine only acts for its bound account. Undo/redo is cleared on load and after a rebase.
+- **Desktop boot (D2, D10):** the `@nuxtjs/supabase` client plugin is replaced in Tauri builds by `app/runtime/supabase-spa.client.ts`, which resolves the boot session from storage (no blocking token refresh offline); token auto-refresh runs only while online.
+- **Quit (D2):** the desktop app flushes outbox writes and the working snapshot before a window close or app exit (`src-tauri/src/lifecycle.rs`, `AppShell.onBeforeQuit`).
