@@ -521,10 +521,10 @@ pub fn draw_frame(canvas: &mut Canvas<OpenGl>, state: &RenderState, fixtures: &[
             paint.set_font_size(13.0); // Exactly 13px on screen!
 
             for fixture in fixtures {
-                // Anchor below the drawn shape; 14px = half label box (10) + 4px gap.
+                // Anchor below the drawn shape; 18px = half label box (10) + 8px gap.
                 let (ax, ay) = label_anchor_world(fixture, state);
                 let screen_x = ax * state.scale + state.cam_x;
-                let screen_y = ay * state.scale + state.cam_y + 14.0;
+                let screen_y = ay * state.scale + state.cam_y + 18.0;
 
                 // Frustum Culling
                 if screen_x + 50.0 < 0.0 || screen_x - 50.0 > state.viewport_w ||
