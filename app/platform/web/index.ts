@@ -30,3 +30,6 @@ export function getWindowChrome(): WindowChrome {
 
 /** No menu bar; project files via download / file input. */
 export { createWebAppShell as getAppShell } from './app-shell';
+
+/** OFL library from the Nitro routes `/api/fixtures` (ADR 0004 D18). */
+export { createWebFixtureLibrary as getFixtureLibrary } from './fixture-library';

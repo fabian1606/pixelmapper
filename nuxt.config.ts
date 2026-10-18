@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import { buildOflBundle } from './scripts/tauri/ofl-bundle';
 
 /**
  * First-party extensions included as Nuxt layers: the distribution set
@@ -32,6 +33,21 @@ const NO_EXTENSIONS = process.env.PM_NO_EXTENSIONS === '1';
  */
 const IS_TAURI = !!process.env.TAURI_ENV_PLATFORM;
 const PLATFORM_DIR = IS_TAURI ? 'tauri' : 'web';
+
+/**
+ * Extra public dir of desktop builds (gitignored): the offline OFL library
+ * (ADR 0004 D18) is written here and served at `/ofl/`. Web builds never
+ * see it and keep using the Nitro route `/api/fixtures`.
+ */
+const TAURI_PUBLIC_DIR = fileURLToPath(new URL('./.tauri-public', import.meta.url));
+
+/** Inline module (Tauri only): builds the OFL bundle before Nitro starts. */
+async function bundleOflForTauri(): Promise<void> {
+  const src = fileURLToPath(new URL('./ofl-data/fixtures', import.meta.url));
+  const stats = await buildOflBundle(src, TAURI_PUBLIC_DIR);
+  if (!stats) console.warn('[ofl-bundle] ofl-data/fixtures missing — the desktop fixture library will be empty (run ./scripts/setup-ofl.sh)');
+  else console.info(`[ofl-bundle] ${stats.fixtures} fixtures bundled for the desktop app`);
+}
 
 export default defineNuxtConfig({
   // The desktop app loads static files from disk: build it as an SPA
@@ -101,7 +117,13 @@ export default defineNuxtConfig({
     },
   },
 
-  modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt', '@nuxtjs/supabase'],
+  modules: [
+    'shadcn-nuxt',
+    '@nuxtjs/color-mode',
+    '@pinia/nuxt',
+    '@nuxtjs/supabase',
+    ...(IS_TAURI ? [bundleOflForTauri] : []),
+  ],
 
   supabase: {
     // SSR cookies are `Secure`; WebKit (Tauri) drops Secure cookies on
@@ -125,6 +147,8 @@ export default defineNuxtConfig({
         baseName: 'ofl-fixtures',
         dir: '../ofl-data/fixtures'
       }
-    ]
+    ],
+    // Desktop only: static OFL bundle next to the SPA (see TAURI_PUBLIC_DIR).
+    ...(IS_TAURI ? { publicAssets: [{ dir: TAURI_PUBLIC_DIR }] } : {}),
   }
 })

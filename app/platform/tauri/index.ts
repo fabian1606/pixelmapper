@@ -65,3 +65,6 @@ function watchFullscreen(callback: (fullscreen: boolean) => void): () => void {
 
 /** Native menu bar and file dialogs. */
 export { createTauriAppShell as getAppShell } from './app-shell';
+
+/** OFL library bundled into the app, works offline (ADR 0004 D18). */
+export { createBundledFixtureLibrary as getFixtureLibrary } from './fixture-library';
