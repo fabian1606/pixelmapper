@@ -21,6 +21,8 @@ export interface RecordHooks {
   syncAllRecords(): Promise<void>;
   countPendingRecords(userId: string): Promise<number>;
   clearLocalRecords(): Promise<void>;
+  /** Binds local-only records to the account (optional; web sign-out). */
+  adoptLocalRecords?(userId: string): Promise<number>;
 }
 
 export interface SignOutDeps {
@@ -30,6 +32,12 @@ export interface SignOutDeps {
   sync: ProjectSyncService | null;
   records: RecordHooks;
   auth: SignOutAuth;
+  /**
+   * Stops mirroring (waiting for a running pass) and closes the open
+   * project's sync session (`teardownAccountSession`). Runs before the
+   * cache is touched, so nothing writes the account's data back afterwards.
+   */
+  teardown?: () => Promise<void>;
 }
 
 // ── Step 1: flush ────────────────────────────────────────────────────────────
@@ -58,6 +66,9 @@ export async function flushBeforeSignOut(deps: SignOutDeps, userId: string): Pro
 
   let records = 0;
   try {
+    // Web (D16): local-only records (written while the account was unknown,
+    // e.g. offline boot) would be deleted by the clear: upload them instead.
+    if (deps.policy.logoutCache === 'clear') await deps.records.adoptLocalRecords?.(userId);
     await deps.records.syncAllRecords();
     records = await deps.records.countPendingRecords(userId);
   }
@@ -88,6 +99,9 @@ export interface FinishSignOutOptions {
  *   bound to `userId`; local-only projects always stay.
  */
 export async function finishSignOut(deps: SignOutDeps, userId: string, opts: FinishSignOutOptions): Promise<void> {
+  // Nothing may sync, mirror or write a working snapshot for this account
+  // from here on (the open project is flushed, then closed).
+  await deps.teardown?.();
   if (deps.policy.logoutCache === 'clear') {
     await deps.store.clearAll();
     await deps.records.clearLocalRecords();

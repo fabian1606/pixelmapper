@@ -2,6 +2,7 @@ import type { LocalProjectMeta, ProjectStore } from '~/utils/persistence/project
 import { loadProject as loadRemoteProject, type RemoteClient, type RemoteProjectHead } from '~/utils/sync/remote-api';
 import { packSnapshot, SyncPosition, unpackSnapshot, type StoredSyncSnapshot } from '~/utils/sync/sync-position';
 import { pullAll, pushRows } from '~/utils/sync/sync-transport';
+import { isCurrentAccount } from '~/utils/auth/current-account';
 
 /**
  * Headless sync of projects that are NOT open (ADR 0004 D13, D15/D16).
@@ -51,8 +52,11 @@ export async function mirrorHeadless(
     lastSyncedAt: now,
   });
 
-  if (meta && await store.countPending(head.id) > 0) {
-    await store.putProject({ ...meta, name: head.name, role: head.role });
+  if (await store.countPending(head.id) > 0) {
+    // No meta but pending rows: migrated from the legacy WAL without an
+    // account. They are bound when a signed-in user opens the project, never
+    // by a background pass (which could push another user's rows).
+    if (meta) await store.putProject({ ...meta, name: head.name, role: head.role });
     return true;
   }
   const cursor = await localCursor(store, meta, head.id);
@@ -67,6 +71,9 @@ export async function mirrorHeadless(
     console.warn(`[sync] mirroring ${head.id} failed:`, res.error.message);
     return false;
   }
+  // Signed out or switched while downloading: write nothing for `userId`
+  // (sign-out may just have removed this account's copies).
+  if (!isCurrentAccount(userId)) return true;
   const { snapshot, snapshotSequence } = res.data;
   if (!snapshot) {
     // Nothing to store without a replay engine; opening online downloads it.

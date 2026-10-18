@@ -57,8 +57,9 @@ export function installUnloadHandlers(opts: UnloadOptions): () => void {
     void session.writer.flush();
     const engine = session.engine;
     const token = opts.token();
-    // Offline, unbound or with a backlog (needs a rebase first): nothing is sent.
-    if (!engine || engine.hasBacklog() || !token || !isOnline.value) return;
+    // Offline, unbound, closed, signed in as another account or with a
+    // backlog (needs a rebase first): nothing is sent.
+    if (!engine || !engine.canSync() || engine.hasBacklog() || !token || !isOnline.value) return;
     const pending = opts.queued();
     if (pending.length > 0) {
       keepalive(`${opts.functionsUrl}/push-change`, token, {

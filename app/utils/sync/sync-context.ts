@@ -35,6 +35,11 @@ export interface SyncDeps {
   writeWorking(): Promise<void>;
   /** Called after remote changes changed or replaced the live state. */
   onLiveChanged?(): void;
+  /**
+   * Called after a rebase replaced the live state (pending changes were
+   * transformed onto remote ones). Local undo/redo history is stale then.
+   */
+  onRebased?(): void;
   /** Called for every server sequence number that is now reflected. */
   onSequence?(seq: number): void;
   /** Restore the `before offline sync` snapshot and reload (D5). */

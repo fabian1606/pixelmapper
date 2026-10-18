@@ -5,7 +5,7 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import { EffectEngine } from '~/utils/engine/engine';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
-import { useHistory, setPersistenceHooks, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
+import { useHistory, setPersistenceHooks, lastSeenSequenceNumber, clearHistory } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
 import {
   TYPE_LAYOUT_BIN, TYPE_CHAN_BIN,
@@ -55,6 +55,9 @@ import { isNetworkError, isOnline, reportNetworkFailure, reportNetworkSuccess } 
 import { createRetryScheduler } from '~/utils/sync/retry-scheduler';
 import { resolveUnauthorized } from '~/utils/auth/session-recovery';
 import { endSession } from '~/utils/account/sign-out';
+import { registerOpenProjectCloser } from '~/utils/account/session-teardown';
+import { dropForeignCopyForOpen } from '~/utils/account/foreign-cache';
+import { getAccountPolicy } from '#platform';
 import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -1026,6 +1029,8 @@ export const useEngineStore = defineStore('engine', () => {
   let session: ProjectSession | null = null;
   /** Removes the page-lifecycle handlers of the open session. */
   let disposeUnload: (() => void) | null = null;
+  /** Bumped by `closeSession`; a load whose generation changed is abandoned. */
+  let loadGeneration = 0;
   /** Origin of the open project (`local` = never uploaded, D3). */
   const projectOrigin = ref<'local' | 'cloud' | null>(null);
 
@@ -1097,12 +1102,22 @@ export const useEngineStore = defineStore('engine', () => {
     }
   }
 
-  /** End the open session (project switch); `discard` skips the working write. */
+  /**
+   * End the open session (project switch, leaving the project page, sign-out
+   * or account switch); `discard` skips the working write. Removes the unload
+   * handlers and the token listener, stops the sync engine (waiting for a
+   * running cycle) and the working-snapshot writer, and drops the undo/redo
+   * history (it belongs to the closed project). Idempotent.
+   */
   async function closeSession(discard = false): Promise<void> {
+    // A load still in flight must not start its session afterwards.
+    loadGeneration++;
     const prev = session;
     session = null;
+    registerOpenProjectCloser(null);
     disposeUnload?.();
     disposeUnload = null;
+    clearHistory();
     if (prev) await prev.close(discard);
   }
 
@@ -1112,10 +1127,27 @@ export const useEngineStore = defineStore('engine', () => {
    * `allowAuthRetry` permits one reload after a 401 was fixed by a token
    * refresh; internal — callers pass only the project id.
    */
-  async function loadProject(projectId: string, allowAuthRetry = true) {
+  async function loadProject(projectId: string, allowAuthRetry = true): Promise<void> {
+    try {
+      await loadProjectUnguarded(projectId, allowAuthRetry);
+    }
+    catch (err) {
+      // IndexedDB or other unexpected failures: show the error state instead
+      // of loading forever (and no unhandled rejection in the layout).
+      console.error('[engine] loading the project failed:', err);
+      if (currentProjectId.value === projectId) {
+        projectError.value = 'error';
+        projectLoading.value = false;
+      }
+    }
+  }
+
+  /** `loadProject` body; may throw. */
+  async function loadProjectUnguarded(projectId: string, allowAuthRetry: boolean): Promise<void> {
     const supabase = useSupabaseClient();
     // Write the previous project's working copy before its state is replaced.
     await closeSession();
+    const generation = loadGeneration;
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
@@ -1140,8 +1172,15 @@ export const useEngineStore = defineStore('engine', () => {
     await ensureLegacyWalMigrated();
     const store = await getProjectStore();
     const userId = await resolveCurrentUserId(useSupabaseUser().value as { id?: string; sub?: string } | null, supabase.auth);
-    const local = await readLocalProject(store, projectId);
-    const meta = local?.meta ?? await store.getProject(projectId);
+    let local = await readLocalProject(store, projectId);
+    let meta = local?.meta ?? await store.getProject(projectId);
+    // Web (D16): a stale copy of another account with nothing pending (left
+    // by an automatic sign-out) is dropped so the project opens from the
+    // server for the signed-in account.
+    if (!getAccountPolicy().showForeignProjects && await dropForeignCopyForOpen(store, meta, userId)) {
+      local = null;
+      meta = null;
+    }
     const origin = meta?.origin ?? 'cloud';
     projectOrigin.value = origin;
     // Changes made from now on are outbox rows of this project (cloud only, D8).
@@ -1178,6 +1217,11 @@ export const useEngineStore = defineStore('engine', () => {
       projectLoading.value = false;
       return;
     }
+    // Closed while loading (page left, sign-out, account switch): no session.
+    if (generation !== loadGeneration) {
+      projectLoading.value = false;
+      return;
+    }
     triggerRef(sceneNodes);
     flushEngineOutput();
     connectProjectControllers();
@@ -1190,12 +1234,16 @@ export const useEngineStore = defineStore('engine', () => {
       userId,
       opened: result.project,
       hasQueuedEntries: () => getPersistQueueSnapshot().length > 0,
-      onLiveChanged: () => { triggerRef(sceneNodes); flushEngineOutput(); },
+      // Remote changes are part of the working copy: persist them too.
+      onLiveChanged: () => { triggerRef(sceneNodes); flushEngineOutput(); session?.writer.schedule(); },
+      onRebased: clearHistory,
       onSequence: (seq) => { if (seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq; },
       discardSession: () => closeSession(true),
       reload: () => loadProject(projectId),
     });
     session = current;
+    // Sign-out / account switch close the session without the store (D15/D16).
+    registerOpenProjectCloser(() => closeSession());
     lastSeenSequenceNumber.value = result.project.position.highest();
     wirePersistence(projectId, current, supabase as unknown as ReturnType<typeof useSupabaseClient>);
     projectLoading.value = false;
@@ -1248,12 +1296,12 @@ export const useEngineStore = defineStore('engine', () => {
     // Cache the JWT so the unload handler can use it synchronously.
     let cachedToken = '';
     void supabase.auth.getSession().then(({ data }) => { cachedToken = data.session?.access_token ?? ''; });
-    supabase.auth.onAuthStateChange((_, s) => { if (s?.access_token) cachedToken = s.access_token; });
+    const { data: tokenListener } = supabase.auth.onAuthStateChange((_, s) => { cachedToken = s?.access_token ?? ''; });
     const runtimeConfig = useRuntimeConfig();
     const supabaseUrl: string = (runtimeConfig.public as { supabase?: { url?: string } }).supabase?.url
       ?? (supabase as unknown as { supabaseUrl?: string }).supabaseUrl
       ?? '';
-    disposeUnload = installUnloadHandlers({
+    const disposeHandlers = installUnloadHandlers({
       projectId,
       session: current,
       token: () => cachedToken,
@@ -1268,6 +1316,11 @@ export const useEngineStore = defineStore('engine', () => {
         snapshotRetry.cancel();
       },
     });
+    // One disposer for the session's page-lifecycle wiring (closeSession).
+    disposeUnload = () => {
+      disposeHandlers();
+      tokenListener.subscription.unsubscribe();
+    };
   }
 
   return {
@@ -1316,6 +1369,7 @@ export const useEngineStore = defineStore('engine', () => {
     projectError,
     missingExtensions,
     loadProject,
+    closeSession,
     projectOrigin,
     scheduleWorkingSnapshot: () => session?.writer.schedule(),
     applyProjectSnapshot,

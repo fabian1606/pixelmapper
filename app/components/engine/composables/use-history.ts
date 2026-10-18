@@ -46,6 +46,18 @@ export function setPersistenceHooks(hooks: {
   persistenceHooks.onPersist = hooks.onPersist ?? null;
 }
 
+/**
+ * Drop the undo/redo stacks (project switch / close, and after a sync
+ * rebase). The stored commands capture before/after states of the old live
+ * state; undoing or redoing them after a rebase that merged a peer's edits
+ * would push those stale payloads and silently revert the peer's changes.
+ */
+export function clearHistory(): void {
+  past.value = [];
+  future.value = [];
+  version.value++;
+}
+
 export function triggerSaveSnapshot() {
   persistenceHooks.saveSnapshot?.();
 }

@@ -24,8 +24,17 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  engineStore.commitPendingPersistence();
+  const leftProjectId = projectId.value;
   collab.cleanup();
+  // Hand queued changes to the outbox/sync, then end the project's session:
+  // no sync engine, timers, unload handlers or snapshot writer may outlive
+  // the page (they would act for this account after a sign-out or switch).
+  void (async () => {
+    try { await engineStore.commitPendingPersistence(); }
+    catch (err) { console.warn('[project] committing pending changes failed:', err); }
+    // Another project may have been opened meanwhile; its session stays.
+    if (engineStore.currentProjectId === leftProjectId) await engineStore.closeSession();
+  })();
 });
 </script>
 

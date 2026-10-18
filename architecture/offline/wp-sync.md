@@ -73,13 +73,28 @@ Lock: every network operation of an engine (cycle or push) runs serialized. Trig
 
 **Realtime**: CDC rows go to `handleRemoteInsert`; known ids (reflected, own) are only recorded; foreign command rows are applied via the collaboration applier (`history.executeRemote`); live-op rows are only recorded (broadcast applies them). During a cycle rows are deferred and decided afterwards.
 
+## Session lifecycle and account binding
+
+A session ends on every project switch, when the project page unmounts (`layouts/project.vue` → `engineStore.closeSession()`), on sign-out (`finishSignOut` → `teardownAccountSession`, before any cache clear) and on `SIGNED_OUT` / an account switch (`05.account.client.ts` via `account-events.ts`). `closeSession` is idempotent and:
+
+- bumps a load generation, so a `loadProject` still in flight does not start its session afterwards;
+- removes the unload handlers and unsubscribes the per-load token listener (`onAuthStateChange`);
+- clears the undo/redo history (`clearHistory()`), which belongs to the closed project;
+- awaits `ProjectSession.close()`: stop the engine first, then flush and dispose the working-snapshot writer (later `flush()` calls are no-ops, so a cleared cache is never refilled).
+
+`SyncEngine.stop()` is async: it removes the triggers and waits for the running cycle/push (at most 5 s). As a backstop the engine wraps its `SyncDeps` (`sync-guard.ts`): once stopped, or once the signed-in account differs from `boundUserId`, remote calls, store writes and live-state access through the shared port throw `SyncBlockedError`, and `writeWorking` / `onLiveChanged` / `onSequence` / `onRebased` become no-ops. A late step of project A therefore never captures or replays into project B, and never pushes with account B's token.
+
+The signed-in account is published synchronously by the account plugin (`utils/auth/current-account.ts`; `undefined` before the first auth event = not blocking). `cycle()`, `pushAndSettle()` and `pushForQueue()` (throws like offline, rows stay in the outbox) check `canSync()`; the unload keepalive is skipped when `!engine.canSync()`. The token cached for keepalive is cleared on sign-out.
+
+After a rebase the engine calls `deps.onRebased()` (from `pullStep`'s `rebased` flag, no change in `sync-cycle.ts`); the engine store clears the undo/redo stacks then, because their before/after payloads predate the merged peer changes.
+
 ## Server snapshots (autosave)
 
 Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only for sessions with an engine, online, with an empty persist queue and outbox (`canSaveServerSnapshot`). Uses `remote-api.saveSnapshot`.
 
 ## Service (`ProjectSyncService`)
 
-- `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
+- `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows (also without meta: legacy-WAL rows have no account and are bound by the first signed-in open, never by a background pass); nothing is written when `userId` is no longer the signed-in account after the download; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
 - `flushAll(userId)`: cloud projects with `ownerUserId === userId` and no `remoteDeletedAt`. Open → `engine.flushNow()`. Closed → `pushHeadless`: pushes only if there is no foreign change since the base (no rebase needed) and records the acked ids in the working snapshot's position; otherwise the rows stay (rebased on the next open). Returns the pending count of all projects bound to the account.
 - `countPending(projectId?)`: outbox count.
 
@@ -89,6 +104,7 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - `use-history.setPersistenceHooks`: `walAppend` / `currentProjectId` removed (the queue writes the outbox row); `WalEntryForHooks` removed.
 - `engine-store`: `projectOrigin`, `scheduleWorkingSnapshot()`, `projectError: 'offline-unavailable'`.
 - `ProjectSyncService` signatures unchanged; `SyncEngine.boundUserId`, `flushNow()`.
+- `SyncEngine.stop()` returns a promise; `SyncEngine.canSync()`; `SyncDeps.onRebased?()`; `SessionInput.onRebased?`; `engine-store.closeSession()` exported; `use-history.clearHistory()`.
 - `restore-snapshot` edge function: CORS + JSON errors (needs deployment).
 
 ## Known limits
@@ -103,4 +119,4 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 
 ## Tests
 
-`app/utils/sync/*.test.ts` (fake port + fake server; scenarios: offline open, first-open offline error, outbox order/acks, rebase of offline edit vs. remote add, conflicts + restore, skipped changes, overlap dedup, local-only never calls remote, binding rules, service), `persist-queue.test.ts` (outbox), `describe-conflicts.test.ts`.
+`app/utils/sync/*.test.ts` (fake port + fake server; scenarios: offline open, first-open offline error, outbox order/acks, rebase of offline edit vs. remote add, conflicts + restore, skipped changes, overlap dedup, local-only never calls remote, binding rules, service), `persist-queue.test.ts` (outbox), `describe-conflicts.test.ts`. Lifecycle: `sync-engine-lifecycle.test.ts` (stop waits for an in-flight push; a step finishing after stop cannot touch the next project; no sync as another account / signed out / after a switch mid-cycle; `onRebased`), `project-mirror-account.test.ts` (legacy rows stay unbound; no write-back after sign-out), `sync-session.test.ts` › close.
