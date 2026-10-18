@@ -5,6 +5,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
+import SyncStatusIndicator from '~/components/sync/SyncStatusIndicator.vue';
 import PmToolbar from '~/components/primitives/PmToolbar.vue';
 import { useAsTitleBar, useWindowChrome } from '~/composables/use-window-chrome';
 import { hasNativeMenu, runMenuCommand } from '~/composables/app-menu/use-app-menu';
@@ -101,6 +102,9 @@ const tabs = computed(() => projectId.value ? [
     </nav>
 
     <div class="ml-auto flex items-center gap-4" data-tauri-drag-region>
+      <!-- Sync status of the open project (ADR 0004 D17) -->
+      <SyncStatusIndicator v-if="projectId" />
+
       <div class="relative">
         <button
           @click="beatOverlayOpen = !beatOverlayOpen"
