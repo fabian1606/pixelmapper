@@ -80,6 +80,8 @@ export const FIXTURE_SPEC: EntitySpec = {
     oflKey: 'fixture type',
     beams: 'beams',
     lensDegreesMinMax: 'beam angle',
+    motionRange: 'fixture type',
+    dimensionsMm: 'fixture type',
     kind: 'kind settings',
     extensionData: 'extension data',
     [PARENT]: 'group',

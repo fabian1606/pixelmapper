@@ -19,12 +19,14 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { buildSceneModel, type BodyModel } from './fixture-adapter';
 import { AlignmentGuides3D, type AlignmentGuideData } from './alignment-guides-3d';
 import { PixelCloud } from './pixel-instances';
+import { PixelSegments } from './pixel-segments';
 import { BeamCones } from './beam-cones';
 import { FixtureBodies } from './fixture-bodies';
 import { BodyPolylines } from './body-polylines';
 import { BodyShapes } from './body-shapes';
 import { SvgPlanes } from './svg-planes';
 import { buildStage, type Stage } from './stage';
+import { addSceneLights } from './scene-lights';
 import {
   FLOOR_MARGIN_METERS,
   FLOOR_MIN_SIZE_METERS,
@@ -105,12 +107,14 @@ export class ThreeSceneManager {
   private pivot = new Group();
 
   private pixels = new PixelCloud();
+  private segments: PixelSegments;
   private beams: BeamCones;
   private bodies: FixtureBodies;
   private polylines: BodyPolylines;
   private shapes: BodyShapes;
   private svgPlanes: SvgPlanes;
   private stage: Stage;
+  private disposeLights: () => void;
   private alignGuides: AlignmentGuides3D;
 
   private raycaster = new Raycaster();
@@ -149,6 +153,7 @@ export class ThreeSceneManager {
 
     this.scene.background = new Color(0x000004);
     this.stage = buildStage(this.scene);
+    this.disposeLights = addSceneLights(this.scene);
 
     this.camera = new PerspectiveCamera(50, 1, 0.1, 200);
     this.camera.position.set(10, 8, 10);
@@ -172,6 +177,7 @@ export class ThreeSceneManager {
 
     this.beams = new BeamCones(this.scene);
     this.bodies = new FixtureBodies(this.scene);
+    this.segments = new PixelSegments(this.scene);
     this.polylines = new BodyPolylines(this.scene);
     this.shapes = new BodyShapes(this.scene);
     this.svgPlanes = new SvgPlanes(this.scene);
@@ -359,10 +365,13 @@ export class ThreeSceneManager {
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
     // Bodies (instanced boxes) plus kind body meshes (polyline tubes, flat
-    // shapes), so clicking anywhere on a kind fixture's body selects it.
-    const targets = [this.bodies.mesh, this.polylines.mesh, this.shapes.mesh].filter(m => m.visible);
+    // shapes), so clicking anywhere on a kind fixture's body selects it, plus
+    // moving-head / spot housings (yoke, head) so the whole model is clickable.
+    const targets = [this.bodies.mesh, this.polylines.mesh, this.shapes.mesh, ...this.beams.pickTargets].filter(m => m.visible);
     const hits = this.raycaster.intersectObjects(targets, false);
     for (const hit of hits) {
+      const housingId = this.beams.fixtureIdOf(hit.object);
+      if (housingId !== undefined) return housingId;
       if (hit.object === this.bodies.mesh && hit.instanceId !== undefined) {
         return this.bodies.fixtureIdAt(hit.instanceId);
       }
@@ -553,6 +562,7 @@ export class ThreeSceneManager {
   rebuild(): void {
     const model = buildSceneModel(this.callbacks.getFixtures());
     this.pixels.rebuild(model.pixels);
+    this.segments.rebuild(model.segments);
     this.beams.rebuild(model.beams);
     this.bodies.rebuild(model.bodies);
     this.polylines.rebuild(model.polylines);
@@ -594,6 +604,7 @@ export class ThreeSceneManager {
       const dmx = this.callbacks.getDmx();
       const tSec = (this.callbacks.getElapsed?.() ?? 0) / 1000;
       this.pixels.updateColors(dmx, tSec);
+      this.segments.updateColors(dmx, tSec);
       this.beams.update(dmx, tSec);
       this.orbit.update();
       this.renderer.render(this.scene, this.camera);
@@ -638,6 +649,7 @@ export class ThreeSceneManager {
     this.gizmo.dispose();
     this.orbit.dispose();
     this.pixels.dispose();
+    this.segments.dispose();
     this.beams.dispose();
     this.bodies.dispose();
     this.polylines.dispose();
@@ -645,6 +657,7 @@ export class ThreeSceneManager {
     this.svgPlanes.dispose();
     this.alignGuides.dispose();
     this.stage.dispose();
+    this.disposeLights();
     this.renderer.dispose();
   }
 }

@@ -4,6 +4,8 @@ import { reactive } from 'vue';
 import { Fixture } from '../engine/core/fixture';
 import type { Channel } from '../engine/core/channel';
 import { Beam } from '../engine/core/beam';
+import { computeHeadElementCentroids } from '../engine/svg-element-positions';
+import { motionRangeFromChannels } from '../engine/core/motion-range';
 
 // ─── Pixel Key Helpers ───────────────────────────────────────────────────────
 
@@ -313,7 +315,11 @@ export function createFixtureFromOfl(
     const fineAddressOffsets: number[] = [];
     let coarseDefault = mapped.defaultValue;
 
-    if (channelDef.dmxValueResolution === '16bit' || channelDef.dmxValueResolution === '24bit') {
+    // Fine channels exist whenever `fineChannelAliases` is set — OFL's
+    // `dmxValueResolution` is optional (defaults to the highest resolution)
+    // and only states the unit of dmxRange/defaultValue, so it must not gate
+    // the coarse↔fine link (virtually no library fixture sets it to 16bit).
+    if ((channelDef.fineChannelAliases?.length ?? 0) > 0) {
       const aliases = channelDef.fineChannelAliases ?? [];
       for (const alias of aliases) {
         // If this is a matrix channel, the alias in the definition (e.g. "Red fine")
@@ -415,7 +421,16 @@ export function createFixtureFromOfl(
     }
 
     if (xCount > 1 || yCount > 1 || zCount > 1) {
-      const svgHeadPositions = oflFixture.pixelmapper?.customSvg?.headPositions;
+      // Prefer fresh centroids from the SVG itself: older saves stored
+      // transform-blind positions (all heads collapsed onto one point).
+      // Falls back to the stored ones when no DOM is available.
+      const customSvg = oflFixture.pixelmapper?.customSvg;
+      const recomputed = customSvg?.enabled && customSvg.data && customSvg.headToElement
+        ? computeHeadElementCentroids(customSvg.data, customSvg.headToElement)
+        : {};
+      const svgHeadPositions = Object.keys(recomputed).length > 0
+        ? recomputed
+        : customSvg?.headPositions;
 
       const beams: Beam[] = [];
       let idx = 0;
@@ -464,6 +479,9 @@ export function createFixtureFromOfl(
   ext.oflShortName = oflFixture.shortName ?? oflFixture.name;
   fixture.definition = oflFixture;
   fixture.lensDegreesMinMax = oflFixture.physical?.lens?.degreesMinMax;
+  fixture.motionRange = motionRangeFromChannels(fixture.channels);
+  const dims = (mode.physical ?? oflFixture.physical)?.dimensions;
+  if (dims?.length === 3 && dims.every(d => d > 0)) fixture.dimensionsMm = [dims[0]!, dims[1]!, dims[2]!];
 
   return fixture;
 }

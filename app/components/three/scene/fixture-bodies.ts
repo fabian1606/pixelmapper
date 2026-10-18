@@ -3,7 +3,7 @@ import {
   Color,
   InstancedMesh,
   Matrix4,
-  MeshBasicMaterial,
+  MeshLambertMaterial,
   Quaternion,
   Scene,
   Vector3,
@@ -22,10 +22,12 @@ export class FixtureBodies {
   readonly mesh: InstancedMesh;
   private models: BodyModel[] = [];
   private geometry = new BoxGeometry(1, 1, 1);
-  private material = new MeshBasicMaterial({ color: 0xffffff });
+  // Lit (scene-lights.ts) so housings read as 3D volumes, not silhouettes.
+  private material = new MeshLambertMaterial({ color: 0xffffff });
   private tmpMatrix = new Matrix4();
   private tmpQuat = new Quaternion();
   private tmpScale = new Vector3();
+  private tmpPos = new Vector3();
 
   constructor(private scene: Scene) {
     this.mesh = new InstancedMesh(this.geometry, this.material, 0);
@@ -58,7 +60,10 @@ export class FixtureBodies {
       const m = models[i]!;
       this.tmpQuat.setFromEuler(m.euler);
       this.tmpScale.copy(m.size);
-      this.tmpMatrix.compose(m.position, this.tmpQuat, this.tmpScale);
+      // Box center = origin + oriented local offset (moving-head base).
+      this.tmpPos.copy(m.position);
+      if (m.localOffset) this.tmpPos.add(m.localOffset.clone().applyQuaternion(this.tmpQuat));
+      this.tmpMatrix.compose(this.tmpPos, this.tmpQuat, this.tmpScale);
       this.mesh.setMatrixAt(i, this.tmpMatrix);
       this.mesh.setColorAt(i, BASE_COLOR);
     }
