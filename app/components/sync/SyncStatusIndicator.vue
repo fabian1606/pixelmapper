@@ -13,6 +13,7 @@ import { notify } from '~/composables/use-notifications';
 import { useSyncStatusView } from '~/composables/sync/use-sync-status-view';
 import { useVersionDetails } from '~/composables/sync/use-version-details';
 import { useVersionHistory } from '~/composables/sync/use-version-history';
+import { useVersionPreview } from '~/composables/sync/use-version-preview';
 import { syncStatus } from '~/utils/sync/project-sync-service';
 import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
 import { absoluteTime } from '~/utils/sync/relative-time';
@@ -30,6 +31,7 @@ const props = defineProps<{ projectId: string }>();
 const { shownState, view, pending, inlineText, details, ariaLabel, now } = useSyncStatusView();
 const history = useVersionHistory(toRef(props, 'projectId'));
 const versionDetails = useVersionDetails(toRef(props, 'projectId'));
+const versionPreview = useVersionPreview(toRef(props, 'projectId'));
 
 const open = ref(false);
 const isLocal = computed(() => shownState.value === 'local-only');
@@ -99,7 +101,7 @@ async function confirmRestore(): Promise<void> {
         </div>
       </div>
       <Separator class="my-1.5" />
-      <VersionHistoryPanel :history="history" :local="isLocal" :now="now" :details="versionDetails" @restore="requestRestore" />
+      <VersionHistoryPanel :history="history" :local="isLocal" :now="now" :details="versionDetails" :preview="versionPreview" @restore="requestRestore" />
     </PopoverContent>
   </Popover>
 
