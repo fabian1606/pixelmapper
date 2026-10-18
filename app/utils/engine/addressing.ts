@@ -4,13 +4,12 @@
  */
 import type { Fixture } from './core/fixture';
 import { getKind } from '~/utils/kinds/kind-host';
-
-/** Next free `ofl-N` id counter, synced past existing ids. */
-let nextFixtureId = 1000;
+import { newPrefixedId } from '~/utils/ids';
 
 /**
- * Assigns ids (`ofl-N`) and consecutive start addresses after the highest
- * used address. A fixture that would cross a 512-channel universe boundary
+ * Assigns ids (`ofl-<uuid>`, ADR 0004 D6 — collision-free across offline
+ * clients; legacy `ofl-N` ids stay valid as opaque strings) and consecutive
+ * start addresses after the highest used address. A fixture that would cross a 512-channel universe boundary
  * starts at the next universe, unless its kind declares `spansUniverses`.
  */
 export function assignIdsAndAddresses(newFixtures: Fixture[], existing: readonly Fixture[]): void {
@@ -18,17 +17,11 @@ export function assignIdsAndAddresses(newFixtures: Fixture[], existing: readonly
   for (const f of existing) {
     const fMax = f.startAddress + f.channels.length - 1;
     if (fMax > maxAddress) maxAddress = fMax;
-    // Ids restored from a snapshot must not collide with new ones.
-    const m = /^ofl-(\d+)$/.exec(String(f.id));
-    if (m) {
-      const n = parseInt(m[1]!, 10);
-      if (Number.isFinite(n) && n >= nextFixtureId) nextFixtureId = n + 1;
-    }
   }
 
   let currentAddress = maxAddress + 1;
   for (const f of newFixtures) {
-    f.id = `ofl-${nextFixtureId++}`;
+    f.id = newPrefixedId('ofl');
     const channelCount = f.channels.length;
     const spans = f.kind ? getKind(f.kind.id)?.def.spansUniverses === true : false;
     if (!spans) {
