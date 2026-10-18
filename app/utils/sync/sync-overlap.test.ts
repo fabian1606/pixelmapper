@@ -105,16 +105,13 @@ describe('pull overlap', () => {
 
 describe('realtime with pending offline changes', () => {
   /**
-   * KNOWN BUG (documented, not fixed here): a realtime insert that arrives
-   * while the engine has a backlog is applied to the live state and recorded
-   * in `live`. The next pull then sees no "unseen" foreign change
-   * (`sync-cycle.ts` `foreignUnseen` filters by `state.live.reflects`), skips
-   * the rebase and pushes the stale offline payload, which wipes the foreign
-   * change for every client replaying it. Expected: the rebase decision uses
-   * the BASE position (foreign changes not in the base), or realtime rows are
-   * deferred to the cycle while `state.backlog` is true.
+   * Regression: a realtime insert that arrived while the engine had a backlog
+   * was applied to the live state and recorded in `live`; the next pull saw
+   * no unseen foreign change, skipped the rebase and pushed the stale offline
+   * payload (wiping the foreign change, no D5 snapshot). Fixed in
+   * `sync-cycle.ts`: the rebase decision uses the BASE position.
    */
-  it.fails('a foreign change received via realtime before the cycle still forces a rebase', async () => {
+  it('a foreign change received via realtime before the cycle still forces a rebase', async () => {
     const A1 = mod('A', { speed: 1 });
     const A4 = mod('A', { speed: 4 });
     const B = mod('B');
@@ -136,5 +133,11 @@ describe('realtime with pending offline changes', () => {
 
     const pushed = server.rowsOf(PID).find(r => r.change_id === 'local-1')!;
     expect((pushed.payload as { after: unknown[] }).after).toEqual([A4, B]);
+    // Live state rebuilt from the base: B present exactly once, D5 snapshot saved first.
+    expect(port.state.modifiers).toEqual([A4, B]);
+    const names = server.callNames();
+    expect(names.indexOf('save-snapshot')).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf('save-snapshot')).toBeLessThan(names.indexOf('push-change'));
+    expect(await store.getOutbox(PID)).toEqual([]);
   });
 });

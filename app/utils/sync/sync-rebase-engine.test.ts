@@ -141,15 +141,12 @@ describe('rebase on sync', () => {
   });
 
   /**
-   * KNOWN BUG (documented, not fixed here): when a rebase drops every pending
-   * change, `pushOutbox` (`sync-push.ts`) returns before
-   * `saveSafetySnapshot`, so `state.safety` stays set. The next unrelated
-   * online push then saves a stale `before offline sync` snapshot. Expected:
-   * clear `state.safety` once the outbox is empty after a rebase (e.g. in
-   * `pushOutbox` when `rows.length === 0`, or in `rebaseStep` when
-   * `out.rebased` is empty).
+   * Regression: a rebase that drops every pending change used to leave
+   * `state.safety` set (`pushOutbox` returned before saving it), so the next
+   * unrelated online push saved a stale `before offline sync` snapshot.
+   * Fixed in `sync-push.ts` `pushOutbox` (empty outbox clears it).
    */
-  it.fails('a skip-only rebase leaves no stale "before offline sync" snapshot for later pushes', async () => {
+  it('a skip-only rebase leaves no stale "before offline sync" snapshot for later pushes', async () => {
     const A = mod('A', { speed: 1 });
     await offlineClient(makeState({ modifiers: [A] }), {
       id: 'local-1',

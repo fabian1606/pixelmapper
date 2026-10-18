@@ -45,7 +45,14 @@ export async function saveSafetySnapshot(deps: SyncDeps, state: SyncState): Prom
 export async function pushOutbox(deps: SyncDeps, state: SyncState): Promise<boolean> {
   await deps.outbox.flush();
   const rows = await deps.store.getOutbox(deps.projectId);
-  if (rows.length === 0) { state.lastError = null; return true; }
+  if (rows.length === 0) {
+    // Nothing to push (e.g. a rebase dropped every row): the server state
+    // needs no "before offline sync" protection. Clearing it keeps a stale
+    // snapshot from being saved before a later, unrelated push (D5).
+    state.safety = null;
+    state.lastError = null;
+    return true;
+  }
   if (!(await saveSafetySnapshot(deps, state))) return false;
 
   // Known before sending, so the realtime echo of a row is never re-applied.
