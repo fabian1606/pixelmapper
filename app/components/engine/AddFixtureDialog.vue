@@ -17,6 +17,8 @@ import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import { useCustomFixtureLibrary } from '~/composables/use-custom-fixture-library';
+import type { CustomFixtureEntry } from '~/composables/use-custom-fixture-library';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
@@ -53,7 +55,7 @@ function handleAddKindFixtures(fixtures: Fixture[]) {
   emit('update:open', false);
 }
 
-// ─── LocalStorage ─────────────────────────────────────────────────────────────
+// ─── Recent fixtures (localStorage, device-local) ─────────────────────────────
 
 interface RecentFixture {
   key: string;
@@ -62,29 +64,16 @@ interface RecentFixture {
   addedAt: number;
 }
 
-interface StoredCustomFixture {
-  id: string;
-  name: string;
-  ofl: OflFixture;
-  createdAt: number;
-}
-
 const RECENT_KEY = 'pixelmapper:recentFixtures';
-const CUSTOM_KEY = 'pixelmapper:customFixtures';
 const MAX_RECENT = 8;
 
 const recentFixtures = ref<RecentFixture[]>([]);
-const customFixtures = ref<StoredCustomFixture[]>([]);
 
 function loadFromStorage() {
   try {
     const r = localStorage.getItem(RECENT_KEY);
     recentFixtures.value = r ? JSON.parse(r) : [];
   } catch { recentFixtures.value = []; }
-  try {
-    const c = localStorage.getItem(CUSTOM_KEY);
-    customFixtures.value = c ? JSON.parse(c) : [];
-  } catch { customFixtures.value = []; }
 }
 
 function saveRecentFixture(summary: FixtureSummary) {
@@ -99,25 +88,23 @@ function saveRecentFixture(summary: FixtureSummary) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(recentFixtures.value));
 }
 
-function saveCustomFixture(ofl: OflFixture) {
-  const existing = customFixtures.value.find(c => c.name === ofl.name);
-  if (existing) {
-    existing.ofl = ofl;
-  } else {
-    const entry: StoredCustomFixture = {
-      id: `custom-${Date.now()}`,
-      name: ofl.name,
-      ofl,
-      createdAt: Date.now(),
-    };
-    customFixtures.value = [entry, ...customFixtures.value];
-  }
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(customFixtures.value));
+// ─── Custom fixture library (IndexedDB + account sync) ────────────────────────
+
+const customLibrary = useCustomFixtureLibrary();
+const customFixtures = customLibrary.customFixtures;
+
+/** Id of the library entry open in the editor (null = creating a new one). */
+const editingCustomFixtureId = ref<string | null>(null);
+
+/** Saves a definition: replaces entry `id` when editing, else creates a new entry. */
+function saveCustomFixture(ofl: OflFixture, id: string | null = null) {
+  customLibrary.saveCustomFixture(ofl, id)
+    .catch(err => console.error('Failed to save custom fixture:', err));
 }
 
 function removeCustomFixture(id: string) {
-  customFixtures.value = customFixtures.value.filter(c => c.id !== id);
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(customFixtures.value));
+  customLibrary.removeCustomFixture(id)
+    .catch(err => console.error('Failed to delete custom fixture:', err));
 }
 
 // ─── Fixture Selection State ──────────────────────────────────────────────────
@@ -133,18 +120,21 @@ const engineStore = useEngineStore();
 
 function triggerPdfUpload() {
   customFixtureToEdit.value = null;
+  editingCustomFixtureId.value = null;
   customFixtureStartWithAi.value = true;
   isCustomFixtureEditorOpen.value = true;
 }
 
 function openCustomEditor() {
   customFixtureToEdit.value = null;
+  editingCustomFixtureId.value = null;
   customFixtureStartWithAi.value = false;
   isCustomFixtureEditorOpen.value = true;
 }
 
-function editStoredCustomFixture(stored: StoredCustomFixture) {
+function editStoredCustomFixture(stored: CustomFixtureEntry) {
   customFixtureToEdit.value = stored.ofl;
+  editingCustomFixtureId.value = stored.id;
   customFixtureStartWithAi.value = false;
   isCustomFixtureEditorOpen.value = true;
 }
@@ -155,14 +145,16 @@ function handleAddCustomFixtures(fixtures: Fixture[]) {
   emit('add', fixtures);
   isCustomFixtureEditorOpen.value = false;
   customFixtureToEdit.value = null;
+  editingCustomFixtureId.value = null;
   customFixtureStartWithAi.value = false;
   emit('update:open', false);
 }
 
 function handleUpdateCustomFixtureType(ofl: OflFixture) {
-  saveCustomFixture(ofl);
+  saveCustomFixture(ofl, editingCustomFixtureId.value);
   isCustomFixtureEditorOpen.value = false;
   customFixtureToEdit.value = null;
+  editingCustomFixtureId.value = null;
 }
 
 // ─── DMX Config ───────────────────────────────────────────────────────────────
@@ -224,11 +216,11 @@ async function selectRecentFixture(recent: RecentFixture) {
   await handleSelect({ key: recent.key, name: recent.name, manufacturer: recent.manufacturer } as FixtureSummary);
 }
 
-function customKey(stored: StoredCustomFixture): string {
+function customKey(stored: CustomFixtureEntry): string {
   return `custom/${stored.id}`;
 }
 
-function selectCustomFixture(stored: StoredCustomFixture) {
+function selectCustomFixture(stored: CustomFixtureEntry) {
   selectedSummary.value = {
     key: customKey(stored),
     name: stored.name,
