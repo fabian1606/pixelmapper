@@ -2,129 +2,117 @@
 /**
  * Header icon showing the sync state of the open project (ADR 0004 D17).
  *
- * Driven by the read-only `syncStatus` of the sync engine. The "syncing"
- * look is delayed by `SYNCING_DELAY_MS` so short pushes do not flicker.
+ * Clicking it opens a popover with the current status (state, pending
+ * changes, last sync) and the project's version history. Restoring a
+ * version asks for confirmation here (outside the popover, which closes
+ * when the dialog takes focus) and runs through the version-history
+ * controller (flush pending changes → restore RPC → reload).
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { Component } from 'vue';
-import type { SyncState } from '~/utils/sync/project-sync-service';
+import { computed, ref, toRef } from 'vue';
+import { notify } from '~/composables/use-notifications';
+import { useSyncStatusView } from '~/composables/sync/use-sync-status-view';
+import { useVersionHistory } from '~/composables/sync/use-version-history';
 import { syncStatus } from '~/utils/sync/project-sync-service';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CloudCheck, CloudOff, HardDrive, RefreshCw, TriangleAlert } from 'lucide-vue-next';
+import type { SnapshotListEntry } from '~/utils/sync/remote-api-snapshots';
+import { absoluteTime } from '~/utils/sync/relative-time';
+import type { RestoreOutcome } from '~/utils/sync/version-history-controller';
+import VersionHistoryPanel from '~/components/sync/VersionHistoryPanel.vue';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 
-/** Minimum time in `syncing` before the spinner shows. */
-const SYNCING_DELAY_MS = 600;
-/** Refresh interval of the relative "last synced" time. */
-const CLOCK_TICK_MS = 30_000;
+const props = defineProps<{ projectId: string }>();
 
-// ── Debounced state ──────────────────────────────────────────────────────────
+const { shownState, view, pending, inlineText, details, ariaLabel, now } = useSyncStatusView();
+const history = useVersionHistory(toRef(props, 'projectId'));
 
-/** State shown in the UI (`syncing` only after the delay). */
-const shownState = ref<SyncState>(syncStatus.value.state);
-/** State before `syncing` started, shown during the delay. */
-let previousState: SyncState = shownState.value === 'syncing' ? 'synced' : shownState.value;
-let syncingTimer: ReturnType<typeof setTimeout> | null = null;
-
-/** Applies a new raw state, delaying the switch to `syncing`. */
-function applyState(state: SyncState): void {
-  if (syncingTimer) { clearTimeout(syncingTimer); syncingTimer = null; }
-  if (state !== 'syncing') {
-    previousState = state;
-    shownState.value = state;
-    return;
-  }
-  // Keep showing the previous state; switch only if syncing lasts long enough.
-  shownState.value = previousState;
-  syncingTimer = setTimeout(() => {
-    syncingTimer = null;
-    if (syncStatus.value.state === 'syncing') shownState.value = 'syncing';
-  }, SYNCING_DELAY_MS);
-}
-
-watch(() => syncStatus.value.state, applyState, { immediate: true });
-
-// ── Clock for the relative time ──────────────────────────────────────────────
-
-const now = ref(Date.now());
-let clockTimer: ReturnType<typeof setInterval> | null = null;
-
-onMounted(() => {
-  clockTimer = setInterval(() => { now.value = Date.now(); }, CLOCK_TICK_MS);
+const open = ref(false);
+const isLocal = computed(() => shownState.value === 'local-only');
+const lastSyncedAbsolute = computed(() => {
+  const last = syncStatus.value.lastSyncedAt;
+  return last ? absoluteTime(last) : '';
 });
 
-onUnmounted(() => {
-  if (clockTimer) clearInterval(clockTimer);
-  if (syncingTimer) clearTimeout(syncingTimer);
+// ── Restore ──────────────────────────────────────────────────────────────────
+
+/** Entry waiting for confirmation (dialog open while set). */
+const confirmEntry = ref<SnapshotListEntry | null>(null);
+const dialogOpen = computed({
+  get: () => confirmEntry.value !== null,
+  set: (v: boolean) => { if (!v) confirmEntry.value = null; },
 });
 
-/** "just now", "2 min ago", "3 h ago", "4 days ago". */
-function relativeTime(ts: number, at: number): string {
-  const s = Math.max(0, Math.round((at - ts) / 1000));
-  if (s < 60) return 'just now';
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} h ago`;
-  const d = Math.round(h / 24);
-  return d === 1 ? '1 day ago' : `${d} days ago`;
+/** Popover → confirmation dialog. */
+function requestRestore(entry: SnapshotListEntry): void {
+  open.value = false;
+  confirmEntry.value = entry;
 }
 
-// ── View model ───────────────────────────────────────────────────────────────
-
-/** Icon, label and color per state. */
-const STATE_VIEW: Record<SyncState, { icon: Component; label: string; tone: string }> = {
-  'synced': { icon: CloudCheck, label: 'Synced', tone: 'text-sidebar-foreground/50' },
-  'syncing': { icon: RefreshCw, label: 'Syncing…', tone: 'text-sidebar-foreground/70' },
-  'offline': { icon: CloudOff, label: 'Offline', tone: 'text-yellow-500' },
-  'error': { icon: TriangleAlert, label: 'Sync error', tone: 'text-destructive' },
-  'local-only': { icon: HardDrive, label: 'Local only', tone: 'text-sidebar-foreground/50' },
+/** Toast per outcome. */
+const OUTCOME_TOAST: Record<RestoreOutcome, Parameters<typeof notify>[0]> = {
+  'restored': { title: 'Version restored', description: 'The project was reloaded from the selected version.' },
+  'pending': { title: 'Restore cancelled', description: 'Unsynced changes could not be uploaded. Try again once they are synced.', variant: 'warning' },
+  'failed': { title: 'Restore failed', description: 'The selected version could not be restored.', variant: 'error' },
+  'unavailable': { title: 'Restore unavailable', description: 'Restoring needs a connection and edit access.', variant: 'warning' },
 };
 
-const view = computed(() => STATE_VIEW[shownState.value]);
-const pending = computed(() => syncStatus.value.pending);
-
-/** Short inline text next to the icon (offline pending count, local-only). */
-const inlineText = computed(() => {
-  if (shownState.value === 'offline' && pending.value > 0) return `${pending.value} pending`;
-  if (shownState.value === 'local-only') return 'Local only';
-  return '';
-});
-
-/** Tooltip detail lines. */
-const details = computed(() => {
-  const out: string[] = [];
-  if (pending.value > 0) out.push(`${pending.value} pending change${pending.value === 1 ? '' : 's'}`);
-  const last = syncStatus.value.lastSyncedAt;
-  if (shownState.value !== 'local-only') {
-    out.push(last ? `Last synced ${relativeTime(last, now.value)}` : 'Not synced yet');
-  }
-  if (shownState.value === 'error' && syncStatus.value.error) out.push(syncStatus.value.error);
-  return out;
-});
-
-/** Screen-reader label summarising state and details. */
-const ariaLabel = computed(() => [`Sync status: ${view.value.label}`, ...details.value].join('. '));
+/** Confirmed: run the restore and report the result. */
+async function confirmRestore(): Promise<void> {
+  const entry = confirmEntry.value;
+  confirmEntry.value = null;
+  if (!entry || !history.value) return;
+  const outcome = await history.value.restore(entry);
+  notify(OUTCOME_TOAST[outcome], outcome === 'restored' ? 6000 : 8000);
+}
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="200">
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <button
-          type="button"
-          class="flex items-center gap-1.5 h-8 px-1.5 rounded-md text-xs transition-colors hover:bg-sidebar-accent"
-          :class="view.tone"
-          :aria-label="ariaLabel"
-          data-testid="sync-status-indicator"
-        >
-          <component :is="view.icon" :size="16" :class="shownState === 'syncing' ? 'animate-spin' : ''" aria-hidden="true" />
-          <span v-if="inlineText">{{ inlineText }}</span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" class="max-w-64">
-        <p class="font-medium">{{ view.label }}</p>
-        <p v-for="(line, i) in details" :key="i" class="opacity-80 break-words">{{ line }}</p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
+  <Popover v-model:open="open">
+    <PopoverTrigger as-child>
+      <button
+        type="button"
+        class="flex items-center gap-1.5 h-8 px-1.5 rounded-md text-xs transition-colors hover:bg-sidebar-accent"
+        :class="view.tone"
+        :aria-label="ariaLabel"
+        data-testid="sync-status-indicator"
+      >
+        <component :is="view.icon" :size="16" :class="shownState === 'syncing' ? 'animate-spin' : ''" aria-hidden="true" />
+        <span v-if="inlineText">{{ inlineText }}</span>
+      </button>
+    </PopoverTrigger>
+    <PopoverContent side="bottom" align="end" class="w-80 p-2" data-testid="sync-status-popover">
+      <div class="flex items-start gap-2 px-2 py-1.5">
+        <component :is="view.icon" :size="16" class="mt-0.5 shrink-0" :class="[view.tone, shownState === 'syncing' ? 'animate-spin' : '']" aria-hidden="true" />
+        <div class="min-w-0">
+          <p class="text-sm font-medium">
+            {{ view.label }}<template v-if="shownState === 'offline' && pending > 0"> · {{ pending }} pending</template>
+          </p>
+          <p v-for="(line, i) in details" :key="i" class="text-xs text-muted-foreground break-words">{{ line }}</p>
+          <p v-if="lastSyncedAbsolute && !isLocal" class="text-[11px] text-muted-foreground">{{ lastSyncedAbsolute }}</p>
+        </div>
+      </div>
+      <Separator class="my-1.5" />
+      <VersionHistoryPanel :history="history" :local="isLocal" :now="now" @restore="requestRestore" />
+    </PopoverContent>
+  </Popover>
+
+  <AlertDialog v-model:open="dialogOpen">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Restore this version?</AlertDialogTitle>
+        <AlertDialogDescription>
+          Your current state is kept in history.
+          <template v-if="confirmEntry"> The project will reload with the version from {{ absoluteTime(Date.parse(confirmEntry.createdAt)) }}.</template>
+          <template v-if="pending > 0"> {{ pending }} unsynced change{{ pending === 1 ? '' : 's' }} will be uploaded first.</template>
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction data-testid="version-restore-confirm" @click="confirmRestore">Restore</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>

@@ -142,6 +142,70 @@ export function parseRestoreSnapshot(body: Record<string, unknown> | null): Pars
   return { ok: true, value: { projectId, snapshotId } };
 }
 
+// ── list-snapshots ───────────────────────────────────────────────────────────
+
+/** Default and maximum page size of `list-snapshots`. */
+export const SNAPSHOTS_DEFAULT_LIMIT = 30;
+export const SNAPSHOTS_MAX_LIMIT = 100;
+
+/**
+ * Keyset position of a snapshot in the history order
+ * (`sequence_number desc, created_at desc, id desc`).
+ */
+export interface SnapshotCursor {
+  sequenceNumber: number;
+  /** `created_at` exactly as Postgres returned it (microseconds kept). */
+  createdAt: string;
+  id: string;
+}
+
+export interface ListSnapshotsRequest {
+  projectId: string;
+  limit: number;
+  /** Exclusive cursor: only snapshots older than this one; null = first page. */
+  before: SnapshotCursor | null;
+}
+
+/** Opaque cursor string `<sequence>~<createdAt>~<id>` (none of the parts contains `~`). */
+export function encodeSnapshotCursor(c: SnapshotCursor): string {
+  return `${c.sequenceNumber}~${c.createdAt}~${c.id}`;
+}
+
+/** Inverse of `encodeSnapshotCursor`; null for anything malformed. */
+export function decodeSnapshotCursor(value: unknown): SnapshotCursor | null {
+  if (typeof value !== 'string') return null;
+  const parts = value.split('~');
+  if (parts.length !== 3) return null;
+  const [seqText, createdAt, id] = parts as [string, string, string];
+  if (!/^\d+$/.test(seqText)) return null;
+  const sequenceNumber = Number(seqText);
+  if (!isSequence(sequenceNumber)) return null;
+  if (!createdAt || Number.isNaN(Date.parse(createdAt))) return null;
+  if (!isUuid(id)) return null;
+  return { sequenceNumber, createdAt, id: id.toLowerCase() };
+}
+
+/** `{ projectId, before?, limit? }` — limit is clamped to 1…SNAPSHOTS_MAX_LIMIT. */
+export function parseListSnapshots(body: Record<string, unknown> | null): Parsed<ListSnapshotsRequest> {
+  const projectId = body?.projectId;
+  if (typeof projectId !== 'string' || projectId === '') return { ok: false, error: 'projectId required' };
+  if (!isUuid(projectId)) return { ok: false, error: 'projectId must be a UUID' };
+  const limit = body?.limit;
+  if (limit !== undefined && limit !== null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) {
+    return { ok: false, error: 'limit must be a positive integer' };
+  }
+  const rawBefore = body?.before;
+  let before: SnapshotCursor | null = null;
+  if (rawBefore !== undefined && rawBefore !== null) {
+    before = decodeSnapshotCursor(rawBefore);
+    if (!before) return { ok: false, error: 'before must be a cursor returned by list-snapshots' };
+  }
+  return {
+    ok: true,
+    value: { projectId, limit: Math.min((limit as number | null | undefined) ?? SNAPSHOTS_DEFAULT_LIMIT, SNAPSHOTS_MAX_LIMIT), before },
+  };
+}
+
 // ── push-change ──────────────────────────────────────────────────────────────
 
 /** One change as sent to the `push_changes` RPC. */

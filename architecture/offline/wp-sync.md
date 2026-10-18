@@ -26,6 +26,7 @@ Implements the integration package of [ADR 0004](../adr/0004-offline-first.md): 
 | `legacy-wal.ts` | One-time `migrateLegacyWal` (plugin + before every open) |
 | `current-user.ts` | Signed-in user id without network |
 | `sync-conflicts.ts`, `describe-conflicts.ts` | Conflict report contract, human-readable lines |
+| `remote-api-snapshots.ts`, `version-history.ts`, `version-history-controller.ts`, `relative-time.ts` | Version history: list wrapper, view logic, state + restore (see "Version history") |
 
 Persist side: `app/utils/persistence/outbox-writer.ts` (new), `persist-queue.ts` (outbox instead of WAL). `wal.ts` is removed. UI: `app/components/sync/SyncStatusIndicator.vue` (in `AppHeader.vue`), `app/composables/use-sync-conflict-toast.ts` (plugin `06.sync-conflict-toast`), actions/lines in `use-notifications.ts` + `ToastStack.vue`. Service registration: plugin `07.project-sync.client.ts`.
 
@@ -97,6 +98,16 @@ After a rebase the engine calls `deps.onRebased()` (from `pullStep`'s `rebased` 
 
 Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only for sessions with an engine, online, with an empty persist queue and outbox (`canSaveServerSnapshot`). Uses `remote-api.saveSnapshot`.
 
+## Version history (D17)
+
+Clicking the header sync indicator opens a popover (`SyncStatusIndicator.vue`): the current status (state, pending count, last sync relative + absolute; view model in `composables/sync/use-sync-status-view.ts`) and below it the **version history** (`VersionHistoryPanel.vue`, `VersionHistoryItem.vue`).
+
+- **Data:** `remote-api-snapshots.listSnapshots()` → `list-snapshots` (WP-SERVER, migration 010): newest first, pages of 30 with a keyset cursor ("Load more"). Each entry: relative + absolute time, label badge (Autosave / Before offline sync / Uploaded / Imported / Restored / custom label), author name, summary "N fixtures · N groups · N modifiers" computed server-side. The full snapshot is never downloaded for the list.
+- **Collapsing:** runs of 3+ consecutive autosaves (label `null`) show the newest one plus a "N more autosaves" row that expands (`version-history.ts`, pure).
+- **Controller:** `version-history-controller.ts` (`createVersionHistory`, deps injected; wired by `composables/sync/use-version-history.ts`). Keeps the last list per project in memory: offline it is shown with a note and restore disabled; local-only projects show "Local project — no version history".
+- **Restore:** confirmation dialog ("Restore this version? Your current state is kept in history.", mentions unsynced changes). Then: pending changes (outbox + unconfirmed) → `engine.flushNow()`; still pending → cancelled with a warning toast (otherwise they would be replayed on top of the restored state). Then `SyncEngine.restoreSnapshot(id)` → the same path as "Restore state before sync" (`sync-restore.ts`: `restore_snapshot` RPC marker + snapshot at its sequence, local base/working replaced, project reloaded; collaborators reload on the marker). Disabled offline, for viewers (role from the local project meta) and while a restore runs.
+- **Tests:** `remote-api-snapshots.test.ts` (wrapper, mocked client), `version-history.test.ts` (labels, summary, collapsing, controller: paging, offline cache, viewer, flush-before-restore), `components/sync/version-history-ui.test.ts` (panel + popover, happy-dom).
+
 ## Service (`ProjectSyncService`)
 
 - `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows (also without meta: legacy-WAL rows have no account and are bound by the first signed-in open, never by a background pass); nothing is written when `userId` is no longer the signed-in account after the download; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
@@ -111,6 +122,7 @@ Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only fo
 - `ProjectSyncService` signatures unchanged; `SyncEngine.boundUserId`, `flushNow()`.
 - `SyncEngine.stop()` returns a promise; `SyncEngine.canSync()`; `SyncDeps.onRebased?()`; `SessionInput.onRebased?`; `engine-store.closeSession()` exported; `use-history.clearHistory()`.
 - `restore-snapshot` edge function: CORS + JSON errors (needs deployment).
+- `SyncEngine.restoreSnapshot(snapshotId)` (version history); `SyncStatusIndicator` takes a `projectId` prop.
 
 ## Known limits
 
