@@ -23,6 +23,8 @@ export interface OutboxAccess {
 
 export interface SyncDeps {
   projectId: string;
+  /** Signed-in account the project is bound to (D15). */
+  userId: string;
   client: RemoteClient;
   store: ProjectStore;
   port: ProjectStatePort;

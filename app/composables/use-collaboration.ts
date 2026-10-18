@@ -1,5 +1,5 @@
 import { triggerRef, watch } from 'vue';
-import { useHistory, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
+import { useHistory } from '~/components/engine/composables/use-history';
 import { commandFromPayload } from '~/components/engine/commands/serializable-command';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore, type CollaboratorPresence, type PresenceController, TAB_SESSION_ID } from '~/stores/live-bus-store';
@@ -9,6 +9,8 @@ import { userColor } from '~/composables/live-ops/colors';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 import { snapshotTwinStates } from '~/composables/live-ops/twin-state-hub';
 import { isNetworkError, isOnline, onReconnect, reportNetworkFailure } from '~/utils/sync/connectivity';
+import { getOpenSyncEngine } from '~/utils/sync/open-sync-engine';
+import type { RemoteInsert } from '~/utils/sync/sync-engine';
 
 // Side-effect imports: register all live ops and live widget commands
 import '~/composables/live-ops';
@@ -152,22 +154,37 @@ export function useCollaboration(projectId: string): CollaborationContext {
   });
 
   // ── Postgres Changes: committed commands (existing tier) ──────────────────
+  // Realtime is the fast path; the project's SyncEngine dedupes rows by
+  // change id (own echoes, rows already pulled) and records them so pulls
+  // never apply them twice (ADR 0004 §3.2). Live-op rows are only recorded:
+  // peers apply them from the LiveBus broadcast.
+  /** Apply a foreign committed command (history, so it can be undone). */
+  function applyRemoteRow(row: RemoteInsert) {
+    const cmd = commandFromPayload(row.commandType, row.payload as object, engineStore.getReplayContext());
+    if (!cmd) return;
+    history.executeRemote(cmd);
+    triggerRef(engineStore.sceneNodes);
+    engineStore.scheduleWorkingSnapshot();
+  }
+
   channel.on(
     'postgres_changes' as any,
     { event: 'INSERT', schema: 'public', table: 'project_changes', filter: `project_id=eq.${projectId}` },
     (change: any) => {
-      const { sequence_number, user_id, command_type, payload } = change.new ?? {};
-      if (sequence_number == null) return;
-      if (sequence_number <= lastSeenSequenceNumber.value) return;
-      lastSeenSequenceNumber.value = Math.max(lastSeenSequenceNumber.value, sequence_number);
-      if (user_id === user.value?.id) return;
-
-      const ctx = engineStore.getReplayContext();
-      const cmd = commandFromPayload(command_type, payload, ctx);
-      if (cmd) {
-        history.executeRemote(cmd);
-        triggerRef(engineStore.sceneNodes);
-      }
+      const { sequence_number, change_id, user_id, command_type, payload } = change.new ?? {};
+      if (typeof sequence_number !== 'number') return;
+      const engine = getOpenSyncEngine(projectId);
+      // No engine (signed out / unbound copy): nothing is synced, ignore.
+      if (!engine) return;
+      engine.setRemoteApplier(applyRemoteRow);
+      engine.handleRemoteInsert({
+        sequenceNumber: sequence_number,
+        // Rows without a change id (very old clients) get a stable stand-in.
+        changeId: typeof change_id === 'string' && change_id ? change_id : `seq:${sequence_number}`,
+        userId: user_id ?? '',
+        commandType: command_type,
+        payload,
+      });
     },
   );
 
@@ -243,6 +260,8 @@ export function useCollaboration(projectId: string): CollaborationContext {
       console.info('[collab] channel status:', status, err ?? '');
 
       if (status === 'SUBSCRIBED') {
+        // Events may have been missed while (re)joining: pull to fill the gap.
+        getOpenSyncEngine(projectId)?.handleRealtimeSubscribed();
         let userId = user.value?.id;
         let email = user.value?.email ?? '';
         let displayName = (user.value?.user_metadata as any)?.display_name ?? '';

@@ -59,7 +59,16 @@ import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfi
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
-import { walAppend, walMarkAcked, walGetPending } from '~/utils/persistence/wal';
+import { getProjectStore } from '~/utils/persistence/project-store';
+import { saveSnapshot as saveServerSnapshot, type RemoteClient } from '~/utils/sync/remote-api';
+import type { ProjectStatePort } from '~/utils/sync/project-state-port';
+import { createEngineStatePort } from '~/utils/sync/engine-state-port';
+import { readLocalProject } from '~/utils/sync/open-project';
+import { openFromLocal, openFromServer, type OpenResult } from '~/utils/sync/open-flow';
+import { startProjectSession, type ProjectSession } from '~/utils/sync/project-session';
+import { installUnloadHandlers } from '~/utils/sync/unload-handlers';
+import { resolveCurrentUserId } from '~/utils/sync/current-user';
+import { ensureLegacyWalMigrated } from '~/utils/sync/legacy-wal';
 import { liveHub, type SignatureFrame } from '~/utils/extensions/live-hub';
 import { getExtension } from '~/utils/extensions/registry';
 import { extensionsReady } from '~/utils/extensions/loader';
@@ -524,6 +533,8 @@ export const useEngineStore = defineStore('engine', () => {
 
   function markEngineDirty() {
     engineDirty = true;
+    // The local working copy follows every change (debounced, ADR 0004 §3.1).
+    session?.writer.schedule();
     // Setting the flag pre-wiring is harmless — the first dirty event after
     // loadProject() finishes wiring will arm both timers.
     if (!persistenceHooksReady) return;
@@ -944,7 +955,8 @@ export const useEngineStore = defineStore('engine', () => {
 
   const currentProjectId = ref<string | null>(null);
   const projectLoading = ref(false);
-  const projectError = ref<'unauthorized' | 'error' | 'incompatible' | 'missing-extensions' | null>(null);
+  /** `offline-unavailable`: a cloud project without local copy opened offline (ADR 0004). */
+  const projectError = ref<'unauthorized' | 'error' | 'incompatible' | 'missing-extensions' | 'offline-unavailable' | null>(null);
   /** Extensions a project needs but this client lacks (ADR §5.10 gate). */
   const missingExtensions = ref<MissingRequirement[]>([]);
 
@@ -1006,14 +1018,104 @@ export const useEngineStore = defineStore('engine', () => {
     flushEngineOutput();
   }
 
+  // ── Local-first open + sync session (ADR 0004 D1, §3) ─────────────────────
+  // Open flow, sync engine, working snapshot and unload handling live in
+  // `~/utils/sync/*`; the store only wires its state into them.
+
+  /** Session of the open project (null before the first load). */
+  let session: ProjectSession | null = null;
+  /** Removes the page-lifecycle handlers of the open session. */
+  let disposeUnload: (() => void) | null = null;
+  /** Origin of the open project (`local` = never uploaded, D3). */
+  const projectOrigin = ref<'local' | 'cloud' | null>(null);
+
+  /** Serialize the live project (export, snapshots, working copy). */
+  function buildSnapshot(): ProjectSnapshot {
+    // Extensions no longer used leave `requires` with this snapshot, so the
+    // change log after it contains none of their commands (ADR §5.8).
+    const removed = recomputeRequires();
+    if (removed.length > 0) console.info('[engine] extensions no longer required:', removed.join(', '));
+    const pinnedStore = usePinnedModifiersStore();
+    const liveStore = useLiveModeStore();
+    return serializeProject(
+      sceneNodes.value,
+      savedPresets.value,
+      pinnedStore.pinnedModifiers,
+      globalBases.value,
+      modifiers.value,
+      liveStore.pages,
+      liveStore.liveControllers,
+      selectedPresetId.value,
+      engine.globalBpm.value,
+      clockEpoch.value,
+      Object.fromEntries(
+        [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
+      ),
+      liveStore.savedPositions,
+      requires.value,
+      projectExtension.extensionData,
+    );
+  }
+
+  /** Live-state port for the sync layer (lazy: needs the store instance). */
+  let statePort: ProjectStatePort | null = null;
+  function getStatePort(): ProjectStatePort {
+    statePort ??= createEngineStatePort({
+      buildSnapshot,
+      applySnapshot: applyProjectSnapshot,
+      replayContext: getReplayContext,
+      engineStore: useEngineStore(),
+    });
+    return statePort;
+  }
+
+  /** Extension gate (ADR §5.10): false (and the dialog state) when blocked. */
+  function gateRequirements(snapshotRequires: readonly ProjectRequirement[], changeTypes: string[]): boolean {
+    const required = requirementsToOpen(snapshotRequires, changeTypes);
+    const missing = missingRequirements(required, id => getExtension(id)?.manifest.version, (v, r) => semver.satisfies(v, r));
+    missingExtensions.value = missing;
+    return missing.length === 0;
+  }
+
+  /** Clear the previous project before a snapshot is applied. */
+  async function resetForLoad(): Promise<void> {
+    sceneNodes.value = [];
+    savedPresets.value = [];
+    selectedPresetId.value = null;
+    // Disconnect hardware-controller instances of the previous project so
+    // MIDI/HID ports don't leak across loads. Output connectors are per
+    // user/device (ADR D18) and survive project switches.
+    await useControllerStore().reset();
+  }
+
+  /** Auto-connect controllers persisted with the project (fire-and-forget). */
+  function connectProjectControllers(): void {
+    const controllerStore = useControllerStore();
+    for (const inst of useLiveModeStore().liveControllers) {
+      const driver = controllerStore.createDriver(inst.id, inst.definitionKey);
+      if (driver) driver.connect().catch((e: unknown) => console.warn('[engine] auto-connect failed:', inst.id, e));
+    }
+  }
+
+  /** End the open session (project switch); `discard` skips the working write. */
+  async function closeSession(discard = false): Promise<void> {
+    const prev = session;
+    session = null;
+    disposeUnload?.();
+    disposeUnload = null;
+    if (prev) await prev.close(discard);
+  }
+
   /**
-   * Load a project (WAL recovery → snapshot + tail → wire persistence).
+   * Open a project local-first: the working snapshot when one exists (also
+   * offline), else download it (first open). Then start the sync session.
    * `allowAuthRetry` permits one reload after a 401 was fixed by a token
    * refresh; internal — callers pass only the project id.
    */
   async function loadProject(projectId: string, allowAuthRetry = true) {
     const supabase = useSupabaseClient();
-    const runtimeConfig = useRuntimeConfig();
+    // Write the previous project's working copy before its state is replaced.
+    await closeSession();
     currentProjectId.value = projectId;
     projectLoading.value = true;
     projectError.value = null;
@@ -1027,68 +1129,37 @@ export const useEngineStore = defineStore('engine', () => {
     engineDirty = false;
     snapshotInFlight = false;
     persistenceHooksReady = false;
-    // Clear persist queue from any previous project and remove the old hook so
-    // stale entries cannot be flushed against the new project's connection.
+    // Drop the previous project's queue (its rows are durable in the outbox)
+    // so nothing is pushed against the wrong project.
     clearPersistQueue();
     setPersistHook(null);
     setPersistAckHook(null);
     snapshotRetry.cancel();
-    // Persistent live-ops dispatched from now on are WAL-logged under this
-    // project (ADR 0004 D8) — even before the push hook is wired below.
-    setPersistProjectId(projectId);
+    lastSeenSequenceNumber.value = 0;
 
-    // ── WAL Recovery ────────────────────────────────────────────────────────
-    // Push any pending changes that survived a crash / failed unload from a
-    // previous session BEFORE loading the snapshot+tail. The push-change edge
-    // function is idempotent via (project_id, change_id) so re-pushing an entry
-    // that already made it last time is safe — the server returns the existing
-    // sequence_number. We then drop the WAL entries that the server confirmed.
-    try {
-      const pending = await walGetPending(projectId);
-      if (pending.length > 0) {
-        console.info(`[engine] WAL recovery: pushing ${pending.length} unacked change(s)`);
-        const { data: recData, error: recErr } = await supabase.functions.invoke('push-change', {
-          body: {
-            projectId,
-            changes: pending.map(e => ({
-              commandType: e.commandType,
-              payload: e.payload,
-              changeId: e.id,
-            })),
-          },
-        });
-        if (recErr) throw recErr;
-        // Only ack the entries the server confirmed. Filter out null/undefined
-        // (one row failed → keep that one in the WAL for next retry).
-        const returnedIds: Array<string | undefined> = recData?.changeIds ?? [];
-        const ackedIds = returnedIds.filter((id): id is string => typeof id === 'string');
-        // Edge case: server didn't return changeIds at all (e.g. old function
-        // pre-deployment). Then assume all pending entries made it.
-        const toAck = ackedIds.length > 0 || returnedIds.length > 0
-          ? ackedIds
-          : pending.map(e => e.id);
-        await walMarkAcked(toAck);
-        reportNetworkSuccess();
-      }
-    } catch (err) {
-      // Don't block the load on recovery failure — degrade gracefully. The WAL
-      // entries stay; the next attempt (or the next reload) will retry.
-      if (isNetworkError(err)) reportNetworkFailure();
-      console.error('[engine] WAL recovery failed — proceeding with possibly stale state:', err);
-    }
+    await ensureLegacyWalMigrated();
+    const store = await getProjectStore();
+    const userId = await resolveCurrentUserId(useSupabaseUser().value as { id?: string; sub?: string } | null, supabase.auth);
+    const local = await readLocalProject(store, projectId);
+    const meta = local?.meta ?? await store.getProject(projectId);
+    const origin = meta?.origin ?? 'cloud';
+    projectOrigin.value = origin;
+    // Changes made from now on are outbox rows of this project (cloud only, D8).
+    setPersistProjectId(projectId, { outbox: origin === 'cloud' });
 
-    const { data, error } = await supabase.functions.invoke('load-project', {
-      body: { projectId },
-    });
-    if (error || !data) {
-      console.error('[engine] loadProject failed:', error);
-      const status = error?.context?.status ?? 0;
-      if (isNetworkError(error)) reportNetworkFailure();
-      if (status === 401) {
+    const host = { port: getStatePort(), reset: resetForLoad, gate: gateRequirements };
+    const client = supabase as unknown as RemoteClient;
+    const result: OpenResult = local || origin === 'local'
+      ? await openFromLocal(host, local, meta)
+      : userId
+        ? await openFromServer(host, { store, client, projectId, userId, meta })
+        : { ok: false, error: 'offline-unavailable' };
+
+    if (!result.ok) {
+      if (result.error === 'auth') {
         // ADR 0004 D10: a 401 may only mean the access token expired while
         // it could not be refreshed (offline period). Refresh first; sign out
-        // only if the auth server definitively rejects the session — never
-        // offline or on transient errors.
+        // only if the auth server definitively rejects the session.
         const action = await resolveUnauthorized(supabase.auth);
         if (action === 'retry' && allowAuthRetry) return loadProject(projectId, false);
         projectLoading.value = false;
@@ -1103,327 +1174,100 @@ export const useEngineStore = defineStore('engine', () => {
         }
         return;
       }
+      projectError.value = result.error;
       projectLoading.value = false;
-      if (status === 403) {
-        projectError.value = 'unauthorized';
-      } else {
-        projectError.value = 'error';
-      }
       return;
     }
-
-    // Gate (ADR §5.10): a project whose required extensions are missing or
-    // incompatible is not opened; the layout offers install/update instead.
-    {
-      const required = requirementsToOpen(
-        data.snapshot?.requires ?? [],
-        (data.tail ?? []).map((c: { command_type: string }) => c.command_type),
-      );
-      const missing = missingRequirements(required, id => getExtension(id)?.manifest.version, (v, r) => semver.satisfies(v, r));
-      missingExtensions.value = missing;
-      if (missing.length > 0) {
-        projectError.value = 'missing-extensions';
-        projectLoading.value = false;
-        return;
-      }
-    }
-
-    // Clear default fixtures so the project starts from a clean slate
-    sceneNodes.value = [];
-    savedPresets.value = [];
-    selectedPresetId.value = null;
-
-    // Disconnect any hardware-controller instances from the previous project
-    // so MIDI/HID ports don't leak across project loads. Bindings cleared too.
-    await useControllerStore().reset();
-    // Output connectors are per user/device (ADR D18) and survive project switches.
-
-    // Apply the base snapshot if present. Version-1 projects are rejected (ADR D24).
-    if (data.snapshot) {
-      try {
-        applyProjectSnapshot(data.snapshot);
-      }
-      catch (err) {
-        if (err instanceof IncompatibleProjectError) {
-          console.warn('[engine] incompatible project snapshot:', err.found);
-          projectError.value = 'incompatible';
-          projectLoading.value = false;
-          return;
-        }
-        throw err;
-      }
-    }
-
-    // Replay the tail: changes after the snapshot's sequence_number.
-    // The tail may contain two kinds of records:
-    //   1. History commands (Undo-able ops) — replayed via the command registry.
-    //   2. Persistent live-ops (BPM, modifier scrubs, color overrides, section
-    //      latches, …) — replayed via the live-op registry. These are written
-    //      to project_changes by the LiveBus persist queue and were NOT in the
-    //      tail before this architectural change.
-    const tail: Array<{ command_type: string; payload: any; sequence_number: number; user_id: string }> = data.tail ?? [];
-    // Build a minimal LiveContext for replaying live-ops without a realtime
-    // channel. We only need the engineStore reference; awareness fields are
-    // empty because replay happens before any collaborators are present.
-    const replayLiveCtx: LiveContext = {
-      cursors: new Map(),
-      remoteSelections: new Map(),
-      remoteEditingModifier: new Map(),
-      remoteEditSteps: new Map(),
-      remoteCameras: new Map(),
-      triggerCursorUpdate: () => {},
-      triggerSelectionUpdate: () => {},
-      triggerEditingModifierUpdate: () => {},
-      triggerEditStepUpdate: () => {},
-      triggerCameraUpdate: () => {},
-      displayNameOf: () => '',
-      colorOf: () => '',
-      engineStore: useEngineStore(),
-    };
-    for (const change of tail) {
-      // Try history command registry first
-      const cmd = commandFromPayload(change.command_type, change.payload, getReplayContext());
-      if (cmd) { cmd.execute(); continue; }
-
-      // Fall back to live-op registry
-      const liveOp = getLiveOpConfig(change.command_type);
-      if (liveOp) {
-        try {
-          liveOp.apply(change.payload, change.user_id ?? '', replayLiveCtx, '');
-        } catch (e) {
-          console.warn(`[loadProject] live-op replay failed for "${change.command_type}":`, e);
-        }
-        continue;
-      }
-
-      console.warn(`[loadProject] no handler for tail entry "${change.command_type}"`);
-    }
-    if (tail.length > 0) {
-      lastSeenSequenceNumber.value = tail[tail.length - 1].sequence_number;
-    } else if (data.snapshot?.sequence_number) {
-      lastSeenSequenceNumber.value = data.snapshot.sequence_number;
-    }
     triggerRef(sceneNodes);
+    flushEngineOutput();
+    connectProjectControllers();
 
-    // Auto-connect controllers that were persisted with the project.
-    // Fire-and-forget: MIDI access is async and non-blocking.
-    {
-      const controllerStore = useControllerStore();
-      const liveStore = useLiveModeStore();
-      for (const inst of liveStore.liveControllers) {
-        const driver = controllerStore.createDriver(inst.id, inst.definitionKey);
-        if (driver) driver.connect().catch((e: unknown) => console.warn('[engine] auto-connect failed:', inst.id, e));
-      }
-    }
-
-    // ── Persistence: unified queue ──────────────────────────────────────────
-    // Both history commands AND persistent live-ops flow through the LiveBus
-    // persist queue. A single in-flight guard there serializes the push-change
-    // round-trip; `lastSeenSequenceNumber` is updated synchronously inside the
-    // hook, so any caller awaiting flushPersistQueue() sees an accurate value
-    // before reading it. This is the architectural fix for the
-    // race-against-snapshot bug that produced stale-state reloads.
-
-    async function persistBatch(
-      entries: Array<{ type: string; payload: any; changeId?: string }>,
-    ): Promise<Array<number | undefined>> {
-      const { data, error } = await supabase.functions.invoke('push-change', {
-        body: {
-          projectId,
-          changes: entries.map(e => ({
-            commandType: e.type,
-            payload: e.payload,
-            changeId: e.changeId,
-          })),
-        },
-      });
-      if (error) throw error;
-      const seqs: number[] = (data?.sequenceNumbers ?? []).filter((s: any) => s != null);
-      const maxSeq = seqs.length ? Math.max(...seqs) : undefined;
-      if (maxSeq != null && maxSeq > lastSeenSequenceNumber.value) {
-        lastSeenSequenceNumber.value = maxSeq;
-      }
-      return data?.sequenceNumbers ?? [];
-    }
-    setPersistHook(persistBatch);
-    // ACK hook: when the server confirms a batch, drop the matching WAL entries
-    // so they aren't re-pushed on the next reload's recovery pass.
-    setPersistAckHook((changeIds) => {
-      walMarkAcked(changeIds).catch(err =>
-        console.warn('[engine] walMarkAcked failed:', err));
+    const current = startProjectSession({
+      projectId,
+      store,
+      client,
+      port: getStatePort(),
+      userId,
+      opened: result.project,
+      hasQueuedEntries: () => getPersistQueueSnapshot().length > 0,
+      onLiveChanged: () => { triggerRef(sceneNodes); flushEngineOutput(); },
+      onSequence: (seq) => { if (seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq; },
+      discardSession: () => closeSession(true),
+      reload: () => loadProject(projectId),
     });
+    session = current;
+    lastSeenSequenceNumber.value = result.project.position.highest();
+    wirePersistence(projectId, current, supabase as unknown as ReturnType<typeof useSupabaseClient>);
+    projectLoading.value = false;
+  }
+
+  /** Persist queue + history hooks, server-snapshot autosave, unload handling. */
+  function wirePersistence(projectId: string, current: ProjectSession, supabase: ReturnType<typeof useSupabaseClient>): void {
+    // Every persisted change is an outbox row first; the session's push hook
+    // sends the outbox (cloud) or nothing (local-only / unbound copies).
+    setPersistHook(current.pushHook);
     commitPendingChanges = flushPersistQueue;
-
-    // Build a snapshot of the full project state. The caller must drain the
-    // persist queue first (via flushPersistQueue) so lastSeenSequenceNumber
-    // matches the state about to be captured.
-    function buildSnapshot() {
-      // Extensions no longer used leave `requires` with this snapshot, so the
-      // change log after it contains none of their commands (ADR §5.8).
-      const removed = recomputeRequires();
-      if (removed.length > 0) console.info('[engine] extensions no longer required:', removed.join(', '));
-      const pinnedStore = usePinnedModifiersStore();
-      const liveStore = useLiveModeStore();
-      return serializeProject(
-        sceneNodes.value,
-        savedPresets.value,
-        pinnedStore.pinnedModifiers,
-        globalBases.value,
-        modifiers.value,
-        liveStore.pages,
-        liveStore.liveControllers,
-        selectedPresetId.value,
-        engine.globalBpm.value,
-        clockEpoch.value,
-        Object.fromEntries(
-          [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
-        ),
-        liveStore.savedPositions,
-        requires.value,
-        projectExtension.extensionData,
-      );
-    }
-
     snapshotBuilder = buildSnapshot;
 
+    /** Server snapshot: cloud projects only, online, nothing pending (D9). */
     async function doSaveSnapshot() {
+      if (!current.engine) return;
       await flushPersistQueue();
-      // A history command still queued (flush failed, or it arrived during the
-      // round-trip) is already in the in-memory state but has no sequence
-      // number yet: a snapshot now would make reload apply it twice. Fail so
-      // the retry scheduler tries again once the queue drained.
-      if (hasPendingCommandPersist()) {
-        throw new Error('[engine] snapshot skipped: unsent history commands pending');
+      // A history command still queued has no sequence number yet: a snapshot
+      // now would make a later replay apply it twice. Retry later.
+      if (hasPendingCommandPersist() || !(await current.canSaveServerSnapshot())) {
+        throw new Error('[engine] snapshot skipped: changes still pending');
       }
-      const snapshot = buildSnapshot();
-      const { error } = await supabase.functions.invoke('save-snapshot', {
-        body: {
-          projectId,
-          snapshot,
-          sequenceNumber: lastSeenSequenceNumber.value,
-        },
+      const res = await saveServerSnapshot(supabase as unknown as RemoteClient, {
+        projectId,
+        snapshot: buildSnapshot(),
+        sequenceNumber: lastSeenSequenceNumber.value,
       });
-      // Surface failures (invoke() resolves with `error` instead of throwing)
-      // so the caller keeps the engine dirty and retries with backoff.
-      if (error) throw error;
+      if (!res.ok) throw res.error.kind === 'network' ? new TypeError(res.error.message) : new Error(res.error.message);
     }
 
-    // History commands flow into the same persist queue. Each one carries its
-    // own resolve/reject so use-history can still chain its snapshot-threshold
-    // logic off the returned sequence number. History commands are append-only
-    // (no dedup) — every undo-able op is recorded individually.
     setPersistenceHooks({
+      // History commands flow into the same persist queue; each carries its
+      // resolve/reject so use-history can chain its snapshot threshold.
       pushChange: (commandType, payload, changeId) =>
         new Promise<number | undefined>((resolve, reject) => {
-          enqueuePersist({ type: commandType, payload, changeId, resolve, reject });
+          enqueuePersist({ type: commandType, payload, changeId, kind: 'command', resolve, reject });
         }),
       // Fire-and-forget callers (history threshold, Cmd+S): never reject.
       saveSnapshot: () => saveSnapshotSafely(doSaveSnapshot),
       markDirty: markEngineDirty,
-      walAppend: (entry) => walAppend(entry),
-      currentProjectId: () => currentProjectId.value,
       onPersist: noteCommandRequirements,
     });
 
-    // Allow markEngineDirty() to arm its timers and bind the snapshot trigger
-    // to the just-wired hook.
     triggerSaveSnapshotInternal = doSaveSnapshot;
     persistenceHooksReady = true;
-    // If a live op fired during loadProject (before hooks were ready), the
-    // dirty flag is set but no timer is armed. Arm them now.
+    // A live op fired during the load (before hooks were ready) left the
+    // dirty flag without armed timers: arm them now.
     if (engineDirty) markEngineDirty();
 
-    projectLoading.value = false;
-
     // Cache the JWT so the unload handler can use it synchronously.
-    // keepalive fetch requires a token at fire time, not after an async getSession().
-    let cachedToken = (await supabase.auth.getSession()).data.session?.access_token ?? '';
-    supabase.auth.onAuthStateChange((_, session) => {
-      if (session?.access_token) cachedToken = session.access_token;
-    });
-    const supabaseUrl: string = (runtimeConfig.public as any).supabase?.url
-      ?? (supabase as any).supabaseUrl
+    let cachedToken = '';
+    void supabase.auth.getSession().then(({ data }) => { cachedToken = data.session?.access_token ?? ''; });
+    supabase.auth.onAuthStateChange((_, s) => { if (s?.access_token) cachedToken = s.access_token; });
+    const runtimeConfig = useRuntimeConfig();
+    const supabaseUrl: string = (runtimeConfig.public as { supabase?: { url?: string } }).supabase?.url
+      ?? (supabase as unknown as { supabaseUrl?: string }).supabaseUrl
       ?? '';
-    const pushChangeUrl = `${supabaseUrl}/functions/v1/push-change`;
-    const saveSnapshotUrl = `${supabaseUrl}/functions/v1/save-snapshot`;
-
-    // On unload: best-effort keepalive push so the next reload's WAL recovery
-    // has less work. CORRECTNESS no longer depends on this fetch succeeding —
-    // every entry in the persist queue ALSO has a WAL row in IndexedDB, and
-    // those are reconciled on the next loadProject() via the idempotent
-    // push-change endpoint. We therefore deliberately DO NOT clearPersistQueue()
-    // here: if the keepalive is dropped (browser limit, network), the entries
-    // stay in memory; if the tab actually closes, the WAL takes over.
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', () => {
+    disposeUnload = installUnloadHandlers({
+      projectId,
+      session: current,
+      token: () => cachedToken,
+      functionsUrl: `${supabaseUrl}/functions/v1`,
+      queued: getPersistQueueSnapshot,
+      isDirty: () => engineDirty,
+      buildSnapshot,
+      lastSequence: () => lastSeenSequenceNumber.value,
+      beforeLeave: () => {
         if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
         if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
         snapshotRetry.cancel();
-        // Make coalesced live-op WAL rows durable first — this is what the
-        // next load recovers if the keepalive below never reaches the server.
-        void flushPersistWal();
-        if (!cachedToken) return;
-        // Offline (ADR 0004 D9): keepalive requests would only fail; the WAL
-        // rows are pushed by the next load's recovery instead.
-        if (!isOnline.value) return;
-
-        // (a) Optimistic keepalive push — passes changeIds so the server can
-        // dedupe against entries that were already written by an in-flight
-        // batch and against the next session's WAL recovery.
-        const pending = getPersistQueueSnapshot();
-        if (pending.length > 0) {
-          const changesBody = JSON.stringify({
-            projectId,
-            changes: pending.map(e => ({
-              commandType: e.type,
-              payload: e.payload,
-              changeId: e.changeId,
-            })),
-          });
-          fetch(pushChangeUrl, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
-            body: changesBody,
-            keepalive: true,
-            // Best effort (64 KB keepalive cap); the WAL recovery covers a dropped push.
-          }).catch(err => console.warn('[engine] beforeunload push failed:', err));
-        }
-
-        // (b) Final snapshot — but ONLY if there are no pending entries left.
-        //
-        // If there are pending entries, the keepalive push above will (on
-        // success) assign them sequence numbers > lastSeenSequenceNumber, while
-        // the snapshot we'd send here was built from in-memory state that
-        // ALREADY includes those commands' effects but carries the stale
-        // lastSeenSequenceNumber. On reload, tail = `> stale-seq` would replay
-        // those commands → double-apply for non-idempotent ops like AddFixtures.
-        //
-        // Skipping the snapshot in that case is safe because:
-        //   - Every SerializableCommand is in the WAL → recovered next load.
-        //   - The pending entries themselves carry changeIds → idempotent
-        //     against the keepalive push above.
-        //   - Tail replay from the last committed snapshot rebuilds state.
-        if (engineDirty && pending.length === 0) {
-          try {
-            const snapshot = buildSnapshot();
-            const snapBody = JSON.stringify({
-              projectId,
-              snapshot,
-              sequenceNumber: lastSeenSequenceNumber.value,
-            });
-            fetch(saveSnapshotUrl, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${cachedToken}`, 'Content-Type': 'application/json' },
-              body: snapBody,
-              keepalive: true,
-              // Best effort: keepalive bodies are capped at 64 KB, so big projects are rejected here.
-            }).catch(err => console.warn('[engine] beforeunload snapshot failed:', err));
-          } catch (err) {
-            console.warn('[engine] beforeunload snapshot failed:', err);
-          }
-        }
-      }, { once: true });
-    }
+      },
+    });
   }
 
   return {
@@ -1472,6 +1316,8 @@ export const useEngineStore = defineStore('engine', () => {
     projectError,
     missingExtensions,
     loadProject,
+    projectOrigin,
+    scheduleWorkingSnapshot: () => session?.writer.schedule(),
     applyProjectSnapshot,
     getReplayContext,
     commitPendingPersistence,

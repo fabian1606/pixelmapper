@@ -103,6 +103,21 @@ export class SyncEngine {
     for (const d of this.disposers.splice(0)) d();
   }
 
+  /** Account this engine syncs as (the project's `ownerUserId`). */
+  get boundUserId(): string {
+    return this.deps.userId;
+  }
+
+  /** Pending changes need a rebase before they may be pushed. */
+  hasBacklog(): boolean {
+    return this.state.backlog;
+  }
+
+  /** Pull and push everything now (logout, D15/D16). */
+  flushNow(): Promise<void> {
+    return this.requestSync();
+  }
+
   /** Live position (written with the working snapshot). */
   livePosition(): SyncPosition {
     return this.state.live;

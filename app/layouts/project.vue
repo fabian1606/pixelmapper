@@ -19,7 +19,8 @@ const collab = useCollaboration(projectId.value);
 
 onMounted(async () => {
   await engineStore.loadProject(projectId.value);
-  collab.connect();
+  // Local-only projects never talk to the server (ADR 0004 D3).
+  if (engineStore.projectOrigin === 'cloud') collab.connect();
 });
 
 onUnmounted(() => {
@@ -49,6 +50,14 @@ onUnmounted(() => {
         <div class="text-center space-y-3 max-w-sm px-4">
           <h2 class="text-lg font-semibold">Incompatible project</h2>
           <p class="text-sm text-muted-foreground">This project was created with an incompatible version of Pixelmapper and cannot be opened.</p>
+          <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
+        </div>
+      </div>
+
+      <div v-else-if="projectError === 'offline-unavailable'" class="flex items-center justify-center h-full">
+        <div class="text-center space-y-3 max-w-sm px-4">
+          <h2 class="text-lg font-semibold">Not available offline</h2>
+          <p class="text-sm text-muted-foreground">This project has not been downloaded to this device yet. Connect to the internet (and sign in) to open it once; afterwards it also opens offline.</p>
           <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
         </div>
       </div>
