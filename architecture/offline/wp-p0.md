@@ -56,6 +56,10 @@ The same key is used in the queue, in the WAL and in the LiveBus broadcast batch
   - `CHANNEL_ERROR` re-auth is skipped while offline.
   - Status handling and presence `track()` calls are wrapped, so they cannot cause unhandled rejections.
 - **Connectivity probe** (new export `setConnectivityProbe` in `connectivity.ts`; existing signatures are unchanged). A reported failure without a browser `offline` event (server or DNS outage) used to leave `isOnline` false forever, because every retry waits for `onReconnect`. While offline and `navigator.onLine` is true, the probe now runs with `backoffDelay` spacing and reports the state back online on success. The `offline-session` plugin registers a `no-cors` GET to `<supabase>/auth/v1/health`: any HTTP answer counts as online.
+- **Flap protection** (`connectivity.ts`). A persistent failure while the health endpoint answers (e.g. a CORS-blocked function) used to flip offline/online about once per second, re-running every reconnect listener each time.
+  - The probe backoff is reset only when the connection had stayed online for `STABLE_ONLINE_MS` (30 s). Quick flaps keep growing it, up to the 30 s cap.
+  - Reconnect notifications are at least `RECONNECT_MIN_INTERVAL_MS` (5 s) apart. The first one fires immediately; a reconnect inside the interval is deferred to its end and dropped if the app is offline by then.
+  - `isNetworkError` no longer counts TypeErrors that are clearly code bugs ("is not a function", "Cannot read properties of undefined", …). Other TypeErrors still count, because wrappers (e.g. `engine-store` autosave) rethrow network failures as TypeError with arbitrary messages.
 
 ## D10 — Offline never logs out
 
@@ -78,7 +82,7 @@ The same key is used in the queue, in the WAL and in the LiveBus broadcast batch
 
 ## Tests
 
-`app/utils/ids.test.ts`, `app/utils/persistence/wal.test.ts`, `app/utils/persistence/persist-queue.test.ts`, `app/utils/sync/retry-scheduler.test.ts` (includes the probe), `app/utils/auth/session-recovery.test.ts`, `app/composables/live-ops/coalesce-keys.test.ts`.
+`app/utils/ids.test.ts`, `app/utils/persistence/wal.test.ts`, `app/utils/persistence/persist-queue.test.ts`, `app/utils/sync/retry-scheduler.test.ts` (includes the probe), `app/utils/sync/connectivity.test.ts` (flap protection), `app/utils/auth/session-recovery.test.ts`, `app/composables/live-ops/coalesce-keys.test.ts`.
 
 ## Known limits / follow-ups
 
