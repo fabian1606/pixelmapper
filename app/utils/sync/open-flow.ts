@@ -1,4 +1,4 @@
-import { IncompatibleProjectError, type ProjectSnapshot } from '~/utils/engine/serialize';
+import { IncompatibleProjectError, serializeProject, type ProjectSnapshot } from '~/utils/engine/serialize';
 import type { ProjectRequirement } from '~/utils/extensions/requires';
 import type { LocalProjectMeta, OutboxEntry, ProjectStore } from '~/utils/persistence/project-store';
 import type { RemoteClient } from '~/utils/sync/remote-api';
@@ -62,6 +62,11 @@ function applySnapshot(port: ProjectStatePort, snapshot: ProjectSnapshot): OpenF
   }
 }
 
+/** State of a new, empty project (no fixtures, presets, modifiers or pages). */
+export function emptyProjectSnapshot(): ProjectSnapshot {
+  return serializeProject([], [], [], { RED: 0, GREEN: 0, BLUE: 0, DIMMER: 0 }, []);
+}
+
 /** Replay outbox rows onto the live state (logged, never throws). */
 function replayRows(port: ProjectStatePort, rows: OutboxEntry[]): void {
   for (const row of rows) {
@@ -84,11 +89,10 @@ export async function openFromLocal(host: OpenFlowHost, local: LocalOpenData | n
   const requires = local?.snapshot.requires ?? [];
   if (!host.gate(requires, (local?.replay ?? []).map(r => r.type))) return { ok: false, error: 'missing-extensions' };
   await host.reset();
-  if (local) {
-    const failed = applySnapshot(host.port, local.snapshot);
-    if (failed) return { ok: false, error: failed };
-    replayRows(host.port, local.replay);
-  }
+  // Meta-only local project (just created): the empty default state.
+  const failed = applySnapshot(host.port, local?.snapshot ?? emptyProjectSnapshot());
+  if (failed) return { ok: false, error: failed };
+  if (local) replayRows(host.port, local.replay);
   return {
     ok: true,
     project: {
@@ -126,10 +130,9 @@ export async function openFromServer(host: OpenFlowHost, input: ServerOpenInput)
   if (!host.gate(data.snapshot?.requires ?? [], data.tail.map(c => c.commandType))) return { ok: false, error: 'missing-extensions' };
 
   await host.reset();
-  if (data.snapshot) {
-    const failed = applySnapshot(host.port, data.snapshot);
-    if (failed) return { ok: false, error: failed };
-  }
+  // No server snapshot yet: start from the empty state, not the previous project.
+  const failed = applySnapshot(host.port, data.snapshot ?? emptyProjectSnapshot());
+  if (failed) return { ok: false, error: failed };
   for (const c of data.tail) {
     try { host.port.replay({ type: c.commandType, payload: c.payload, userId: c.userId }); }
     catch (err) { console.warn(`[sync] tail replay of "${c.commandType}" failed:`, err); }

@@ -7,6 +7,9 @@ import { pullStep } from '~/utils/sync/sync-cycle';
 import type { SyncPosition } from '~/utils/sync/sync-position';
 import { checkpointBase, pushOutbox, touchLastSynced } from '~/utils/sync/sync-push';
 import { describeStatus } from '~/utils/sync/sync-status';
+import { RealtimeIntake, type RemoteApplier, type RemoteInsert } from '~/utils/sync/sync-realtime';
+
+export type { RemoteApplier, RemoteInsert } from '~/utils/sync/sync-realtime';
 
 /**
  * SyncEngine — one per open cloud project (ADR 0004 §3, D4, D5, D9, D17).
@@ -22,18 +25,6 @@ import { describeStatus } from '~/utils/sync/sync-status';
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-/** A realtime `project_changes` insert. */
-export interface RemoteInsert {
-  sequenceNumber: number;
-  changeId: string;
-  userId: string;
-  commandType: string;
-  payload: unknown;
-}
-
-/** Applies a realtime insert to the live state (commands via history). */
-export type RemoteApplier = (row: RemoteInsert) => void;
 
 export interface SyncEngineInit {
   base: BaseState | null;
@@ -60,8 +51,7 @@ export class SyncEngine {
   private queuedCycle: Promise<void> | null = null;
   private cycleRunning = false;
   private initialSyncDone = false;
-  private deferred: RemoteInsert[] = [];
-  private applier: RemoteApplier | null = null;
+  private readonly realtime: RealtimeIntake;
   private stopped = false;
   private disposers: Array<() => void> = [];
 
@@ -80,6 +70,7 @@ export class SyncEngine {
       lastError: null,
       lastSyncedAt: null,
     };
+    this.realtime = new RealtimeIntake(() => this.state, deps);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -125,7 +116,7 @@ export class SyncEngine {
 
   /** Realtime applier from the collaboration layer. */
   setRemoteApplier(fn: RemoteApplier | null): void {
-    this.applier = fn;
+    this.realtime.setApplier(fn);
   }
 
   // ── Lock ───────────────────────────────────────────────────────────────────
@@ -167,7 +158,7 @@ export class SyncEngine {
     }
     finally {
       this.cycleRunning = false;
-      this.drainDeferred();
+      this.realtime.drain();
       await this.refreshStatus();
     }
   }
@@ -231,30 +222,12 @@ export class SyncEngine {
   handleRemoteInsert(row: RemoteInsert): void {
     if (this.stopped) return;
     // A running cycle may replace the live state: decide afterwards.
-    if (this.cycleRunning) { this.deferred.push(row); return; }
-    this.processRemote(row);
+    this.realtime.handle(row, this.cycleRunning);
   }
 
   /** Realtime (re)subscribed: events may have been missed → pull. */
   handleRealtimeSubscribed(): void {
     void this.requestSync();
-  }
-
-  /** Apply one realtime row unless it is reflected already or our own. */
-  private processRemote(row: RemoteInsert): void {
-    const { changeId, sequenceNumber } = row;
-    if (!changeId) return;
-    const known = this.state.live.reflects(changeId, sequenceNumber) || this.state.ownIds.has(changeId);
-    this.state.live.add(changeId, sequenceNumber);
-    this.deps.onSequence?.(sequenceNumber);
-    if (known) return;
-    try { this.applier?.(row); }
-    catch (err) { console.warn('[sync] realtime apply failed:', err); }
-  }
-
-  /** Process realtime rows that arrived during a cycle. */
-  private drainDeferred(): void {
-    for (const row of this.deferred.splice(0)) this.processRemote(row);
   }
 
   // ── Status ─────────────────────────────────────────────────────────────────
