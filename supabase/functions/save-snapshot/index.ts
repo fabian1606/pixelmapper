@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { authenticate, callerRole } from '../_shared/auth.ts';
 import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
+import { edgeWaitUntil, pruneSnapshotsBestEffort, runAfterResponse } from '../_shared/snapshot-retention.ts';
 import { parseSaveSnapshot } from '../_shared/validate.ts';
 
 // Stores a full project snapshot at a sequence position.
@@ -10,6 +11,11 @@ import { parseSaveSnapshot } from '../_shared/validate.ts';
 // Response: { id, sequence_number, label, created_at }
 // 400 for invalid input (non-UUID projectId, or a sequenceNumber above the
 // project's latest change); 403 unless the caller is owner or editor.
+//
+// Retention (migration 013): after a successful insert the project's
+// snapshots are thinned by `prune_project_snapshots` — in the background
+// (EdgeRuntime.waitUntil) and best effort: a failed prune is logged and
+// never affects the response.
 
 Deno.serve(async (req: Request) => {
   const early = preflight(req);
@@ -58,5 +64,9 @@ Deno.serve(async (req: Request) => {
     .single();
 
   if (error) return errorResponse(error.message, 500);
+
+  // Thin old snapshots after the response is sent (never throws).
+  await runAfterResponse(pruneSnapshotsBestEffort(caller.supabase, projectId), edgeWaitUntil());
+
   return json(data);
 });
