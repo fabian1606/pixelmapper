@@ -32,5 +32,7 @@ export function createWebAppShell(): AppShell {
       return true;
     },
     openProjectFile: pickFile,
+    // No quit hook on the web; `unload-handlers.ts` covers `beforeunload`.
+    onBeforeQuit: () => () => {},
   };
 }

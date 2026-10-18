@@ -51,6 +51,16 @@ Implements ADR 0004 **D18** (bundled OFL library), **D19** (bundled firmware) an
 - An unreachable AI endpoint does not mark the app offline.
 - Gated: `useAiFixtureEnrichment.enrichFromManual` and the "Verify with AI" / "AI PDF Import" actions in `CustomFixtureEditorDialog.vue`. These are the only users of `aiBackendUrl`. The "Create from PDF" card in `AddFixtureDialog.vue` stays enabled; the dialog it opens shows the hint and blocks the upload.
 
+## Quit guard (flush before close / quit)
+
+Local-only projects persist only through the working snapshot (written 1 s after the last change, at least every 5 s). `beforeunload` starts the IndexedDB writes, but Tauri does not wait for them, so edits of the last second could be lost on close or ⌘Q.
+
+- **Rust** (`src-tauri/src/lifecycle.rs`): `WindowEvent::CloseRequested` on the main window and `RunEvent::ExitRequested` (⌘Q, menu Quit) are prevented once. The backend then emits `app-before-quit` with the payload `"close"` or `"exit"`. The command `app_quit_ready(mode)` approves and performs it: `exit(0)`, or `destroy()` of the window. Two safety nets keep the app quittable:
+  - Without an answer, a 5 s fallback thread performs the close or exit anyway.
+  - A second close or quit while one is pending goes through at once.
+- **Platform:** `AppShell.onBeforeQuit(handler)`. On Tauri (`app/platform/tauri/app-shell.ts`) the handlers run in parallel, bounded by `QUIT_FLUSH_TIMEOUT_MS` (3 s), and then `app_quit_ready` is invoked. On the web it is a no-op.
+- **Flush:** `app/plugins/before-quit.client.ts` registers `flushOpenSession()` (`app/utils/sync/unload-handlers.ts`). It writes the outbox rows (`flushOutboxWrites`), then the open session's working snapshot. `installUnloadHandlers` registers that writer and unregisters it on dispose. `flushOpenSession()` never rejects.
+
 ## Nitro routes in the SPA build
 
 The Tauri SPA build has no Nitro server. Remaining `/api/` references are web-only:
@@ -67,4 +77,6 @@ No other `$fetch`/`useFetch` or relative fetches remain. Online-only by nature (
 - `extensions/connector-esp/firmware-source.test.ts` (incl. stalled release check)
 - `extensions/connector-esp/serial-connector.test.ts` (bundled offered immediately, upgraded later)
 - `app/utils/sync/ai-reachability-probe.test.ts`
-- Rust: `net::tests` (URL allowlist, path escapes, stalled server times out)
+- `app/platform/tauri/app-shell.test.ts` (quit handlers, timeout, `app_quit_ready`)
+- `app/utils/sync/unload-handlers.test.ts` (`flushOpenSession`)
+- Rust: `net::tests` (URL allowlist, path escapes, stalled server times out), `lifecycle::tests` (intercept → force → allow)
