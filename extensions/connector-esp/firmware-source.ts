@@ -16,6 +16,11 @@ import type { Platform } from '@pixelmapper/extension-api';
 
 /** Release feed of the firmware. */
 export const RELEASES_URL = 'https://api.github.com/repos/fabian1606/pixelmapper/releases/latest';
+/**
+ * Max time for the release check. On a stalled network (captive portal,
+ * lighting LAN without gateway) a plain fetch can hang for minutes.
+ */
+export const RELEASE_CHECK_TIMEOUT_MS = 5000;
 /** Bundled firmware paths inside the app resources. */
 const BUNDLED_BIN = 'firmware/firmware.bin';
 const BUNDLED_META = 'firmware/firmware-meta.json';
@@ -61,12 +66,25 @@ export async function readBundledFirmware(platform: Platform): Promise<FirmwareC
   };
 }
 
+/** Abort signal firing after `ms` (falls back to a timer where `AbortSignal.timeout` is missing). */
+export function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(new DOMException('The operation timed out.', 'TimeoutError')), ms);
+  return ctrl.signal;
+}
+
 /**
  * The latest GitHub release, or `null` when unknown (offline, no asset).
- * Throws on network failures so the caller can log them.
+ * Throws on network failures and after `timeoutMs` so the caller can log them.
  */
-export async function fetchLatestRelease(platform: Platform, fetchFn: typeof fetch = fetch): Promise<FirmwareCandidate | null> {
-  const res = await fetchFn(RELEASES_URL);
+export async function fetchLatestRelease(
+  platform: Platform,
+  fetchFn: typeof fetch = fetch,
+  timeoutMs = RELEASE_CHECK_TIMEOUT_MS,
+): Promise<FirmwareCandidate | null> {
+  // The signal also bounds reading the JSON body.
+  const res = await fetchFn(RELEASES_URL, { signal: timeoutSignal(timeoutMs) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json() as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
   const version = data.tag_name?.replace(/^v/, '');

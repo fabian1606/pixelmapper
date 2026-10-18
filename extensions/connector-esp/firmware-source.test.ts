@@ -4,7 +4,9 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { Platform } from '@pixelmapper/extension-api';
-import { fetchLatestRelease, pickFirmware, readBundledFirmware, type FirmwareCandidate } from './firmware-source';
+import {
+  fetchLatestRelease, pickFirmware, readBundledFirmware, timeoutSignal, type FirmwareCandidate,
+} from './firmware-source';
 
 const BIN = new Uint8Array([1, 2, 3]);
 
@@ -56,5 +58,30 @@ describe('firmware sources', () => {
     expect(pickFirmware(cand('0.2.0', 'bundled'), cand('0.2.0', 'github'))?.origin).toBe('bundled');
     expect(pickFirmware(cand('0.2.0', 'bundled'), null)?.origin).toBe('bundled');
     expect(pickFirmware(null, null)).toBeNull();
+  });
+
+  it('gives up on a stalled release check after the timeout', async () => {
+    // A fetch that never answers unless aborted (captive portal, dead LAN).
+    const stalled = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+    }));
+    const started = Date.now();
+    await expect(fetchLatestRelease(WEB, stalled as unknown as typeof fetch, 50)).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(stalled.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('timeoutSignal falls back to a timer without AbortSignal.timeout', async () => {
+    const original = AbortSignal.timeout;
+    try {
+      (AbortSignal as { timeout?: unknown }).timeout = undefined;
+      const signal = timeoutSignal(10);
+      expect(signal.aborted).toBe(false);
+      await new Promise(r => setTimeout(r, 30));
+      expect(signal.aborted).toBe(true);
+    }
+    finally {
+      AbortSignal.timeout = original;
+    }
   });
 });

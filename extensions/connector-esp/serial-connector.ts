@@ -145,7 +145,9 @@ export class EspSerialConnector extends SerialPortConnector {
 
   /**
    * Determines the firmware to offer: the bundled copy (offline) and, when
-   * reachable, the latest GitHub release — whichever is newer.
+   * reachable, the latest GitHub release — whichever is newer. The bundled
+   * copy is offered right away; the (time-limited) remote check only
+   * upgrades it.
    */
   private async fetchLatestVersion(): Promise<void> {
     const platform = getPlatform();
@@ -154,6 +156,11 @@ export class EspSerialConnector extends SerialPortConnector {
     }
     catch (e) {
       this.pushLog(`[version] bundled firmware unreadable: ${(e as Error)?.message ?? e}`);
+    }
+    // Offer the bundled firmware immediately — no waiting on the network.
+    if (this.bundledFirmware) {
+      this.latestFirmware.value = this.bundledFirmware;
+      this.latestVersion.value = this.bundledFirmware.version;
     }
     let remote: FirmwareCandidate | null = null;
     try {
