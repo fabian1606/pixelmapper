@@ -31,6 +31,7 @@ describe('ArtNetConnector — direct UDP', () => {
     stubPlatform(udp.api);
     const c = ArtNetConnector.fromConfig('a1', { targetIp: '2.0.0.10', artnetPort: 6455, bridgeUrl: '' });
     expect(c.directUdp).toBe(true);
+    expect(c.alwaysConnected()).toBe(true);
     expect(c.canAutoConnect()).toBe(true);
 
     await c.connect();
@@ -82,6 +83,7 @@ describe('ArtNetConnector — bridge fallback', () => {
     });
     const c = new ArtNetConnector('b1');
     expect(c.directUdp).toBe(false);
+    expect(c.alwaysConnected()).toBe(false);
     await c.connect();
     expect(urls).toEqual(['ws://localhost:7777']);
     expect(c.status.value).toBe('connecting');

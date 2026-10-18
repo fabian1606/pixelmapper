@@ -1,0 +1,22 @@
+# Pixelmapper desktop app (ADR 0003): Tauri 2 shell around the Nuxt SPA.
+# Native capabilities are exposed as commands and consumed by
+# `app/platform/tauri` on the frontend.
+[package]
+name = "pixelmapper-desktop"
+version = "0.1.0"
+description = "Pixelmapper desktop app"
+edition = "2021"
+publish = false
+
+[lib]
+# `_lib` suffix avoids a name clash with the binary on Windows (cargo#8519).
+name = "pixelmapper_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+tauri-plugin-dialog = "2"

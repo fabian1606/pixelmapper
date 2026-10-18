@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { House, Sparkles, Cable, Zap, Download } from 'lucide-vue-next';
-import { exportProject, downloadBytes } from '~/utils/persistence/project-transfer';
-import { useNotifications } from '~/composables/use-notifications';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
 import PmToolbar from '~/components/primitives/PmToolbar.vue';
+import { useAsTitleBar, useWindowChrome } from '~/composables/use-window-chrome';
+import { hasNativeMenu, runMenuCommand } from '~/composables/app-menu/use-app-menu';
+
+// Desktop app (macOS): the header is the title bar, next to the traffic lights.
+const { trafficLightInset } = useWindowChrome();
+useAsTitleBar();
 
 const engineStore = useEngineStore();
 const { projectLoading } = storeToRefs(engineStore);
@@ -49,27 +53,6 @@ onUnmounted(() => {
 const route = useRoute();
 const projectId = computed(() => route.params.id as string | undefined);
 
-const exporting = ref(false);
-
-/** Downloads the open project as a `.pmproject` archive. */
-async function exportCurrent() {
-  const snapshot = engineStore.currentSnapshot();
-  if (!snapshot || exporting.value) return;
-  exporting.value = true;
-  try {
-    const name = `project-${projectId.value ?? 'export'}`;
-    const { bytes, missingPlugins } = await exportProject(name, snapshot);
-    downloadBytes(bytes, `${name}.pmproject`);
-    if (missingPlugins.length) useNotifications().notify({ variant: 'warning', title: 'Export incomplete', description: `${missingPlugins.length} content plugin(s) were unavailable and are not included.` });
-  }
-  catch (err) {
-    useNotifications().notify({ variant: 'error', title: 'Export failed', description: (err as Error).message });
-  }
-  finally {
-    exporting.value = false;
-  }
-}
-
 const tabs = computed(() => projectId.value ? [
   { label: 'Design',       icon: Sparkles, path: `/project/${projectId.value}` },
   { label: 'Live',         icon: Zap,      path: `/project/${projectId.value}/live` },
@@ -79,8 +62,15 @@ const tabs = computed(() => projectId.value ? [
 
 <template>
   <!-- Extension slots: header:start|end -->
-  <PmToolbar id="header" as="header" class="relative flex items-center h-14 bg-sidebar border-b border-sidebar-border px-4 gap-2 shrink-0">
-    <nav class="flex items-center gap-2">
+  <!-- data-tauri-drag-region: empty header space drags the desktop window (no-op in browsers) -->
+  <PmToolbar
+    id="header"
+    as="header"
+    class="relative flex items-center h-12 bg-sidebar border-b border-sidebar-border pl-2 pr-4 gap-2 shrink-0 select-none"
+    :style="trafficLightInset ? { paddingLeft: `${trafficLightInset}px` } : undefined"
+    data-tauri-drag-region
+  >
+    <nav class="flex items-center gap-2" data-tauri-drag-region>
       <NuxtLink
         to="/"
         class="flex items-center justify-center w-8 h-8 rounded-md transition-colors text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
@@ -98,18 +88,19 @@ const tabs = computed(() => projectId.value ? [
         <component :is="tab.icon" :size="14" />
         {{ tab.label }}
       </NuxtLink>
+      <!-- Browser only: the desktop app has File → Export in its menu bar. -->
       <button
-        v-if="projectId"
+        v-if="projectId && !hasNativeMenu"
         class="flex items-center justify-center w-8 h-8 rounded-md transition-colors text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-        title="Export project (.pmproject)"
-        :disabled="exporting || projectLoading"
-        @click="exportCurrent"
+        title="Export project (.pmproject) ⌘⇧E"
+        :disabled="projectLoading"
+        @click="runMenuCommand('file.export')"
       >
         <Download :size="16" />
       </button>
     </nav>
 
-    <div class="ml-auto flex items-center gap-4">
+    <div class="ml-auto flex items-center gap-4" data-tauri-drag-region>
       <div class="relative">
         <button
           @click="beatOverlayOpen = !beatOverlayOpen"

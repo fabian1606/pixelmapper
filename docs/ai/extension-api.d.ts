@@ -185,6 +185,8 @@ declare module '@pixelmapper/extension-api' {
       onEngineState?(state: ConnectorEngineState): void;
       /** True when the host may connect this instance on startup without a user gesture. */
       canAutoConnect(): boolean;
+      /** True when the user never connects/disconnects this instance (see `Connector.alwaysConnected`). */
+      alwaysConnected(): boolean;
       /** Serializable per-device configuration (`label` and outputs included). */
       getConfig(): Record<string, unknown>;
       /**
@@ -254,6 +256,13 @@ declare module '@pixelmapper/extension-api' {
       onEngineState?(state: ConnectorEngineState): void;
       /** True when the host may connect on startup without a user gesture. */
       canAutoConnect(): boolean;
+      /**
+       * True when there is no connection for the user to manage (e.g. direct
+       * UDP output): the host connects the instance as soon as it is added or
+       * restored and shows no Connect/Disconnect button, only Retry on error.
+       * Optional (API 1.2); absent = false.
+       */
+      alwaysConnected?(): boolean;
       /** Serializable per-device configuration. */
       getConfig(): Record<string, unknown>;
       /** Applies (a part of) a stored config. */
@@ -917,7 +926,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.1.0";
+  export const API_VERSION = "1.2.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];

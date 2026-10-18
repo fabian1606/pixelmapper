@@ -7,6 +7,7 @@ Pixelmapper is a multi-runtime DMX lighting controller with three sub-projects:
 - **Rust Engine**: WASM packages (`rs-engine/`)
 - **AI Backend Service**: Express 5 / Bun / TypeScript (`aiBackendService/`)
 - **ESP32 Firmware**: PlatformIO / C++ (`pio/`)
+- **Desktop App**: Tauri 2 shell (`src-tauri/`); platform-specific I/O via `#platform` / `getPlatform()` (ADR 0003)
 
 ## Commands
 
@@ -36,6 +37,13 @@ cargo build && cargo test  # from rs-engine/
 ```bash
 pio run              # Build firmware (from pio/ directory)
 pio run --target upload  # Build and upload
+```
+
+### Desktop App (Tauri 2, ADR 0003)
+```bash
+bun run dev:tauri        # Desktop app against the Nuxt dev server (SPA, native platform)
+bun run build:tauri      # Release build: `bun run generate` as SPA + native bundle (.app/.dmg)
+cargo test --manifest-path src-tauri/Cargo.toml  # Rust tests of the native commands
 ```
 
 ### AI Backend Service
