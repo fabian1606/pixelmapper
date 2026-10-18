@@ -41,13 +41,19 @@ import {
   useLiveBusStore,
   setPersistHook,
   setPersistAckHook,
+  setPersistProjectId,
   enqueuePersist,
   flushPersistQueue,
+  flushPersistWal,
   clearPersistQueue,
   getPersistQueueSnapshot,
+  hasPendingCommandPersist,
   getLiveOpConfig,
   type LiveContext,
 } from '~/stores/live-bus-store';
+import { isNetworkError, isOnline, reportNetworkFailure, reportNetworkSuccess } from '~/utils/sync/connectivity';
+import { createRetryScheduler } from '~/utils/sync/retry-scheduler';
+import { resolveUnauthorized } from '~/utils/auth/session-recovery';
 import type { GlobalFunctionType, GlobalFunctionConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { parseHexColor } from '~/utils/engine/color-math';
 import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
@@ -495,6 +501,25 @@ export const useEngineStore = defineStore('engine', () => {
   let triggerSaveSnapshotInternal: () => Promise<void> = async () => {};
   const SNAPSHOT_IDLE_MS = 10_000;
   const SNAPSHOT_HARDCAP_MS = 30_000;
+  /** Retries a failed snapshot autosave with backoff / on reconnect (ADR 0004 D9). */
+  const snapshotRetry = createRetryScheduler(() => { void flushSnapshotIfDirty(); });
+
+  /**
+   * Run a snapshot save requested outside the timers (history threshold,
+   * Cmd+S). Never rejects: a failure keeps the engine dirty and is retried
+   * by `snapshotRetry`, so callers that don't await it can't leak rejections.
+   */
+  async function saveSnapshotSafely(save: () => Promise<void>): Promise<void> {
+    if (!isOnline.value) { engineDirty = true; snapshotRetry.deferUntilOnline(); return; }
+    try {
+      await save();
+      snapshotRetry.succeed();
+    } catch (err) {
+      console.warn('[engine] snapshot save failed:', err);
+      engineDirty = true;
+      snapshotRetry.fail(err);
+    }
+  }
 
   function markEngineDirty() {
     engineDirty = true;
@@ -516,13 +541,19 @@ export const useEngineStore = defineStore('engine', () => {
     if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
     if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
     if (!engineDirty) return;
+    // Offline (ADR 0004 D9): keep the dirty flag and save once we are back
+    // online instead of failing on every idle/hard-cap timer.
+    if (!isOnline.value) { snapshotRetry.deferUntilOnline(); return; }
     engineDirty = false;
     snapshotInFlight = true;
     try {
       await triggerSaveSnapshotInternal();
+      snapshotRetry.succeed();
     } catch (err) {
       console.warn('[engine] time-triggered snapshot failed:', err);
-      engineDirty = true; // retry on next dirty mark
+      engineDirty = true;
+      // Backoff retry (or retry on reconnect when the failure was the network).
+      snapshotRetry.fail(err);
     } finally {
       snapshotInFlight = false;
     }
@@ -974,7 +1005,12 @@ export const useEngineStore = defineStore('engine', () => {
     flushEngineOutput();
   }
 
-  async function loadProject(projectId: string) {
+  /**
+   * Load a project (WAL recovery → snapshot + tail → wire persistence).
+   * `allowAuthRetry` permits one reload after a 401 was fixed by a token
+   * refresh; internal — callers pass only the project id.
+   */
+  async function loadProject(projectId: string, allowAuthRetry = true) {
     const supabase = useSupabaseClient();
     const runtimeConfig = useRuntimeConfig();
     currentProjectId.value = projectId;
@@ -995,6 +1031,10 @@ export const useEngineStore = defineStore('engine', () => {
     clearPersistQueue();
     setPersistHook(null);
     setPersistAckHook(null);
+    snapshotRetry.cancel();
+    // Persistent live-ops dispatched from now on are WAL-logged under this
+    // project (ADR 0004 D8) — even before the push hook is wired below.
+    setPersistProjectId(projectId);
 
     // ── WAL Recovery ────────────────────────────────────────────────────────
     // Push any pending changes that survived a crash / failed unload from a
@@ -1027,10 +1067,12 @@ export const useEngineStore = defineStore('engine', () => {
           ? ackedIds
           : pending.map(e => e.id);
         await walMarkAcked(toAck);
+        reportNetworkSuccess();
       }
     } catch (err) {
       // Don't block the load on recovery failure — degrade gracefully. The WAL
       // entries stay; the next attempt (or the next reload) will retry.
+      if (isNetworkError(err)) reportNetworkFailure();
       console.error('[engine] WAL recovery failed — proceeding with possibly stale state:', err);
     }
 
@@ -1039,13 +1081,27 @@ export const useEngineStore = defineStore('engine', () => {
     });
     if (error || !data) {
       console.error('[engine] loadProject failed:', error);
-      projectLoading.value = false;
       const status = error?.context?.status ?? 0;
+      if (isNetworkError(error)) reportNetworkFailure();
       if (status === 401) {
-        const router = useRouter();
-        await supabase.auth.signOut();
-        router.push(`/auth/login?redirect=/project/${projectId}`);
-      } else if (status === 403) {
+        // ADR 0004 D10: a 401 may only mean the access token expired while
+        // it could not be refreshed (offline period). Refresh first; sign out
+        // only if the auth server definitively rejects the session — never
+        // offline or on transient errors.
+        const action = await resolveUnauthorized(supabase.auth);
+        if (action === 'retry' && allowAuthRetry) return loadProject(projectId, false);
+        projectLoading.value = false;
+        if (action === 'sign-out') {
+          const router = useRouter();
+          await supabase.auth.signOut();
+          router.push(`/auth/login?redirect=/project/${projectId}`);
+        } else {
+          projectError.value = 'error';
+        }
+        return;
+      }
+      projectLoading.value = false;
+      if (status === 403) {
         projectError.value = 'unauthorized';
       } else {
         projectError.value = 'error';
@@ -1229,14 +1285,24 @@ export const useEngineStore = defineStore('engine', () => {
 
     async function doSaveSnapshot() {
       await flushPersistQueue();
+      // A history command still queued (flush failed, or it arrived during the
+      // round-trip) is already in the in-memory state but has no sequence
+      // number yet: a snapshot now would make reload apply it twice. Fail so
+      // the retry scheduler tries again once the queue drained.
+      if (hasPendingCommandPersist()) {
+        throw new Error('[engine] snapshot skipped: unsent history commands pending');
+      }
       const snapshot = buildSnapshot();
-      await supabase.functions.invoke('save-snapshot', {
+      const { error } = await supabase.functions.invoke('save-snapshot', {
         body: {
           projectId,
           snapshot,
           sequenceNumber: lastSeenSequenceNumber.value,
         },
       });
+      // Surface failures (invoke() resolves with `error` instead of throwing)
+      // so the caller keeps the engine dirty and retries with backoff.
+      if (error) throw error;
     }
 
     // History commands flow into the same persist queue. Each one carries its
@@ -1248,7 +1314,8 @@ export const useEngineStore = defineStore('engine', () => {
         new Promise<number | undefined>((resolve, reject) => {
           enqueuePersist({ type: commandType, payload, changeId, resolve, reject });
         }),
-      saveSnapshot: doSaveSnapshot,
+      // Fire-and-forget callers (history threshold, Cmd+S): never reject.
+      saveSnapshot: () => saveSnapshotSafely(doSaveSnapshot),
       markDirty: markEngineDirty,
       walAppend: (entry) => walAppend(entry),
       currentProjectId: () => currentProjectId.value,
@@ -1288,7 +1355,14 @@ export const useEngineStore = defineStore('engine', () => {
       window.addEventListener('beforeunload', () => {
         if (idleTimer != null) { clearTimeout(idleTimer); idleTimer = null; }
         if (hardCapTimer != null) { clearTimeout(hardCapTimer); hardCapTimer = null; }
+        snapshotRetry.cancel();
+        // Make coalesced live-op WAL rows durable first — this is what the
+        // next load recovers if the keepalive below never reaches the server.
+        void flushPersistWal();
         if (!cachedToken) return;
+        // Offline (ADR 0004 D9): keepalive requests would only fail; the WAL
+        // rows are pushed by the next load's recovery instead.
+        if (!isOnline.value) return;
 
         // (a) Optimistic keepalive push — passes changeIds so the server can
         // dedupe against entries that were already written by an in-flight
