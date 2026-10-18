@@ -81,10 +81,13 @@ export const useConnectionsStore = defineStore('connections', () => {
     }
   }
 
-  /** Adds an instance and persists. */
+  /** Adds an instance and persists; always-connected instances connect right away. */
   function add(connector: Connector) {
     connectors.push(connector);
     persist();
+    if (connector.alwaysConnected?.()) {
+      connector.connect().catch((e: unknown) => console.warn('[connections] connect failed:', connector.id, e));
+    }
   }
 
   /** Removes an instance (disconnecting it) and persists. */

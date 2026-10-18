@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * ArtNet settings: bridge URL, target IP/port, universe count. Emits
+ * ArtNet settings: bridge URL (browser only), target IP/port, universe count. Emits
  * `change(patch)`; the host applies and persists it.
  */
 import type { ArtNetConnector } from '../artnet-connector';
@@ -15,7 +15,7 @@ const input = 'mt-1 w-full rounded border border-border bg-background text-xs px
 
 <template>
   <div class="flex flex-col gap-1.5">
-    <label class="text-xs text-muted-foreground">
+    <label v-if="!props.connector.directUdp" class="text-xs text-muted-foreground">
       Bridge URL
       <input
         type="text"
@@ -40,7 +40,10 @@ const input = 'mt-1 w-full rounded border border-border bg-background text-xs px
         <input type="number" min="1" max="64" :class="input" :value="props.connector.outputCount" @change="emit('change', { outputCount: Number(val($event)) })">
       </label>
     </div>
-    <p class="text-[10px] text-muted-foreground/80 leading-snug">
+    <p v-if="props.connector.directUdp" class="text-[10px] text-muted-foreground/80 leading-snug">
+      Packets are sent directly from the app over UDP.
+    </p>
+    <p v-else class="text-[10px] text-muted-foreground/80 leading-snug">
       The ArtNet bridge must run locally (e.g. <span class="font-mono">bun run artnet-bridge</span>) and forwards packets to the target IP.
     </p>
   </div>

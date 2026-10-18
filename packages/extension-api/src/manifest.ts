@@ -17,7 +17,7 @@ import type { SlotContribution } from './slots';
 import { getHostApi } from './host';
 
 /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-export const API_VERSION = '1.0.0';
+export const API_VERSION = '1.2.0';
 
 /** Everything an extension can contribute. All lists are optional. */
 export interface ExtensionContributions {

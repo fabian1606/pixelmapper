@@ -59,6 +59,13 @@ export interface Connector {
   onEngineState?(state: ConnectorEngineState): void;
   /** True when the host may connect on startup without a user gesture. */
   canAutoConnect(): boolean;
+  /**
+   * True when there is no connection for the user to manage (e.g. direct
+   * UDP output): the host connects the instance as soon as it is added or
+   * restored and shows no Connect/Disconnect button, only Retry on error.
+   * Optional (API 1.2); absent = false.
+   */
+  alwaysConnected?(): boolean;
   /** Serializable per-device configuration. */
   getConfig(): Record<string, unknown>;
   /** Applies (a part of) a stored config. */

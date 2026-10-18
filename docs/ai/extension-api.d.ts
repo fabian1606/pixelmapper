@@ -185,6 +185,8 @@ declare module '@pixelmapper/extension-api' {
       onEngineState?(state: ConnectorEngineState): void;
       /** True when the host may connect this instance on startup without a user gesture. */
       canAutoConnect(): boolean;
+      /** True when the user never connects/disconnects this instance (see `Connector.alwaysConnected`). */
+      alwaysConnected(): boolean;
       /** Serializable per-device configuration (`label` and outputs included). */
       getConfig(): Record<string, unknown>;
       /**
@@ -254,6 +256,13 @@ declare module '@pixelmapper/extension-api' {
       onEngineState?(state: ConnectorEngineState): void;
       /** True when the host may connect on startup without a user gesture. */
       canAutoConnect(): boolean;
+      /**
+       * True when there is no connection for the user to manage (e.g. direct
+       * UDP output): the host connects the instance as soon as it is added or
+       * restored and shows no Connect/Disconnect button, only Retry on error.
+       * Optional (API 1.2); absent = false.
+       */
+      alwaysConnected?(): boolean;
       /** Serializable per-device configuration. */
       getConfig(): Record<string, unknown>;
       /** Applies (a part of) a stored config. */
@@ -610,6 +619,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** The implementation of the API composables, provided by the host. */
   export interface HostApi {
       /** Semver of the API the host implements. */
@@ -623,6 +633,8 @@ declare module '@pixelmapper/extension-api' {
       getFixture(id: FixtureId): DeepReadonly<FixtureView> | undefined;
       /** Validates and registers an extension manifest. */
       registerExtension(manifest: ExtensionManifest): void;
+      /** Platform-dependent I/O (UDP, serial, MIDI); see ADR 0003. */
+      platform: Platform;
   }
   /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */
   export interface SharedGlobals {
@@ -914,7 +926,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.0.0";
+  export const API_VERSION = "1.2.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1207,6 +1219,98 @@ declare module '@pixelmapper/extension-api' {
   export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>>;
   /** Default `pm.*` input per param type (D13). */
   export const PARAM_DEFAULT_INPUT: Readonly<Record<ParamType, PmInputName>>;
+
+  // ── packages/extension-api/src/platform.ts ──────────────────────
+  /** Which runtime the app is running in. */
+  export type PlatformKind = 'web' | 'tauri';
+  /** Options for opening a UDP socket. */
+  export interface UdpBindOptions {
+      /** Local port; 0 or omitted = any free port. */
+      port?: number;
+      /** Allow sending to broadcast addresses (e.g. `2.255.255.255`). */
+      broadcast?: boolean;
+  }
+  /** An open UDP socket. */
+  export interface UdpSocket {
+      /** Sends one datagram (fire-and-forget; errors are logged by the platform). */
+      send(data: Uint8Array, host: string, port: number): void;
+      /** Closes the socket. */
+      close(): Promise<void>;
+  }
+  /** Direct UDP access (native only). */
+  export interface UdpApi {
+      bind(options?: UdpBindOptions): Promise<UdpSocket>;
+  }
+  /** Options for opening a serial port. */
+  export interface SerialOpenOptions {
+      baudRate: number;
+  }
+  /** Callbacks of an open serial connection. */
+  export interface SerialEvents {
+      /** A chunk of received bytes. */
+      onData(chunk: Uint8Array): void;
+      /** The port closed unexpectedly (device unplugged, read error). Not called after `close()`. */
+      onDrop(error: Error): void;
+  }
+  /** An open serial connection. */
+  export interface SerialConnection {
+      /** Writes bytes; rejects when the port is gone. */
+      write(data: Uint8Array): Promise<void>;
+      /** Closes the port. Idempotent. */
+      close(): Promise<void>;
+  }
+  /**
+   * A serial port the user granted. Can be opened again after a close without
+   * a new user gesture. Errors whose `name` is `NotFoundError` mean the device
+   * is gone and the port must be requested again.
+   */
+  export interface SerialPortHandle {
+      open(options: SerialOpenOptions, events: SerialEvents): Promise<SerialConnection>;
+  }
+  /** Serial port access. */
+  export interface SerialApi {
+      /** Lets the user pick a port. Web: must be called from a user gesture. */
+      requestPort(): Promise<SerialPortHandle>;
+  }
+  /** A MIDI input port. */
+  export interface MidiInputPort extends MidiPortInfo {
+      /** Subscribes to incoming messages; returns the unsubscribe function. */
+      onMessage(cb: (data: Uint8Array) => void): () => void;
+  }
+  /** A MIDI output port. */
+  export interface MidiOutputPort extends MidiPortInfo {
+      /** Sends one message (including sysex). */
+      send(data: number[] | Uint8Array): void;
+  }
+  /** A port appeared or disappeared. */
+  export interface MidiStateChange {
+      port: MidiPortInfo;
+      direction: 'input' | 'output';
+      state: 'connected' | 'disconnected';
+  }
+  /** Granted MIDI access. */
+  export interface MidiAccessHandle {
+      inputs(): MidiInputPort[];
+      outputs(): MidiOutputPort[];
+      /** Subscribes to hot-plug events; returns the unsubscribe function. */
+      onStateChange(cb: (change: MidiStateChange) => void): () => void;
+  }
+  /** MIDI access. */
+  export interface MidiApi {
+      /** Requests access. Web: may show a permission prompt (user gesture). */
+      requestAccess(options?: {
+          sysex?: boolean;
+      }): Promise<MidiAccessHandle>;
+  }
+  /** Platform-dependent capabilities. `null` = not available here. */
+  export interface Platform {
+      readonly kind: PlatformKind;
+      readonly udp: UdpApi | null;
+      readonly serial: SerialApi | null;
+      readonly midi: MidiApi | null;
+  }
+  /** Returns the platform of the running host (connectors, drivers, components). */
+  export function getPlatform(): Platform;
 
   // ── packages/extension-api/src/replaceables.ts ──────────────────
   /**

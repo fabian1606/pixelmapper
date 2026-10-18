@@ -15,8 +15,8 @@ import EspNowSettings from './components/EspNowSettings.vue';
 
 export default defineExtension({
   id: 'connector-esp',
-  version: '1.0.0',
-  apiVersion: '^1.0.0',
+  version: '1.1.0',
+  apiVersion: '^1.1.0',
   displayName: 'ESP32 nodes',
   description: 'Outputs to Pixelmapper ESP32 firmware: USB serial DMX nodes, WebSocket LED strip nodes and the ESP-NOW audience bridge.',
   contributes: {

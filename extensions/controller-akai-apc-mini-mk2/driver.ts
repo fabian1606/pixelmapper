@@ -1,7 +1,16 @@
-import { ControllerDriverBase, type ControlFeedback, type ControlInputEvent } from '@pixelmapper/extension-api';
+import {
+  ControllerDriverBase,
+  getPlatform,
+  type ControlFeedback,
+  type ControlInputEvent,
+  type MidiAccessHandle,
+  type MidiInputPort,
+  type MidiOutputPort,
+  type MidiStateChange,
+} from '@pixelmapper/extension-api';
 
 /**
- * AKAI APC Mini mk2 driver (Web MIDI).
+ * AKAI APC Mini mk2 driver (MIDI via the platform: Web MIDI or native, ADR 0003).
  *
  * Control id conventions (must match the manifest):
  *   pad-<row>-<col>   r=0..7 (0 = bottom row), c=0..7 (0 = left col)  → notes  0..63
@@ -38,11 +47,12 @@ const FADER_COUNT = 9;
 export class APCMiniMk2Driver extends ControllerDriverBase {
   readonly definitionKey = 'akai-apc-mini-mk2';
 
-  private access: MIDIAccess | null = null;
-  private input: MIDIInput | null = null;
-  private output: MIDIOutput | null = null;
-  private onStateChangeBound: ((e: Event) => void) | null = null;
-  private onMidiMessageBound: ((e: Event) => void) | null = null;
+  private access: MidiAccessHandle | null = null;
+  private input: MidiInputPort | null = null;
+  private output: MidiOutputPort | null = null;
+  /** Unsubscribe functions of the state-change and message listeners. */
+  private offStateChange: (() => void) | null = null;
+  private offMidiMessage: (() => void) | null = null;
 
   /** Diff cache so we don't spam the device with identical LED writes. */
   private lastFeedback = new Map<string, string>();
@@ -51,10 +61,17 @@ export class APCMiniMk2Driver extends ControllerDriverBase {
     if (this.status.value === 'connected' || this.status.value === 'connecting') return;
     this.status.value = 'connecting';
     this.errorMessage.value = null;
+    const midi = getPlatform().midi;
+    if (!midi) {
+      this.status.value = 'error';
+      this.errorMessage.value = 'MIDI needs Chrome/Edge/Firefox or the desktop app';
+      this.pushLog(this.errorMessage.value);
+      return;
+    }
     try {
       // Sysex required for RGB pad colors. Triggers the browser permission prompt
       // on first call per origin (must be invoked from a user gesture).
-      this.access = await navigator.requestMIDIAccess({ sysex: true });
+      this.access = await midi.requestAccess({ sysex: true });
     } catch (err) {
       this.status.value = 'error';
       this.errorMessage.value = (err as Error).message ?? 'MIDI access denied';
@@ -62,8 +79,8 @@ export class APCMiniMk2Driver extends ControllerDriverBase {
       return;
     }
 
-    const input = this.findPort(this.access.inputs.values()) as MIDIInput | null;
-    const output = this.findPort(this.access.outputs.values()) as MIDIOutput | null;
+    const input = this.findPort(this.access.inputs());
+    const output = this.findPort(this.access.outputs());
 
     if (!input || !output) {
       this.status.value = 'error';
@@ -74,30 +91,26 @@ export class APCMiniMk2Driver extends ControllerDriverBase {
 
     this.input = input;
     this.output = output;
-    this.deviceLabel.value = input.name ?? 'APC Mini mk2';
+    this.deviceLabel.value = input.name || 'APC Mini mk2';
 
-    this.onMidiMessageBound = (e) => this.handleMidiMessage(e as MIDIMessageEvent);
-    this.input.addEventListener('midimessage', this.onMidiMessageBound);
-
-    this.onStateChangeBound = (e) => this.handleStateChange(e as MIDIConnectionEvent);
-    this.access.addEventListener('statechange', this.onStateChangeBound);
+    // A replug reconnect re-runs connect(): drop the listeners of the previous access first.
+    this.offMidiMessage?.();
+    this.offStateChange?.();
+    this.offMidiMessage = input.onMessage(data => this.handleMidiMessage(data));
+    this.offStateChange = this.access.onStateChange(change => this.handleStateChange(change));
 
     this.status.value = 'connected';
     this.pushLog(`Connected to ${this.deviceLabel.value}`);
   }
 
   async disconnect(): Promise<void> {
-    if (this.input && this.onMidiMessageBound) {
-      this.input.removeEventListener('midimessage', this.onMidiMessageBound);
-    }
-    if (this.access && this.onStateChangeBound) {
-      this.access.removeEventListener('statechange', this.onStateChangeBound);
-    }
+    this.offMidiMessage?.();
+    this.offStateChange?.();
     this.input = null;
     this.output = null;
     this.access = null;
-    this.onMidiMessageBound = null;
-    this.onStateChangeBound = null;
+    this.offMidiMessage = null;
+    this.offStateChange = null;
     this.lastFeedback.clear();
     this.status.value = 'disconnected';
     this.deviceLabel.value = null;
@@ -128,9 +141,8 @@ export class APCMiniMk2Driver extends ControllerDriverBase {
 
   // ── MIDI message handling ────────────────────────────────────────────────
 
-  private handleMidiMessage(e: MIDIMessageEvent) {
-    const data = e.data;
-    if (!data || data.length < 2) return;
+  private handleMidiMessage(data: Uint8Array) {
+    if (data.length < 2) return;
     const status = data[0]! & 0xf0;
 
     if (status === 0x90) {
@@ -213,26 +225,29 @@ export class APCMiniMk2Driver extends ControllerDriverBase {
 
   // ── Hot plug/unplug ──────────────────────────────────────────────────────
 
-  private handleStateChange(e: MIDIConnectionEvent) {
-    const port = e.port;
-    if (!port) return;
-    if (port.state === 'disconnected' && (port === this.input || port === this.output)) {
+  private handleStateChange(change: MidiStateChange) {
+    const { port, state } = change;
+    const ours = port.id === this.input?.id || port.id === this.output?.id;
+    if (state === 'disconnected' && ours) {
       this.pushLog(`Device disconnected: ${port.name}`);
       this.status.value = 'disconnected';
+      // Drop the message listener of the vanished input; the state listener stays for replug.
+      this.offMidiMessage?.();
+      this.offMidiMessage = null;
       this.input = null;
       this.output = null;
       return;
     }
     // Auto-reconnect on replug: if device shows up again while we're disconnected,
     // re-acquire the input/output ports silently.
-    if (port.state === 'connected' && this.status.value === 'disconnected' && /apc.*mini/i.test(port.name ?? '')) {
+    if (state === 'connected' && this.status.value === 'disconnected' && /apc.*mini/i.test(port.name)) {
       this.pushLog(`Device re-detected: ${port.name} — auto-reconnecting`);
       this.connect().catch(err => this.pushLog(`Auto-reconnect failed: ${String(err)}`));
     }
   }
 
-  private findPort(iter: IterableIterator<MIDIInput | MIDIOutput>): MIDIInput | MIDIOutput | null {
-    for (const port of iter) {
+  private findPort<P extends MidiInputPort | MidiOutputPort>(ports: P[]): P | null {
+    for (const port of ports) {
       if (port.name && VENDOR_REGEX.test(port.name)) return port;
     }
     return null;

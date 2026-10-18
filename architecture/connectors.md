@@ -50,6 +50,8 @@ export default defineExtension({
 - **Fixture data:** connectors are not components; use `getFixture(id)` from the API (a readonly view incl. channels with `dmxAddress` and kind config). Re-read it occasionally (e.g. every 30 frames), not every frame.
 - **Settings:** the host renders label, connect/disconnect, output mapping and logs. The type's `settings` component renders only type-specific fields and emits `change(patch)`; the host applies it (`applyConfig`) and persists. Settings run in the extension's context, so `useExtensionContext()` / `useScope('project')` work (e.g. the ESP strip node edits strips through `ctx.commands.setFixtureKindConfig`).
 - **Auto-connect:** return `true` from `canAutoConnect()` when the instance can connect without a user gesture (WebSocket/ArtNet with a URL). Web Serial/MIDI need a click.
+- **Always connected (API 1.2):** return `true` from `alwaysConnected()` when there is no connection for the user to manage (ArtNet over direct UDP in the desktop app). The host connects the instance when it is added or restored, and the card shows no Connect/Disconnect button, only Retry after an error.
+- **Platform I/O ([ADR 0003](adr/0003-native-platform-layer.md)):** never call `navigator.serial`, `navigator.requestMIDIAccess` or `@tauri-apps/*` directly. Use `getPlatform()` from the API: `udp`, `serial` and `midi` are transport-shaped (bytes in/out) and `null` where the platform lacks them — fall back (ArtNet → bridge) or show a message such as "needs Chrome/Edge or the desktop app". Protocol encoding stays in the extension (e.g. `connector-artnet/art-dmx.ts`, also used by the bridge).
 
 ### Persistence (D18)
 
@@ -59,8 +61,8 @@ export default defineExtension({
 
 | Extension | Set | Connectors |
 |---|---|---|
-| `connector-artnet` | distribution | `artnet`: universes to a local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
-| `connector-esp` | catalog | `serial` (ESP32 DMX node over Web Serial, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
+| `connector-artnet` | distribution | `artnet`: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to a local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
+| `connector-esp` | catalog | `serial` (ESP32 DMX node over platform serial — Web Serial or native, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
 
 ### ESP firmware protocol (`extensions/connector-esp/protocol.ts`)
 

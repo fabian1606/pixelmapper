@@ -13,6 +13,7 @@ import type { ExtensionContext, ExtensionManifest } from './manifest';
 import type { LiveFrame, LiveTarget, LiveValueOf, LiveValueOptions, OnFrameOptions } from './live';
 import type { PmInputName } from './replaceables';
 import type { FixtureView, ScopeName, ScopeRef } from './scopes';
+import type { Platform } from './platform';
 
 /** The implementation of the API composables, provided by the host. */
 export interface HostApi {
@@ -30,6 +31,8 @@ export interface HostApi {
   getFixture(id: FixtureId): DeepReadonly<FixtureView> | undefined;
   /** Validates and registers an extension manifest. */
   registerExtension(manifest: ExtensionManifest): void;
+  /** Platform-dependent I/O (UDP, serial, MIDI); see ADR 0003. */
+  platform: Platform;
 }
 
 /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */

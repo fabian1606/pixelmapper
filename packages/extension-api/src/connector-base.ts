@@ -87,6 +87,11 @@ export abstract class ConnectorBase implements Connector {
     return false;
   }
 
+  /** True when the user never connects/disconnects this instance (see `Connector.alwaysConnected`). */
+  alwaysConnected(): boolean {
+    return false;
+  }
+
   /** Serializable per-device configuration (`label` and outputs included). */
   getConfig(): Record<string, unknown> {
     return { label: this.label.value, outputCount: this.outputCount, outputMapping: this.outputMapping.value.slice() };

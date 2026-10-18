@@ -128,7 +128,8 @@
 </template>
 
 <script setup lang="ts">
-import { importArchive } from '~/utils/persistence/project-transfer'
+import { importProjectBytes } from '~/utils/persistence/project-file'
+import { syncRecentNames } from '~/composables/app-menu/recent-projects'
 import { notify } from '~/composables/use-notifications'
 import { ChevronRight, Edit, Trash2 } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
@@ -179,7 +180,11 @@ async function loadProjects() {
   loading.value = true
   const { data, error } = await supabase.functions.invoke('get-projects')
   loading.value = false
-  if (!error && data) projects.value = data
+  if (!error && data) {
+    projects.value = data
+    // Keep File → Open Recent names current (and drop deleted projects).
+    syncRecentNames(data)
+  }
 }
 
 async function createProject() {
@@ -207,9 +212,8 @@ function openProject(id: string) {
 const importing = ref(false)
 
 /**
- * Imports a `.pmproject`: verifies its plugins, caches its extension bundles,
- * creates a project from the snapshot and opens it (missing extensions are
- * offered for install by the open gate, from the imported bundles).
+ * Imports a `.pmproject` (same as File → Open) and opens the new project
+ * (missing extensions are offered for install by the open gate).
  */
 async function importProjectFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -218,14 +222,8 @@ async function importProjectFile(e: Event) {
   if (!file) return
   importing.value = true
   try {
-    const imported = await importArchive(new Uint8Array(await file.arrayBuffer()))
-    const failed = Object.keys(imported.pluginErrors).length
-    if (failed) notify({ variant: 'warning', title: 'Some plugins could not be verified', description: `${failed} content plugin(s) were skipped.` })
-    const { data, error } = await supabase.functions.invoke('create-project', { body: { name: imported.name || file.name.replace(/\.pmproject$/, '') } })
-    if (error || !data) throw new Error(error?.message ?? 'Failed to create project')
-    const saved = await supabase.functions.invoke('save-snapshot', { body: { projectId: data.id, snapshot: imported.snapshot, sequenceNumber: 0, label: 'Imported' } })
-    if (saved.error) throw new Error(saved.error.message)
-    router.push(`/project/${data.id}`)
+    const id = await importProjectBytes(supabase, new Uint8Array(await file.arrayBuffer()), file.name)
+    router.push(`/project/${id}`)
   }
   catch (err) {
     notify({ variant: 'error', title: 'Import failed', description: (err as Error).message })
@@ -292,4 +290,12 @@ async function deleteProject() {
 }
 
 onMounted(loadProjects)
+
+// File → New Project (menu bar) lands here with `?new=1`.
+const route = useRoute()
+watch(() => route.query.new, (v) => {
+  if (!v) return
+  showCreate.value = true
+  router.replace({ query: {} })
+}, { immediate: true })
 </script>
