@@ -13,6 +13,7 @@ import {
   type DownloadFailure,
   type LocalOpenData,
 } from '~/utils/sync/open-project';
+import { settleLegacyRows } from '~/utils/sync/open-legacy-rows';
 
 /**
  * Local-first open (ADR 0004 D1, §3.1): build the live state from the local
@@ -119,8 +120,8 @@ export interface ServerOpenInput {
 /**
  * First open of a cloud project: download snapshot + tail, store the base,
  * working snapshot and meta (`origin: 'cloud'`). Outbox rows that exist
- * already (moved from the legacy WAL) are acked when the server has them and
- * replayed on top otherwise.
+ * already (moved from the legacy WAL) are settled by `settleLegacyRows`:
+ * acked when the server has them, replayed on top otherwise.
  */
 export async function openFromServer(host: OpenFlowHost, input: ServerOpenInput): Promise<OpenResult> {
   const { store, client, projectId, userId, meta } = input;
@@ -138,14 +139,20 @@ export async function openFromServer(host: OpenFlowHost, input: ServerOpenInput)
     catch (err) { console.warn(`[sync] tail replay of "${c.commandType}" failed:`, err); }
   }
   const position = downloadedPosition(data);
-  const baseSnapshot = host.port.capture();
 
-  // Rows from an older build: on the server already → ack, otherwise pending.
+  // Rows from an older build: in the tail → ack. The others are pushed once
+  // (idempotent): covered by the snapshot → ack without replay; inserted
+  // above it → server changes (base); unconfirmed → pending on top.
   const outbox = await store.getOutbox(projectId);
   const tailIds = new Set(data.tail.map(c => c.changeId));
-  const onServer = outbox.filter(r => tailIds.has(r.id));
-  const pending = outbox.filter(r => !tailIds.has(r.id));
-  if (onServer.length > 0) await store.ackOutbox(onServer.map(r => r.id));
+  const inTail = outbox.filter(r => tailIds.has(r.id));
+  const settled = await settleLegacyRows(client, projectId, outbox.filter(r => !tailIds.has(r.id)), data.snapshotSequence);
+  replayRows(host.port, settled.inserted.map(i => i.row));
+  for (const { row, seq } of settled.inserted) position.add(row.id, seq);
+  const baseSnapshot = host.port.capture();
+  const done = [...inTail, ...settled.covered, ...settled.inserted.map(i => i.row)];
+  if (done.length > 0) await store.ackOutbox(done.map(r => r.id));
+  const pending = settled.pending;
   replayRows(host.port, pending);
 
   const now = Date.now();

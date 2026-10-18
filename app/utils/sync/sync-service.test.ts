@@ -7,7 +7,8 @@ import type { ProjectSyncService } from '~/utils/sync/project-sync-service';
 import type { RemoteProjectHead } from '~/utils/sync/remote-api';
 import { packSnapshot, SyncPosition } from '~/utils/sync/sync-position';
 import { makeState, mod } from '~/utils/sync/merge/adapters/test-state';
-import { appendRow, cloudMeta, readBase, readWorking, seedBase } from '~/utils/sync/sync-test-kit';
+import { SyncEngine } from '~/utils/sync/sync-engine';
+import { appendRow, cloudMeta, FakePort, makeDeps, readBase, readWorking, seedBase } from '~/utils/sync/sync-test-kit';
 import { FakeSyncServer } from '~/utils/sync/sync-test-server';
 
 /** Headless mirror and logout flush of closed projects (ADR 0004 D13, D15, D16). */
@@ -75,6 +76,48 @@ describe('mirrorProject', () => {
     expect((await readBase(store, 'm2'))?.snapshot.modifiers).toEqual([]);
     expect((await store.getProject('m2'))?.name).toBe('Server m2');
     expect((await store.getOutbox('m2')).map(r => r.id)).toEqual(['m2-row']);
+  });
+});
+
+describe('mirrorProject of the open project', () => {
+  it('delegates to its engine: no headless load, concurrent requests apply each change once', async () => {
+    await store.putProject(cloudMeta('open'));
+    await seedBase(store, 'open', makeState(), SyncPosition.at(0));
+    const port = new FakePort(makeState());
+    const engine = new SyncEngine(makeDeps(server, store, port, 'open'), {
+      base: { snapshot: makeState(), position: SyncPosition.at(0) }, live: SyncPosition.at(0), backlog: false,
+    });
+    setOpenSyncEngine(engine);
+    server.insert('open', 'engine.bpm', { bpm: 101 });
+    server.insert('open', 'engine.bpm', { bpm: 102 });
+    server.addSnapshot('open', makeState({ globalBpm: 102 }), 2);
+
+    const results = await Promise.all([
+      service.mirrorProject(head('open', 2, 2), 'u-me'),
+      service.mirrorProject(head('open', 2, 2), 'u-me'),
+      engine.requestSync(),
+    ]);
+
+    expect(results.slice(0, 2)).toEqual([true, true]);
+    expect(server.callNames()).not.toContain('load-project');
+    expect(port.replaysOf('engine.bpm').map(r => (r.payload as { bpm: number }).bpm)).toEqual([101, 102]);
+    // Bound to another account: the engine is not asked to sync.
+    const before = server.calls.length;
+    await expect(service.mirrorProject(head('open', 2, 2), 'u-other')).resolves.toBe(true);
+    expect(server.calls.length).toBe(before);
+    engine.stop();
+    setOpenSyncEngine(null);
+  });
+
+  it('a closed copy bound to another account is left untouched', async () => {
+    await store.putProject(cloudMeta('theirs', { ownerUserId: 'u-other' }));
+    server.addSnapshot('theirs', makeState({ globalBpm: 9 }), 4);
+
+    await expect(service.mirrorProject(head('theirs', 4, 4), 'u-me')).resolves.toBe(true);
+
+    expect(server.calls).toEqual([]);
+    expect(await store.getBaseSnapshot('theirs')).toBeNull();
+    expect((await store.getProject('theirs'))?.ownerUserId).toBe('u-other');
   });
 });
 

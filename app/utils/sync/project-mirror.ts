@@ -112,21 +112,30 @@ export async function pushHeadless(store: ProjectStore, client: RemoteClient, pr
   const alreadyThere = pulled.data.changes.filter(c => ownIds.has(c.changeId));
   const remaining = outbox.filter(r => !alreadyThere.some(c => c.changeId === r.id));
   const { acks } = await pushRows(client, projectId, remaining);
+  const orderOf = new Map(outbox.map(r => [r.id, r.order]));
   const acked = [
-    ...alreadyThere.map(c => ({ id: c.changeId, seq: c.sequenceNumber })),
-    ...acks.filter(a => a.sequenceNumber != null).map(a => ({ id: a.changeId, seq: a.sequenceNumber! })),
+    ...alreadyThere.map(c => ({ id: c.changeId, seq: c.sequenceNumber, order: orderOf.get(c.changeId) ?? 0 })),
+    ...acks.filter(a => a.sequenceNumber != null).map(a => ({ id: a.changeId, seq: a.sequenceNumber!, order: orderOf.get(a.changeId) ?? 0 })),
   ];
   await recordInWorking(store, projectId, meta?.serverCursor ?? 0, acked);
   await store.ackOutbox(acked.map(a => a.id));
   return store.countPending(projectId);
 }
 
-/** Add acknowledged own changes to the working snapshot's position. */
-async function recordInWorking(store: ProjectStore, projectId: string, cursor: number, acked: Array<{ id: string; seq: number }>): Promise<void> {
+/**
+ * Add acknowledged own changes to the working snapshot's position — only
+ * those the snapshot contains (`order <= outboxOrder`). A row written after
+ * the last working snapshot (tab killed during the writer debounce) is not
+ * in it: once acked it leaves the outbox, so the next open must pull it as a
+ * server change. Marking it as reflected would lose that edit.
+ */
+async function recordInWorking(store: ProjectStore, projectId: string, cursor: number, acked: Array<{ id: string; seq: number; order: number }>): Promise<void> {
   if (acked.length === 0) return;
   const working = await store.getWorkingSnapshot(projectId) as StoredSyncSnapshot | null;
   if (!working) return;
   const { snapshot, position, outboxOrder } = unpackSnapshot(working, cursor);
-  for (const a of acked) position.add(a.id, a.seq);
+  const reflected = acked.filter(a => a.order <= outboxOrder);
+  if (reflected.length === 0) return;
+  for (const a of reflected) position.add(a.id, a.seq);
   await store.putWorkingSnapshot(projectId, packSnapshot(snapshot, position, outboxOrder));
 }

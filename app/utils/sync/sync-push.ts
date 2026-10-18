@@ -2,6 +2,9 @@ import { saveSnapshot } from '~/utils/sync/remote-api';
 import { packSnapshot } from '~/utils/sync/sync-position';
 import { plain, type SyncDeps, type SyncState } from '~/utils/sync/sync-context';
 import { pushRows } from '~/utils/sync/sync-transport';
+import { isRejection, pushIsolated, rejectionError } from '~/utils/sync/sync-reject';
+import type { OutboxEntry } from '~/utils/persistence/project-store';
+import type { RemoteError } from '~/utils/sync/remote-api';
 
 /**
  * Push and checkpoint steps of the sync engine (ADR 0004 §3.2 steps 4.1, 4.5, 5).
@@ -45,12 +48,28 @@ export async function saveSafetySnapshot(deps: SyncDeps, state: SyncState): Prom
 export async function pushOutbox(deps: SyncDeps, state: SyncState): Promise<boolean> {
   await deps.outbox.flush();
   const rows = await deps.store.getOutbox(deps.projectId);
-  if (rows.length === 0) { state.lastError = null; return true; }
+  if (rows.length === 0) {
+    // Nothing to push (e.g. a rebase dropped every row): the server state
+    // needs no "before offline sync" protection. Clearing it keeps a stale
+    // snapshot from being saved before a later, unrelated push (D5).
+    state.safety = null;
+    state.lastError = null;
+    return true;
+  }
   if (!(await saveSafetySnapshot(deps, state))) return false;
 
   // Known before sending, so the realtime echo of a row is never re-applied.
   for (const r of rows) state.ownIds.add(r.id);
-  const { acks, error } = await pushRows(deps.client, deps.projectId, rows);
+  let { acks, error } = await pushRows(deps.client, deps.projectId, rows);
+  // A permanent rejection must not block every later row: isolate it.
+  let rejected: OutboxEntry[] = [];
+  let rejection: RemoteError | null = null;
+  if (isRejection(error)) {
+    const done = new Set(acks.filter(a => a.sequenceNumber != null).map(a => a.changeId));
+    const isolated = await pushIsolated(deps.client, deps.projectId, rows.filter(r => !done.has(r.id)));
+    acks = [...acks, ...isolated.acks];
+    ({ rejected, rejection, error } = isolated);
+  }
   const acked: string[] = [];
   for (const a of acks) {
     if (a.sequenceNumber == null) continue;
@@ -60,9 +79,14 @@ export async function pushOutbox(deps: SyncDeps, state: SyncState): Promise<bool
     deps.onSequence?.(a.sequenceNumber);
   }
   if (acked.length > 0) await deps.store.ackOutbox(acked);
-  state.lastError = error;
+  if (rejected.length > 0) {
+    // Discarded for good; the status shows why until the next clean sync.
+    for (const r of rejected) console.warn(`[sync] server rejected "${r.type}" (${r.id}), discarded:`, rejection?.message);
+    await deps.store.ackOutbox(rejected.map(r => r.id));
+  }
+  state.lastError = error ?? (rejection && rejected.length > 0 ? rejectionError(rejected.length, rejection) : null);
   if (error) console.warn('[sync] push failed:', error.message);
-  return !error && acked.length === rows.length;
+  return !error && acked.length + rejected.length === rows.length;
 }
 
 // ── Checkpoint ───────────────────────────────────────────────────────────────

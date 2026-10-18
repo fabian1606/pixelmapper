@@ -63,12 +63,28 @@ export async function pullStep(deps: SyncDeps, state: SyncState): Promise<PullOu
   const { changes, nextAfterSequence } = pulled.data;
   const ownAcked = changes.filter(c => pendingIds.has(c.changeId));
   const ownAckedIds = new Set(ownAcked.map(c => c.changeId));
+  // Pulled own rows are confirmed (e.g. an ack lost in a crash): hand their
+  // sequence numbers to the persist queue like push acks, and treat their
+  // realtime echo as own.
+  for (const c of ownAcked) {
+    state.ownIds.add(c.changeId);
+    state.ackedSeq.set(c.changeId, c.sequenceNumber);
+  }
   const stillPending = pending.filter(p => !ownAckedIds.has(p.id));
   const foreignUnseen = changes.filter(c =>
     !pendingIds.has(c.changeId) && !state.ownIds.has(c.changeId) && !state.live.reflects(c.changeId, c.sequenceNumber));
 
   const base = state.base;
-  if (state.backlog && base && stillPending.length > 0 && foreignUnseen.length > 0) {
+  // The rebase decision is taken against the BASE, not the live position: a
+  // foreign row the live state already has (realtime insert while offline
+  // edits were pending) is still missing from the base the pending payloads
+  // were made on. Deciding by `live` would skip the rebase and push the stale
+  // payloads, wiping that row for everyone (and without a D5 snapshot).
+  // The rebase rebuilds the live state from the base, so nothing applies twice.
+  const foreignSinceBase = base
+    ? changes.filter(c => !pendingIds.has(c.changeId) && !state.ownIds.has(c.changeId) && !base.position.reflects(c.changeId, c.sequenceNumber))
+    : [];
+  if (state.backlog && base && stillPending.length > 0 && foreignSinceBase.length > 0) {
     await rebaseStep(deps, state, { changes, nextAfterSequence, stillPending, ownAckedIds });
     return { ok: true, rebased: true, applied: foreignUnseen.length };
   }
@@ -122,6 +138,9 @@ async function rebaseStep(deps: SyncDeps, state: SyncState, input: RebaseStepInp
   state.base = { snapshot: newBase, position };
   state.live = position.clone();
   state.safety = { snapshot: newBase, seq: position.highest() };
+  // A snapshot saved for an earlier rebase must not be offered as "restore
+  // state before sync" for the conflicts of this one.
+  state.safetySnapshotId = null;
   state.conflicts = out.conflicts.length > 0 ? { items: out.conflicts, state: plain(out.working) } : null;
   deps.onLiveChanged?.();
   // ── End of synchronous section ──
