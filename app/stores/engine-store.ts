@@ -64,6 +64,7 @@ import { usePinnedModifiersStore } from '~/stores/pinned-modifiers-store';
 import { trace } from '~/utils/perf';
 import { getProjectStore } from '~/utils/persistence/project-store';
 import { saveSnapshot as saveServerSnapshot, type RemoteClient } from '~/utils/sync/remote-api';
+import { createSnapshotSaveDedupe } from '~/utils/sync/snapshot-content-hash';
 import type { ProjectStatePort } from '~/utils/sync/project-state-port';
 import { createEngineStatePort } from '~/utils/sync/engine-state-port';
 import { readLocalProject } from '~/utils/sync/open-project';
@@ -1319,6 +1320,10 @@ export const useEngineStore = defineStore('engine', () => {
     commitPendingChanges = flushPersistQueue;
     snapshotBuilder = buildSnapshot;
 
+    // Content hash of the last snapshot this session saved: an autosave with
+    // the same content (only clockEpoch / group `expanded` differ) is skipped.
+    const snapshotDedupe = createSnapshotSaveDedupe();
+
     /** Server snapshot: cloud projects only, online, nothing pending (D9). */
     async function doSaveSnapshot() {
       // Only the open session may save its project's state (safety gate).
@@ -1329,12 +1334,17 @@ export const useEngineStore = defineStore('engine', () => {
       if (hasPendingCommandPersist() || !(await current.canSaveServerSnapshot())) {
         throw new Error('[engine] snapshot skipped: changes still pending');
       }
+      const snapshot = buildSnapshot();
+      const { hash, unchanged } = await snapshotDedupe.check(snapshot);
+      // No content change since the last save: nothing to store (counts as success).
+      if (unchanged) return;
       const res = await saveServerSnapshot(supabase as unknown as RemoteClient, {
         projectId,
-        snapshot: buildSnapshot(),
+        snapshot,
         sequenceNumber: lastSeenSequenceNumber.value,
       });
       if (!res.ok) throw res.error.kind === 'network' ? new TypeError(res.error.message) : new Error(res.error.message);
+      snapshotDedupe.saved(hash);
     }
 
     setPersistenceHooks({
