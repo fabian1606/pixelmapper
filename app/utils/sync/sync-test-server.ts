@@ -57,6 +57,8 @@ export class FakeSyncServer {
   unconfirm = new Set<string>();
   /** Edge functions that answer with this HTTP status (e.g. `save-snapshot` → 500). */
   failing = new Map<string, number>();
+  /** Change ids whose `push-change` request fails with this HTTP status (whole request). */
+  reject = new Map<string, number>();
   private nextSeq = 1;
   private nextSnapshotId = 1;
 
@@ -125,7 +127,11 @@ export class FakeSyncServer {
     }
     switch (name) {
       case 'pull-changes': return { data: this.pull(body), error: null };
-      case 'push-change': return { data: this.push(body), error: null };
+      case 'push-change': {
+        const refused = (body.changes as Array<{ changeId: string }>).map(c => this.reject.get(c.changeId)).find(Boolean);
+        if (refused) return { data: null, error: Object.assign(new Error('rejected'), { context: new Response('{"error":"not allowed"}', { status: refused }) }) };
+        return { data: this.push(body), error: null };
+      }
       case 'save-snapshot': return { data: this.save(body), error: null };
       case 'load-project': return { data: this.load(body), error: null };
       case 'restore-snapshot': return { data: this.restore(body), error: null };

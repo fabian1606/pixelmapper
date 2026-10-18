@@ -19,6 +19,7 @@
  * into the outbox once by `migrateLegacyWal`.
  */
 import { getProjectStore, type NewOutboxEntry, type ProjectStore } from '~/utils/persistence/project-store';
+import { backoffDelay } from '~/utils/sync/connectivity';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ const pending: NewOutboxEntry[] = [];
 /** Rows of the batch currently being written. */
 let writing: NewOutboxEntry[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
+/** Consecutive failed batch writes (input for `backoffDelay`). */
+let failedWrites = 0;
 /** Serializes writes so transactions are created in enqueue order. */
 let chain: Promise<void> = Promise.resolve();
 /** Highest outbox `order` assigned per project in this session. */
@@ -91,9 +94,10 @@ export function dropUnwrittenOutboxRow(id: string): void {
 }
 
 /**
- * Write all queued rows now. Resolves once they are durable (or the write
- * failed — failures are logged; the rows are lost for durability but the
- * in-memory persist queue still pushes them).
+ * Write all queued rows now. Resolves once they are durable, or once the
+ * write failed: failures are logged and the unwritten rows go back to the
+ * front of the queue (still "unconfirmed", so no checkpoint drops them) and
+ * are retried with backoff.
  */
 export function flushOutboxWrites(): Promise<void> {
   if (timer != null) { clearTimeout(timer); timer = null; }
@@ -107,22 +111,39 @@ export function flushOutboxWrites(): Promise<void> {
 /** Append one batch in order; tracks the assigned orders. */
 async function writeBatch(batch: NewOutboxEntry[]): Promise<void> {
   writing = batch;
+  const touched = new Set<string>();
+  let written = 0;
   try {
     const store = await resolveStore();
-    const touched = new Set<string>();
     for (const row of batch) {
       const stored = await store.appendOutbox(row);
       lastOrder.set(row.projectId, Math.max(lastOrder.get(row.projectId) ?? 0, stored.order));
       touched.add(row.projectId);
+      written++;
     }
-    for (const projectId of touched) notifyWritten(projectId);
+    failedWrites = 0;
   }
   catch (err) {
     console.warn('[outbox] write failed:', err);
+    requeueUnwritten(batch.slice(written));
   }
   finally {
     writing = [];
+    for (const projectId of touched) notifyWritten(projectId);
   }
+}
+
+/**
+ * Put rows whose write failed back in front of the queue (order kept) and
+ * retry with backoff. Without this they would be lost: the sync engine only
+ * pushes stored rows. A row superseded meanwhile (same project + dedupKey
+ * queued again) is dropped; its newer row carries the change.
+ */
+function requeueUnwritten(rows: NewOutboxEntry[]): void {
+  const keep = rows.filter(r => !r.dedupKey || !pending.some(p => p.projectId === r.projectId && p.dedupKey === r.dedupKey));
+  pending.unshift(...keep);
+  if (pending.length === 0 || timer != null) return;
+  timer = setTimeout(() => { timer = null; void flushOutboxWrites(); }, backoffDelay(failedWrites++));
 }
 
 /** Notify listeners; a failing listener never breaks the write chain. */

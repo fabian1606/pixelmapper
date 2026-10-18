@@ -156,15 +156,17 @@ export function useCollaboration(projectId: string): CollaborationContext {
   // ── Postgres Changes: committed commands (existing tier) ──────────────────
   // Realtime is the fast path; the project's SyncEngine dedupes rows by
   // change id (own echoes, rows already pulled) and records them so pulls
-  // never apply them twice (ADR 0004 §3.2). Live-op rows are only recorded:
-  // peers apply them from the LiveBus broadcast.
+  // never apply them twice (ADR 0004 §3.2). Live-op rows are not handled
+  // here (`false`): the engine replays them through its state port, because
+  // a peer that edited offline never broadcast them.
   /** Apply a foreign committed command (history, so it can be undone). */
-  function applyRemoteRow(row: RemoteInsert) {
+  function applyRemoteRow(row: RemoteInsert): boolean {
     const cmd = commandFromPayload(row.commandType, row.payload as object, engineStore.getReplayContext());
-    if (!cmd) return;
+    if (!cmd) return false;
     history.executeRemote(cmd);
     triggerRef(engineStore.sceneNodes);
     engineStore.scheduleWorkingSnapshot();
+    return true;
   }
 
   channel.on(

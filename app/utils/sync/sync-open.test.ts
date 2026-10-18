@@ -110,7 +110,7 @@ describe('openFromServer', () => {
     expect((await readWorking(store, PID))?.position.cursor).toBe(4);
   });
 
-  it('acks outbox rows the server has and replays the others on top', async () => {
+  it('migrated rows: tail rows acked, others pushed once and become server changes', async () => {
     server.addSnapshot(PID, makeState({ globalBpm: 1 }), 0);
     server.insert(PID, 'engine.bpm', { bpm: 2 }, { changeId: 'mine-1', userId: 'u-me' });
     await appendRow(store, PID, 'mine-1', 'engine.bpm', { bpm: 2 }, 'live-op');
@@ -118,11 +118,44 @@ describe('openFromServer', () => {
 
     const res = await openFromServer(host, { store, client: server.client, projectId: PID, userId: 'u-me', meta: null });
 
+    expect(res.ok && res.project.backlog).toBe(false);
+    expect(await store.getOutbox(PID)).toEqual([]);
+    expect(server.rowsOf(PID).map(r => r.change_id)).toEqual(['mine-1', 'mine-2']);
+    expect(port.state.globalBpm).toBe(3);
+    // Base = server state incl. the pushed row, which the position reflects.
+    const base = await readBase(store, PID);
+    expect(base?.snapshot.globalBpm).toBe(3);
+    expect(base?.position.reflects('mine-2', 2)).toBe(true);
+  });
+
+  it('regression: a migrated row covered by the server snapshot is acked, not replayed again', async () => {
+    // mine-1 reached the server (ack lost) and was compacted into the snapshot.
+    server.insert(PID, 'engine.bpm', { bpm: 2 }, { changeId: 'mine-1', userId: 'u-me' });
+    server.insert(PID, 'engine.bpm', { bpm: 5 });
+    server.addSnapshot(PID, makeState({ globalBpm: 5 }), 2);
+    await appendRow(store, PID, 'mine-1', 'engine.bpm', { bpm: 2 }, 'live-op');
+
+    const res = await openFromServer(host, { store, client: server.client, projectId: PID, userId: 'u-me', meta: null });
+
+    expect(res.ok).toBe(true);
+    expect(port.replaysOf('engine.bpm')).toEqual([]);
+    expect(port.state.globalBpm).toBe(5);
+    expect(await store.getOutbox(PID)).toEqual([]);
+    expect(server.rowsOf(PID)).toHaveLength(2);
+  });
+
+  it('migrated rows the push cannot confirm stay pending and are replayed on top', async () => {
+    server.addSnapshot(PID, makeState({ globalBpm: 1 }), 0);
+    await appendRow(store, PID, 'mine-2', 'engine.bpm', { bpm: 3 }, 'live-op');
+    server.unconfirm.add('mine-2');
+
+    const res = await openFromServer(host, { store, client: server.client, projectId: PID, userId: 'u-me', meta: null });
+
     expect(res.ok && res.project.backlog).toBe(true);
     expect((await store.getOutbox(PID)).map(r => r.id)).toEqual(['mine-2']);
     expect(port.state.globalBpm).toBe(3);
     // Base = server state only; working = base + pending.
-    expect((await readBase(store, PID))?.snapshot.globalBpm).toBe(2);
+    expect((await readBase(store, PID))?.snapshot.globalBpm).toBe(1);
     expect((await readWorking(store, PID))?.snapshot.globalBpm).toBe(3);
   });
 });

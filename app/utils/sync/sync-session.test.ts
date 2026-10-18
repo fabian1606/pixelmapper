@@ -9,7 +9,8 @@ import {
   setPersistProjectId,
 } from '~/utils/persistence/persist-queue';
 import { reportNetworkSuccess } from '~/utils/sync/connectivity';
-import type { OpenedProject } from '~/utils/sync/open-flow';
+import { openFromLocal, type OpenedProject } from '~/utils/sync/open-flow';
+import { readLocalProject } from '~/utils/sync/open-project';
 import { getOpenSyncEngine } from '~/utils/sync/open-sync-engine';
 import { startProjectSession, syncBlocker, type ProjectSession } from '~/utils/sync/project-session';
 import { syncStatus } from '~/utils/sync/project-sync-service';
@@ -99,6 +100,25 @@ describe('local-only project', () => {
     await settle();
     expect(server.client.functions.invoke).not.toHaveBeenCalled();
     expect(syncStatus.value.state).toBe('local-only');
+  });
+  it('closing writes the working snapshot; reopening yields the identical state without network', async () => {
+    const meta: LocalProjectMeta = { ...cloudMeta(PID), origin: 'local', ownerUserId: null };
+    await store.putProject(meta);
+    const s = start(meta, 'u-me');
+    port.state.globalBpm = 133;
+    port.state.modifiers = [{ id: 'M', plugin: 'p', strength: 1, params: { speed: 2 } } as never];
+    const closedState = port.capture();
+    await s.close();
+    session = null;
+
+    const next = new FakePort(makeState());
+    const res = await openFromLocal({ port: next, reset: vi.fn(async () => {}), gate: () => true }, await readLocalProject(store, PID), meta);
+
+    expect(res.ok).toBe(true);
+    expect(next.state).toEqual(closedState);
+    expect(next.replayed).toEqual([]);
+    expect(await store.getOutbox(PID)).toEqual([]);
+    expect(server.client.functions.invoke).not.toHaveBeenCalled();
   });
 });
 

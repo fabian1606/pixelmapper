@@ -29,7 +29,6 @@ import {
   isOnline,
   onReconnect,
   reportNetworkFailure,
-  reportNetworkSuccess,
 } from '~/utils/sync/connectivity';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -220,7 +219,9 @@ async function runFlush(hook: PersistHook): Promise<void> {
   try {
     const seqs = await hook(batch.map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId })));
     retryAttempt = 0;
-    reportNetworkSuccess();
+    // No `reportNetworkSuccess()` here: the hook may resolve without any
+    // request (local-only project, unbound copy, nothing to push). Requests
+    // that do reach the backend report it themselves (`invokeRemote`).
     for (let i = 0; i < batch.length; i++) batch[i]!.resolve?.(seqs[i]);
     // Report entries the server returned a sequence number for; the rest stay
     // in the outbox so the sync engine retries them idempotently.

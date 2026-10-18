@@ -174,6 +174,16 @@ describe('persist queue — backoff + connectivity (D9)', () => {
     expect(hook.mock.calls[1]![0].map((e: { changeId?: string }) => e.changeId)).toEqual(['c1', 'c2']);
   });
 
+  it('regression: a hook that resolves without network does not flip the app online', async () => {
+    const { hook } = wireHook(async batch => batch.map(() => undefined));
+    conn.reportNetworkFailure();
+    pq.enqueuePersist({ type: 'Cmd', payload: {}, changeId: 'c1' });
+    // Explicit flush (e.g. leaving a local-only project while offline).
+    await pq.flushPersistQueue();
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(conn.isOnline.value).toBe(false);
+  });
+
   it('retries server errors with exponential backoff instead of 50 ms', async () => {
     // Pin the backoff jitter to 0 so the timing windows below are deterministic.
     const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
