@@ -7,19 +7,22 @@
  *
  * Guarantees:
  * - **Order:** one chronological queue. A coalesced entry (same `dedupKey`)
- *   leaves its old slot and is appended at the end, exactly like its WAL row.
- * - **Durability:** every live-op gets a client `changeId` and is written to
- *   the WAL (`wal.ts`) BEFORE it is sent. History commands are written to the
- *   WAL by `use-history`. Acknowledged ids are removed via the ack hook.
+ *   leaves its old slot and is appended at the end, exactly like its outbox row.
+ * - **Durability:** every entry with a `changeId` (history commands and
+ *   live-ops) is appended to the `ProjectStore` outbox (`outbox-writer.ts`)
+ *   BEFORE it is sent. The push hook (the sync engine) acknowledges rows in
+ *   the outbox itself; the optional ack hook is only informational.
  * - **Coalescing:** a newer entry with the same `dedupKey` replaces the pending
- *   older one — in memory and in the WAL — so the old changeId is never pushed.
+ *   older one — in memory and in the outbox — so the old changeId is never pushed.
+ * - **Local-only projects:** `setPersistProjectId(id, { outbox: false })`
+ *   writes no outbox rows; the working snapshot is their only persistence.
  * - **Serialization:** a single in-flight flush, so `lastSeenSequenceNumber`
  *   (updated inside the hook) is accurate for any caller awaiting a flush.
  * - **Backoff (D9):** failed flushes retry with `backoffDelay(attempt)`. While
  *   `isOnline` is false nothing retries on a timer; `onReconnect` resumes.
  */
 import { newUuid } from '~/utils/ids';
-import { walAppendBatch, walNextEnqueuedAt, type WalEntry } from '~/utils/persistence/wal';
+import { dropUnwrittenOutboxRow, flushOutboxWrites, queueOutboxRow } from '~/utils/persistence/outbox-writer';
 import {
   backoffDelay,
   isNetworkError,
@@ -35,7 +38,7 @@ export interface PersistEntry {
   type: string;
   payload: any;
   /** Client-generated idempotency key (UUID). History commands and live-ops
-   *  always carry one so the WAL ACK can target them precisely. */
+   *  always carry one so the outbox ack can target them precisely. */
   changeId?: string;
   dedupKey?: string;
   /** Origin. Missing → 'command' (history layer). */
@@ -54,13 +57,10 @@ export type PersistAckHook = (changeIds: string[]) => void;
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * Settle window before a flush. The WAL makes correctness independent of
+ * Settle window before a flush. The outbox makes correctness independent of
  * this window; it only batches same-frame writes into one request.
  */
 export const PERSIST_SETTLE_MS = 50;
-
-/** Window in which live-op WAL writes are coalesced (60 Hz drags → ~20 Hz IDB writes). */
-export const WAL_SETTLE_MS = 50;
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -78,13 +78,8 @@ let inFlightFlush: Promise<void> | null = null;
 let persistHook: PersistHook | null = null;
 let persistAckHook: PersistAckHook | null = null;
 
-/** Project the live-op WAL rows belong to; null → live-ops are not WAL-logged. */
-let walProjectId: string | null = null;
-/** Live-op WAL rows not yet written (coalesced by dedupKey). */
-const walPending: WalEntry[] = [];
-let walTimer: ReturnType<typeof setTimeout> | null = null;
-/** Serializes WAL writes so their transactions are created in order. */
-let walChain: Promise<void> = Promise.resolve();
+/** Project outbox rows belong to; null → no outbox rows are written. */
+let outboxProjectId: string | null = null;
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -94,17 +89,32 @@ export function setPersistHook(hook: PersistHook | null): void {
   if (hook && queue.length > 0) scheduleFlush();
 }
 
-/** Wire the WAL acknowledgement callback. */
+/** Wire the (informational) acknowledgement callback. */
 export function setPersistAckHook(hook: PersistAckHook | null): void {
   persistAckHook = hook;
 }
 
 /**
- * Set the project live-op WAL rows are scoped to. Captured per entry at
- * enqueue time, so switching projects never re-labels pending rows.
+ * Set the project outbox rows are scoped to. Captured per entry at enqueue
+ * time, so switching projects never re-labels pending rows. With
+ * `{ outbox: false }` (local-only projects) no outbox rows are written.
  */
-export function setPersistProjectId(projectId: string | null): void {
-  walProjectId = projectId;
+export function setPersistProjectId(projectId: string | null, options: { outbox?: boolean } = {}): void {
+  outboxProjectId = options.outbox === false ? null : projectId;
+}
+
+/** Queue the outbox row of an entry (no-op without changeId / outbox project). */
+function queueRow(entry: PersistEntry): void {
+  if (!outboxProjectId || !entry.changeId) return;
+  const kind = entry.kind ?? 'command';
+  queueOutboxRow({
+    id: entry.changeId,
+    projectId: outboxProjectId,
+    kind,
+    type: entry.type,
+    payload: entry.payload,
+    dedupKey: entry.dedupKey,
+  }, kind === 'command');
 }
 
 // ── Enqueue ──────────────────────────────────────────────────────────────────
@@ -114,78 +124,41 @@ export function enqueuePersist(entry: PersistEntry): void {
   if (entry.dedupKey) {
     const prev = byKey.get(entry.dedupKey);
     if (prev && prev !== entry) {
-      // Superseded: drop its slot, its unwritten WAL row, and resolve its
+      // Superseded: drop its slot, its unwritten outbox row, and resolve its
       // promise with undefined so callers never wait forever.
       const idx = queue.indexOf(prev);
       if (idx >= 0) queue.splice(idx, 1);
-      if (prev.changeId) dropPendingWal(prev.changeId);
+      if (prev.changeId) dropUnwrittenOutboxRow(prev.changeId);
       prev.resolve?.(undefined);
     }
     byKey.set(entry.dedupKey, entry);
   }
+  // Durable before it is sent (outbox write is queued first, D8).
+  queueRow(entry);
   queue.push(entry);
   scheduleFlush();
 }
 
 /**
- * Queue a persistent live-op: assigns a `changeId`, schedules its WAL write
- * (coalesced by `dedupKey`) and enqueues it for the server push.
+ * Queue a persistent live-op: assigns a `changeId`, schedules its outbox
+ * write (coalesced by `dedupKey`) and enqueues it for the server push.
  * Returns the assigned changeId.
  */
 export function enqueueLiveOp(type: string, payload: unknown, dedupKey?: string): string {
   const changeId = newUuid();
-  if (walProjectId) {
-    walPending.push({
-      id: changeId,
-      projectId: walProjectId,
-      commandType: type,
-      payload,
-      enqueuedAt: walNextEnqueuedAt(),
-      kind: 'live-op',
-      dedupKey,
-    });
-    scheduleWalWrite();
-  }
   enqueuePersist({ type, payload, changeId, dedupKey, kind: 'live-op' });
   return changeId;
 }
 
-// ── WAL writes ───────────────────────────────────────────────────────────────
-
-/** Remove a not-yet-written WAL row (its entry was superseded). */
-function dropPendingWal(changeId: string): void {
-  const idx = walPending.findIndex(e => e.id === changeId);
-  if (idx >= 0) walPending.splice(idx, 1);
-}
-
-/** Arm the WAL settle timer (no-op if already armed). */
-function scheduleWalWrite(): void {
-  if (walTimer != null) return;
-  walTimer = setTimeout(() => { walTimer = null; void flushPersistWal(); }, WAL_SETTLE_MS);
-}
+// ── Outbox writes ────────────────────────────────────────────────────────────
 
 /**
- * Plain-JSON copy of a payload: IndexedDB cannot clone Vue proxies, and the
- * payload is sent as JSON anyway, so this is exactly what the server gets.
- */
-function toStorable(entry: WalEntry): WalEntry {
-  return { ...entry, payload: JSON.parse(JSON.stringify(entry.payload ?? null)) };
-}
-
-/**
- * Write all pending live-op WAL rows now. Resolves once they are durable (or
- * the write failed — failures are logged, the in-memory queue still pushes).
- * Call from unload/visibility handlers to shrink the loss window.
+ * Make all queued outbox rows durable now (see `outbox-writer.ts`). Kept
+ * under its WP-P0 name because LiveBus and engine-store call it from
+ * unload/visibility handlers.
  */
 export function flushPersistWal(): Promise<void> {
-  if (walTimer != null) { clearTimeout(walTimer); walTimer = null; }
-  if (walPending.length > 0) {
-    const batch = walPending.splice(0);
-    walChain = walChain
-      .then(() => walAppendBatch(batch.map(toStorable)))
-      .catch(err => console.warn('[persist] WAL write failed:', err));
-  }
-  return walChain;
+  return flushOutboxWrites();
 }
 
 // ── Flush ────────────────────────────────────────────────────────────────────
@@ -234,23 +207,23 @@ export async function flushPersistQueue(): Promise<void> {
   finally { inFlightFlush = null; }
 }
 
-/** One flush pass: take the queue, make its WAL rows durable, push, ack. */
+/** One flush pass: take the queue, make its outbox rows durable, push, ack. */
 async function runFlush(hook: PersistHook): Promise<void> {
-  // Take the batch first: every entry in it had its WAL row queued before
-  // this point, so the WAL flush below covers all of them.
+  // Take the batch first: every entry in it had its outbox row queued before
+  // this point, so the outbox flush below covers all of them.
   const batch = queue.splice(0);
   byKey.clear();
 
-  // WAL before network: every live-op row must be durable before it is sent.
-  await flushPersistWal();
+  // Outbox before network: every row must be durable before it is sent.
+  await flushOutboxWrites();
 
   try {
     const seqs = await hook(batch.map(e => ({ type: e.type, payload: e.payload, changeId: e.changeId })));
     retryAttempt = 0;
     reportNetworkSuccess();
     for (let i = 0; i < batch.length; i++) batch[i]!.resolve?.(seqs[i]);
-    // Ack only entries the server returned a sequence number for; the rest
-    // stay in the WAL so the next load's recovery retries them idempotently.
+    // Report entries the server returned a sequence number for; the rest stay
+    // in the outbox so the sync engine retries them idempotently.
     if (persistAckHook) {
       const acked: string[] = [];
       for (let i = 0; i < batch.length; i++) {
@@ -272,7 +245,7 @@ async function runFlush(hook: PersistHook): Promise<void> {
 /**
  * Put a failed batch back in front of newer entries, keeping its order.
  * Coalesced entries are dropped if a newer payload for their key arrived
- * meanwhile (that newer entry's WAL row already replaced theirs).
+ * meanwhile (that newer entry's outbox row already replaced theirs).
  */
 function requeueFront(batch: PersistEntry[]): void {
   const keep: PersistEntry[] = [];
@@ -304,9 +277,9 @@ export function hasPendingCommandPersist(): boolean {
 
 /**
  * Drop all pending entries without resolving callers' data. Used on project
- * switch to discard ops queued against the previous project. Their WAL rows
- * (already written or flushed here) stay and are recovered on that project's
- * next load. Callers that want them on the server now must
+ * switch to discard ops queued against the previous project. Their outbox
+ * rows (already written or flushed here) stay and are synced on that
+ * project's next open. Callers that want them on the server now must
  * `await flushPersistQueue()` first.
  */
 export function clearPersistQueue(): void {
@@ -316,8 +289,8 @@ export function clearPersistQueue(): void {
   if (flushTimer != null) { clearTimeout(flushTimer); flushTimer = null; }
   retryScheduled = false;
   retryAttempt = 0;
-  // Keep durability: write any still-pending live-op rows of the old project.
-  void flushPersistWal();
+  // Keep durability: write any still-queued rows of the old project.
+  void flushOutboxWrites();
 }
 
 // ── Connectivity ─────────────────────────────────────────────────────────────
@@ -328,10 +301,3 @@ onReconnect(() => {
   retryScheduled = false;
   if (queue.length > 0) scheduleFlush();
 });
-
-// Tab hidden (mobile app switch, close): persist pending WAL rows right away.
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void flushPersistWal();
-  });
-}

@@ -1,15 +1,16 @@
-import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { InMemoryProjectStore } from '~/utils/persistence/project-store/in-memory-project-store';
 
 type PersistQueue = typeof import('~/utils/persistence/persist-queue');
-type Wal = typeof import('~/utils/persistence/wal');
+type OutboxWriter = typeof import('~/utils/persistence/outbox-writer');
 type Connectivity = typeof import('~/utils/sync/connectivity');
 
 /** Sent batch as seen by the hook. */
 type Sent = Array<{ type: string; payload: any; changeId?: string }>;
 
 let pq: PersistQueue;
-let wal: Wal;
+let writer: OutboxWriter;
+let store: InMemoryProjectStore;
 let conn: Connectivity;
 let projectId: string;
 let counter = 0;
@@ -24,8 +25,10 @@ beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   conn = await import('~/utils/sync/connectivity');
-  wal = await import('~/utils/persistence/wal');
+  writer = await import('~/utils/persistence/outbox-writer');
   pq = await import('~/utils/persistence/persist-queue');
+  store = new InMemoryProjectStore();
+  writer.setOutboxStoreForTests(store);
   conn.reportNetworkSuccess();
   projectId = `project-${++counter}`;
   pq.setPersistProjectId(projectId);
@@ -35,8 +38,14 @@ afterEach(() => {
   pq.clearPersistQueue();
   pq.setPersistHook(null);
   pq.setPersistAckHook(null);
+  writer.setOutboxStoreForTests(null);
   vi.useRealTimers();
 });
+
+/** Pending outbox rows of the current project. */
+function outboxRows() {
+  return store.getOutbox(projectId);
+}
 
 /** Wire a hook that records batches and returns sequence numbers. */
 function wireHook(impl?: (batch: Sent) => Promise<Array<number | undefined>>) {
@@ -48,15 +57,16 @@ function wireHook(impl?: (batch: Sent) => Promise<Array<number | undefined>>) {
     return batch.map(() => ++seq);
   });
   pq.setPersistHook(hook);
-  pq.setPersistAckHook((ids) => { void wal.walMarkAcked(ids); });
+  // The sync engine acks in production; the tests ack via the hook.
+  pq.setPersistAckHook((ids) => { void store.ackOutbox(ids); });
   return { sent, hook };
 }
 
-describe('persist queue — WAL (D8)', () => {
-  it('writes a live-op to the WAL with a changeId before sending it', async () => {
+describe('persist queue — outbox (D8)', () => {
+  it('writes a live-op to the outbox with a changeId before sending it', async () => {
     let rowsAtSend: string[] = [];
     const { sent } = wireHook(async (batch) => {
-      rowsAtSend = (await wal.walGetPending(projectId)).map(r => r.id);
+      rowsAtSend = (await outboxRows()).map(r => r.id);
       return batch.map((_, i) => i + 1);
     });
 
@@ -66,12 +76,12 @@ describe('persist queue — WAL (D8)', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]![0]).toMatchObject({ type: 'engine.bpm', changeId });
     expect(rowsAtSend).toEqual([changeId]);
-    // Acked → removed from the WAL.
+    // Acked → removed from the outbox.
     await settle();
-    expect(await wal.walGetPending(projectId)).toEqual([]);
+    expect(await outboxRows()).toEqual([]);
   });
 
-  it('coalesces by dedupKey: the superseded changeId is never pushed nor kept in the WAL', async () => {
+  it('coalesces by dedupKey: the superseded changeId is never pushed nor kept in the outbox', async () => {
     const { sent } = wireHook(async () => { throw new TypeError('Failed to fetch'); });
 
     const first = pq.enqueueLiveOp('engine.bpm', { bpm: 100 }, 'engine.bpm');
@@ -79,7 +89,7 @@ describe('persist queue — WAL (D8)', () => {
     const second = pq.enqueueLiveOp('engine.bpm', { bpm: 140 }, 'engine.bpm');
     await pq.flushPersistWal(); // …and gets replaced by the second one
 
-    const rows = await wal.walGetPending(projectId);
+    const rows = await outboxRows();
     expect(rows.map(r => r.id)).toEqual([second]);
     expect(rows[0]).toMatchObject({ kind: 'live-op', dedupKey: 'engine.bpm', payload: { bpm: 140 } });
 
@@ -104,8 +114,27 @@ describe('persist queue — WAL (D8)', () => {
     wireHook();
     pq.enqueueLiveOp('x', { a: 1, fn: () => 1 }, 'x');
     await pq.flushPersistWal();
-    const rows = await wal.walGetPending(projectId);
+    const rows = await outboxRows();
     expect(rows[0]!.payload).toEqual({ a: 1 });
+  });
+
+  it('writes history commands immediately, in order with earlier live-ops', async () => {
+    wireHook(async batch => batch.map(() => undefined));
+    const op = pq.enqueueLiveOp('engine.bpm', { bpm: 90 }, 'engine.bpm');
+    pq.enqueuePersist({ type: 'CmdA', payload: { a: 1 }, changeId: 'cmd-a' });
+    // No settle-window wait: the command flushed the whole batch.
+    await settle();
+    const rows = await outboxRows();
+    expect(rows.map(r => r.id)).toEqual([op, 'cmd-a']);
+    expect(rows[1]).toMatchObject({ kind: 'command', type: 'CmdA' });
+  });
+
+  it('writes no outbox rows for local-only projects', async () => {
+    pq.setPersistProjectId(projectId, { outbox: false });
+    pq.enqueueLiveOp('engine.bpm', { bpm: 90 }, 'engine.bpm');
+    pq.enqueuePersist({ type: 'CmdA', payload: {}, changeId: 'cmd-a' });
+    await pq.flushPersistWal();
+    expect(await outboxRows()).toEqual([]);
   });
 
   it('reports pending history commands (not live-ops)', () => {
@@ -177,11 +206,11 @@ describe('persist queue — backoff + connectivity (D9)', () => {
     expect(hook).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps unacknowledged WAL rows when the server returns no sequence number', async () => {
+  it('keeps unacknowledged outbox rows when the server returns no sequence number', async () => {
     wireHook(async batch => batch.map(() => undefined));
     const id = pq.enqueueLiveOp('x', { v: 1 }, 'x');
     await pq.flushPersistQueue();
     await settle();
-    expect((await wal.walGetPending(projectId)).map(r => r.id)).toEqual([id]);
+    expect((await outboxRows()).map(r => r.id)).toEqual([id]);
   });
 });
