@@ -24,6 +24,7 @@ import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { useDistributionToolStore } from '~/stores/distribution-tool-store';
+import { useCanvasHoverStore } from '~/stores/canvas-hover-store';
 import OrderTool from './distribution/OrderTool.vue';
 import DistributionOverlay from './distribution/DistributionOverlay.vue';
 
@@ -341,7 +342,7 @@ function handleMouseDown(e: MouseEvent) {
   // Middle-mouse or space-drag pans the viewport — stop following
   if (e.button === 1) liveBus.followedSessionId = null;
   // Swap handles sit on top of the fixture bodies, so they win over select/drag.
-  if (onSwapMouseDown(e, rect())) { updateCursor(e); return; }
+  if (onSwapMouseDown(e, rect())) { updateHoveredFixture(e); updateCursor(e); return; }
   onViewportMouseDown(e, rect());
 }
 
@@ -391,8 +392,30 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown, { capture: true });
 });
+// ─── Hover (mirrored as a row highlight in the scene sidebar) ────────────────
+const canvasHover = useCanvasHoverStore();
+
+/**
+ * Publishes the fixture under the pointer so the sidebar can highlight its row.
+ * During a swap drag the grabbed fixture is always under the pointer, so the
+ * swap partner (or nothing) is published instead.
+ */
+function updateHoveredFixture(e: MouseEvent) {
+  const drag = swapDrag.value;
+  if (drag) {
+    canvasHover.setHovered(drag.targetId !== null ? String(drag.targetId) : null, true);
+    return;
+  }
+  const r = rect();
+  canvasHover.setHovered(fixtureCanvas.value?.hitTest(e.clientX - r.left, e.clientY - r.top) ?? null);
+}
+
+onBeforeUnmount(() => canvasHover.setHovered(null));
+
 function handleMouseMove(e: MouseEvent) {
-  if (onSwapMouseMove(e, rect())) { updateCursor(e); return; }
+  // Swap state first, so the hover reflects this move's partner.
+  if (onSwapMouseMove(e, rect())) { updateHoveredFixture(e); updateCursor(e); return; }
+  updateHoveredFixture(e);
   onMouseMove(e, rect());
   const t = interaction.value.type;
   if (t === 'drag' || t === 'rotate' || t === 'kind-handle') fixtureCanvas.value?.sync();
@@ -416,8 +439,14 @@ function handleMouseMove(e: MouseEvent) {
   }
 }
 function handleMouseUp(e?: MouseEvent) {
+  if (e?.type === 'mouseleave') canvasHover.setHovered(null);
   // Leaving the viewport cancels a swap preview instead of committing it.
-  if (onSwapMouseUp(e?.type === 'mouseleave')) { if (e) updateCursor(e); else cursor.value = 'default'; return; }
+  if (onSwapMouseUp(e?.type === 'mouseleave')) {
+    // Drag ended: back to plain hover of whatever is under the pointer.
+    if (e && e.type !== 'mouseleave') updateHoveredFixture(e); else canvasHover.setHovered(null);
+    if (e) updateCursor(e); else cursor.value = 'default';
+    return;
+  }
   const t = interaction.value.type;
   const wasInteracting = t === 'drag' || t === 'rotate';
   onMouseUp();

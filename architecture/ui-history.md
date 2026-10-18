@@ -67,6 +67,6 @@ Domain inputs (faders, number fields, color/XY inputs, tap tempo, trigger button
 
 `FixtureSidebar.vue` provides a navigable tree of all fixtures and groups with:
 
-- **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor.
+- **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor. Hovering a fixture in the 2D canvas highlights its row (`canvas-hover-store.ts`), also inside a selected group, and scrolls it into view.
 - **Preset/programmer tab** — Active preset management.
 - **Selection info** — Average X/Y position for multi-selections; full channel details (address, type, manufacturer, model) for single selections.

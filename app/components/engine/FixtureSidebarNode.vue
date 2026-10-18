@@ -20,6 +20,7 @@ import PmListItem from '~/components/primitives/PmListItem.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { fixtureView } from '~/utils/extensions/scope-views';
 import { useScopeSnapshot } from '~/composables/extensions/use-scope';
+import { useCanvasHoverStore } from '~/stores/canvas-hover-store';
 
 const props = defineProps<{
   node: SceneNode;
@@ -45,6 +46,23 @@ const isSelected = computed(() => props.selectedIds.has(props.node.id));
 const fixtureScope = provideScope('fixture', () => (isGroup.value ? undefined : fixtureView(props.node as Fixture)));
 /** Scopes captured when opening the context menu (slot `context-menu/fixture|group:items`). */
 const scopeSnapshot = useScopeSnapshot({ fixture: fixtureScope });
+
+// Canvas hover: the row of the fixture under the 2D-canvas pointer gets its own
+// highlight, so a single member stays identifiable while its group is selected.
+const canvasHover = useCanvasHoverStore();
+// Selected rows normally skip it (already highlighted) — except for the swap
+// partner during a swap drag, whose fixtures are usually all selected.
+const isCanvasHovered = computed(() =>
+  !isGroup.value
+  && (!isSelected.value || canvasHover.isSwapTarget)
+  && canvasHover.hoveredFixtureId === String(props.node.id),
+);
+const rowEl = ref<{ $el?: HTMLElement } | null>(null);
+
+// Keep the hovered row visible in long lists ('nearest' = no scroll when already in view).
+watch(isCanvasHovered, (hovered) => {
+  if (hovered) rowEl.value?.$el?.scrollIntoView?.({ block: 'nearest' });
+});
 
 const isExpanded = ref(isGroup.value ? (props.node as FixtureGroup).expanded : false);
 
@@ -181,7 +199,13 @@ useShortcuts([
 <template>
   <!-- ─── Fixture (leaf) node ─────────────────────────────────────────────── -->
   <PmListItem v-if="!isGroup" id="fixture" :as="SidebarMenuItem" :manual="['badges', 'actions']" v-slot="{ Badges, Actions }">
-    <SidebarMenuButton :is-active="isSelected" @click="handleSelect" @contextmenu.prevent="onContextMenu">
+    <SidebarMenuButton
+      ref="rowEl"
+      :is-active="isSelected"
+      :class="isCanvasHovered && (isSelected ? 'bg-muted-foreground/30!' : 'bg-muted-foreground/15')"
+      @click="handleSelect"
+      @contextmenu.prevent="onContextMenu"
+    >
       <Spotlight class="w-4 h-4 mr-2" @dblclick.stop="emit('zoomTo', node)" />
       <input
         v-if="isEditing"
