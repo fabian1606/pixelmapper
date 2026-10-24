@@ -265,3 +265,28 @@ The kind appears as a card in **Add Fixture** and in the library under its categ
 Extensions persist small JSON state with `ctx.run(ctx.commands.setExtensionData({ owner: 'fixture' | 'project' | 'liveWidget', ownerId, key, value }))`; it is stored at `owner.extensionData[extensionId][key]` and undone like any command.
 
 Using extension data or kinds keeps the extension in the project's `requires` (see “Project requirements and the open gate” above).
+
+## Fixture patching (API 1.3)
+
+Added for the Art-Net/RDM work (plan M4) but generic: nothing here knows a protocol. API: `packages/extension-api/src/patch.ts` (helpers, guard, observation, lookup) and `commands.ts` (commands).
+
+**Definitions and sources.** A fixture definition is identified by a key: `'<manufacturer>/<fixture>'` for the Open Fixture Library, `'custom/<id>'` for the user's custom fixtures (`app/utils/fixture-definitions/definition-keys.ts`). Fixtures built from a definition store `source: { key, modeIndex }` (`Fixture.source`, persisted in snapshots and `AddFixtures` payloads, exposed as `FixtureView.source`); library fixtures also get `oflKey`. `resolveFixtureDefinition(key)` loads custom definitions through the accessor and OFL definitions from `/api/fixtures/<mf>/<fixture>` (cached); `createFixtureFromDefinition(resolved, modeIndex)` builds the fixture and records the source. Custom fixtures are read and written only through `app/utils/fixture-definitions/custom-fixtures.ts` (`getCustomFixtures`, `saveCustomFixture`, …; storage is still `localStorage['pixelmapper:customFixtures']`, to move to the user account later).
+
+**Commands** (core command factory, `app/utils/extensions/core-command-factory.ts`):
+
+| Command | Core implementation |
+|---|---|
+| `addFixtures(items) → Promise<AddFixturesCommand>` (`fixtureIds` known before it runs) | `buildFixtures` → `placeNewFixtures` (`app/utils/engine/add-fixtures.ts`, shared with the add dialog: ids, explicit or appended addresses, centre + 0.02 cascade) → `AddFixturesCommand`; selects the new fixtures on its first local run |
+| `setStartAddress({ fixtureId, startAddress })` | `UpdateDmxCommand` |
+| `setFixtureMode({ fixtureId, modeIndex }) → Promise<Command>` | `buildSetFixtureModeCommand` (`app/utils/fixture-definitions/fixture-mode.ts`) → `SetFixtureModeCommand`: swaps channels, beams, source, definition and lens of the fixture **in place** (identity, id, name, position, size, address, group and extension data stay; programmed values carry over per head and channel type); serializable (`SetFixtureMode`, payload holds both mode states) |
+| `batch(commands, description?)` | `createBatchCommand` (`commands/batch-command.ts`): one history entry, children in order, undo in reverse, all-or-nothing on errors; serializable `Batch` when all children are. Replay builds each child right before it runs, so a child may refer to fixtures added by an earlier one (`SetExtensionData` resolves its fixture through the live tree). `requires` bookkeeping and the open gate look inside batches (`flattenCommandTypes`). |
+
+The inspector shows a **Mode** select (`FixtureModeSelect.vue`) for fixtures with a source.
+
+**Free addresses.** `findFreeAddressSpan(fixtures, footprint, count, { ignore?, universe? })` (`app/utils/engine/free-address.ts`) is the add dialog's search; `universe` keeps the span inside one universe (else `null`). `listFixtures()` gives `FixtureSummary[]` outside components.
+
+**Change guard** (`onBeforeFixtureChange`, host: `app/utils/extensions/fixture-change-guard.ts`). Core UI paths that change a fixture's start address, universe or mode — the inspector's U/A fields (`SelectionInfoSection.vue`), the address grid drag (`AddressGrid.vue`) and the Mode select — call `requestFixtureChanges([{ fixtureId, before, after }])` before running their command. All guards are asked; any `deny` wins (message as a warning toast), otherwise all `confirm` messages appear in one core confirm dialog (`requestConfirm()` in `app/composables/use-confirm-dialog.ts`, rendered by `ConfirmDialogHost.vue` in `app.vue`). Commands never consult guards, so `ctx.run`, undo/redo, collaborator changes and replays are never blocked.
+
+**Change observation** (`onFixturePatchChange`, host: `app/utils/extensions/fixture-patch-observer.ts`). While subscribed, the host keeps a baseline of every fixture's patch state (`FixturePatchState`: start address, universe, local address, channel count, mode index) and diffs it after each history step (`onHistoryApplied` in `use-history.ts`: `local`, `undo`, `redo`, `remote` for `executeRemote`). Changes (including fixtures that appear/disappear) are delivered per step in a microtask, filtered by `fixtureIds` (list or getter); `initiator` is the extension whose `ctx.run`/`api.run` ran the step. Project loads replace the state outside the history; `loadProject` calls `rebaseFixturePatchObservation()`, so a load is never reported.
+
+**Lookup by RDM IDs** (`findFixtureDefinitionByRdm(manufacturerId, modelId)`, `app/utils/fixture-definitions/rdm-lookup.ts`): custom fixtures first (`ofl.pixelmapper.rdmManufacturerId` + `ofl.rdm.modelId`), then OFL through `GET /api/fixtures/rdm?manufacturerId=&modelId=` (`server/api/fixtures/rdm.get.ts`: manufacturers' `rdmId`, fixtures' `rdm.modelId`). Returns the key, all modes with channel counts and `modeByPersonality` from the modes' `rdmPersonalityIndex`. The custom fixture editor imports OFL JSON files and edits these RDM fields (manufacturer ID, model ID, personality per mode).

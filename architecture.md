@@ -50,6 +50,7 @@ pixelmapper/
 │       ├── persistence/           # Snapshots, change log, `.pmproject` archives
 │       ├── connectors/            # Connector registry + engine packet encoders
 │       ├── controllers/           # Registry-driven controller catalog
+│       ├── fixture-definitions/   # Definition keys, custom fixture accessor, definition resolution, mode changes, RDM lookup
 │       └── ofl/                   # Open Fixture Library import
 ├── extensions/                    # First-party extensions (Nuxt layers; Bun workspace)
 │   ├── color-picker/ pan-tilt/ connector-artnet/   # distribution set (layered into every build)

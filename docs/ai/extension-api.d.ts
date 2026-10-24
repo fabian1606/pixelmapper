@@ -14,6 +14,7 @@ declare module '@pixelmapper/extension-api' {
    */
 
 
+
   /** An undoable operation. Mirrors the core `Command` interface. */
   export interface Command {
       /** Human-readable description shown in history UI. */
@@ -79,6 +80,41 @@ declare module '@pixelmapper/extension-api' {
       max: number;
   }
   /**
+   * One fixture to add with `commands.addFixtures` (plan M4.1). Give exactly
+   * one of `definition` or `kind`.
+   */
+  export interface AddFixtureItem {
+      /**
+       * Definition to build the fixture from: an OFL key `'<manufacturer>/<fixture>'`
+       * or a custom fixture `'custom/<id>'` (e.g. `RdmDefinitionMatch.key`).
+       */
+      definition?: FixtureDefinitionKey;
+      /** A fixture kind instead of a definition. */
+      kind?: {
+          id: string;
+          config?: Json;
+      };
+      /** 0-based mode of `definition` (default 0; ignored for kinds). */
+      modeIndex?: number;
+      /**
+       * Absolute 1-based DMX start address (universe = ⌊(startAddress − 1) / 512⌋ + 1).
+       * Omitted: appended after the highest used address, like the add dialog.
+       * Overlaps are allowed (the caller decides how to flag them).
+       */
+      startAddress?: number;
+      /** Display name (default: the definition's / kind's name). */
+      name?: string;
+  }
+  /**
+   * Command returned by `commands.addFixtures`. The ids of the new fixtures are
+   * known before the command runs, so further commands for them can be
+   * composed into the same undo step with `commands.batch`.
+   */
+  export interface AddFixturesCommand extends SerializableCommand {
+      /** Ids of the fixtures this command adds, in item order. */
+      readonly fixtureIds: readonly FixtureId[];
+  }
+  /**
    * Typed constructors of core commands available to extensions. The list is
    * part of the versioned API. Each call returns a `Command` that is executed
    * with `ctx.run(command)`.
@@ -111,6 +147,53 @@ declare module '@pixelmapper/extension-api' {
           ofl?: string;
           position: Vec2;
       }): Command;
+      /**
+       * Add fixtures from definitions (OFL / custom) or kinds — the same add path
+       * as the add-fixture dialog: placed at the centre with a diagonal cascade,
+       * one undo step, and added to the selection when the command first runs.
+       * Async because OFL definitions are loaded on demand; rejects when a
+       * definition or mode does not exist, a kind is not installed or an address
+       * is invalid. Available from API 1.3.
+       *
+       * To store extension data on the new fixtures in the same undo step,
+       * batch it (`setExtensionData` resolves its fixture when it runs):
+       *
+       * @example
+       * const add = await ctx.commands.addFixtures([
+       *   { definition: match.key, modeIndex: match.modeByPersonality[personality], startAddress: 1 },
+       * ]);
+       * ctx.run(ctx.commands.batch([
+       *   add,
+       *   ...add.fixtureIds.map(id => ctx.commands.setExtensionData({ owner: 'fixture', ownerId: id, key: 'link', value: { uid } })),
+       * ], 'Add devices'));
+       */
+      addFixtures(items: readonly AddFixtureItem[]): Promise<AddFixturesCommand>;
+      /**
+       * Set a fixture's absolute 1-based DMX start address (this also sets its
+       * universe). Not guarded by `onBeforeFixtureChange`. Available from API 1.3.
+       */
+      setStartAddress(args: {
+          fixtureId: FixtureId;
+          startAddress: number;
+      }): Command;
+      /**
+       * Switch a fixture created from a definition (`FixtureView.source`) to
+       * another mode of that definition. Rebuilds channels and heads; id, name,
+       * position, address, group and extension data stay. Async because the
+       * definition may have to be loaded; rejects for fixtures without a source
+       * or unknown modes. Available from API 1.3.
+       */
+      setFixtureMode(args: {
+          fixtureId: FixtureId;
+          modeIndex: number;
+      }): Promise<Command>;
+      /**
+       * Combine commands into ONE undo step, executed in order and undone in
+       * reverse; if one fails the earlier ones are rolled back. Persisted and
+       * synced as one change when every command is serializable (all core
+       * commands and registered extension commands are). Available from API 1.3.
+       */
+      batch(commands: readonly Command[], description?: string): Command;
       /** Write namespaced extension data. */
       setExtensionData(args: SetExtensionDataArgs): Command;
       /** Rename a scene node. */
@@ -620,6 +703,8 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
+
   /** The implementation of the API composables, provided by the host. */
   export interface HostApi {
       /** Semver of the API the host implements. */
@@ -635,6 +720,16 @@ declare module '@pixelmapper/extension-api' {
       registerExtension(manifest: ExtensionManifest): void;
       /** Platform-dependent I/O (UDP, serial, MIDI); see ADR 0003. */
       platform: Platform;
+      /** Free DMX address search (API 1.3, `patch.ts`). */
+      findFreeAddressSpan(fixtures: readonly AddressOccupant[], footprint: number, count: number, options?: FindFreeAddressOptions): number | null;
+      /** All fixtures of the project (API 1.3). */
+      listFixtures(): FixtureSummary[];
+      /** Registers a patch change guard (API 1.3). */
+      onBeforeFixtureChange(guard: FixtureChangeGuard): () => void;
+      /** Subscribes to patch changes (API 1.3). */
+      onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
+      /** Definition lookup by RDM IDs (API 1.3). */
+      findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
   }
   /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */
   export interface SharedGlobals {
@@ -926,7 +1021,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.2.0";
+  export const API_VERSION = "1.3.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1219,6 +1314,216 @@ declare module '@pixelmapper/extension-api' {
   export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>>;
   /** Default `pm.*` input per param type (D13). */
   export const PARAM_DEFAULT_INPUT: Readonly<Record<ParamType, PmInputName>>;
+
+  // ── packages/extension-api/src/patch.ts ─────────────────────────
+  /**
+   * Fixture patching (plan M4, API 1.3).
+   *
+   * Read-only helpers and hooks around a fixture's DMX patch — its start
+   * address (and so its universe) and the mode of its definition:
+   *
+   * - `findFreeAddressSpan` / `listFixtures` — free address search,
+   * - `onBeforeFixtureChange` — guard address/universe/mode changes the user
+   *   makes in the core UI (confirm or deny them),
+   * - `onFixturePatchChange` — observe patch changes from any source (local
+   *   edits, undo/redo, collaborators),
+   * - `findFixtureDefinitionByRdm` — find a fixture definition (custom fixtures,
+   *   then the Open Fixture Library) by RDM manufacturer and model ID.
+   *
+   * Writes go through commands: `commands.addFixtures`,
+   * `commands.setStartAddress`, `commands.setFixtureMode`, `commands.batch`.
+   */
+
+
+  /**
+   * Key of a fixture definition: an Open Fixture Library fixture
+   * `'<manufacturer>/<fixture>'` (e.g. `'cameo/flat-pro-18'`) or a custom
+   * fixture of the user `'custom/<id>'`.
+   */
+  export type FixtureDefinitionKey = string;
+  /** The definition and mode a fixture was created from (see `FixtureView.source`). */
+  export interface FixtureSourceRef {
+      /** Definition key. */
+      key: FixtureDefinitionKey;
+      /** 0-based index into the definition's modes. */
+      modeIndex: number;
+  }
+  /** One mode of a definition found by `findFixtureDefinitionByRdm`. */
+  export interface RdmDefinitionMode {
+      /** 0-based mode index (`AddFixtureItem.modeIndex`, `commands.setFixtureMode`). */
+      index: number;
+      /** Mode name from the definition. */
+      name: string;
+      /**
+       * Number of channels the core creates for the mode. Unused (`null`) slots
+       * of an OFL mode are not counted, so this can be lower than the DMX
+       * footprint a device reports.
+       */
+      channelCount: number;
+      /** 1-based RDM personality of the mode, when the definition declares one. */
+      rdmPersonalityIndex?: number;
+  }
+  /** A fixture definition found by RDM IDs. */
+  export interface RdmDefinitionMatch {
+      /** Definition key to pass to `commands.addFixtures`. */
+      key: FixtureDefinitionKey;
+      /** Custom fixture of the user or Open Fixture Library fixture. */
+      source: 'custom' | 'ofl';
+      /** Definition name. */
+      name: string;
+      /** Manufacturer display name (`''` for custom fixtures). */
+      manufacturer: string;
+      /** All modes, in definition order. */
+      modes: RdmDefinitionMode[];
+      /**
+       * RDM personality (1-based) → 0-based mode index. Only modes that declare
+       * `rdmPersonalityIndex` appear; when several declare the same personality
+       * the first one wins.
+       */
+      modeByPersonality: Record<number, number>;
+  }
+  /**
+   * Finds the fixture definition of a device by its RDM manufacturer ID and
+   * device model ID (both 0–0xFFFF): the user's custom fixtures first, then the
+   * Open Fixture Library (manufacturer `rdmId`, fixture `rdm.modelId`).
+   * Resolves `null` when nothing matches, the IDs are invalid or the library
+   * is unreachable.
+   */
+  export function findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
+  /** Anything that occupies DMX channels (e.g. a `FixtureSummary`). */
+  export interface AddressOccupant {
+      /** Fixture id, matched by `FindFreeAddressOptions.ignore`. */
+      id?: FixtureId;
+      /** 1-based absolute start address. */
+      startAddress: number;
+      /** Number of channels from `startAddress`. */
+      channelCount: number;
+  }
+  /** Options of `findFreeAddressSpan`. */
+  export interface FindFreeAddressOptions {
+      /** Occupants to skip, e.g. the fixtures being re-addressed. */
+      ignore?: readonly FixtureId[];
+      /**
+       * 1-based universe the whole span must lie in. Without it the search runs
+       * over the absolute address space (like the add dialog) and the span may
+       * cross a universe boundary.
+       */
+      universe?: number;
+  }
+  /**
+   * First absolute start address (1-based) of a gap of `footprint * count`
+   * channels not used by `fixtures` — the same search the add-fixture dialog
+   * uses. Returns `null` only when `options.universe` is given and the span
+   * does not fit into that universe.
+   *
+   * @example
+   * // Free address for one 12-channel device in universe 2, ignoring itself.
+   * const start = findFreeAddressSpan(listFixtures(), 12, 1, { universe: 2, ignore: [fixtureId] });
+   */
+  export function findFreeAddressSpan(fixtures: readonly AddressOccupant[], footprint: number, count: number, options?: FindFreeAddressOptions): number | null;
+  /**
+   * Snapshot of all fixtures of the project in scene order (like the
+   * `project` scope's `fixtures`, usable outside components).
+   */
+  export function listFixtures(): FixtureSummary[];
+  /** The patch of a fixture at one moment. */
+  export interface FixturePatchState {
+      /** 1-based absolute start address. */
+      startAddress: number;
+      /** 1-based universe (derived from `startAddress`). */
+      universe: number;
+      /** 1-based address inside the universe (derived from `startAddress`). */
+      localAddress: number;
+      /** Number of channels. */
+      channelCount: number;
+      /** 0-based mode index; `undefined` for fixtures without a known definition. */
+      modeIndex?: number;
+  }
+  /** A patch change the user is about to make in the core UI. */
+  export interface FixtureChangeRequest {
+      fixtureId: FixtureId;
+      /** Patch now. */
+      before: FixturePatchState;
+      /** Patch after the change. */
+      after: FixturePatchState;
+  }
+  /**
+   * Answer of a guard:
+   * - `allow` — no objection (returning nothing means the same),
+   * - `confirm` — the core asks the user with `message`; the change happens only if they confirm,
+   * - `deny` — the change does not happen; `message` is shown to the user.
+   */
+  export type FixtureChangeVerdict = {
+      action: 'allow';
+  } | {
+      action: 'confirm';
+      /** Explanation shown in the confirm dialog. */
+      message: string;
+      /** Dialog title (default "Change fixture patch?"). */
+      title?: string;
+      /** Label of the confirm button (default "Change anyway"). */
+      confirmLabel?: string;
+  } | {
+      action: 'deny';
+      message?: string;
+  };
+  /** A guard; may be async. Exceptions count as `allow` (logged). */
+  export type FixtureChangeGuard = (change: FixtureChangeRequest) => FixtureChangeVerdict | void | Promise<FixtureChangeVerdict | void>;
+  /**
+   * Registers a guard evaluated before the core UI changes a fixture's start
+   * address, universe or mode (inspector fields, address grid drag, Mode
+   * select). All guards run; any `deny` wins, otherwise all `confirm` messages
+   * are shown in one core confirm dialog.
+   *
+   * Guards never block commands run programmatically (`ctx.run`, extension
+   * code), undo/redo, collaborator changes or replays. Returns the
+   * unregister function.
+   *
+   * @example
+   * onBeforeFixtureChange((change) => {
+   *   if (change.before.universe !== change.after.universe && isLinked(change.fixtureId)) {
+   *     return { action: 'confirm', message: 'This fixture is bound to a physical output port.' };
+   *   }
+   * });
+   */
+  export function onBeforeFixtureChange(guard: FixtureChangeGuard): () => void;
+  /**
+   * How a patch change reached the model: a command executed in this app
+   * (`local`, by the user or an extension), undo, redo, or a collaborator's
+   * change (`remote`).
+   */
+  export type FixturePatchChangeOrigin = 'local' | 'undo' | 'redo' | 'remote';
+  /** One observed patch change. */
+  export interface FixturePatchChange {
+      fixtureId: FixtureId;
+      /** Patch before; `null` when the fixture appeared (added, undo of a delete). */
+      before: FixturePatchState | null;
+      /** Patch after; `null` when the fixture disappeared (deleted, undo of an add). */
+      after: FixturePatchState | null;
+      origin: FixturePatchChangeOrigin;
+      /**
+       * Id of the extension whose `ctx.run` / `api.run` executed the change
+       * (`local` origin only); `undefined` for the core UI.
+       */
+      initiator?: string;
+  }
+  /** Options of `onFixturePatchChange`. */
+  export interface FixturePatchObserverOptions {
+      /**
+       * Fixtures to observe: a list, or a function returning the current list
+       * (evaluated per change). Default: all fixtures.
+       */
+      fixtureIds?: readonly FixtureId[] | (() => Iterable<FixtureId>);
+  }
+  /**
+   * Subscribes to patch changes (start address, universe, channel count, mode)
+   * of fixtures, whatever caused them: local commands, undo/redo and
+   * collaborator changes. Loading a project is not a change. The callback
+   * gets all changes of one history step together, asynchronously (a
+   * microtask after the step), so it may run commands. Returns the
+   * unsubscribe function.
+   */
+  export function onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
 
   // ── packages/extension-api/src/platform.ts ──────────────────────
   /** Which runtime the app is running in. */
@@ -1670,6 +1975,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** A project dependency on an extension (ADR D20). */
   export interface ProjectRequirement {
       /** Extension id. */
@@ -1795,6 +2101,11 @@ declare module '@pixelmapper/extension-api' {
       fixtureType: string;
       /** OFL key (`manufacturer/fixture`) if created from the library. */
       oflKey?: string;
+      /**
+       * Definition (OFL or custom fixture) and mode the fixture was created from
+       * (API 1.3). Absent for kind fixtures and fixtures added before it existed.
+       */
+      source?: FixtureSourceRef;
       channels: ChannelView[];
       beams: BeamView[];
       /** Kind reference if generated by a fixture kind. */

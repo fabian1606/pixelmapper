@@ -13,6 +13,7 @@ This guide is self-contained: hand it (together with `packages/extension-api/src
 | Support a hardware controller (MIDI grid …) | `controllers` | [Add a controller](#add-a-controller) |
 | Add a live-mode widget | `liveWidgets` | [Add a live widget](#add-a-live-widget) |
 | Persist own state / own undoable operations | `setExtensionData`, `commands` | [State and commands](#state-and-commands) |
+| Add fixtures from definitions, change address/mode, guard or observe patch changes | `ctx.commands`, `onBeforeFixtureChange`, `onFixturePatchChange` | [Patch fixtures](#patch-fixtures-api-13) |
 
 ## Rules (enforced)
 
@@ -217,11 +218,60 @@ Menu entries need no component — use `menuItem` in an `:items` slot:
 | `setChannelValues({ fixtureId, values: [{ channelIndex, value }], description? })` | programmed static values |
 | `setChannelRange({ fixtureId, channelIndex, min, max })`, `setChannelRanges({ changes })` | output range limits |
 | `setFixtureKindConfig({ fixtureId, config })` | replace a kind fixture's config (rebuilds) |
-| `addFixture({ kind: { id, config? }, position })` | add a kind fixture (OFL fixtures go through the library) |
+| `addFixture({ kind: { id, config? }, position })` | add one kind fixture at a position |
+| `addFixtures(items)` → `Promise<AddFixturesCommand>` | add fixtures from definitions (OFL / custom) or kinds, like the add dialog; `fixtureIds` known up front (API 1.3) |
+| `setStartAddress({ fixtureId, startAddress })` | absolute DMX start address (sets the universe too) (API 1.3) |
+| `setFixtureMode({ fixtureId, modeIndex })` → `Promise<Command>` | switch a definition fixture to another mode (API 1.3) |
+| `batch(commands, description?)` | several commands as ONE undo step (API 1.3) |
 | `setExtensionData({ owner, ownerId?, key, value })` | namespaced JSON state (see below) |
 | `rename({ nodeId, name })`, `move({ moves })`, `rotate({ fixtureId, rotation })` | scene edits |
 
 Run every command with `ctx.run(command)`: that gives undo/redo, persistence and live collaboration.
+
+## Patch fixtures (API 1.3)
+
+For connectors and tools that manage the DMX patch (e.g. devices discovered on the network). Requires `apiVersion: '^1.3.0'`.
+
+**Definitions.** A definition key is `'<manufacturer>/<fixture>'` (Open Fixture Library) or `'custom/<id>'` (the user's custom fixtures). Fixtures built from a definition expose `fixture.source = { key, modeIndex }` in their view. Find the definition of a device by its RDM IDs — custom fixtures first, then the library:
+
+```ts
+import { findFixtureDefinitionByRdm } from '@pixelmapper/extension-api';
+
+const match = await findFixtureDefinitionByRdm(0x7ff0, 1);
+// { key: 'custom/custom-…', source: 'custom', name, manufacturer, modes: [{ index, name, channelCount, rdmPersonalityIndex? }],
+//   modeByPersonality: { 1: 0, 2: 1, … } }   — null when nothing matches
+```
+
+**Add fixtures + your data as one undo step.** `addFixtures` is async (library definitions load on demand) and returns a command that already knows the new ids; `batch` combines it with `setExtensionData`:
+
+```ts
+const add = await ctx.commands.addFixtures(devices.map(d => ({
+  definition: match.key,
+  modeIndex: match.modeByPersonality[d.personality] ?? 0,
+  startAddress: d.address,             // absolute, 1-based; omit to append like the add dialog
+  name: d.label,
+})));
+ctx.run(ctx.commands.batch([
+  add,
+  ...add.fixtureIds.map((id, i) => ctx.commands.setExtensionData({ owner: 'fixture', ownerId: id, key: 'device', value: { uid: devices[i]!.uid } })),
+], 'Add all devices'));
+```
+
+New fixtures are placed at the centre with a small diagonal cascade and selected, exactly like the add dialog. Overlapping addresses are allowed — flag them yourself.
+
+**Addresses and modes.** `ctx.commands.setStartAddress({ fixtureId, startAddress })`, `await ctx.commands.setFixtureMode({ fixtureId, modeIndex })` (keeps id, name, position, address and extension data). Free addresses:
+
+```ts
+import { findFreeAddressSpan, listFixtures } from '@pixelmapper/extension-api';
+
+const start = findFreeAddressSpan(listFixtures(), footprint, 1, { universe: 2, ignore: [fixtureId] }); // null = no room in universe 2
+```
+
+**Guard user changes.** `onBeforeFixtureChange(change => …)` runs before the core UI (inspector address fields, address grid drag, Mode select) changes a fixture's address, universe or mode. Return nothing / `{ action: 'allow' }`, `{ action: 'confirm', message, confirmLabel? }` (core dialog; default button "Change anyway") or `{ action: 'deny', message? }`. `change.before` / `change.after` are `FixturePatchState`s (`startAddress`, `universe`, `localAddress`, `channelCount`, `modeIndex`). Guards never block `ctx.run`, undo/redo or collaborators — derive state such as "unlinked" from the fixture (e.g. its universe) instead of from the guard answer.
+
+**Observe patch changes.** `onFixturePatchChange(changes => …, { fixtureIds })` reports every change of start address, universe, channel count or mode — local commands (`origin: 'local'`, `initiator` = extension id when run through `ctx.run`), `undo`, `redo` and collaborators (`remote`); `before`/`after` is `null` when a fixture appears/disappears. Callbacks run a microtask after the history step, so they may run commands; opening a project is not reported. Typical use: push the new address/mode to a device for local changes, and ignore changes your own extension initiated in response to the device.
+
+Both hooks return an unsubscribe function; register them in `activate` (return a disposer) or in a component's setup.
 
 ## Add a fixture kind
 
