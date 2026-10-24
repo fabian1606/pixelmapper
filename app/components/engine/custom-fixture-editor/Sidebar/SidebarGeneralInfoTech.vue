@@ -7,6 +7,7 @@ import {
   DMX_CONNECTORS,
   type FormFieldDescriptor,
 } from '~/utils/engine/custom-fixture-types';
+import SidebarRdmInfo from './SidebarRdmInfo.vue';
 
 const props = defineProps<{
   formState: CustomFixtureFormState;
@@ -70,5 +71,8 @@ function sectionLabel(fields: FormFieldDescriptor[], idx: number): string | unde
         </SelectContent>
       </Select>
     </template>
+
+    <!-- RDM identification (plan M4.7) — not part of GENERAL_INFO_FIELDS (AI extraction schema) -->
+    <SidebarRdmInfo :form-state="formState" @update:form-state="emit('update:formState', $event)" />
   </div>
 </template>

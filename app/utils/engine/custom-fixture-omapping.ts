@@ -22,6 +22,21 @@
  *
  * Consecutive perHead:true ModeEntries are grouped back into a single
  * OflMatrixChannelInsert when building the OFL output.
+ *
+ * A run of plain strings naming template instances ("Red 1", "Green 1", …,
+ * "Blue 4") that covers every pixel in a regular order is folded into a
+ * per-head group on load as well (custom-fixture-template-runs.ts), so
+ * imported definitions keep their templateChannels/matrix structure on save.
+ *
+ * # RDM identification (plan M4.7)
+ *
+ * | OFL field                       | Form field                          |
+ * |---------------------------------|-------------------------------------|
+ * | pixelmapper.rdmManufacturerId   | state.rdmManufacturerId             |
+ * | rdm.modelId / rdm.softwareVersion | state.rdmModelId / rdmSoftwareVersion |
+ * | modes[i].rdmPersonalityIndex    | ModeDraft.rdmPersonalityIndex       |
+ *
+ * Unset fields are omitted from the OFL output (no `undefined` keys).
  */
 
 import type {
@@ -43,6 +58,12 @@ import type {
 import { resolveOflChannel } from '~/utils/ofl/capability-map';
 import type { ChannelType } from '~/utils/engine/types';
 import { CHANNEL_CAPABILITY_TYPES } from '~/utils/engine/custom-fixture-channel-types';
+import {
+  collectPixelKeysRowMajor,
+  foldTemplateRun,
+  resolveTemplateRef,
+  type TemplateRef,
+} from '~/utils/engine/custom-fixture-template-runs';
 
 // Set of all editor ChannelType enum values — used for idempotency guard in oflCapToEditorType
 const EDITOR_TYPE_SET = new Set<string>(CHANNEL_CAPABILITY_TYPES);
@@ -214,6 +235,16 @@ function parseOflCapabilities(ch: OflChannel): CapabilityRange[] {
   });
 }
 
+/** True for a valid RDM manufacturer / model ID (16-bit unsigned integer). */
+function isRdmId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff;
+}
+
+/** True for a valid RDM personality index (1-based positive integer). */
+function isRdmPersonalityIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
 /**
  * Clamps OFL's `dmxValueResolution` to the subset the editor supports.
  * '24bit' is degraded to '16bit' — this is a display/editing limitation only.
@@ -341,7 +372,13 @@ export function buildOflFixture(
       }
     }
 
-    return { name: m.name, channels: modeChannels };
+    // RDM personality (plan M4.7): only written when set, so an unset field
+    // does not leave an `rdmPersonalityIndex: undefined` key behind.
+    return {
+      name: m.name,
+      ...(isRdmPersonalityIndex(m.rdmPersonalityIndex) ? { rdmPersonalityIndex: m.rdmPersonalityIndex } : {}),
+      channels: modeChannels,
+    };
   });
 
   // ── Build wheels ──────────────────────────────────────────────────────────
@@ -401,6 +438,15 @@ export function buildOflFixture(
       lastModifyDate: new Date().toISOString().split('T')[0]!,
     },
     comment: state.comment || undefined,
+    // RDM model ID (+ preserved software version); omitted when no model ID is set.
+    ...(isRdmId(state.rdmModelId)
+      ? {
+          rdm: {
+            modelId: state.rdmModelId,
+            ...(state.rdmSoftwareVersion ? { softwareVersion: state.rdmSoftwareVersion } : {}),
+          },
+        }
+      : {}),
     physical: {
       dimensions: [state.fixtureWidth, state.fixtureHeight, state.fixtureDepth],
       weight: state.weight || undefined,
@@ -433,6 +479,9 @@ export function buildOflFixture(
           }
         : undefined,
     pixelmapper: {
+      // Custom fixtures have no OFL manufacturer entry, so the RDM
+      // manufacturer ID lives in the definition; omitted when not set.
+      ...(isRdmId(state.rdmManufacturerId) ? { rdmManufacturerId: state.rdmManufacturerId } : {}),
       headLayout: {
         headCount: effectiveHeadCount,
         gridCols: matrixCols,
@@ -497,6 +546,10 @@ export function initFromOflFixture(ofl: OflFixture) {
     colorTemperature: ofl.physical?.bulb?.colorTemperature || 0,
     beamAngleMin: ofl.physical?.lens?.degreesMinMax?.[0] || 0,
     beamAngleMax: ofl.physical?.lens?.degreesMinMax?.[1] || 0,
+    // RDM identification (plan M4.7); `null` / '' = not set.
+    rdmManufacturerId: isRdmId(ofl.pixelmapper?.rdmManufacturerId) ? ofl.pixelmapper!.rdmManufacturerId! : null,
+    rdmModelId: isRdmId(ofl.rdm?.modelId) ? ofl.rdm!.modelId : null,
+    rdmSoftwareVersion: ofl.rdm?.softwareVersion ?? '',
   };
 
   const rawCategory = ofl.categories?.[0];
@@ -551,14 +604,73 @@ export function initFromOflFixture(ofl: OflFixture) {
     }
   }
 
+  // ── Pixel grid ────────────────────────────────────────────────────────────
+  // Restore from OFL matrix.pixelCount ([cols, rows, layers]).
+  // Falls back to 1×1 for single-head fixtures that have no matrix block.
+  // (Computed before the modes: folding explicit pixel channels needs headCount.)
+  const pixelCols = ofl.matrix?.pixelCount?.[0] ?? 1;
+  const pixelRows = ofl.matrix?.pixelCount?.[1] ?? 1;
+  const headCount = Math.max(
+    1,
+    ofl.pixelmapper?.headLayout?.headCount
+      ?? ofl.pixelmapper?.customSvg?.headCount
+      ?? ((pixelCols || 1) * (pixelRows || 1)),
+  );
+
+  // Pixel keys of the source matrix in head order. Explicitly listed pixel
+  // channels ("Red 1", "Green 1", …) are only folded into a per-head group when
+  // the matrix has exactly one pixel per editor head, so the DMX footprint of
+  // every mode stays the same after saving.
+  const sourcePixelKeys = collectPixelKeysRowMajor(ofl.matrix);
+  const canFoldPixelRuns = sourcePixelKeys.length > 0 && sourcePixelKeys.length === headCount;
+  const sourcePixelKeySet = new Set(sourcePixelKeys);
+
+  /**
+   * Tries to fold the run of explicit per-pixel references starting at
+   * `start` into perHead entries (see custom-fixture-template-runs.ts).
+   * Returns the entries and how many mode items they consumed, or `null`.
+   */
+  function foldPixelRunAt(items: OflMode['channels'], start: number) {
+    if (!canFoldPixelRuns) return null;
+    const run: TemplateRef[] = [];
+    for (let j = start; j < items.length; j++) {
+      const key = items[j];
+      // A run consists of strings that are no global channel but an
+      // instance of a template channel the editor has a draft for.
+      if (typeof key !== 'string' || ofl.availableChannels?.[key]) break;
+      const ref = resolveTemplateRef(key, ofl, sourcePixelKeySet);
+      if (!ref || !channelIdByKey.has(ref.templateKey)) break;
+      run.push(ref);
+    }
+    const folded = foldTemplateRun(run, sourcePixelKeys);
+    if (!folded) return null;
+    const entries: ModeDraft['entries'] = folded.templateKeys.map(templateKey => ({
+      entryId: crypto.randomUUID(),
+      channelId: channelIdByKey.get(templateKey)!,
+      perHead: true,
+      order: folded.order,
+    }));
+    return { entries, consumed: run.length };
+  }
+
   // ── Modes ─────────────────────────────────────────────────────────────────
   const modes: ModeDraft[] = (ofl.modes || []).map((m, i) => {
     const entries: ModeDraft['entries'] = [];
+    const items = m.channels || [];
 
-    for (const item of m.channels || []) {
+    for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
+      const item = items[itemIdx];
       if (!item) continue;
 
       if (typeof item === 'string') {
+        // Explicit per-pixel channels ("Red 1" … "Blue 4") → one per-head group.
+        const folded = foldPixelRunAt(items, itemIdx);
+        if (folded) {
+          entries.push(...folded.entries);
+          itemIdx += folded.consumed - 1;
+          continue;
+        }
+
         // Plain global channel reference
         let channelId = channelIdByKey.get(item);
 
@@ -610,6 +722,8 @@ export function initFromOflFixture(ofl: OflFixture) {
     return {
       id: `mode-${crypto.randomUUID()}`,
       name: m.name || `Mode ${i + 1}`,
+      // RDM personality (plan M4.7); only kept when it is a valid index.
+      ...(isRdmPersonalityIndex(m.rdmPersonalityIndex) ? { rdmPersonalityIndex: m.rdmPersonalityIndex } : {}),
       entries,
     };
   });
@@ -641,17 +755,7 @@ export function initFromOflFixture(ofl: OflFixture) {
     }
   }
 
-  // ── Pixel grid ────────────────────────────────────────────────────────────
-  // Restore from OFL matrix.pixelCount ([cols, rows, layers]).
-  // Falls back to 1×1 for single-head fixtures that have no matrix block.
-  const pixelCols = ofl.matrix?.pixelCount?.[0] ?? 1;
-  const pixelRows = ofl.matrix?.pixelCount?.[1] ?? 1;
-  const headCount = Math.max(
-    1,
-    ofl.pixelmapper?.headLayout?.headCount
-      ?? ofl.pixelmapper?.customSvg?.headCount
-      ?? ((pixelCols || 1) * (pixelRows || 1)),
-  );
+  // ── Custom SVG ────────────────────────────────────────────────────────────
   const customSvgData = ofl.pixelmapper?.customSvg?.data ?? null;
   const useCustomSvg = Boolean(ofl.pixelmapper?.customSvg?.enabled && customSvgData);
   const headToElementMap = ofl.pixelmapper?.customSvg?.headToElement ?? {};
