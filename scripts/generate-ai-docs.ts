@@ -32,7 +32,7 @@ const DOCUMENTED_SLOT_PATTERNS = [
   'modifiers:header|before|after', 'modifiers/modifier:badges|actions', 'modifiers/add:items',
   'presets:header|before|after', 'presets/preset:badges|actions',
   'library:header|before|after', 'library/categories:items', 'library/<manufacturer>:items', 'add-fixture/sources:items',
-  'header:start|end', 'live:start|end', 'context-menu/<fixture|group|channel|preset>:items',
+  'header:start|end', 'live:start|end', 'connections/outputs:before', 'context-menu/<fixture|group|channel|preset>:items',
 ];
 
 // ── Declarations ─────────────────────────────────

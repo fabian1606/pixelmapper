@@ -1371,6 +1371,7 @@
       "add-fixture/sources:items",
       "header:start|end",
       "live:start|end",
+      "connections/outputs:before",
       "context-menu/<fixture|group|channel|preset>:items"
     ],
     "positions": {

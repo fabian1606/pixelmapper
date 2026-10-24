@@ -61,8 +61,34 @@ export default defineExtension({
 
 | Extension | Set | Connectors |
 |---|---|---|
-| `connector-artnet` | distribution | `artnet`: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to a local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
+| `connector-artnet` | distribution | `artnet-node` (one connector per Art-Net 4 node found by the bridge `pmnet serve`, see below) and `artnet` — “ArtNet (manual target)”: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to the old local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
 | `connector-esp` | catalog | `serial` (ESP32 DMX node over platform serial — Web Serial or native, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
+
+### Art-Net nodes (`extensions/connector-artnet`, plan M5)
+
+All Art-Net 4 / RDM packets, timers and procedures live in the Rust bridge **`pmnet serve`** (crate `pixelmapper-net`, hardware repo). The extension sends intents and receives state over the [bridge WebSocket protocol](artnet-bridge-ws-protocol.md) and never builds packets.
+
+```
+connector-artnet
+├── bridge/            contract mirror + client (public surface: bridge/index.ts)
+│   ├── backend.ts           ArtNetBackend interface, BackendState, DmxTarget, BridgeCommandError
+│   ├── ws-bridge-backend.ts WsBridgeBackend: one WebSocket per app, hello/version check, reconnect with backoff,
+│   │                        command ids/timeouts, events, poll targets, DMX frame sets (dmx-router.ts, frame-set.ts)
+│   ├── node-directory.ts    reactive nodes + TODs from events and the `nodes` snapshot (cleared without bridge)
+│   ├── shared.ts            getArtNetBackend() / getNodeDirectory() / startArtNetDiscovery(), bridge URL setting
+│   └── testing/             FakeArtNetBackend, FakeBridgeSocket, fixtures (for tests of later milestones)
+├── node/              artnet-node connector, output ports + mapping, status, suggestions, dismissals
+├── host-connectors.ts adapter for host features the API lacks (adding a connector, user key) — temporary
+└── components/        NodeSuggestions (slot), NodeConnectorSettings, NodePortTable, BridgeStatusHint, …
+```
+
+- **Backend seam.** UI and connectors use only `ArtNetBackend` (`request(type, args)`, `on(event, cb)`, `sendDmx(target, data)`, `addPollTarget(ip)`, reactive `state`). `WsBridgeBackend` is used in the browser and the desktop app; a native backend (embedded `pixelmapper-net` via Tauri) can replace it with `installArtNetBackend()` without touching UI code. One instance per app; the manifest's `activate` starts it, so discovery runs while the extension is active.
+- **States.** `idle`, `connecting`, `connected` (after `hello` + client `hello`), `unreachable` (retry 1 s → 30 s backoff, *“start pmnet serve”*), `incompatible` (protocol major differs → *“Bridge update needed”* / app too old; no `hello` within 3 s → another program, e.g. the old bridge), `unsupported` (Safari: *“Art-Net discovery is not supported in Safari”*). The bridge URL (default `ws://127.0.0.1:7777`) is a per-device setting in the hint (`pm:artnet:bridge-url`).
+- **`artnet-node` connector** (D6): config `{ nodeId (UID, else mac:…), ip, manual, ports: ['1.0', …], outputMapping }`. Outputs = the node's output ports in BindIndex order (the Pixelmapper Node: 4 ports, one per BindIndex); default universe = Port-Address + 1 (D7), changed ports are reconciled by port key. Status: `connected` when the bridge is connected and the node answers; `connecting` + message while the node is offline or the bridge is not running; `error` when the bridge is incompatible/unsupported (Retry = reconnect now). Always connected (`alwaysConnected`): the bridge connection is shared, so the host connects it on add/restore and calls `disconnect` only on remove. What the connector learns (node id after an add by IP, IP changes, ports) is persisted by its settings component while the card is open.
+- **DMX out** (M5.4): `sendFrame(universe)` → `backend.sendDmx({ nodeId, portAddress }, data)` for every output port mapped to that universe. The backend collects one rendered frame into one binary frame set (+ `dmxRoutes` when routes change); the bridge sends unicast ArtDmx and a broadcast ArtSync. Fire-and-forget; dropped while the socket is backed up.
+- **Port mapping** (M5.5): per port the universe, the node's Port-Address (read-only) and *Write port address to node* (`artAddress`) — the only write to the node; the new state comes back as a `node` event (D5).
+- **Suggestions** (M5.2): contributed into the core slot `connections/outputs:before`: *Art-Net node found: name · IP — Connect / Dismiss* for discovered output nodes without a connector, *Add by IP* (the bridge then polls that IP), and the bridge hint. Dismissals: `pm:artnet:dismissed-nodes:<user key>`.
+- **Pending core API** (workaround in `host-connectors.ts`): extensions cannot add connector instances or read the current user. Until `connectors.add(connector)` and the user id exist in `@pixelmapper/extension-api`, *Connect* uses the host's Pinia store `connections` and dismissals use the user key `local`. Without the store, the user adds the node with *+ Art-Net node* and picks it in the connector's node picker.
 
 ### ESP firmware protocol (`extensions/connector-esp/protocol.ts`)
 

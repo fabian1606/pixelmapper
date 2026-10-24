@@ -93,13 +93,14 @@ Slots already exist and need no core change: `scene/fixture:badges` (fixture row
 
 ## M5 — Plugin: nodes and DMX (this repo, `extensions/connector-artnet`)
 
-- [ ] **M5.1 Bridge client.** + `bridge-client.ts`: one shared WebSocket to `pmnet serve` per app (not per connector), reconnect, version check ("Bridge update needed"), typed commands/events per contract. No packet code.
-- [ ] **M5.2 Node suggestions.** Discovery runs whenever the extension is active. Connectors page → Outputs: "Art-Net node found: *<short name> · <IP>* — Connect / Dismiss". Nodes already connected are not suggested. Manual add by IP. If the bridge is unreachable: hint with download link and `pmnet serve` command (Safari: unsupported notice).
+- [x] **M5.1 Bridge client.** + `bridge/` (`ArtNetBackend` interface, `WsBridgeBackend`, `NodeDirectory`, contract types): one shared WebSocket to `pmnet serve` per app (not per connector), reconnect, version check ("Bridge update needed"), typed commands/events per contract. No packet code.
+- [x] **M5.2 Node suggestions.** Discovery runs whenever the extension is active. Connectors page → Outputs: "Art-Net node found: *<short name> · <IP>* — Connect / Dismiss". Nodes already connected are not suggested. Manual add by IP. If the bridge is unreachable: hint with download link and `pmnet serve` command (Safari: unsupported notice).
   **Files:** + `components/NodeSuggestions.vue`, slot on the connectors page (~ `app/pages/project/[id]/connections.vue`, generic slot id, no Art-Net in core).
-- [ ] **M5.3 Node connector.** ~ `artnet-connector.ts`: config = node UID (fallback MAC); outputs = node output ports; IP followed from replies; status from Status1/2/3 + port flags. − target IP / broadcast settings.
-- [ ] **M5.4 DMX out.** Frames for mapped universes to the bridge; bridge sends unicast ArtDmx with port-address + sequence, ArtSync after each full frame set.
-- [ ] **M5.5 Port mapping UI (D7).** Per port: Pixelmapper universe (default port-address + 1), node's port-address shown read-only, button "Write port address to node" (ArtAddress).
+- [x] **M5.3 Node connector.** + `node/node-connector.ts` (new type `artnet-node`): config = node UID (fallback MAC); outputs = node output ports; IP followed from replies; status from bridge state + node presence. *Deviation (WP2 decision):* the old `artnet` connector stays unchanged as “ArtNet (manual target)” for existing setups instead of losing its target IP / broadcast settings.
+- [x] **M5.4 DMX out.** Frames for mapped universes to the bridge; bridge sends unicast ArtDmx with port-address + sequence, ArtSync after each full frame set.
+- [x] **M5.5 Port mapping UI (D7).** Per port: Pixelmapper universe (default port-address + 1), node's port-address shown read-only, button "Write port address to node" (ArtAddress).
   *Done when:* Pixelmapper lights tubes through the node on all 4 ports.
+  *Status 2026-10-24:* app side done and tested against a fake bridge (Vitest event replay); the hardware *Done when* is pending `pmnet serve` (M3) and the node. The contract was aligned with `pixelmapper-hardware/protocol/contract.md` (one port per BindIndex, `todControl`, ArtSync broadcast, Physical per connection).
 
 ## M6 — Plugin: discovery, add, patch, status (**v1**)
 

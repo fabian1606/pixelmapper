@@ -102,6 +102,7 @@ Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled i
 - `presets:header|before|after`, `presets/preset:badges|actions`
 - `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items`
 - `header:start|end` (app header), `live:start|end` (live mode toolbar)
+- `connections/outputs:before` (Connectors page, Outputs tab, above the output connectors — e.g. devices found on the network)
 - `context-menu/<id>:items` with `id` ∈ `fixture`, `group`, `channel`, `preset`
 
 `ExtensionSlot` resolves contributions through a memoized index (`slot-matching.ts`; `*` = one segment, `**` = any number), orders them by `priority` (desc) then extension id, evaluates `when` against the scope snapshot, renders each component inside `ExtensionContributionHost` (provides the owning extension id + slot id, isolates render errors) and renders nothing when empty.
