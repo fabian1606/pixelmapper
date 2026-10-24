@@ -13,6 +13,7 @@ import {
   listFixtures,
   onBeforeFixtureChange,
   onFixturePatchChange,
+  saveCustomFixtureDefinition,
   type Command,
   type CoreCommandFactory,
   type FixturePatchChange,
@@ -24,7 +25,7 @@ import { commandFromPayload } from '~/components/engine/commands/serializable-co
 import { Fixture } from '~/utils/engine/core/fixture';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { OflFixture } from '~/utils/ofl/types';
-import { saveCustomFixture, customFixtureKey } from '~/utils/fixture-definitions/custom-fixtures';
+import { saveCustomFixture, customFixtureKey, getCustomFixtures } from '~/utils/fixture-definitions/custom-fixtures';
 import { setDefinitionFetcher } from '~/utils/fixture-definitions/resolve-definition';
 import { setRdmLookupFetcher } from '~/utils/fixture-definitions/rdm-lookup';
 import xbar500 from '~/utils/fixture-definitions/__fixtures__/xbar500-custom.json';
@@ -372,5 +373,41 @@ describe('findFixtureDefinitionByRdm (M4.8)', () => {
     expect(match).toMatchObject({ key: xbarKey, source: 'custom', modeByPersonality: { 1: 0, 2: 1, 3: 2, 4: 3 } });
     expect(match!.modes.map(m => m.channelCount)).toEqual([12, 3, 4, 13]);
     expect(await findFixtureDefinitionByRdm(0x7ff0, 2)).toBeNull();
+  });
+});
+
+describe('saveCustomFixtureDefinition (API 1.4)', () => {
+  /** A generated two-mode definition with RDM IDs. */
+  const generated = {
+    name: 'Acme Bar (RDM)',
+    categories: ['Pixel Bar'],
+    rdm: { modelId: 9 },
+    pixelmapper: { rdmManufacturerId: 0x1234 },
+    availableChannels: {
+      Dimmer: { capability: { type: 'Intensity' } },
+      Red: { capability: { type: 'ColorIntensity', color: 'Red' } },
+    },
+    modes: [
+      { name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] },
+      { name: '2 ch', rdmPersonalityIndex: 2, channels: ['Dimmer', 'Red'] },
+    ],
+  };
+
+  it('stores a new custom fixture that the RDM lookup and addFixtures find', async () => {
+    const key = saveCustomFixtureDefinition(generated);
+    expect(key).toMatch(/^custom\//);
+    const match = await findFixtureDefinitionByRdm(0x1234, 9);
+    expect(match).toMatchObject({ key, source: 'custom', modeByPersonality: { 1: 0, 2: 1 } });
+    const add = await commands.addFixtures([{ definition: key, modeIndex: 1, startAddress: 1 }]);
+    run(add);
+    expect(getFixture(add.fixtureIds[0]!)?.channels).toHaveLength(2);
+  });
+
+  it('never replaces an existing custom fixture and rejects invalid definitions', () => {
+    const first = saveCustomFixtureDefinition(generated);
+    const second = saveCustomFixtureDefinition(generated);
+    expect(second).not.toBe(first);
+    expect(getCustomFixtures().map(c => c.name)).toEqual(expect.arrayContaining(['Acme Bar (RDM)', 'Acme Bar (RDM) (2)']));
+    expect(() => saveCustomFixtureDefinition({ name: 'x' })).toThrow('modes');
   });
 });

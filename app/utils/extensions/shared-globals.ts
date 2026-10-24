@@ -23,6 +23,7 @@ import { createPlatform } from '#platform';
 import { useEngineStore } from '~/stores/engine-store';
 import { findFreeAddressSpan } from '~/utils/engine/free-address';
 import { findFixtureDefinitionByRdm } from '~/utils/fixture-definitions/rdm-lookup';
+import { saveCustomFixtureDefinition } from './custom-definition-api';
 import { fixtureSummaries } from './scope-views';
 import { registerFixtureChangeGuard } from './fixture-change-guard';
 import { subscribeFixturePatchChanges } from './fixture-patch-observer';
@@ -67,6 +68,8 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     onBeforeFixtureChange: registerFixtureChangeGuard,
     onFixturePatchChange: subscribeFixturePatchChanges,
     findFixtureDefinitionByRdm,
+    // Generated definitions as custom fixtures (API 1.4).
+    saveCustomFixtureDefinition,
   };
 
   globalThis.__PIXELMAPPER_SHARED__ = {

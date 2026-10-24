@@ -10,12 +10,14 @@
  * - `onFixturePatchChange` — observe patch changes from any source (local
  *   edits, undo/redo, collaborators),
  * - `findFixtureDefinitionByRdm` — find a fixture definition (custom fixtures,
- *   then the Open Fixture Library) by RDM manufacturer and model ID.
+ *   then the Open Fixture Library) by RDM manufacturer and model ID,
+ * - `saveCustomFixtureDefinition` — store a generated definition as a custom
+ *   fixture of the user (API 1.4).
  *
  * Writes go through commands: `commands.addFixtures`,
  * `commands.setStartAddress`, `commands.setFixtureMode`, `commands.batch`.
  */
-import type { FixtureId } from './model';
+import type { FixtureId, Json } from './model';
 import type { FixtureSummary } from './scopes';
 import { getHostApi } from './host';
 
@@ -81,6 +83,33 @@ export interface RdmDefinitionMatch {
  */
 export function findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null> {
   return getHostApi().findFixtureDefinitionByRdm(manufacturerId, modelId);
+}
+
+/**
+ * Stores a fixture definition in Open Fixture Library JSON format as a NEW
+ * custom fixture of the user (API 1.4) — e.g. one generated from a device's
+ * RDM slot descriptions — so the user can edit it in the custom fixture
+ * editor. Never replaces an existing custom fixture: a name already in use
+ * gets a numeric suffix. Validated like the editor's OFL import (`name`,
+ * non-empty `modes` with `channels`, `availableChannels` and/or
+ * `templateChannels`); every mode must build.
+ *
+ * Set `rdm.modelId`, `pixelmapper.rdmManufacturerId` and the modes'
+ * `rdmPersonalityIndex` so `findFixtureDefinitionByRdm` finds the definition
+ * next time. Returns the key `'custom/<id>'` for `commands.addFixtures`.
+ *
+ * @throws Error when the definition is invalid.
+ *
+ * @example
+ * const key = saveCustomFixtureDefinition({
+ *   name: 'Acme Bar (RDM)', categories: ['Pixel Bar'],
+ *   rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
+ *   availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
+ *   modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
+ * });
+ */
+export function saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey {
+  return getHostApi().saveCustomFixtureDefinition(definition);
 }
 
 // ── Addressing ──────────────────────────────────

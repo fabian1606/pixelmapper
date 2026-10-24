@@ -88,6 +88,19 @@ export function saveCustomFixture(ofl: OflFixture): StoredCustomFixture {
   return entry;
 }
 
+/**
+ * Adds a definition as a NEW custom fixture, never replacing an existing
+ * one (used by extensions, which must not overwrite the user's fixtures).
+ * A name already in use gets a numeric suffix (`'Name (2)'`); `ofl.name`
+ * is updated to match. Returns the stored entry.
+ */
+export function addCustomFixture(ofl: OflFixture): StoredCustomFixture {
+  const names = new Set(readAll().map(c => c.name));
+  let name = ofl.name;
+  for (let n = 2; names.has(name); n++) name = `${ofl.name} (${n})`;
+  return saveCustomFixture(name === ofl.name ? ofl : { ...ofl, name });
+}
+
 /** Removes a custom fixture by id. */
 export function removeCustomFixture(id: string): void {
   writeAll(readAll().filter(c => c.id !== id));
