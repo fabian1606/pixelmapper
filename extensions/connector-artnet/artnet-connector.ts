@@ -26,7 +26,7 @@ function platformUdp(): UdpApi | null {
 }
 
 export class ArtNetConnector extends ConnectorBase {
-  readonly meta = { type: 'artnet', label: 'ArtNet', icon: 'network' };
+  readonly meta = { type: 'artnet', label: 'ArtNet (manual target)', icon: 'network' };
 
   bridgeUrl = ref('ws://localhost:7777');
   targetIp = ref('255.255.255.255');
