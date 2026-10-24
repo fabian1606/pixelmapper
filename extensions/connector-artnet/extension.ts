@@ -18,6 +18,7 @@ import { startArtNetDiscovery } from './bridge/shared';
 import { EXTENSION_VERSION } from './version';
 import ArtNetSettings from './components/ArtNetSettings.vue';
 import NodeConnectorSettings from './components/NodeConnectorSettings.vue';
+import NodeSuggestions from './components/NodeSuggestions.vue';
 
 export default defineExtension({
   id: 'connector-artnet',
@@ -48,6 +49,8 @@ export default defineExtension({
         settings: ArtNetSettings,
       }),
     ],
+    // Discovered nodes without a connector, above the output connectors.
+    slots: [{ slot: 'connections/outputs:before', component: NodeSuggestions }],
   },
   activate: () => startArtNetDiscovery(),
 });
