@@ -11,6 +11,8 @@ import { useHistory, triggerSaveSnapshot } from '~/components/engine/composables
 import { useWorkspaceOperations } from '~/components/engine/composables/use-workspace-operations';
 import { UpdateFixtureTypesCommand } from '~/components/engine/commands/update-fixture-types-command';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
+import { isCustomDefinitionKey } from '~/utils/fixture-definitions/definition-keys';
+import { customFixtureKey, saveCustomFixture } from '~/utils/fixture-definitions/custom-fixtures';
 import AddFixtureDialog from '~/components/engine/AddFixtureDialog.vue';
 import CustomFixtureEditorDialog from '~/components/engine/custom-fixture-editor/CustomFixtureEditorDialog.vue';
 import FixtureWorkspace from '~/components/engine/FixtureWorkspace.vue';
@@ -206,8 +208,18 @@ function handleUpdateFixtureType(newOfl: import('~/utils/ofl/types').OflFixture)
   if (!targetName) return
   const oldInstances = flatFixtures.value.filter(f => f.definition?.name === targetName)
   if (oldInstances.length > 0) {
+    // Instances of a custom fixture keep pointing at its stored definition,
+    // so the edited version is saved under that key (plan M4.3).
+    let customKey: string | null = null
+    const storedKey = () => (customKey ??= customFixtureKey(saveCustomFixture(newOfl)))
     const newInstances = oldInstances.map(old => {
-      const newFixture = createFixtureFromOfl(newOfl)
+      // Keep each instance's mode when the edited definition still has it.
+      const modeIndex = old.source && newOfl.modes[old.source.modeIndex] ? old.source.modeIndex : 0
+      const newFixture = createFixtureFromOfl(newOfl, modeIndex)
+      // Edited custom fixtures keep their source; an edited library fixture no longer matches the library.
+      if (old.source && isCustomDefinitionKey(old.source.key)) newFixture.source = { key: storedKey(), modeIndex }
+      // Extension data (e.g. device links) survives a type edit.
+      if (old.extensionData) newFixture.extensionData = JSON.parse(JSON.stringify(old.extensionData))
       newFixture.id = old.id
       newFixture.name = old.name
       newFixture.fixturePosition = { ...old.fixturePosition }
