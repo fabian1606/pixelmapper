@@ -30,7 +30,7 @@ describe('NodeDirectory', () => {
     expect(dir.findByIp('10.0.0.7')?.nodeId).toBe('7FF0:8A1B2C3D');
     expect(dir.findByIp('2.27.44.61')).toBeUndefined();
 
-    backend.emit({ type: 'tod', ...makeTod('7FF0:8A1B2C3D', 0, ['7FF0:00000002', '7FF0:00000001']) });
+    backend.emit({ type: 'tod', ...makeTod('7FF0:8A1B2C3D', 1, ['7FF0:00000002', '7FF0:00000001']) });
     expect(dir.todOf('7FF0:8A1B2C3D', { bind: 1, index: 0 })?.uids).toEqual(['7FF0:00000001', '7FF0:00000002']);
 
     backend.emit({ type: 'nodeGone', nodeId: '7FF0:8A1B2C3D', lastSeen: 0 });
@@ -41,13 +41,13 @@ describe('NodeDirectory', () => {
 
   it('loads the snapshot on connect and clears when the bridge goes away', async () => {
     const backend = new FakeArtNetBackend(false);
-    backend.handle('nodes', () => ({ nodes: [makeNode(), makeNode({ nodeId: 'mac:00:11:22:33:44:55', uid: null, shortName: 'Other', ip: '2.0.0.9' })], tods: [makeTod('7FF0:8A1B2C3D', 1, ['7FF0:00000003'])] }));
+    backend.handle('nodes', () => ({ nodes: [makeNode(), makeNode({ nodeId: 'mac:00:11:22:33:44:55', uid: null, shortName: 'Other', ip: '2.0.0.9' })], tods: [makeTod('7FF0:8A1B2C3D', 2, ['7FF0:00000003'])] }));
     const dir = new NodeDirectory(backend);
     backend.connect();
     await nextTick();
     await flush();
     expect(dir.list().map(n => n.shortName)).toEqual(['Other', 'PM Node']);
-    expect(dir.todOf('7FF0:8A1B2C3D', { bind: 1, index: 1 })?.uids).toEqual(['7FF0:00000003']);
+    expect(dir.todOf('7FF0:8A1B2C3D', { bind: 2, index: 0 })?.uids).toEqual(['7FF0:00000003']);
 
     backend.disconnect();
     await nextTick();
@@ -66,7 +66,7 @@ describe('NodeDirectory', () => {
     s.answer('nodes', { nodes: [makeNode()], tods: [] });
     await flush();
     for (const msg of [
-      { type: 'tod', ...makeTod('7FF0:8A1B2C3D', 0, ['7FF0:74B6510C']) },
+      { type: 'tod', ...makeTod('7FF0:8A1B2C3D', 1, ['7FF0:74B6510C']) },
       { type: 'node', node: makeNode({ shortName: 'Renamed' }) },
       { type: 'node', node: makeNode({ nodeId: 'mac:02:00:00:00:00:01', uid: null, ip: '2.0.0.20', shortName: 'Second' }) },
       { type: 'nodeGone', nodeId: 'mac:02:00:00:00:00:01', lastSeen: 1 },

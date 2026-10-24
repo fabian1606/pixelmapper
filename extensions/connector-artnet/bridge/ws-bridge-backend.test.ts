@@ -226,7 +226,7 @@ describe('WsBridgeBackend — DMX', () => {
 
     // Next frame: no new routes, no table.
     const tables = s.commands.filter(c => c.type === 'dmxRoutes').length;
-    b.sendDmx({ ip: '2.255.255.255', portAddress: 5 }, new Uint8Array(512));
+    b.sendDmx({ ip: '2.0.0.50', portAddress: 5 }, new Uint8Array(512));
     b.sendDmx({ nodeId: 'A', portAddress: 0 }, new Uint8Array(512));
     await tick();
     expect(s.commands.filter(c => c.type === 'dmxRoutes')).toHaveLength(tables + 1); // the IP route is new

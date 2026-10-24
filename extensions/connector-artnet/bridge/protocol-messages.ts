@@ -116,6 +116,9 @@ export type BridgeEvent = BridgeEventMap[BridgeEventType];
 
 // ── Commands (app → bridge) ────────────────────
 
+/** ArtTodControl commands: AtcFlush, AtcEnd, AtcIncOn, AtcIncOff. */
+export type TodControlAction = 'flush' | 'end' | 'incOn' | 'incOff';
+
 /** Addressing of an RDM request. */
 export interface RdmAddress {
   nodeId: NodeId;
@@ -189,7 +192,7 @@ export interface BridgeCommandMap {
   addPollTarget: { args: { ip: string }; result: Empty };
   removePollTarget: { args: { ip: string }; result: Empty };
   todRequest: { args: { nodeId: NodeId; port: PortRef }; result: Empty };
-  todFlush: { args: { nodeId: NodeId; port: PortRef }; result: Empty };
+  todControl: { args: { nodeId: NodeId; port: PortRef; action: TodControlAction }; result: Empty };
   rdmGet: { args: RdmGetArgs; result: RdmResult };
   rdmSet: { args: RdmSetArgs; result: RdmResult };
   rdmDescribe: { args: RdmAddress & { refresh?: boolean }; result: RdmDeviceDescription };

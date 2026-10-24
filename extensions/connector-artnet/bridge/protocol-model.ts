@@ -14,7 +14,11 @@ export type NodeId = string;
 /** RDM UID, `"MMMM:DDDDDDDD"` uppercase hex. */
 export type RdmUid = string;
 
-/** One port of a node: `BindIndex` of its ArtPollReply + index within that reply. */
+/**
+ * One port of a node: `BindIndex` of its ArtPollReply + index within that
+ * reply. The Pixelmapper Node sends one port per BindIndex (`{bind: 1…4,
+ * index: 0}`); other Art-Net 4 nodes may put up to 4 ports in one reply.
+ */
 export interface PortRef {
   /** BindIndex, 1–255. */
   bind: number;
@@ -94,10 +98,12 @@ export interface PortInputState {
 export interface PortState {
   port: PortRef;
   protocol: 'dmx512' | 'midi' | 'avab' | 'cmx' | 'adb' | 'artnet' | 'dali' | 'unknown';
+  /** PortTypes bit 7 (Art-Net → DMX). */
   canOutput: boolean;
+  /** PortTypes bit 6 (DMX → Art-Net). */
   canInput: boolean;
-  /** Current direction (node contract §3). */
-  direction: 'output' | 'input' | 'none';
+  /** From PortTypes bits 7/6; the current direction for switchable ports (node contract §3). */
+  direction: 'output' | 'input' | 'both' | 'none';
   /** 15-bit Port-Address of the output (Net/Sub/SwOut). */
   outputPortAddress: number;
   /** 15-bit Port-Address of the input (Net/Sub/SwIn). */
@@ -305,6 +311,15 @@ export function parsePortKey(key: string): PortRef | null {
 /** True when both refer to the same port. */
 export function samePort(a: PortRef, b: PortRef): boolean {
   return a.bind === b.bind && a.index === b.index;
+}
+
+/**
+ * Display name of a port: `Port 3` when every port of the node is alone in
+ * its BindIndex (Pixelmapper Node), else `Port 1.2` (BindIndex.port).
+ */
+export function portLabel(port: PortRef, allPorts: readonly PortRef[]): string {
+  const onePerBind = allPorts.every(p => p.index === 0);
+  return onePerBind ? `Port ${port.bind}` : `Port ${port.bind}.${port.index + 1}`;
 }
 
 /** Formats a 15-bit Port-Address as `Net:Sub:Uni` (e.g. `0:1:3`). */

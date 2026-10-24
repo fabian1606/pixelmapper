@@ -42,6 +42,25 @@ export const RDM_NACK_REASON: Readonly<Record<number, string>> = {
   0x000b: 'ACTION_NOT_SUPPORTED',
 };
 
+/**
+ * Device constants of our hardware, copied from
+ * `pixelmapper-hardware/protocol/pids.toml` `[constants]` (the only source
+ * Pixelmapper may hard-code from, node contract §1).
+ */
+export const PM_DEVICE = {
+  /** ESTA prototype manufacturer id of node and tubes. */
+  ESTA_MANUFACTURER: 0x7ff0,
+  /** DEVICE_MODEL_ID of the LED tube (app, bootloader, image trailer). */
+  MODEL_TUBE: 0x0001,
+  /** DEVICE_MODEL_ID of the Pixelmapper Node. */
+  MODEL_NODE: 0x0002,
+  /** Art-Net OEM code of the node prototype (placeholder OemUnknown). */
+  ARTNET_OEM_NODE: 0x00ff,
+} as const;
+
+/** Number range of the node's manufacturer PIDs (`pids.toml`). */
+export const NODE_PID_RANGE = { first: 0x8100, last: 0x81ff } as const;
+
 /** Manufacturer-specific PID range (E1.20 §10). */
 export function isManufacturerPid(pid: number): boolean {
   return pid >= 0x8000 && pid <= 0xffdf;

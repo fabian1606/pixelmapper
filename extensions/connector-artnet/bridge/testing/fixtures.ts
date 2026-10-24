@@ -1,6 +1,9 @@
 /**
  * Builders of contract-shaped test data (nodes, ports, TODs). Used by the
  * extension's tests and the fake backend; not used at runtime.
+ *
+ * The default node is a Pixelmapper Node as the node contract describes it:
+ * 4 ports, one per BindIndex (1–4), Port-Addresses 1–4, OEM 0x00FF.
  */
 import type { NodeState, NodeStatus, PortState, Tod } from '../protocol-model';
 
@@ -13,13 +16,13 @@ export function makeStatus(overrides: Partial<NodeStatus> = {}): NodeStatus {
     rdmCapable: true,
     ubeaPresent: false,
     webConfig: false,
-    dhcpConfigured: false,
+    dhcpConfigured: true,
     dhcpCapable: true,
     portAddress15Bit: true,
     sacnSwitchable: false,
     squawking: false,
-    outputStyleSwitchable: false,
-    rdmSwitchable: false,
+    outputStyleSwitchable: true,
+    rdmSwitchable: true,
     failsafe: 'hold',
     failsafeProgrammable: true,
     llrp: false,
@@ -31,13 +34,13 @@ export function makeStatus(overrides: Partial<NodeStatus> = {}): NodeStatus {
   };
 }
 
-/** One DMX output port (bind 1) with Port-Address `portAddress`. */
-export function makePort(index: number, portAddress: number, overrides: Partial<PortState> = {}): PortState {
+/** One DMX output port at BindIndex `bind` with Port-Address `portAddress`. */
+export function makePort(bind: number, portAddress: number, overrides: Partial<PortState> = {}): PortState {
   return {
-    port: { bind: 1, index },
+    port: { bind, index: 0 },
     protocol: 'dmx512',
     canOutput: true,
-    canInput: true,
+    canInput: false,
     direction: 'output',
     outputPortAddress: portAddress,
     inputPortAddress: portAddress,
@@ -47,7 +50,7 @@ export function makePort(index: number, portAddress: number, overrides: Partial<
   };
 }
 
-/** A 4-port Pixelmapper Node (ports at Port-Address 0–3 unless given). */
+/** A Pixelmapper Node with 4 output ports (BindIndex 1–4, Port-Address 1–4). */
 export function makeNode(overrides: Partial<NodeState> = {}): NodeState {
   return {
     nodeId: '7FF0:8A1B2C3D',
@@ -60,19 +63,19 @@ export function makeNode(overrides: Partial<NodeState> = {}): NodeState {
     nodeReport: '#0001 [0001] OK',
     firmware: 0x0100,
     estaMan: 0x7ff0,
-    oem: 0,
+    oem: 0x00ff,
     ubeaVersion: 0,
     style: 'node',
     refreshRate: 44,
     status: makeStatus(),
-    raw: { status1: 0xe2, status2: 0x0c, status3: 0x28 },
-    ports: [0, 1, 2, 3].map(i => makePort(i, i)),
+    raw: { status1: 0xe2, status2: 0xce, status3: 0x28 },
+    ports: [1, 2, 3, 4].map(bind => makePort(bind, bind)),
     lastSeen: 1_761_336_000_000,
     ...overrides,
   };
 }
 
-/** A TOD of port `index` (bind 1). */
-export function makeTod(nodeId: string, index: number, uids: string[], portAddress = index): Tod {
-  return { nodeId, port: { bind: 1, index }, portAddress, available: true, uids: [...uids].sort() };
+/** A TOD of the port at BindIndex `bind`. */
+export function makeTod(nodeId: string, bind: number, uids: string[], portAddress = bind): Tod {
+  return { nodeId, port: { bind, index: 0 }, portAddress, available: true, uids: [...uids].sort() };
 }
