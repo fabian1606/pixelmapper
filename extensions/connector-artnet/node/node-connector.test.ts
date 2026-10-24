@@ -108,6 +108,28 @@ describe('ArtNetNodeConnector — node binding', () => {
   });
 });
 
+describe('ArtNetNodeConnector — DMX out', () => {
+  it('sends a universe to every port mapped to it, by the node’s Port-Address', async () => {
+    const { backend, deps } = await setup();
+    backend.emit({ type: 'node', node: makeNode() });
+    const c = create({ ...ArtNetNodeConnector.configForNode(makeNode()), outputMapping: [2, 2, 0, 7] }, deps);
+    await c.connect();
+    const data = new Uint8Array(512).fill(3);
+    c.sendFrame(data, 2);
+    c.sendFrame(data, 7);
+    c.sendFrame(data, 5);
+    expect(backend.dmx.map(d => d.target)).toEqual([
+      { nodeId: '7FF0:8A1B2C3D', portAddress: 1 },
+      { nodeId: '7FF0:8A1B2C3D', portAddress: 2 },
+      { nodeId: '7FF0:8A1B2C3D', portAddress: 4 },
+    ]);
+
+    backend.emit({ type: 'nodeGone', nodeId: '7FF0:8A1B2C3D', lastSeen: 0 });
+    c.sendFrame(data, 2);
+    expect(backend.dmx).toHaveLength(3);
+  });
+});
+
 describe('output ports', () => {
   it('reconciles outputs and validates Port-Address writes', () => {
     const node = makeNode();

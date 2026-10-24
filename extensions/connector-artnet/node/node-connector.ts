@@ -6,13 +6,14 @@
  * Outputs = the node's output ports; output `i` maps to a Pixelmapper
  * universe like any connector (default: the port's Port-Address + 1, D7).
  * Status comes from the shared backend and from whether the node answers.
+ * DMX goes through the shared backend, never directly (M5.4).
  */
 import { computed, effectScope, ref, shallowReactive, shallowRef, watch, type ComputedRef, type EffectScope, type Ref, type ShallowRef } from 'vue';
 import { ConnectorBase } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeDirectory } from '../bridge/node-directory';
 import type { NodeId, NodeState, PortRef } from '../bridge/protocol-model';
-import { parsePortKey, portKey } from '../bridge/protocol-model';
+import { parsePortKey, portKey, samePort } from '../bridge/protocol-model';
 import { getArtNetBackend, getNodeDirectory } from '../bridge/shared';
 import { nodeConnectorStatus } from './node-status';
 import { outputPortsOf, reconcileOutputs, sameOutputs } from './output-ports';
@@ -137,6 +138,22 @@ export class ArtNetNodeConnector extends ConnectorBase {
     if ('nodeId' in config) this.nodeId.value = typeof config.nodeId === 'string' && config.nodeId ? config.nodeId : null;
     if ('ip' in config) this.ip.value = typeof config.ip === 'string' && config.ip ? config.ip : null;
     if (typeof config.manual === 'boolean') this.manual.value = config.manual;
+  }
+
+  // ── DMX out (M5.4) ───────────────────────────
+
+  /** Sends the universe to every output port mapped to it (fire-and-forget). */
+  override sendFrame(dmxBuffer: Uint8Array, universe?: number): void {
+    const node = this.node.value;
+    if (!node || !universe) return;
+    const ports = this.ports.value;
+    const mapping = this.outputMapping.value;
+    for (let i = 0; i < ports.length; i++) {
+      if (mapping[i] !== universe) continue;
+      const port = node.ports.find(p => samePort(p.port, ports[i]!));
+      if (!port?.canOutput) continue;
+      this.deps.backend.sendDmx({ nodeId: node.nodeId, portAddress: port.outputPortAddress }, dmxBuffer);
+    }
   }
 
   // ── Internals ────────────────────────────────
