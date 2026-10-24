@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * Settings of an `artnet-node` connector (plan M5.3): bridge hint, node
- * picker while no node is chosen, else the node summary and its ports.
+ * Settings of an `artnet-node` connector (plan M5.3/M5.5): bridge hint,
+ * node picker while no node is chosen, else the node summary and the port
+ * mapping.
  * Later milestones add sections here (device list M6, node configuration M7).
  *
  * What the connector learns from the network (node id after an add by IP,
@@ -12,6 +13,7 @@ import { computed, onMounted, watch } from 'vue';
 import type { ArtNetNodeConnector } from '../node/node-connector';
 import BridgeStatusHint from './BridgeStatusHint.vue';
 import NodePicker from './NodePicker.vue';
+import NodePortTable from './NodePortTable.vue';
 import NodeSummary from './NodeSummary.vue';
 
 const props = defineProps<{ connector: ArtNetNodeConnector }>();
@@ -49,6 +51,9 @@ onMounted(() => {
   <div class="flex flex-col gap-2">
     <BridgeStatusHint compact />
     <NodePicker v-if="!bound" :connector="connector" @change="emit('change', $event)" />
-    <NodeSummary v-else :connector="connector" />
+    <template v-else>
+      <NodeSummary :connector="connector" />
+      <NodePortTable :connector="connector" @change="emit('change', $event)" />
+    </template>
   </div>
 </template>
