@@ -14,9 +14,17 @@ import KindAddForm from './KindAddForm.vue';
 import { listKinds } from '~/utils/kinds/kind-host';
 import { iconByName } from '~/utils/extensions/icons';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
-import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import { findFreeAddressSpan } from '~/utils/engine/free-address';
+import { createFixtureFromDefinition } from '~/utils/fixture-definitions/resolve-definition';
+import {
+  customFixtureKey,
+  getCustomFixtures,
+  removeCustomFixture as removeStoredCustomFixture,
+  saveCustomFixture as saveStoredCustomFixture,
+  type StoredCustomFixture,
+} from '~/utils/fixture-definitions/custom-fixtures';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
@@ -53,7 +61,7 @@ function handleAddKindFixtures(fixtures: Fixture[]) {
   emit('update:open', false);
 }
 
-// ─── LocalStorage ─────────────────────────────────────────────────────────────
+// ─── Recent + custom fixtures ─────────────────────────────────────────────────
 
 interface RecentFixture {
   key: string;
@@ -62,15 +70,7 @@ interface RecentFixture {
   addedAt: number;
 }
 
-interface StoredCustomFixture {
-  id: string;
-  name: string;
-  ofl: OflFixture;
-  createdAt: number;
-}
-
 const RECENT_KEY = 'pixelmapper:recentFixtures';
-const CUSTOM_KEY = 'pixelmapper:customFixtures';
 const MAX_RECENT = 8;
 
 const recentFixtures = ref<RecentFixture[]>([]);
@@ -81,10 +81,8 @@ function loadFromStorage() {
     const r = localStorage.getItem(RECENT_KEY);
     recentFixtures.value = r ? JSON.parse(r) : [];
   } catch { recentFixtures.value = []; }
-  try {
-    const c = localStorage.getItem(CUSTOM_KEY);
-    customFixtures.value = c ? JSON.parse(c) : [];
-  } catch { customFixtures.value = []; }
+  // Custom fixtures only through their accessor (plan M4.7).
+  customFixtures.value = getCustomFixtures();
 }
 
 function saveRecentFixture(summary: FixtureSummary) {
@@ -99,25 +97,17 @@ function saveRecentFixture(summary: FixtureSummary) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(recentFixtures.value));
 }
 
-function saveCustomFixture(ofl: OflFixture) {
-  const existing = customFixtures.value.find(c => c.name === ofl.name);
-  if (existing) {
-    existing.ofl = ofl;
-  } else {
-    const entry: StoredCustomFixture = {
-      id: `custom-${Date.now()}`,
-      name: ofl.name,
-      ofl,
-      createdAt: Date.now(),
-    };
-    customFixtures.value = [entry, ...customFixtures.value];
-  }
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(customFixtures.value));
+/** Saves (upserts by name) a custom fixture definition and refreshes the list. */
+function saveCustomFixture(ofl: OflFixture): StoredCustomFixture {
+  const stored = saveStoredCustomFixture(ofl);
+  customFixtures.value = getCustomFixtures();
+  return stored;
 }
 
+/** Deletes a custom fixture definition and refreshes the list. */
 function removeCustomFixture(id: string) {
-  customFixtures.value = customFixtures.value.filter(c => c.id !== id);
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(customFixtures.value));
+  removeStoredCustomFixture(id);
+  customFixtures.value = getCustomFixtures();
 }
 
 // ─── Fixture Selection State ──────────────────────────────────────────────────
@@ -151,7 +141,11 @@ function editStoredCustomFixture(stored: StoredCustomFixture) {
 
 function handleAddCustomFixtures(fixtures: Fixture[]) {
   const def = fixtures[0]?.definition;
-  if (def) saveCustomFixture(def);
+  if (def) {
+    // Record the stored definition as source so the mode can change later (plan M4.3).
+    const stored = saveCustomFixture(def);
+    for (const f of fixtures) f.source = { key: customFixtureKey(stored), modeIndex: 0 };
+  }
   emit('add', fixtures);
   isCustomFixtureEditorOpen.value = false;
   customFixtureToEdit.value = null;
@@ -181,18 +175,10 @@ function getSelectedFootprint(): number {
   return selectedMode ? selectedMode.channels.length : 1;
 }
 
+/** Suggests the first free address span for the selected mode and amount (shared helper, plan M4.2). */
 function autoAssignFreeAddress() {
-  const footprint = getSelectedFootprint();
-  const requiredSpan = footprint * config.value.amount;
-  const occupiedRanges = engineStore.flatFixtures.map(f => ({
-    start: f.startAddress, end: f.startAddress + f.channels.length - 1,
-  })).sort((a, b) => a.start - b.start);
-
-  let searchStart = 1;
-  for (const range of occupiedRanges) {
-    if (searchStart + requiredSpan - 1 < range.start) break;
-    searchStart = Math.max(searchStart, range.end + 1);
-  }
+  const occupants = engineStore.flatFixtures.map(f => ({ id: f.id, startAddress: f.startAddress, channelCount: f.channels.length }));
+  const searchStart = findFreeAddressSpan(occupants, getSelectedFootprint(), config.value.amount) ?? 1;
   config.value.universe = Math.floor((searchStart - 1) / 512) + 1;
   config.value.address = ((searchStart - 1) % 512) + 1;
 }
@@ -225,7 +211,7 @@ async function selectRecentFixture(recent: RecentFixture) {
 }
 
 function customKey(stored: StoredCustomFixture): string {
-  return `custom/${stored.id}`;
+  return customFixtureKey(stored);
 }
 
 function selectCustomFixture(stored: StoredCustomFixture) {
@@ -258,12 +244,12 @@ function handleAdd() {
       currentUniverse++;
       currentLocalAddress = 1;
     }
-    const fixture = createFixtureFromOfl(
-      fullFixtureData.value,
-      modeIdx,
-      undefined,
-      selectedSummary.value?.manufacturer,
-    );
+    // Shared builder: also records the definition key + mode (plan M4.3).
+    const fixture = createFixtureFromDefinition({
+      key: selectedSummary.value.key,
+      definition: fullFixtureData.value,
+      manufacturer: selectedSummary.value.manufacturer ?? '',
+    }, modeIdx);
     fixture.startAddress = (currentUniverse - 1) * 512 + currentLocalAddress;
     (fixture as any).dmxConfig = { universe: currentUniverse, address: currentLocalAddress };
     if (count > 1) fixture.name = `${fixture.name} ${i + 1}`;

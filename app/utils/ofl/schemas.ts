@@ -612,6 +612,12 @@ export const OflFixtureSchema = z.object({
   modes: z.array(OflModeSchema),
   matrix: OflMatrixSchema.optional(),
   pixelmapper: z.object({
+    /**
+     * RDM (ESTA) manufacturer ID of a custom fixture (plan M4.7). OFL keeps
+     * it per manufacturer (`manufacturers.json` `rdmId`); custom fixtures have
+     * no manufacturer entry, so the ID lives in the definition.
+     */
+    rdmManufacturerId: z.number().int().min(0).max(0xffff).optional(),
     customSvg: z.object({
       enabled: z.boolean().optional(),
       data: z.string(),
