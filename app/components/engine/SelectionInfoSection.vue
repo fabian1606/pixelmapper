@@ -10,6 +10,9 @@ import { UpdateDmxCommand } from './commands/update-dmx-command';
 import SelectionPositionInfo, { type PositionAxis } from './SelectionPositionInfo.vue';
 import SelectionDmxInfo from './SelectionDmxInfo.vue';
 import KindConfigSection from './KindConfigSection.vue';
+import FixtureModeSelect from './FixtureModeSelect.vue';
+import { requestFixtureChanges } from '~/utils/extensions/fixture-change-guard';
+import { patchStateAt, patchStateOf } from '~/utils/extensions/fixture-patch-state';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 
@@ -193,7 +196,14 @@ watch(firstFixture, (fix) => {
   }
 }, { immediate: true });
 
-function updateDmx() {
+/** Resets the address fields to the fixture's current address. */
+function resetDmxFields() {
+  if (!firstFixture.value) return;
+  localAddress.value = firstFixture.value.localAddress;
+  universe.value = firstFixture.value.universe;
+}
+
+async function updateDmx() {
   if (!firstFixture.value) return;
 
   const newGlobalAddress = ((universe.value - 1) * 512) + localAddress.value;
@@ -209,9 +219,21 @@ function updateDmx() {
     if (localStart + firstFixture.value.channels.length - 1 > 512) return;
   }
 
+  // Fixture change guards (plan M4.5) may confirm or deny the change.
+  const fixture = firstFixture.value;
+  const allowed = await requestFixtureChanges([{
+    fixtureId: fixture.id,
+    before: patchStateOf(fixture),
+    after: patchStateAt(newGlobalAddress, fixture.channels.length, fixture.source?.modeIndex),
+  }]);
+  if (!allowed || fixture.startAddress === newGlobalAddress) {
+    resetDmxFields();
+    return;
+  }
+
   history.execute(new UpdateDmxCommand(
-    firstFixture.value,
-    firstFixture.value.startAddress,
+    fixture,
+    fixture.startAddress,
     newGlobalAddress,
   ));
 }
@@ -263,6 +285,10 @@ function updateDmx() {
             @change-universe="updateDmx"
             @change-address="updateDmx"
           />
+        </div>
+        <!-- Definition mode (fixtures created from OFL / custom definitions) -->
+        <div v-if="firstFixture.source" class="pt-2 border-t border-border/30">
+          <FixtureModeSelect :fixture="firstFixture" />
         </div>
         <!-- Fixture-kind config (e.g. strip LEDs, chip, shape) -->
         <div v-if="firstFixture.kind" class="pt-2 border-t border-border/30">

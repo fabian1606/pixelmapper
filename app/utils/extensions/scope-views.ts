@@ -153,6 +153,7 @@ export function fixtureView(fixture: Fixture): FixtureView {
     manufacturer: fixture.manufacturer,
     fixtureType: fixture.fixtureType,
     oflKey: fixture.oflKey,
+    source: fixture.source ? { key: fixture.source.key, modeIndex: fixture.source.modeIndex } : undefined,
     channels: fixture.channels.map((_, i) => channelView(fixture, i)),
     beams,
     kind: fixture.kind ? { id: fixture.kind.id, version: fixture.kind.version, config: jsonClone(fixture.kind.config) as Json } : undefined,

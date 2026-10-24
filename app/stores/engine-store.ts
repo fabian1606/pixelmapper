@@ -18,6 +18,7 @@ import {
   type ProjectSnapshot,
 } from '~/utils/engine/serialize';
 import { commandFromPayload, type ReplayContext } from '~/components/engine/commands/serializable-command';
+import { flattenCommandTypes } from '~/components/engine/commands/batch-command';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
@@ -63,6 +64,11 @@ import {
 } from '~/utils/extensions/requires';
 import semver from 'semver';
 import '~/components/engine/commands/set-extension-data-command';
+// Side-effect imports — register the patch commands (plan M4) for tail replay.
+import '~/components/engine/commands/add-fixture-command';
+import '~/components/engine/commands/update-dmx-command';
+import '~/components/engine/commands/set-fixture-mode-command';
+import { rebaseFixturePatchObservation } from '~/utils/extensions/fixture-patch-observer';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { notify } from '~/composables/use-notifications';
 import { isBuiltinHash } from '~/utils/plugins/builtin-index';
@@ -1058,7 +1064,8 @@ export const useEngineStore = defineStore('engine', () => {
     {
       const required = requirementsToOpen(
         data.snapshot?.requires ?? [],
-        (data.tail ?? []).map((c: { command_type: string }) => c.command_type),
+        // Batches (plan M4.4) are expanded so namespaced children count too.
+        (data.tail ?? []).flatMap((c: { command_type: string; payload: unknown }) => flattenCommandTypes(c.command_type, c.payload)),
       );
       const missing = missingRequirements(required, id => getExtension(id)?.manifest.version, (v, r) => semver.satisfies(v, r));
       missingExtensions.value = missing;
@@ -1139,6 +1146,9 @@ export const useEngineStore = defineStore('engine', () => {
 
       console.warn(`[loadProject] no handler for tail entry "${change.command_type}"`);
     }
+    // The load replaced the scene outside the history: patch observers
+    // (plan M4.6) take the loaded state as their new baseline.
+    rebaseFixturePatchObservation();
     if (tail.length > 0) {
       lastSeenSequenceNumber.value = tail[tail.length - 1].sequence_number;
     } else if (data.snapshot?.sequence_number) {

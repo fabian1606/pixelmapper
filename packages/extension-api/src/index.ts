@@ -21,6 +21,7 @@ export * from './connectors';
 export { ConnectorBase } from './connector-base';
 export { ControllerDriverBase } from './controller-base';
 export * from './commands';
+export * from './patch';
 export * from './manifest';
 export * from './platform';
 export { getHostApi, registerExtension } from './host';

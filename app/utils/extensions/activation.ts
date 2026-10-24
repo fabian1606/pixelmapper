@@ -10,6 +10,7 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 import { useHistory } from '~/components/engine/composables/use-history';
 import { getFixture } from '~/composables/extensions/use-extension-context';
 import { createCoreCommandFactory } from './core-command-factory';
+import { runAsExtension } from './fixture-patch-observer';
 import { registerShape } from '~/utils/params/curve-shapes';
 import { onExtensionRegistered, type RegisteredExtension } from './registry';
 
@@ -31,7 +32,7 @@ export function activateExtension({ manifest }: RegisteredExtension): void {
     const api: ExtensionApi = {
       extensionId: manifest.id,
       commands,
-      run: (command: Command) => useHistory().execute(command as never),
+      run: (command: Command) => runAsExtension(manifest.id, () => useHistory().execute(command as never)),
     };
     const dispose = manifest.activate(api);
     disposers.set(manifest.id, typeof dispose === 'function' ? dispose : () => {});

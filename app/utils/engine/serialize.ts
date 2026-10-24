@@ -126,7 +126,7 @@ export interface ProjectSnapshot {
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
-function serializeChannel(ch: Channel): SerializedChannel {
+export function serializeChannel(ch: Channel): SerializedChannel {
   return {
     type: ch.type,
     addressOffset: ch.addressOffset,
@@ -145,7 +145,7 @@ function serializeChannel(ch: Channel): SerializedChannel {
   }
 }
 
-function serializeBeam(b: Beam): SerializedBeam {
+export function serializeBeam(b: Beam): SerializedBeam {
   return { id: b.id, localX: b.localX, localY: b.localY, localZ: b.localZ }
 }
 
@@ -246,7 +246,7 @@ function migrateLegacyChannel(data: SerializedChannel): { role: Channel['role'];
   return { role: data.role }
 }
 
-function deserializeChannel(data: SerializedChannel): Channel {
+export function deserializeChannel(data: SerializedChannel): Channel {
   const migrated = migrateLegacyChannel(data)
   return {
     type: data.type,

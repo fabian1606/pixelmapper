@@ -75,8 +75,11 @@ export function saveCustomFixture(ofl: OflFixture): StoredCustomFixture {
     writeAll(list);
     return existing;
   }
+  // Time-based id as before; suffixed when two saves share a millisecond.
+  let id = `custom-${Date.now()}`;
+  for (let n = 2; list.some(c => c.id === id); n++) id = `custom-${Date.now()}-${n}`;
   const entry: StoredCustomFixture = {
-    id: `custom-${Date.now()}`,
+    id,
     name: ofl.name,
     ofl,
     createdAt: Date.now(),

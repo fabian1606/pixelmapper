@@ -22,6 +22,37 @@ const commandsSinceSnapshot = ref(0);
 
 export const lastSeenSequenceNumber = ref<number>(0);
 
+// ─── Applied-change listeners ────────────────────────────────────────────────
+
+/**
+ * How a command reached the model: executed locally, undone, redone, or
+ * received from a collaborator (`executeRemote`).
+ */
+export type HistoryOrigin = 'local' | 'undo' | 'redo' | 'remote';
+
+/** Called synchronously after a command was applied through the history. */
+export type HistoryListener = (origin: HistoryOrigin, command: Command) => void;
+
+const listeners = new Set<HistoryListener>();
+
+/**
+ * Subscribes to every command applied through the history (plan M4.6:
+ * fixture patch observation). Returns the unsubscribe function. Listeners
+ * run synchronously and must not execute commands themselves.
+ */
+export function onHistoryApplied(listener: HistoryListener): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** Notifies listeners; one failing listener never breaks the history. */
+function notifyApplied(origin: HistoryOrigin, command: Command): void {
+  for (const listener of listeners) {
+    try { listener(origin, command); }
+    catch (err) { console.warn('[history] listener failed:', err); }
+  }
+}
+
 export interface WalEntryForHooks {
   id: string;
   projectId: string;
@@ -134,6 +165,7 @@ export function useHistory() {
     if (isSerializable(command)) {
       persistOne(command.commandType, command.toPayload(), 'execute');
     }
+    notifyApplied('local', command);
   }
 
   function executeRemote(command: Command) {
@@ -143,6 +175,7 @@ export function useHistory() {
     future.value = [];
     version.value++;
     // No persistence — command came from Realtime, already in DB
+    notifyApplied('remote', command);
   }
 
   function undo() {
@@ -163,6 +196,7 @@ export function useHistory() {
         persistOne(sCmd.commandType, sCmd.toPayload(), 'undo');
       }
     }
+    notifyApplied('undo', command);
   }
 
   function redo() {
@@ -176,6 +210,7 @@ export function useHistory() {
     if (isSerializable(command)) {
       persistOne(command.commandType, command.toPayload(), 'redo');
     }
+    notifyApplied('redo', command);
   }
 
   return { execute, executeRemote, undo, redo, canUndo, canRedo, lastDescription, version };

@@ -14,6 +14,15 @@ import type { LiveFrame, LiveTarget, LiveValueOf, LiveValueOptions, OnFrameOptio
 import type { PmInputName } from './replaceables';
 import type { FixtureView, ScopeName, ScopeRef } from './scopes';
 import type { Platform } from './platform';
+import type { FixtureSummary } from './scopes';
+import type {
+  AddressOccupant,
+  FindFreeAddressOptions,
+  FixtureChangeGuard,
+  FixturePatchChange,
+  FixturePatchObserverOptions,
+  RdmDefinitionMatch,
+} from './patch';
 
 /** The implementation of the API composables, provided by the host. */
 export interface HostApi {
@@ -33,6 +42,21 @@ export interface HostApi {
   registerExtension(manifest: ExtensionManifest): void;
   /** Platform-dependent I/O (UDP, serial, MIDI); see ADR 0003. */
   platform: Platform;
+  /** Free DMX address search (API 1.3, `patch.ts`). */
+  findFreeAddressSpan(
+    fixtures: readonly AddressOccupant[],
+    footprint: number,
+    count: number,
+    options?: FindFreeAddressOptions,
+  ): number | null;
+  /** All fixtures of the project (API 1.3). */
+  listFixtures(): FixtureSummary[];
+  /** Registers a patch change guard (API 1.3). */
+  onBeforeFixtureChange(guard: FixtureChangeGuard): () => void;
+  /** Subscribes to patch changes (API 1.3). */
+  onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
+  /** Definition lookup by RDM IDs (API 1.3). */
+  findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
 }
 
 /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */

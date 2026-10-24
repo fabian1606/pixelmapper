@@ -7,6 +7,7 @@ import GlobalContextMenu from '~/components/GlobalContextMenu.vue';
 import { provideRootScopes } from '~/composables/extensions/provide-root-scopes';
 import ReplacementChoiceDialog from '~/components/extension-host/ReplacementChoiceDialog.vue';
 import ToastStack from '~/components/ToastStack.vue';
+import ConfirmDialogHost from '~/components/ConfirmDialogHost.vue';
 import WindowDragStrip from '~/components/WindowDragStrip.vue';
 import { useAppMenu } from '~/composables/app-menu/use-app-menu';
 
@@ -52,6 +53,8 @@ onBeforeUnmount(() => {
     <GlobalContextMenu />
     <ReplacementChoiceDialog />
     <ToastStack />
+    <!-- Core confirm dialog (requestConfirm, e.g. fixture change guards) -->
+    <ConfirmDialogHost />
     <WindowDragStrip />
   </div>
 </template>

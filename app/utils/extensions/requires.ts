@@ -64,6 +64,12 @@ export function requirementsOfCommand(
   kindOfFixture: (fixtureId: string | number) => string | undefined,
 ): string[] {
   const out = new Set<string>();
+  // A batch (plan M4.4) depends on whatever its children depend on.
+  if (commandType === 'Batch') {
+    const entries = (payload as { commands?: { commandType: string; payload: unknown }[] } | null)?.commands ?? [];
+    for (const e of entries) for (const id of requirementsOfCommand(e.commandType, e.payload, src, kindOfFixture)) out.add(id);
+    return [...out];
+  }
   const owner = commandOwner(commandType, src);
   if (owner) out.add(owner);
 
