@@ -23,8 +23,8 @@ export function defaultUniverse(port: PortState): number {
 
 /**
  * Port-Address that matches a 1-based Pixelmapper universe: the same number
- * (null when out of range, i.e. above 32767). “Write port address to node”
- * writes it.
+ * (null when out of range, i.e. above 32767). The port mapping compares it
+ * with the node's Port-Address to point out a difference.
  */
 export function portAddressForUniverse(universe: number): number | null {
   return universe >= 1 && isPortAddress(universe) ? universe : null;
@@ -46,27 +46,4 @@ export function reconcileOutputs(prevPorts: readonly PortRef[], prevMapping: rea
 export function sameOutputs(aPorts: readonly PortRef[], aMapping: readonly number[], bPorts: readonly PortRef[], bMapping: readonly number[]): boolean {
   return aPorts.length === bPorts.length
     && aPorts.every((p, i) => samePort(p, bPorts[i]!) && aMapping[i] === bMapping[i]);
-}
-
-/**
- * Checks writing new output Port-Addresses (contract `artAddress`): ports of
- * one BindIndex share Net and Sub-Net, so every port of a BindIndex that is
- * not written must keep bits 14–4 equal to the written ones. Returns an
- * error message, or null when the write is allowed.
- */
-export function portAddressWriteError(node: NodeState, writes: readonly { port: PortRef; portAddress: number }[]): string | null {
-  for (const w of writes) {
-    if (!isPortAddress(w.portAddress)) return 'Port-Address out of range (0–32767)';
-    if (!node.ports.some(p => samePort(p.port, w.port))) return 'The node has no such port';
-  }
-  for (const w of writes) {
-    const group = w.portAddress >> 4;
-    for (const other of node.ports) {
-      if (other.port.bind !== w.port.bind) continue;
-      const written = writes.find(x => samePort(x.port, other.port));
-      const address = written ? written.portAddress : other.outputPortAddress;
-      if (address >> 4 !== group) return 'Ports of one node share Net and Sub-Net — write all ports together or pick an address in the same Sub-Net';
-    }
-  }
-  return null;
 }

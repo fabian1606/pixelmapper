@@ -46,4 +46,6 @@ export {
 } from './firmware-version';
 export { FLASH_PHASE_LABELS, TERMINAL_PHASES, describeFlashPhase, flashProgressFraction, isTerminalPhase } from './flash-progress';
 export { describeFlashError, describeJobError, type FlashErrorText } from './firmware-errors';
-export { listNodeTubes, readTubeFirmware, type NodeTube, type TubeDirectory } from './tube-devices';
+export { listNodeTubes, readTubeFirmware, type NodeTube, type TubeDirectory, type TubeReader } from './tube-devices';
+export { installFirmwareRuntime, linkFirmwareToDevices, type FirmwareRuntimeDeps } from './firmware-runtime';
+export { deviceStoreTubeReader, readingFromDevice } from './device-store-reader';

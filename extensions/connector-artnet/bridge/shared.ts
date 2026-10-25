@@ -6,6 +6,7 @@
  * native backend can be installed with `installArtNetBackend` without
  * touching connectors or components.
  */
+import { shallowRef } from 'vue';
 import { getPlatform } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from './backend';
 import { NodeDirectory } from './node-directory';
@@ -75,8 +76,12 @@ export function getNodeDirectory(): NodeDirectory {
   return directory ??= new NodeDirectory(getArtNetBackend());
 }
 
-/** Holders that currently need discovery (see `retainArtNetDiscovery`). */
-let discoveryDemand = 0;
+/**
+ * Holders that currently need discovery (see `retainArtNetDiscovery`).
+ * Reactive, so features that should only run while Art-Net is in use
+ * (e.g. the firmware update manager) can follow it.
+ */
+const discoveryDemand = shallowRef(0);
 
 /**
  * Keeps the shared backend (bridge connection, discovery) running until the
@@ -89,19 +94,19 @@ let discoveryDemand = 0;
 export function retainArtNetDiscovery(): () => void {
   const b = getArtNetBackend();
   getNodeDirectory();
-  if (discoveryDemand++ === 0) b.start();
+  if (discoveryDemand.value++ === 0) b.start();
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    discoveryDemand = Math.max(0, discoveryDemand - 1);
-    if (discoveryDemand === 0) getArtNetBackend().stop();
+    discoveryDemand.value = Math.max(0, discoveryDemand.value - 1);
+    if (discoveryDemand.value === 0) getArtNetBackend().stop();
   };
 }
 
-/** Number of current discovery holders (tests, diagnostics). */
+/** Number of current discovery holders (reactive inside `computed`/`watch`; tests, diagnostics). */
 export function artNetDiscoveryDemand(): number {
-  return discoveryDemand;
+  return discoveryDemand.value;
 }
 
 /**
@@ -113,5 +118,5 @@ export function installArtNetBackend(next: ArtNetBackend | null): void {
   directory?.dispose();
   directory = null;
   backend = next;
-  discoveryDemand = 0;
+  discoveryDemand.value = 0;
 }

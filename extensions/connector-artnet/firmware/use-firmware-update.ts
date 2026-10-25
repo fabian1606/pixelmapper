@@ -14,7 +14,7 @@ import { checkFirmwareEligibility, type FirmwareEligibility, type TubeReading } 
 import { getFirmwareUpdateManager, type FirmwareUpdateManager } from './firmware-update-manager';
 import { formatFirmwareVersion } from './firmware-version';
 import { isItemPending, latestItemOf, type FlashItem } from './flash-item';
-import { listNodeTubes, readTubeFirmware, type NodeTube, type TubeDirectory } from './tube-devices';
+import { listNodeTubes, readTubeFirmware, type NodeTube, type TubeDirectory, type TubeReader } from './tube-devices';
 import { useFirmwareImage } from './use-firmware-image';
 import { useTubeReadings } from './use-tube-readings';
 
@@ -57,7 +57,7 @@ export interface UseFirmwareUpdateOptions {
   /** Default: the manager of `backend`. */
   manager?: FirmwareUpdateManager;
   /** How a tube is read; default DEVICE_INFO + SOFTWARE_VERSION_LABEL via `rdmGet`. */
-  readTube?: (tube: NodeTube) => Promise<TubeReading>;
+  readTube?: TubeReader;
   /** Tubes read at once (default 4). */
   concurrency?: number;
   /** Read tubes automatically (default true). */

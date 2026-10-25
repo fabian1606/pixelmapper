@@ -12,10 +12,9 @@
 import { computed, ref } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeId, RdmUid } from '../bridge/protocol-model';
-import type { TubeReading } from './firmware-eligibility';
 import type { FirmwareUpdateManager } from './firmware-update-manager';
 import { describeImageModel } from './firmware-version';
-import type { NodeTube, TubeDirectory } from './tube-devices';
+import type { TubeDirectory, TubeReader } from './tube-devices';
 import { useFirmwareUpdate, type FirmwareCandidate } from './use-firmware-update';
 import FirmwareUpdateRow from './FirmwareUpdateRow.vue';
 
@@ -26,7 +25,7 @@ const props = defineProps<{
   backend?: ArtNetBackend;
   directory?: TubeDirectory;
   manager?: FirmwareUpdateManager;
-  readTube?: (tube: NodeTube) => Promise<TubeReading>;
+  readTube?: TubeReader;
 }>();
 
 const emit = defineEmits<{

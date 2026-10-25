@@ -10,11 +10,10 @@ import { computed, ref } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeId, RdmUid } from '../bridge/protocol-model';
 import { getArtNetBackend } from '../bridge/shared';
-import type { TubeReading } from './firmware-eligibility';
 import { getFirmwareUpdateManager, type FirmwareUpdateManager } from './firmware-update-manager';
 import { flashProgressFraction } from './flash-progress';
 import { isItemPending } from './flash-item';
-import type { NodeTube, TubeDirectory } from './tube-devices';
+import type { TubeDirectory, TubeReader } from './tube-devices';
 import FirmwareUpdateDialog from './FirmwareUpdateDialog.vue';
 
 const props = withDefaults(defineProps<{
@@ -26,7 +25,7 @@ const props = withDefaults(defineProps<{
   backend?: ArtNetBackend;
   directory?: TubeDirectory;
   manager?: FirmwareUpdateManager;
-  readTube?: (tube: NodeTube) => Promise<TubeReading>;
+  readTube?: TubeReader;
 }>(), { label: 'Update firmware…', backend: undefined, directory: undefined, manager: undefined, readTube: undefined });
 
 const open = ref(false);

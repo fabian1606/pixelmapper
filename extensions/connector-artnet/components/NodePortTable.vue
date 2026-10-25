@@ -1,23 +1,22 @@
 <script setup lang="ts">
 /**
  * Port mapping of an `artnet-node` connector (plan D7, M5.5): per output
- * port the Pixelmapper universe (default = the Port-Address), the node's
- * Port-Address read-only, and “Write port address to node” (ArtAddress)
- * when they differ. Nothing is written to the node without that click.
+ * port the Pixelmapper universe (default = the Port-Address) and the
+ * node's Port-Address, read-only. When they differ the row says so; the
+ * Port-Address itself is written only in the node configuration's Ports
+ * section (M7.3), so there is one place that writes it.
  */
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useScope } from '@pixelmapper/extension-api';
 import { formatPortAddress, portLabel, samePort } from '../bridge/protocol-model';
 import type { ArtNetNodeConnector } from '../node/node-connector';
-import { portAddressForUniverse, portAddressWriteError } from '../node/output-ports';
+import { portAddressForUniverse } from '../node/output-ports';
 
 const props = defineProps<{ connector: ArtNetNodeConnector }>();
 const emit = defineEmits<{ change: [patch: Record<string, unknown>] }>();
 
 const project = useScope('project');
 const node = computed(() => props.connector.node.value);
-const busy = ref(false);
-const error = ref<string | null>(null);
 
 /** Universes that carry fixtures (for the “no fixtures” hint). */
 const usedUniverses = computed(() => {
@@ -37,15 +36,9 @@ const rows = computed(() => props.connector.ports.value.map((port, i) => {
   const universe = props.connector.outputMapping.value[i] ?? 0;
   const target = universe > 0 ? portAddressForUniverse(universe) : null;
   const portAddress = state?.outputPortAddress ?? null;
-  const mismatch = node.value !== null && portAddress !== null && target !== null && portAddress !== target;
-  const writeError = mismatch ? portAddressWriteError(node.value!, [{ port, portAddress: target! }]) : null;
-  return { i, port, label: portLabel(port, props.connector.ports.value), state, universe, target, portAddress, mismatch, writeError };
+  const differs = node.value !== null && portAddress !== null && target !== null && portAddress !== target;
+  return { i, port, label: portLabel(port, props.connector.ports.value), state, universe, portAddress, differs };
 }));
-
-type Row = (typeof rows.value)[number];
-
-/** Rows whose node Port-Address differs from their universe. */
-const mismatched = computed(() => rows.value.filter(r => r.mismatch));
 
 /** Sets the universe of one output (0 = off). */
 function setUniverse(index: number, raw: string) {
@@ -55,33 +48,13 @@ function setUniverse(index: number, raw: string) {
   mapping[index] = universe;
   emit('change', { outputMapping: mapping });
 }
-
-/** Writes the universes of `list` as the node's Port-Addresses. */
-async function write(list: Row[]) {
-  busy.value = true;
-  error.value = null;
-  try {
-    await props.connector.writePortAddresses(list.map(r => ({ port: r.port, portAddress: r.target! })));
-  }
-  catch (e) {
-    error.value = (e as Error).message ?? String(e);
-  }
-  finally {
-    busy.value = false;
-  }
-}
-
-/** Tooltip of a write button. */
-function writeTitle(r: Row): string {
-  return r.writeError ?? `Set the node's Port-Address of ${r.label} to ${formatPortAddress(r.target!)} (${r.target}) so it matches U${r.universe}`;
-}
 </script>
 
 <template>
   <div class="flex flex-col gap-1">
     <div class="flex items-center gap-2">
-      <span class="text-xs font-medium text-muted-foreground">Ports</span>
-      <span class="text-[10px] text-muted-foreground/80">Universe → node port. The node's Port-Address only changes when you write it.</span>
+      <span class="text-xs font-medium text-muted-foreground">Universes</span>
+      <span class="text-[10px] text-muted-foreground/80">Universe → node port. Port-Addresses are set under Ports below.</span>
     </div>
     <div v-for="r in rows" :key="`${r.port.bind}.${r.port.index}`" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <span class="w-14 flex items-center gap-1 text-muted-foreground">
@@ -104,24 +77,14 @@ function writeTitle(r: Row): string {
         node {{ r.portAddress !== null ? formatPortAddress(r.portAddress) : '—' }}
       </span>
       <span v-if="r.universe && !usedUniverses.has(r.universe)" class="text-[10px] text-muted-foreground/70">no fixtures</span>
-      <button
-        v-if="r.mismatch"
-        class="ml-auto px-1.5 py-0.5 rounded border border-border hover:bg-accent transition-colors text-[11px] disabled:opacity-50"
-        :disabled="busy || !!r.writeError"
-        :title="writeTitle(r)"
-        @click="write([r])"
+      <span
+        v-if="r.differs"
+        class="ml-auto text-[10px] text-muted-foreground"
+        :title="`The node's Port-Address ${r.portAddress} differs from U${r.universe}. DMX still reaches the port; change the Port-Address under Ports if other Art-Net software should see the same number.`"
+        data-differs
       >
-        Write port address to node
-      </button>
+        ≠ U{{ r.universe }}
+      </span>
     </div>
-    <button
-      v-if="mismatched.length > 1"
-      class="self-end px-1.5 py-0.5 rounded border border-border hover:bg-accent transition-colors text-[11px] disabled:opacity-50"
-      :disabled="busy"
-      @click="write(mismatched)"
-    >
-      Write all port addresses
-    </button>
-    <p v-if="error" class="text-[11px] text-destructive">{{ error }}</p>
   </div>
 </template>

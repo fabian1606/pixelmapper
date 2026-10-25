@@ -16,9 +16,8 @@ import { computed, onBeforeUnmount, watch } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeId, RdmUid } from '../bridge/protocol-model';
 import { getNodeDirectory } from '../bridge/shared';
-import type { TubeReading } from './firmware-eligibility';
 import type { FirmwareUpdateManager } from './firmware-update-manager';
-import type { NodeTube, TubeDirectory } from './tube-devices';
+import type { TubeDirectory, TubeReader } from './tube-devices';
 import FirmwareUpdatePanel from './FirmwareUpdatePanel.vue';
 
 const props = withDefaults(defineProps<{
@@ -37,7 +36,7 @@ const props = withDefaults(defineProps<{
   /** Default: the manager of `backend`. */
   manager?: FirmwareUpdateManager;
   /** How a tube's firmware is read (tests, cached device info). */
-  readTube?: (tube: NodeTube) => Promise<TubeReading>;
+  readTube?: TubeReader;
 }>(), { uids: undefined, title: 'Update tube firmware', backend: undefined, directory: undefined, manager: undefined, readTube: undefined });
 
 const emit = defineEmits<{

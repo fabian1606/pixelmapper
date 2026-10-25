@@ -7,6 +7,10 @@
  * TOD changes, after every SET and when the node reports a SET from its
  * panel (LOCAL_RDM_SET queued message). Nothing here is derived from what
  * Pixelmapper sent. One shared instance per app (`device-runtime.ts`).
+ *
+ * While a device's firmware is written (plan M7.4) its reads are held
+ * (`holdReads`): the tube runs its bootloader, and GETs would only time out
+ * and compete with the update for the port.
  */
 import { shallowReactive, watch, type WatchStopHandle } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
@@ -21,6 +25,9 @@ export const DEVICE_REREAD_MS = 45_000;
 
 /** RDM requests in flight per node port (the bridge queues the rest). */
 const PER_PORT_CONCURRENCY = 2;
+
+/** Longest DEVICE_LABEL (E1.20 §10.5.4: up to 32 characters). */
+export const DEVICE_LABEL_MAX = 32;
 
 /** One device as last reported by the network. */
 export interface DeviceEntry {
@@ -79,6 +86,8 @@ export class DeviceStore {
   private stopWatch: WatchStopHandle | null = null;
   private offEvents: (() => void)[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Holders per UID whose reads are paused (see `holdReads`); reactive. */
+  private readonly holds: Map<RdmUid, number> = shallowReactive(new Map());
 
   constructor(options: DeviceStoreOptions) {
     this.backend = options.backend;
@@ -133,12 +142,38 @@ export class DeviceStore {
         || (a.info?.dmxStartAddress ?? 0xffff) - (b.info?.dmxStartAddress ?? 0xffff) || a.uid.localeCompare(b.uid));
   }
 
+  /** True while reads of the device are held (its firmware is being written). */
+  isHeld(uid: RdmUid): boolean {
+    return (this.holds.get(uid) ?? 0) > 0;
+  }
+
+  // ── Read holds ───────────────────────────────
+
+  /**
+   * Pauses every read of `uid` (describe, DEVICE_INFO, labels) until the
+   * returned release function is called — used while its firmware is
+   * written. Reads asked for meanwhile answer with what is known. Releasing
+   * twice is a no-op.
+   */
+  holdReads(uid: RdmUid): () => void {
+    this.holds.set(uid, (this.holds.get(uid) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (this.holds.get(uid) ?? 1) - 1;
+      if (left > 0) this.holds.set(uid, left);
+      else this.holds.delete(uid);
+    };
+  }
+
   // ── Reads ────────────────────────────────────
 
   /** Reads the full description (`refresh` bypasses the bridge's cache). */
   async describe(uid: RdmUid, refresh = false): Promise<RdmDeviceDescription | null> {
     const d = this.devices.get(uid);
     if (!d) return null;
+    if (this.isHeld(uid)) return d.description;
     this.patch(uid, { loading: true });
     try {
       const description = await this.limited(d, () => this.backend.request('rdmDescribe', { nodeId: d.nodeId, port: d.port, uid, ...(refresh ? { refresh } : {}) }));
@@ -155,6 +190,7 @@ export class DeviceStore {
   async readInfo(uid: RdmUid): Promise<RdmDeviceInfo | null> {
     const d = this.devices.get(uid);
     if (!d) return null;
+    if (this.isHeld(uid)) return d.info;
     try {
       const result = await this.limited(d, () => this.backend.request('rdmGet', { nodeId: d.nodeId, port: d.port, uid, pid: RDM_PID.DEVICE_INFO }));
       const info = asDeviceInfo(result.value);
@@ -164,6 +200,26 @@ export class DeviceStore {
       const described = this.devices.get(uid)?.description;
       if (described && described.deviceInfo.currentPersonality !== info.currentPersonality) void this.describe(uid);
       return info;
+    }
+    catch (err) {
+      this.patch(uid, { error: rdmErrorText(err), noAnswer: isNoAnswer(err) });
+      return null;
+    }
+  }
+
+  /**
+   * Reads DEVICE_LABEL into the description (null when the device has no
+   * description yet, holds reads, or the GET fails — the error is kept).
+   */
+  async readLabel(uid: RdmUid): Promise<string | null> {
+    const d = this.devices.get(uid);
+    if (!d?.description || this.isHeld(uid)) return d?.description?.deviceLabel ?? null;
+    try {
+      const result = await this.limited(d, () => this.backend.request('rdmGet', { nodeId: d.nodeId, port: d.port, uid, pid: RDM_PID.DEVICE_LABEL }));
+      const label = typeof result.value === 'string' ? result.value : null;
+      const now = this.devices.get(uid);
+      if (now?.description) this.patch(uid, { description: { ...now.description, deviceLabel: label }, lastSeen: this.now(), noAnswer: false, error: null });
+      return label;
     }
     catch (err) {
       this.patch(uid, { error: rdmErrorText(err), noAnswer: isNoAnswer(err) });
@@ -185,6 +241,16 @@ export class DeviceStore {
     return this.readInfo(uid);
   }
 
+  /**
+   * SET DEVICE_LABEL (at most 32 characters), then read it back: the label
+   * shown is the device's answer (D5). Throws a user-facing Error on failure.
+   */
+  async setDeviceLabel(uid: RdmUid, label: string): Promise<string | null> {
+    if (label.length > DEVICE_LABEL_MAX) throw new Error(`The label is longer than ${DEVICE_LABEL_MAX} characters`);
+    await this.set(uid, RDM_PID.DEVICE_LABEL, label);
+    return this.readLabel(uid);
+  }
+
   /** Turns IDENTIFY_DEVICE on/off; `identifying` follows the device's ACK. */
   async identify(uid: RdmUid, on: boolean): Promise<void> {
     await this.set(uid, RDM_PID.IDENTIFY_DEVICE, on);
@@ -199,7 +265,7 @@ export class DeviceStore {
   // ── Internals ────────────────────────────────
 
   /** SET with error bookkeeping. */
-  private async set(uid: RdmUid, pid: number, value: number | boolean): Promise<void> {
+  private async set(uid: RdmUid, pid: number, value: number | boolean | string): Promise<void> {
     const d = this.devices.get(uid);
     if (!d) throw new Error('Unknown device');
     try {
@@ -271,7 +337,7 @@ export class DeviceStore {
   /** Periodic re-read of every present device. */
   private rereadAll() {
     for (const d of this.devices.values()) {
-      if (!d.present) continue;
+      if (!d.present || this.isHeld(d.uid)) continue;
       if (d.description) void this.readInfo(d.uid);
       else if (!d.loading) void this.describe(d.uid);
     }

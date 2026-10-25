@@ -13,10 +13,10 @@ import { ConnectorBase, connectors } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeDirectory } from '../bridge/node-directory';
 import type { NodeId, NodeState, PortRef } from '../bridge/protocol-model';
-import { formatPortAddress, parsePortKey, portKey, portLabel, samePort } from '../bridge/protocol-model';
+import { parsePortKey, portKey, samePort } from '../bridge/protocol-model';
 import { getArtNetBackend, getNodeDirectory, retainArtNetDiscovery } from '../bridge/shared';
 import { nodeConnectorStatus } from './node-status';
-import { outputPortsOf, portAddressWriteError, reconcileOutputs, sameOutputs } from './output-ports';
+import { outputPortsOf, reconcileOutputs, sameOutputs } from './output-ports';
 
 /** Connector type id. */
 export const NODE_CONNECTOR_TYPE = 'artnet-node';
@@ -166,26 +166,6 @@ export class ArtNetNodeConnector extends ConnectorBase {
       if (!port?.canOutput) continue;
       this.deps.backend.sendDmx({ nodeId: node.nodeId, portAddress: port.outputPortAddress }, dmxBuffer);
     }
-  }
-
-  // ── Port-Address (M5.5) ──────────────────────
-
-  /**
-   * Writes output Port-Addresses to the node (ArtAddress). Nothing is
-   * written unless the user asks (D7); the new state arrives from the node
-   * as a `node` event (D5), so the UI never shows what was only requested.
-   */
-  async writePortAddresses(writes: { port: PortRef; portAddress: number }[]): Promise<void> {
-    const node = this.node.value;
-    if (!node) throw new Error('The node is offline');
-    const problem = portAddressWriteError(node, writes);
-    if (problem) throw new Error(problem);
-    await this.deps.backend.request('artAddress', {
-      nodeId: node.nodeId,
-      ports: writes.map(w => ({ port: w.port, outputPortAddress: w.portAddress })),
-    });
-    const all = node.ports.map(p => p.port);
-    this.pushLog(`[artnet] Port-Address written: ${writes.map(w => `${portLabel(w.port, all)} → ${formatPortAddress(w.portAddress)}`).join(', ')}`);
   }
 
   // ── Internals ────────────────────────────────

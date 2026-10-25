@@ -9,7 +9,7 @@ import { NodeDirectory } from '../bridge/node-directory';
 import { FakeArtNetBackend } from '../bridge/testing/fake-backend';
 import { makeNode, makePort } from '../bridge/testing/fixtures';
 import { ArtNetNodeConnector, activeNodeConnectors } from './node-connector';
-import { defaultUniverse, portAddressForUniverse, portAddressWriteError, reconcileOutputs } from './output-ports';
+import { defaultUniverse, portAddressForUniverse, reconcileOutputs } from './output-ports';
 
 /** A connected fake backend with its directory. */
 async function setup() {
@@ -138,18 +138,11 @@ describe('ArtNetNodeConnector — DMX out', () => {
 });
 
 describe('output ports', () => {
-  it('reconciles outputs and validates Port-Address writes', () => {
+  it('reconciles outputs and matches universes to Port-Addresses', () => {
     const node = makeNode();
     expect(reconcileOutputs([{ bind: 3, index: 0 }], [42], node.ports).mapping).toEqual([1, 2, 42, 4]);
-    // The deprecated Port-Address 0 defaults to U1; a universe writes the same Port-Address.
+    // The deprecated Port-Address 0 defaults to U1; a universe matches the same Port-Address.
     expect(defaultUniverse(makePort(1, 0))).toBe(1);
     expect([portAddressForUniverse(1), portAddressForUniverse(32767), portAddressForUniverse(32768), portAddressForUniverse(0)]).toEqual([1, 32767, null, null]);
-    // One port per BindIndex: any address is fine.
-    expect(portAddressWriteError(node, [{ port: { bind: 1, index: 0 }, portAddress: 0x123 }])).toBeNull();
-    expect(portAddressWriteError(node, [{ port: { bind: 1, index: 0 }, portAddress: 40000 }])).toMatch(/out of range/);
-    // Several ports in one BindIndex share Net/Sub-Net.
-    const multi = makeNode({ ports: [0, 1].map(i => ({ ...makePort(1, i), port: { bind: 1, index: i } })) });
-    expect(portAddressWriteError(multi, [{ port: { bind: 1, index: 0 }, portAddress: 0x10 }])).toMatch(/share Net and Sub-Net/);
-    expect(portAddressWriteError(multi, [{ port: { bind: 1, index: 0 }, portAddress: 0x10 }, { port: { bind: 1, index: 1 }, portAddress: 0x11 }])).toBeNull();
   });
 });

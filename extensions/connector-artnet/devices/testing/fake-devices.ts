@@ -39,6 +39,7 @@ export class FakeRdmDevices {
       const d = this.answer(args.uid);
       if (args.pid === RDM_PID.DEVICE_INFO) return { data: '', value: { ...d.info } };
       if (args.pid === RDM_PID.DMX_START_ADDRESS) return { data: '', value: d.info.dmxStartAddress };
+      if (args.pid === RDM_PID.DEVICE_LABEL) return { data: '', value: d.label ?? '' };
       throw new BridgeCommandError('nack', 'NACK UNKNOWN_PID', { nackReason: 0, nackName: 'UNKNOWN_PID' });
     });
     backend.handle('rdmSet', (args) => {
@@ -55,6 +56,8 @@ export class FakeRdmDevices {
         d.info = { ...d.info, currentPersonality: p, dmxFootprint: TUBE_FOOTPRINTS[p - 1] ?? d.info.dmxFootprint };
       }
       else if (args.pid === RDM_PID.IDENTIFY_DEVICE) d.identify = value === true;
+      // A real device may shorten or reject a label; this one keeps 32 characters.
+      else if (args.pid === RDM_PID.DEVICE_LABEL) d.label = String(value).slice(0, 32);
       return { data: '' };
     });
     backend.handle('todControl', (args) => {

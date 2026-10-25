@@ -20,6 +20,13 @@ export interface NodeTube {
   uid: RdmUid;
 }
 
+/**
+ * Reads what a tube reports about its firmware. `fresh` asks for a new
+ * answer from the device (the dialog's “Re-read”); without it a reader may
+ * answer from what it already knows (e.g. the device store, plan M7.4).
+ */
+export type TubeReader = (tube: NodeTube, options?: { fresh?: boolean }) => Promise<TubeReading>;
+
 /** What `listNodeTubes` needs of the node directory. */
 export type TubeDirectory = Pick<NodeDirectory, 'getNode' | 'todOf'>;
 

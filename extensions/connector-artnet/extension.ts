@@ -14,12 +14,15 @@
  * bridge connection and no browser local-network prompt.
  *
  * `activate` installs the RDM device runtime (plan M6): device store,
- * patch sync and universe guard for fixtures linked to devices.
+ * patch sync and universe guard for fixtures linked to devices; and the
+ * firmware runtime (M7.4), which creates the firmware update manager on
+ * the first discovery demand and re-attaches to running updates.
  */
 import { defineConnector, defineExtension } from '@pixelmapper/extension-api';
 import { ArtNetConnector } from './artnet-connector';
 import { ArtNetNodeConnector, NODE_CONNECTOR_TYPE } from './node/node-connector';
 import { installDeviceRuntime } from './devices/device-runtime';
+import { installFirmwareRuntime } from './firmware/firmware-runtime';
 import { readLink } from './devices/link';
 import { EXTENSION_VERSION } from './version';
 import ArtNetSettings from './components/ArtNetSettings.vue';
@@ -65,6 +68,14 @@ export default defineExtension({
       { slot: 'scene/fixture:badges', component: RdmStatusBadge, when: s => !!readLink(s.fixture?.extensionData as never) },
     ],
   },
-  // RDM devices: store, sync of linked fixtures, universe guard (M6).
-  activate: api => installDeviceRuntime(api),
+  // RDM devices: store, sync of linked fixtures, universe guard (M6);
+  // tube firmware updates, only once Art-Net is in use (M7.4).
+  activate: (api) => {
+    const stopDevices = installDeviceRuntime(api);
+    const stopFirmware = installFirmwareRuntime();
+    return () => {
+      stopFirmware();
+      stopDevices();
+    };
+  },
 });

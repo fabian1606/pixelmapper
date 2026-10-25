@@ -125,4 +125,38 @@ describe('DeviceStore', () => {
     expect(backend.requests.find(r => r.type === 'todControl')?.args).toMatchObject({ action: 'flush', port: { bind: 1, index: 0 } });
     expect(store.get('7FF0:00000009')?.present).toBe(true);
   });
+
+  it('writes DEVICE_LABEL and shows the label the device reads back', async () => {
+    tubes.add('7FF0:00000001', 1, {}, 'Old');
+    store.start();
+    tubes.announce();
+    await settle();
+    await expect(store.setDeviceLabel('7FF0:00000001', 'Stage left')).resolves.toBe('Stage left');
+    expect(store.get('7FF0:00000001')!.description?.deviceLabel).toBe('Stage left');
+    expect(tubes.sets.at(-1)).toEqual({ uid: '7FF0:00000001', pid: 0x0082, value: 'Stage left' });
+    await expect(store.setDeviceLabel('7FF0:00000001', 'x'.repeat(33))).rejects.toThrow(/32 characters/);
+  });
+
+  it('holds reads of a device while its firmware is written', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    tubes.add('7FF0:00000001', 1);
+    store.start();
+    tubes.announce();
+    await settle();
+    const reads = () => backend.requests.filter(r => r.type === 'rdmGet' || r.type === 'rdmDescribe').length;
+    const before = reads();
+    const release = store.holdReads('7FF0:00000001');
+    expect(store.isHeld('7FF0:00000001')).toBe(true);
+    vi.advanceTimersByTime(1000);
+    await store.readInfo('7FF0:00000001');
+    await store.describe('7FF0:00000001', true);
+    await settle();
+    expect(reads()).toBe(before); // nothing sent while held
+    release();
+    release(); // twice is a no-op
+    expect(store.isHeld('7FF0:00000001')).toBe(false);
+    vi.advanceTimersByTime(1000);
+    await settle();
+    expect(reads()).toBe(before + 1); // the periodic re-read resumes
+  });
 });

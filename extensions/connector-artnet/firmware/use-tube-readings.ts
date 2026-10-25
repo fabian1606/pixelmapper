@@ -13,7 +13,7 @@ import { describeRdmError } from '../rdm/parameter-form/rdm-errors';
 import { runLimited } from '../rdm/parameter-form/use-rdm-parameter-form';
 import type { TubeReading } from './firmware-eligibility';
 import { isItemPending, latestItemOf, type FlashItem } from './flash-item';
-import type { NodeTube } from './tube-devices';
+import type { NodeTube, TubeReader } from './tube-devices';
 
 /** Inputs of `useTubeReadings`. */
 export interface TubeReadingsOptions {
@@ -25,8 +25,8 @@ export interface TubeReadingsOptions {
   connected: Readonly<Ref<boolean>>;
   /** Connected and the bridge's job list is known: automatic reads may run. */
   ready: Readonly<Ref<boolean>>;
-  /** Reads one tube. */
-  readTube: (tube: NodeTube) => Promise<TubeReading>;
+  /** Reads one tube (`fresh` on a forced re-read). */
+  readTube: TubeReader;
   /** Tubes read at once. */
   concurrency: number;
   /** Read automatically. */
@@ -65,7 +65,7 @@ export function useTubeReadings(options: TubeReadingsOptions) {
       await runLimited(list, options.concurrency, async (t) => {
         let reading: TubeReading;
         try {
-          reading = await options.readTube(t);
+          reading = await options.readTube(t, { fresh: mode.force === true });
         }
         catch (err) {
           reading = { state: 'error', message: describeRdmError(err) };
