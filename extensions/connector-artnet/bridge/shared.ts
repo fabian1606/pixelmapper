@@ -12,13 +12,13 @@ import { NodeDirectory } from './node-directory';
 import { WsBridgeBackend } from './ws-bridge-backend';
 import { EXTENSION_VERSION } from '../version';
 
-/** Default bridge address (`pmnet serve`). */
+/** Default bridge address (`pmnet-bridge serve`). */
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:7777';
 
 /** Command that starts the bridge (shown in hints). */
-export const PMNET_SERVE_COMMAND = 'pmnet serve';
+export const PMNET_SERVE_COMMAND = 'pmnet-bridge serve';
 
-/** Download page of `pmnet`; null until the first release exists (plan M3.3). */
+/** Download page of `pmnet-bridge`; null until the first release exists (plan M3.3). */
 export const PMNET_DOWNLOAD_URL: string | null = null;
 
 /** localStorage key of the bridge URL setting (per device). */

@@ -1,5 +1,5 @@
 /**
- * `ArtNetBackend` over the WebSocket contract to `pmnet serve`
+ * `ArtNetBackend` over the WebSocket contract to `pmnet-bridge serve`
  * (`architecture/artnet-bridge-ws-protocol.md`).
  *
  * One instance per app (see `shared.ts`). Connects, checks the `hello`

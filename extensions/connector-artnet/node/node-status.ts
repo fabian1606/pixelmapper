@@ -24,7 +24,7 @@ export function backendProblem(state: BackendState): string | null {
     case 'incompatible':
       if (state.reason === 'noHello') return `Another program answers on ${state.url} (old ArtNet bridge?) — start “${PMNET_SERVE_COMMAND}” instead`;
       if (state.reason === 'appTooOld') return `The Art-Net bridge is newer than this app (protocol ${state.protocol}) — reload Pixelmapper`;
-      return `Bridge update needed (pmnet ${state.bridgeVersion ?? '?'} speaks protocol ${state.protocol ?? '?'})`;
+      return `Bridge update needed (pmnet-bridge ${state.bridgeVersion ?? '?'} speaks protocol ${state.protocol ?? '?'})`;
     default:
       return null;
   }

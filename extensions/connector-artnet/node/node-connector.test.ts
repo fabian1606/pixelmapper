@@ -71,7 +71,7 @@ describe('ArtNetNodeConnector — node binding', () => {
 
     backend.disconnect();
     await nextTick();
-    expect(c.errorMessage.value).toMatch(/pmnet serve/);
+    expect(c.errorMessage.value).toMatch(/pmnet-bridge serve/);
     backend.state.value = { kind: 'incompatible', url: 'ws://x', reason: 'bridgeTooOld', bridgeVersion: '0.1.0', protocol: '0.9.0' };
     await nextTick();
     expect(c.status.value).toBe('error');

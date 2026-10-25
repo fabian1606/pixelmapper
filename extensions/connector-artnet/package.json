@@ -1,7 +1,7 @@
 {
   "name": "@pixelmapper/ext-connector-artnet",
   "version": "1.2.0",
-  "description": "Art-Net output: nodes found by the pmnet bridge, or a manual target.",
+  "description": "Art-Net output: nodes found by the local bridge pmnet-bridge, or a manual target.",
   "private": true,
   "type": "module",
   "main": "./nuxt.config.ts"

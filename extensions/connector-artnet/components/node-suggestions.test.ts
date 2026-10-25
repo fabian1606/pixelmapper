@@ -123,7 +123,7 @@ describe('NodeSuggestions', () => {
     backend.disconnect();
     const wrapper = mount(NodeSuggestions);
     await nextTick();
-    expect(wrapper.text()).toContain('pmnet serve');
+    expect(wrapper.text()).toContain('pmnet-bridge serve');
     await wrapper.findAll('button').find(b => b.text() === 'Retry')!.trigger('click');
     expect(backend.reconnects).toBe(1);
 

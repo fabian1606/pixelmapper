@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Hint about the Art-Net bridge when it blocks Art-Net (plan M5.2):
- * unsupported browser (Safari), bridge not running (`pmnet serve`, download
+ * unsupported browser (Safari), bridge not running (`pmnet-bridge serve`, download
  * link, Chrome local-network prompt), wrong version, UDP port taken.
  * Renders nothing while the bridge is connected and healthy.
  */
@@ -62,12 +62,12 @@ function applyUrl() {
     </div>
     <div v-if="actionable && detailsOpen" class="flex flex-col gap-1 text-muted-foreground">
       <p>
-        Art-Net needs the local bridge <span class="font-mono">pmnet</span>. Start it in a terminal:
+        Art-Net needs the local bridge <span class="font-mono">pmnet-bridge</span>. Start it in a terminal:
         <span class="font-mono text-foreground select-all">{{ PMNET_SERVE_COMMAND }}</span>
       </p>
       <p>
-        <a v-if="PMNET_DOWNLOAD_URL" :href="PMNET_DOWNLOAD_URL" target="_blank" rel="noopener" class="underline hover:text-foreground">Download pmnet</a>
-        <span v-else>pmnet download: the link follows with the first release.</span>
+        <a v-if="PMNET_DOWNLOAD_URL" :href="PMNET_DOWNLOAD_URL" target="_blank" rel="noopener" class="underline hover:text-foreground">Download pmnet-bridge</a>
+        <span v-else>pmnet-bridge download: the link follows with the first release.</span>
         Chrome may ask to allow access to devices on your local network — allow it.
       </p>
       <label class="flex items-center gap-1.5">

@@ -1,5 +1,5 @@
 /**
- * State shapes of the bridge WebSocket contract (`pmnet serve` ↔ app).
+ * State shapes of the bridge WebSocket contract (`pmnet-bridge serve` ↔ app).
  *
  * Mirrors §3–§4 of `architecture/artnet-bridge-ws-protocol.md` 1:1. Every
  * change here is a contract change and goes into that document too. The

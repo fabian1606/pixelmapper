@@ -27,7 +27,7 @@ export const PROTOCOL_VERSION = '1.0.0';
 /** First message of every connection. */
 export interface HelloEvent {
   type: 'hello';
-  /** pmnet version. */
+  /** pmnet-bridge version. */
   bridge: string;
   /** Protocol semver. */
   protocol: string;

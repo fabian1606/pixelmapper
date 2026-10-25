@@ -3,7 +3,7 @@
  * for it.
  *
  * UI and connectors only use this interface. The first implementation is
- * `WsBridgeBackend` (WebSocket to `pmnet serve`); a future desktop backend
+ * `WsBridgeBackend` (WebSocket to `pmnet-bridge serve`); a future desktop backend
  * (embedded `pixelmapper-net` through Tauri) implements the same interface,
  * so platform details never leak into components or connectors. Commands
  * and events mirror the WebSocket contract 1:1
@@ -22,7 +22,7 @@ import type {
 
 /** What the backend reported in its handshake. */
 export interface BackendInfo {
-  /** Bridge (pmnet) version. */
+  /** Bridge (pmnet-bridge) version. */
   bridgeVersion: string;
   /** Protocol version of the bridge. */
   protocol: string;
