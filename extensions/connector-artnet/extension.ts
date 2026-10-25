@@ -20,10 +20,12 @@ import { defineConnector, defineExtension } from '@pixelmapper/extension-api';
 import { ArtNetConnector } from './artnet-connector';
 import { ArtNetNodeConnector, NODE_CONNECTOR_TYPE } from './node/node-connector';
 import { installDeviceRuntime } from './devices/device-runtime';
+import { readLink } from './devices/link';
 import { EXTENSION_VERSION } from './version';
 import ArtNetSettings from './components/ArtNetSettings.vue';
 import NodeConnectorSettings from './components/NodeConnectorSettings.vue';
 import NodeSuggestions from './components/NodeSuggestions.vue';
+import RdmStatusBadge from './components/RdmStatusBadge.vue';
 
 export default defineExtension({
   id: 'connector-artnet',
@@ -56,8 +58,12 @@ export default defineExtension({
         settings: ArtNetSettings,
       }),
     ],
-    // Discovered nodes without a connector, above the output connectors.
-    slots: [{ slot: 'connections/outputs:before', component: NodeSuggestions }],
+    slots: [
+      // Discovered nodes without a connector, above the output connectors.
+      { slot: 'connections/outputs:before', component: NodeSuggestions },
+      // RDM status of fixtures linked to a device (D15), only for those.
+      { slot: 'scene/fixture:badges', component: RdmStatusBadge, when: s => !!readLink(s.fixture?.extensionData as never) },
+    ],
   },
   // RDM devices: store, sync of linked fixtures, universe guard (M6).
   activate: api => installDeviceRuntime(api),
