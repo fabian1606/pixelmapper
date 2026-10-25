@@ -28,7 +28,8 @@ export function getUserKey(): string {
 export function createHostConnectorSet(): ConnectorSet {
   return {
     list(type?: string): readonly Connector[] {
-      const all = useConnectionsStore().connectors;
+      // The store's instances (Pinia's typing unwraps their refs; at runtime they are the connectors).
+      const all = useConnectionsStore().connectors as unknown as readonly Connector[];
       return type ? all.filter(c => c.meta.type === type) : all;
     },
     add(connector: Connector): void {
