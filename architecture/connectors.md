@@ -85,7 +85,7 @@ connector-artnet
 ├── firmware/          tube firmware update (M7.4): dialog, per-tube button, FirmwareUpdateManager (one per app),
 │                      firmware-runtime.ts (manager on first demand, read holds, refresh after an update),
 │                      device-store-reader.ts (dialog readings from the device store)
-├── inspector/         RDM section of the fixture inspector (M7.2, slot properties:after)
+├── inspector/         RDM section of the fixture inspector (M7.2, slot selection:after)
 ├── devices/           RDM devices on the node ports (M6)
 │   ├── device-store.ts      devices from TODs: rdmDescribe once, DEVICE_INFO re-read (45 s, TOD change, after SETs,
 │   │                        LOCAL_RDM_SET), presence, SETs (address, personality, identify), Rediscover
@@ -138,7 +138,7 @@ State is always the node's answer (D5). Confirmations are inline boxes (`Confirm
 
 #### Inspector RDM section (plan M7.2, D18)
 
-`inspector/RdmInspectorSection.vue` in the core slot `properties:after` with `when: s => !!readLink(s.fixture?.extensionData)` — the properties panel provides `fixture` only for a single selection, so multi-selections show nothing. The panel-level slots render below the open category (own scroll area) and only while a category tab is open. Content:
+`inspector/RdmInspectorSection.vue` in the core slot `selection:after` with `when: s => !!readLink(s.fixture?.extensionData)`: in the fixture inspector at the bottom of the scene sidebar (`SelectionInfoSection`), directly below the fixture's own DMX address, mode and kind fields — a linked tube is a normal fixture (D18). The slot exists only for a single selected fixture (with `fixture`), so multi-selections show nothing; it is visible whenever the tube is selected, no properties category has to be opened. Laid out for the narrow sidebar (heading + badge in one row, long values truncated with a tooltip); the inspector scrolls when the section makes it taller than 60 % of the sidebar. Its popovers and dialogs (Mismatch popover, firmware dialog) carry `data-overlay-root` (`FLOATING_OVERLAY_SELECTORS`). Content:
 
 - status badge (`RdmStatusBadge`, incl. the Mismatch popover) and its reasons, UID, node port + port universe, firmware (SOFTWARE_VERSION_LABEL when it describes the running version, else the version id);
 - **Identify** (store, ACK = state), switched off when the inspected device changes or the section unmounts;
