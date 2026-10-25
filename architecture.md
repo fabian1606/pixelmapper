@@ -71,7 +71,7 @@ pixelmapper/
 │   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
 ├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs), config, icons — ADR 0003
 ├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
-├── tools/artnet-bridge/           # Old local WebSocket → UDP ArtNet bridge (manual-target connector; replaced by `pmnet serve`, plan M3.4)
+├── tools/artnet-bridge/           # Old local WebSocket → UDP ArtNet bridge (manual-target connector; replaced by `pmnet-bridge serve`, plan M3.4)
 ├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)
 └── pio*/                          # ESP32 firmware (out of scope; must implement frames 0x21/0x22)
 ```
@@ -81,6 +81,7 @@ pixelmapper/
 - `bun run dev:tauri` / `bun run build:tauri` — desktop app (Tauri 2, `src-tauri/`; SPA build with the native `#platform`, ADR 0003). `cargo test --manifest-path src-tauri/Cargo.toml` tests the native commands.
 - `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
 - `bun run typecheck` — `nuxt typecheck` (vue-tsc).
+- `bun run typecheck:extensions` — vue-tsc over `extensions/**` and `packages/extension-api` (`tsconfig.extensions.json`; `nuxt typecheck` does not cover them). It also reports the app files the extensions' tests import, so judge it by the `extensions/` lines.
 - `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
 - `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
@@ -98,7 +99,7 @@ pixelmapper/
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
-- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes (v1 = M6: device list, add, addressing, sync, status badge — [connectors.md › RDM devices](architecture/connectors.md#rdm-devices-plan-m6-v1)), tube firmware updates; bridge contract (1.0.0 candidate, authoritative in `pixelmapper-hardware` `protocol/bridge-ws.md`, mirrored here and in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
+- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes (v1 = M6: device list, add, addressing, sync, status badge — [connectors.md › RDM devices](architecture/connectors.md#rdm-devices-plan-m6-v1)); M7: node configuration in the node card, tube firmware updates (batch per node, per tube), RDM section in the fixture inspector — [connectors.md › Node configuration](architecture/connectors.md#node-configuration-plan-m73-d8), [› Tube firmware update](architecture/connectors.md#tube-firmware-update-plan-m74-d17), [› Inspector RDM section](architecture/connectors.md#inspector-rdm-section-plan-m72-d18); bridge binary `pmnet-bridge serve`, started on demand only; bridge contract (1.0.0 candidate, authoritative in `pixelmapper-hardware` `protocol/bridge-ws.md`, mirrored here and in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
 - [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
 - [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.1, distribution, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN` v2 (distribution block)

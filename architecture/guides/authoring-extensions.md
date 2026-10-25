@@ -146,7 +146,7 @@ Layout primitives generate **slots**: slot id = the `/`-joined ids of the enclos
 
 | Slot ids | Where |
 |---|---|
-| `properties:header\|before\|after`, `properties/<category>:actions\|before\|after\|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges\|actions` | fixture properties sidebar |
+| `properties:header\|before\|after`, `properties/<category>:actions\|before\|after\|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges\|actions` | fixture properties sidebar (panel-level slots only while a category is open; `after` below it, scrolling) |
 | `scene:header`, `scene/fixture:badges\|actions`, `scene/group:badges\|actions` | scene list |
 | `modifiers:*`, `modifiers/modifier:badges\|actions`, `modifiers/add:items` | modifier stack |
 | `presets:header\|before\|after`, `presets/preset:badges\|actions` | presets |

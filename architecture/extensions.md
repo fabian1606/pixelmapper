@@ -97,7 +97,7 @@ Callers with custom markup list positions in `manual` and render the outlets the
 Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled in the UI, open `/dev/slots` in dev for the catalog of slots rendered in the session with their scopes and contributors, or read `docs/ai/index.json`):
 
 - `scene:header`, `scene/fixture:badges|actions`, `scene/group:badges|actions`
-- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions`
+- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions` — the panel-level `properties:*` slots render only while a category is open: header/before above the category, `after` below it in its own scroll area (at most half the panel), e.g. the RDM section of `connector-artnet`; `fixture` is provided for a single selection only
 - `modifiers:*`, `modifiers/modifier:badges|actions`, `modifiers/add:items`
 - `presets:header|before|after`, `presets/preset:badges|actions`
 - `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items`
