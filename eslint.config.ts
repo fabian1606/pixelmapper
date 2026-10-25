@@ -17,8 +17,9 @@ const MESSAGE
 export default tseslint.config(
   {
     files: ['extensions/**/*.{ts,vue}'],
-    // Tests are host-side harnesses and may import core modules.
-    ignores: ['**/node_modules/**', '**/dist/**', '**/*.test.ts'],
+    // Tests and their helpers (`*.test-support.ts`) are host-side harnesses
+    // and may import core modules.
+    ignores: ['**/node_modules/**', '**/dist/**', '**/*.test.ts', '**/*.test-support.ts'],
     languageOptions: {
       parser: vueParser,
       parserOptions: {
