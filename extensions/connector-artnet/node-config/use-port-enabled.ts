@@ -3,12 +3,16 @@
  * the port mode “off” (plan M7.3): Art-Net cannot switch output ports off
  * (ArtInput only affects inputs, contract §5), so the Ports section reads
  * these PIDs, writes them, and follows queued messages. The value shown is
- * always the node's answer (D5): a write is followed by a GET.
+ * always the node's answer (D5): a write is followed by a GET. They are also
+ * re-read every 45 s while shown: the node has one queue of queued messages
+ * for all controllers, so another Pixelmapper may consume the message of a
+ * change at the node's display.
  */
 import { computed, onScopeDispose, reactive, watch } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { PortRef } from '../bridge/protocol-model';
 import type { RdmResult } from '../bridge/protocol-messages';
+import { RDM_SETTINGS_REREAD_MS } from '../rdm/parameter-form/use-rdm-parameter-form';
 import type { NodeDescription } from './use-node-context';
 import { NODE_PORT_COUNT, nodePortNumber, nodePortPids, type PortEnableState } from './port-rules';
 
@@ -21,8 +25,8 @@ export function decodeEnabled(answer: Pick<RdmResult, 'data' | 'value'>): boolea
   return Number.isNaN(byte) ? null : byte !== 0;
 }
 
-/** `PORTn_ENABLED` of every port of the node (see file comment). */
-export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription) {
+/** `PORTn_ENABLED` of every port of the node (see file comment); `rereadMs` 0 = no periodic re-read. */
+export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription, rereadMs: number = RDM_SETTINGS_REREAD_MS) {
   /** Last reported value by port number 1–4; missing = not read. */
   const values = reactive<Record<number, boolean | null>>({});
 
@@ -86,6 +90,14 @@ export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription) {
     }
   });
   onScopeDispose(off);
+
+  // Periodic re-read (see file comment), only while the bridge is connected.
+  if (rereadMs > 0) {
+    const timer = setInterval(() => {
+      if (backend.state.value.kind === 'connected' && supported.value.size) void refresh();
+    }, rereadMs);
+    onScopeDispose(() => clearInterval(timer));
+  }
 
   return { stateOf, write, refresh };
 }

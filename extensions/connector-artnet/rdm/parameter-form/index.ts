@@ -5,7 +5,7 @@
  * inspector's RDM section (M7.2).
  */
 export { default as RdmParameterForm } from './RdmParameterForm.vue';
-export { useRdmParameterForm, runLimited, type RdmFieldState, type RdmParameterFormOptions } from './use-rdm-parameter-form';
+export { RDM_SETTINGS_REREAD_MS, useRdmParameterForm, runLimited, type RdmFieldState, type RdmParameterFormOptions } from './use-rdm-parameter-form';
 export type {
   BuildFieldsOptions,
   RdmActionField,

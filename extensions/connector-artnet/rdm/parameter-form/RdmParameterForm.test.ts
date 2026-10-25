@@ -4,7 +4,7 @@
  * commit, show NACK reasons, re-read after writes (the device's answer
  * wins), refresh, queued messages, offline bridge.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, defineComponent, h, type Component } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import type { PmInputName, SharedGlobals } from '@pixelmapper/extension-api';
@@ -89,6 +89,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
   globalThis.__PIXELMAPPER_SHARED__ = undefined;
+  vi.useRealTimers();
 });
 
 /** Mounts the form for the node and waits for the first load. */
@@ -202,6 +203,22 @@ describe('RdmParameterForm', () => {
     await flushPromises();
     expect(pidsOf('rdmGet')).toHaveLength(16);
     expect(row(w, 0x8118).find('input').element.value).toBe('44');
+  });
+
+  it('re-reads every value periodically while shown (a queued message may go to another controller)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const w = await mountForm({ rereadMs: 1000 });
+    const first = pidsOf('rdmGet').length;
+    device.set(0x8118, '2c'); // changed at the node; the queued message was consumed elsewhere
+    vi.advanceTimersByTime(1000);
+    await flushPromises();
+    expect(pidsOf('rdmGet')).toHaveLength(first * 2);
+    expect(row(w, 0x8118).find('input').element.value).toBe('44');
+    w.unmount();
+    wrapper = null;
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+    expect(pidsOf('rdmGet')).toHaveLength(first * 2); // stopped with the form
   });
 
   it('applies queued messages of this device', async () => {

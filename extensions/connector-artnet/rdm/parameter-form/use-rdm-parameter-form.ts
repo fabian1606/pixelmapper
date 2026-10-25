@@ -6,6 +6,10 @@
  * Last-writer-wins (plan D5): a field always shows what the device answered
  * — after a write the device is read again, and queued messages
  * (`rdmQueued`, e.g. a change at the node's display) replace the value.
+ * Values are also re-read periodically (`rereadMs`): the node keeps one
+ * queue of queued messages for all controllers, so with a second
+ * Pixelmapper (or another RDM controller) fetching it this form can miss a
+ * change.
  */
 import { computed, onScopeDispose, reactive, toValue, watch, type MaybeRefOrGetter } from 'vue';
 import type { ArtNetBackend } from '../../bridge/backend';
@@ -15,6 +19,9 @@ import { buildParameterFields } from './parameter-fields';
 import type { BuildFieldsOptions, RdmFieldValue, RdmParameterField } from './field-types';
 import { decodeFieldValue, encodeFieldData, validateFieldValue } from './parameter-codec';
 import { describeRdmError } from './rdm-errors';
+
+/** Default interval of the periodic re-read of RDM-only settings (like the device store's 45 s). */
+export const RDM_SETTINGS_REREAD_MS = 45_000;
 
 /** Live state of one field. */
 export interface RdmFieldState {
@@ -41,6 +48,8 @@ export interface RdmParameterFormOptions {
   concurrency?: number;
   /** Called after a successful write with the value the device reports afterwards. */
   onWritten?: (field: RdmParameterField, value: RdmFieldValue | null) => void;
+  /** Re-read every value this often while connected (ms; 0 / unset = never). */
+  rereadMs?: number;
 }
 
 /** Runs `worker` over `items` with at most `limit` running at once. */
@@ -166,6 +175,14 @@ export function useRdmParameterForm(options: RdmParameterFormOptions) {
   watch(connected, (now, before) => {
     if (now && !before) void refresh();
   });
+
+  // Periodic re-read (see file comment); skipped while a load is still running.
+  if (options.rereadMs && options.rereadMs > 0) {
+    const timer = setInterval(() => {
+      if (connected.value && !loading.value) void refresh();
+    }, options.rereadMs);
+    onScopeDispose(() => clearInterval(timer));
+  }
 
   // Queued messages carry the GET response of a changed PID (node contract §6.3, §7).
   const off = backend.on('rdmQueued', (event) => {

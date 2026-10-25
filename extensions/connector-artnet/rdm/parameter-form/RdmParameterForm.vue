@@ -6,7 +6,8 @@
  *
  * Values are read from the device (a few GETs at a time), written on commit
  * and read back: the form shows the device's answer, not the requested
- * value (last-writer-wins, D5). Compact enough for the node's connector card
+ * value (last-writer-wins, D5); values are re-read every 45 s while shown
+ * (queued messages can be consumed by another controller). Compact enough for the node's connector card
  * (Advanced, D8) and the fixture inspector's RDM section (D18).
  *
  * Usage: `<RdmParameterForm :address="{ nodeId, port, uid }" :description="describeResult" />`
@@ -16,7 +17,7 @@ import type { RdmAddress } from '../../bridge/protocol-messages';
 import type { RdmDeviceDescription } from '../../bridge/protocol-model';
 import { getArtNetBackend } from '../../bridge/shared';
 import type { RdmFieldValue } from './field-types';
-import { useRdmParameterForm } from './use-rdm-parameter-form';
+import { RDM_SETTINGS_REREAD_MS, useRdmParameterForm } from './use-rdm-parameter-form';
 import RdmParameterRow from './RdmParameterRow.vue';
 
 const props = withDefaults(defineProps<{
@@ -34,7 +35,9 @@ const props = withDefaults(defineProps<{
   title?: string;
   /** GETs in flight at once. */
   concurrency?: number;
-}>(), { backend: undefined, exclude: undefined, only: undefined, title: 'Parameters', concurrency: 2 });
+  /** Periodic re-read of all values in ms (default 45 s; 0 = off). */
+  rereadMs?: number;
+}>(), { backend: undefined, exclude: undefined, only: undefined, title: 'Parameters', concurrency: 2, rereadMs: RDM_SETTINGS_REREAD_MS });
 
 const emit = defineEmits<{
   /** A write was accepted; `value` is what the device reports afterwards. */
@@ -48,6 +51,7 @@ const form = useRdmParameterForm({
   build: () => ({ exclude: props.exclude, only: props.only }),
   concurrency: props.concurrency,
   onWritten: (field, value) => emit('written', { pid: field.pid, value }),
+  rereadMs: props.rereadMs,
 });
 const { fields, states, connected, loading } = form;
 

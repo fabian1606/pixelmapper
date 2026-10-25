@@ -5,7 +5,7 @@
  * `PORTn_ENABLED` and ArtInput, Port-Address editor, failsafe + record
  * scene, per-port PIDs, errors.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { BridgeCommandError } from '../bridge/backend';
 import type { PortState } from '../bridge/protocol-model';
@@ -28,6 +28,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
   uninstallHost();
+  vi.useRealTimers();
 });
 
 /** Mounts the section and waits for the description and the PORTn_ENABLED reads. */
@@ -110,6 +111,16 @@ describe('NodePortsSection', () => {
     h.backend.emit({ type: 'rdmQueued', nodeId: NODE_UID, port: { bind: 1, index: 0 }, uid: NODE_UID, subDevice: 0, pid: 0x8103, data: '01' });
     await flushPromises();
     expect(mode(row(w, 3)).attributes('data-value')).toBe('output');
+  });
+
+  it('re-reads PORTn_ENABLED every 45 s (a queued message may go to another controller)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const w = await mountSection();
+    expect(mode(row(w, 3)).attributes('data-value')).toBe('output');
+    h.rdm.set(0x8103, '00'); // switched off at the node; nobody told this window
+    vi.advanceTimersByTime(45_000);
+    await flushPromises();
+    expect(mode(row(w, 3)).attributes('data-value')).toBe('off');
   });
 
   it('switches input ports off with ArtInput', async () => {
