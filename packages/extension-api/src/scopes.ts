@@ -276,7 +276,7 @@ export interface ScopeMap {
   selection: SelectionInfo;
   /** Global-ish: which main view is active. */
   viewport: ViewportInfo;
-  /** One fixture (fixture rows, property sidebar with single selection). */
+  /** One fixture (fixture rows; properties sidebar and selection inspector with a single selection). */
   fixture: FixtureView;
   /** One channel (channel controls). */
   channel: ChannelView;

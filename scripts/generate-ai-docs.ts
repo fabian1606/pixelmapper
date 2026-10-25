@@ -27,7 +27,7 @@ const COLLECTED = join(OUT, '.slots.collected.json');
 
 /** Slot patterns of surfaces not mounted by the collector (architecture/extensions.md). */
 const DOCUMENTED_SLOT_PATTERNS = [
-  'scene:header|before|after', 'scene/fixture:badges|actions', 'scene/group:badges|actions',
+  'scene:header|before|after', 'scene/fixture:badges|actions', 'scene/group:badges|actions', 'selection:after',
   'properties:header|before|after', 'properties/<category>:actions|before|after|items', 'properties/<category>/channel:badges|actions',
   'modifiers:header|before|after', 'modifiers/modifier:badges|actions', 'modifiers/add:items',
   'presets:header|before|after', 'presets/preset:badges|actions',

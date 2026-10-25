@@ -67,7 +67,7 @@ Scopes (`ScopeMap` in `packages/extension-api/src/scopes.ts`) are readonly views
 | Scope | Provided by |
 |---|---|
 | `project`, `selection`, `viewport` | `app.vue` via `provideRootScopes()` (`viewport` mirrors the project page's 2D/3D/raw switch and the live route) |
-| `fixture` | scene rows (`FixtureSidebarNode`), properties sidebar (single selection) |
+| `fixture` | scene rows (`FixtureSidebarNode`), properties sidebar and selection inspector (`SelectionInfoSection`; single selection) |
 | `channel`, `signature` | channel controls (`FixturePropertyControl`) |
 | `modifier` | modifier cards (`ChaserModifiersList`) |
 | `preset` | preset rows (`PresetsSidebar`) |
@@ -97,7 +97,8 @@ Callers with custom markup list positions in `manual` and render the outlets the
 Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled in the UI, open `/dev/slots` in dev for the catalog of slots rendered in the session with their scopes and contributors, or read `docs/ai/index.json`):
 
 - `scene:header`, `scene/fixture:badges|actions`, `scene/group:badges|actions`
-- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions` — the panel-level `properties:*` slots render only while a category is open: header/before above the category, `after` below it in its own scroll area (at most half the panel), e.g. the RDM section of `connector-artnet`; `fixture` is provided for a single selection only
+- `selection:after` — the selection inspector at the bottom of the scene sidebar (`SelectionInfoSection`): below the fields of a **single** selected fixture (DMX address, mode, kind config), with `fixture`; multi-selections render no slot. For per-fixture sections that belong next to address/mode, e.g. the RDM section of `connector-artnet`. The inspector is capped at 60 % of the sidebar and scrolls, so contributions should stay compact (sidebar width ≈ 230 px).
+- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions` — the panel-level `properties:*` slots render only while a category is open: header/before above the category, `after` below it in its own scroll area (at most half the panel); `fixture` is provided for a single selection only
 - `modifiers:*`, `modifiers/modifier:badges|actions`, `modifiers/add:items`
 - `presets:header|before|after`, `presets/preset:badges|actions`
 - `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items`

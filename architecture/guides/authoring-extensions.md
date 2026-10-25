@@ -148,15 +148,17 @@ Layout primitives generate **slots**: slot id = the `/`-joined ids of the enclos
 |---|---|
 | `properties:header\|before\|after`, `properties/<category>:actions\|before\|after\|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges\|actions` | fixture properties sidebar (panel-level slots only while a category is open; `after` below it, scrolling) |
 | `scene:header`, `scene/fixture:badges\|actions`, `scene/group:badges\|actions` | scene list |
+| `selection:after` | selection inspector below the scene list: below the fields (address, mode, kind config) of a single selected fixture, with `fixture`; not rendered for multi-selections — for per-fixture sections such as device settings |
 | `modifiers:*`, `modifiers/modifier:badges\|actions`, `modifiers/add:items` | modifier stack |
 | `presets:header\|before\|after`, `presets/preset:badges\|actions` | presets |
 | `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items` | fixture library / add dialog |
 | `header:start\|end`, `live:start\|end` | app header, live toolbar |
+| `connections/outputs:before` | Connectors page, Outputs tab, above the output connectors |
 | `context-menu/<fixture\|group\|channel\|preset>:items` | context menus |
 
 Globs: `*` = one path segment, `**` = any number (`'properties/*:actions'`, `'**:badges'`). Contributions are ordered by `priority` (desc), then extension id; `when(scopes)` decides visibility reactively.
 
-**Scopes** available to a contribution are those of its location: `project` (id, bpm, `requires`, `fixtures` list), `selection` (`fixtureIds`, `nodeIds`), `viewport` everywhere; `fixture` in fixture rows and single-selection properties; `channel` + `signature` in channel controls; `modifier` in modifier cards; `preset` in preset rows; `liveWidget`/`livePage` in live mode. Types: `packages/extension-api/src/scopes.ts`.
+**Scopes** available to a contribution are those of its location: `project` (id, bpm, `requires`, `fixtures` list), `selection` (`fixtureIds`, `nodeIds`), `viewport` everywhere; `fixture` in fixture rows, single-selection properties and `selection:after`; `channel` + `signature` in channel controls; `modifier` in modifier cards; `preset` in preset rows; `liveWidget`/`livePage` in live mode. Types: `packages/extension-api/src/scopes.ts`.
 
 Example — a "Full" button in the intensity section that sets every selected dimmer to 255 in one undo step:
 
