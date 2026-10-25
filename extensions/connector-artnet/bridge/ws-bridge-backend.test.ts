@@ -147,9 +147,9 @@ describe('WsBridgeBackend — commands and events', () => {
     s.receive({ type: 'error', id: cSet!.id, code: 'nack', message: 'NACK DATA_OUT_OF_RANGE', details: { nackReason: 6, nackName: 'DATA_OUT_OF_RANGE' } });
     s.receive({ type: 'result', id: cGet!.id, result: { data: '0001', value: 1 } });
     await expect(get).resolves.toEqual({ data: '0001', value: 1 });
-    const err = await set.catch(e => e as BridgeCommandError);
+    const err = await set.then(() => null, (e: unknown) => e as BridgeCommandError);
     expect(err).toBeInstanceOf(BridgeCommandError);
-    expect([err.code, err.nackReason]).toEqual(['nack', 6]);
+    expect([err!.code, err!.nackReason]).toEqual(['nack', 6]);
     b.stop();
   });
 

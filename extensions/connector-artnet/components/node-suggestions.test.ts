@@ -83,7 +83,7 @@ describe('NodeSuggestions', () => {
     await nextTick();
     const store = useConnectionsStore();
     expect(store.connectors).toHaveLength(1);
-    const c = store.connectors[0] as ArtNetNodeConnector;
+    const c = store.connectors[0] as unknown as ArtNetNodeConnector;
     expect([c.meta.type, c.nodeId.value, c.outputCount]).toEqual(['artnet-node', '7FF0:8A1B2C3D', 4]);
     expect(c.status.value).toBe('connected');
     expect(wrapper.text()).not.toContain('Art-Net node found');
@@ -108,7 +108,7 @@ describe('NodeSuggestions', () => {
     await wrapper.findAll('button').find(b => b.text() === 'Add by IP')!.trigger('click');
     await wrapper.find('input').setValue('10.0.0.50');
     await wrapper.find('form').trigger('submit');
-    const c = useConnectionsStore().connectors[0] as ArtNetNodeConnector;
+    const c = useConnectionsStore().connectors[0] as unknown as ArtNetNodeConnector;
     expect([c.ip.value, c.manual.value]).toEqual(['10.0.0.50', true]);
     expect(backend.pollTargets.get('10.0.0.50')).toBe(1);
     wrapper.unmount();
