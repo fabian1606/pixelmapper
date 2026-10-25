@@ -74,6 +74,14 @@ describe('NodeConfigPanel', () => {
     expect(h.argsOf('rdmDescribe')).toEqual([]);
   });
 
+  it('survives an incomplete description (e.g. an unscripted fake bridge)', async () => {
+    h.backend.handle('rdmDescribe', () => ({}) as never);
+    const w = await mountPanel({ initialOpen: ['ports', 'advanced'] });
+    expect(w.findAll('[data-port]')).toHaveLength(4);
+    expect(w.text()).toContain('The bridge sent an incomplete device description');
+    expect(h.pidsOf('rdmGet')).toEqual([]);
+  });
+
   it('passes on where the node moved', async () => {
     const w = await mountPanel({ initialOpen: ['network'] });
     w.findComponent(NodeNetworkSection).vm.$emit('follow', { nodeId: NODE_UID, ip: '10.0.0.30' });

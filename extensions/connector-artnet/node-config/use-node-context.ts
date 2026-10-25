@@ -106,6 +106,13 @@ export interface NodeDescription {
 /** Injection key of the panel-wide description. */
 export const NODE_DESCRIPTION_KEY: InjectionKey<NodeDescription> = Symbol('artnet-node-description');
 
+/** True when `value` has the fields the sections rely on (guards against malformed bridge answers). */
+export function isDeviceDescription(value: unknown): value is RdmDeviceDescription {
+  const d = value as Partial<RdmDeviceDescription> | null;
+  return !!d && typeof d.uid === 'string' && typeof d.deviceInfo?.deviceModelId === 'number'
+    && Array.isArray(d.supportedParameters) && Array.isArray(d.parameterDescriptions) && Array.isArray(d.errors);
+}
+
 /** Loads the node's description when its UID is known and the bridge is connected. */
 export function useNodeDescription(ctx: NodeContext): NodeDescription {
   const description = shallowRef<RdmDeviceDescription | null>(null);
@@ -136,7 +143,9 @@ export function useNodeDescription(ctx: NodeContext): NodeDescription {
     error.value = null;
     try {
       const result = await ctx.backend.request('rdmDescribe', { ...a, ...(refresh ? { refresh: true } : {}) }, { timeoutMs: 20_000 });
-      if (mine === seq) description.value = result;
+      if (mine !== seq) return;
+      if (isDeviceDescription(result)) description.value = result;
+      else error.value = 'The bridge sent an incomplete device description';
     }
     catch (err) {
       if (mine === seq) error.value = describeNodeError(err);

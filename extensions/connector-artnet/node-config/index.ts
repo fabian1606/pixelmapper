@@ -13,6 +13,7 @@ export { default as NodeDeviceSection } from './NodeDeviceSection.vue';
 export { default as NodeAdvancedSection } from './NodeAdvancedSection.vue';
 export {
   NODE_DESCRIPTION_KEY,
+  isDeviceDescription,
   provideNodeDescription,
   useCommandRunner,
   useNodeContext,
