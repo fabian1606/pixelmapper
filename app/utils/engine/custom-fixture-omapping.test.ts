@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildOflFixture, initFromOflFixture } from './custom-fixture-omapping';
+import { modeAddressCount } from './custom-fixture-channel-types';
 import { parseOflFixtureJson } from '~/utils/fixture-definitions/ofl-import';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import type { OflFixture } from '~/utils/ofl/types';
@@ -151,6 +152,165 @@ describe('custom fixture mapping — explicit per-pixel channels', () => {
     const names = init.modes[0]!.entries.map(e => init.channels.find(c => c.id === e.channelId)?.name);
     expect(names).toEqual(['Red 1', 'Green 2']);
     expect(channelTypes(buildFromInit(init), 0)).toEqual(['RED', 'GREEN']);
+  });
+});
+
+// ── 16-bit channels (fineChannelAliases) ─────────────────────────────────────
+
+/** DMX layout of a mode as the core builds it: one row per channel, in DMX order. */
+function dmxLayout(ofl: OflFixture, modeIndex: number) {
+  return createFixtureFromOfl(ofl, modeIndex).channels.map(c => ({
+    name: c.oflChannelName,
+    type: c.type,
+    offset: c.addressOffset,
+    isFine: c.isFine ?? false,
+    fineOffsets: c.fineAddressOffsets ?? [],
+    defaultValue: c.defaultValue,
+  }));
+}
+
+/** Asserts that the editor shows as many DMX addresses per mode as the core uses. */
+function expectEditorFootprint(ofl: OflFixture): void {
+  const init = initFromOflFixture(ofl);
+  init.modes.forEach((mode, i) => {
+    expect(modeAddressCount(mode, init.channels, init.headCount)).toBe(createFixtureFromOfl(ofl, i).channels.length);
+  });
+}
+
+/** `fineChannelAliases` of every channel that has some, by channel key. */
+function fineAliases(channels: OflFixture['availableChannels']): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(channels ?? {})
+      .filter(([, ch]) => ch.fineChannelAliases?.length)
+      .map(([key, ch]) => [key, ch.fineChannelAliases!]),
+  );
+}
+
+/** Moving head with 16-bit Pan / Tilt and a plain 8-bit channel after them. */
+function mover(modes: OflFixture['modes'], extra: OflFixture['availableChannels'] = {}): OflFixture {
+  return {
+    $schema: 'https://example.invalid/fixture.json',
+    name: 'Mover',
+    categories: ['Moving Head'],
+    meta: { authors: ['Test'], createDate: '2026-01-01', lastModifyDate: '2026-01-01' },
+    availableChannels: {
+      'Pan': { fineChannelAliases: ['Pan fine'], dmxValueResolution: '16bit', defaultValue: 32768, capability: { type: 'Pan', angleStart: '0deg', angleEnd: '540deg' } },
+      'Tilt': { fineChannelAliases: ['Tilt LSB'], dmxValueResolution: '16bit', capability: { type: 'Tilt', angleStart: '0deg', angleEnd: '270deg' } },
+      'Dimmer': { capability: { type: 'Intensity' } },
+      ...extra,
+    },
+    modes,
+  } as OflFixture;
+}
+
+describe('custom fixture mapping — 16-bit channels', () => {
+  it('keeps fine aliases and DMX offsets when the fine bytes follow their coarse channels', () => {
+    const ofl = mover([{ name: '16-bit', channels: ['Pan', 'Pan fine', 'Tilt', 'Tilt LSB', 'Dimmer'] }]);
+    const init = initFromOflFixture(ofl);
+    // The editor models coarse + fine as one '16bit' channel (2 addresses).
+    expect(init.channels.map(c => [c.name, c.resolution])).toEqual([
+      ['Pan', '16bit'], ['Tilt', '16bit'], ['Dimmer', '8bit'],
+    ]);
+    expect(init.modes[0]!.entries).toHaveLength(3);
+
+    const saved = buildFromInit(init);
+    expect(fineAliases(saved.availableChannels)).toEqual({ Pan: ['Pan fine'], Tilt: ['Tilt LSB'] });
+    expect(saved.modes[0]!.channels).toEqual(ofl.modes[0]!.channels);
+
+    const layout = dmxLayout(saved, 0);
+    expect(layout).toEqual(dmxLayout(ofl, 0));
+    // Pan fine byte at offset 1, Tilt at 2 (fine at 3), Dimmer right after at 4.
+    expect(layout.map(c => [c.name, c.offset, c.isFine, c.fineOffsets])).toEqual([
+      ['Pan', 0, false, [1]],
+      ['Pan fine', 1, true, []],
+      ['Tilt', 2, false, [3]],
+      ['Tilt LSB', 3, true, []],
+      ['Dimmer', 4, false, []],
+    ]);
+    expectEditorFootprint(ofl);
+  });
+
+  it('survives a second edit + save unchanged', () => {
+    const ofl = mover([{ name: '16-bit', channels: ['Pan', 'Pan fine', 'Tilt', 'Tilt LSB', 'Dimmer'] }]);
+    const twice = roundTrip(roundTrip(ofl));
+    expect(fineAliases(twice.availableChannels)).toEqual({ Pan: ['Pan fine'], Tilt: ['Tilt LSB'] });
+    expect(dmxLayout(twice, 0)).toEqual(dmxLayout(ofl, 0));
+  });
+
+  it('keeps every mode when a mode lists a fine alias apart from its coarse channel', () => {
+    const ofl = mover(
+      [
+        { name: '8-bit', channels: ['Pan', 'Tilt', 'Dimmer'] },
+        { name: 'Split', channels: ['Pan', 'Tilt', 'Pan fine', 'Tilt LSB', 'Dimmer'] },
+        { name: '24-bit zoom', channels: ['Dimmer', 'Zoom', 'Zoom fine', 'Zoom fine 2', 'Pan', 'Pan fine'] },
+      ],
+      { Zoom: { fineChannelAliases: ['Zoom fine', 'Zoom fine 2'], dmxValueResolution: '24bit', capability: { type: 'Zoom', angleStart: '10deg', angleEnd: '40deg' } } },
+    );
+    const saved = roundTrip(ofl);
+
+    expect(fineAliases(saved.availableChannels)).toEqual({
+      Pan: ['Pan fine'], Tilt: ['Tilt LSB'], Zoom: ['Zoom fine', 'Zoom fine 2'],
+    });
+    expect(saved.availableChannels?.Zoom?.dmxValueResolution).toBe('24bit');
+    // Fine aliases are no channels of their own.
+    expect(Object.keys(saved.availableChannels ?? {})).toEqual(['Pan', 'Tilt', 'Dimmer', 'Zoom']);
+    for (let i = 0; i < ofl.modes.length; i++) {
+      expect(saved.modes[i]!.channels).toEqual(ofl.modes[i]!.channels);
+      expect(dmxLayout(saved, i)).toEqual(dmxLayout(ofl, i));
+    }
+    // Split mode: the fine bytes stay behind Tilt, Dimmer stays at offset 4.
+    expect(dmxLayout(saved, 1).map(c => [c.name, c.offset, c.fineOffsets])).toEqual([
+      ['Pan', 0, [2]], ['Tilt', 1, [3]], ['Pan fine', 2, []], ['Tilt LSB', 3, []], ['Dimmer', 4, []],
+    ]);
+    expectEditorFootprint(ofl);
+  });
+
+  it('keeps fine aliases of per-pixel template channels', () => {
+    const ofl = {
+      $schema: 'https://example.invalid/fixture.json',
+      name: 'Bar',
+      categories: ['Pixel Bar'],
+      meta: { authors: ['Test'], createDate: '2026-01-01', lastModifyDate: '2026-01-01' },
+      // The editor's own pixel keys, so channel names compare 1:1 after the save.
+      matrix: { pixelCount: [2, 1, 1], pixelKeys: [[['head-1', 'head-2']]] },
+      availableChannels: { Strobe: { capability: { type: 'ShutterStrobe', shutterEffect: 'Strobe' } } },
+      templateChannels: {
+        'Dimmer $pixelKey': { fineChannelAliases: ['Dimmer fine $pixelKey'], dmxValueResolution: '16bit', capability: { type: 'Intensity' } },
+        'Red $pixelKey': { capability: { type: 'ColorIntensity', color: 'Red' } },
+      },
+      modes: [{
+        name: 'Pixels',
+        channels: [
+          { insert: 'matrixChannels', repeatFor: 'eachPixelABC', channelOrder: 'perPixel', templateChannels: ['Dimmer $pixelKey', 'Dimmer fine $pixelKey', 'Red $pixelKey'] },
+          'Strobe',
+        ],
+      }],
+    } as OflFixture;
+    const saved = roundTrip(ofl);
+
+    expect(saved.templateChannels?.['Dimmer $pixelKey']?.fineChannelAliases).toEqual(['Dimmer fine $pixelKey']);
+    expect(dmxLayout(saved, 0)).toEqual(dmxLayout(ofl, 0));
+    // Per pixel: Dimmer, Dimmer fine, Red → Strobe after both pixels at offset 6.
+    expect(dmxLayout(saved, 0).map(c => [c.name, c.offset, c.fineOffsets])).toEqual([
+      ['Dimmer head-1', 0, [1]], ['Dimmer fine head-1', 1, []], ['Red head-1', 2, []],
+      ['Dimmer head-2', 3, [4]], ['Dimmer fine head-2', 4, []], ['Red head-2', 5, []],
+      ['Strobe', 6, []],
+    ]);
+    expectEditorFootprint(ofl);
+  });
+
+  it('gives a 16-bit channel created in the editor the two addresses the editor shows', () => {
+    const init = initFromOflFixture(mover([{ name: 'Mode', channels: ['Dimmer'] }]));
+    const pan = init.channels.find(c => c.name === 'Pan')!;
+    // Add Pan (16-bit) in front of Dimmer, like the mode editor does.
+    init.modes[0]!.entries.unshift({ entryId: 'e-pan', channelId: pan.id, perHead: false, order: 'perPixel' });
+    pan.name = 'Head Pan';
+    const saved = buildFromInit(init);
+
+    expect(saved.availableChannels?.['Head Pan']?.fineChannelAliases).toEqual(['Head Pan fine']);
+    expect(dmxLayout(saved, 0).map(c => [c.name, c.offset, c.isFine, c.fineOffsets])).toEqual([
+      ['Head Pan', 0, false, [1]], ['Head Pan fine', 1, true, []], ['Dimmer', 2, false, []],
+    ]);
   });
 });
 
