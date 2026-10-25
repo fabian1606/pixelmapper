@@ -1,6 +1,6 @@
 {
   "name": "@pixelmapper/ext-connector-artnet",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Art-Net output: nodes found by the local bridge pmnet-bridge, or a manual target.",
   "private": true,
   "type": "module",
