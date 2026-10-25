@@ -387,7 +387,7 @@ The host registers it for replay from the change log and for collaborators; exec
 
 ## Testing and shipping
 
-- Tests next to the code (`<id>.test.ts`, Vitest + happy-dom); tests may import core modules (`~/…`) to mount hosts, e.g. `registerExtension(manifest)` + `installSharedGlobals()`.
+- Tests next to the code (`<id>.test.ts`, Vitest + happy-dom); tests may import core modules (`~/…`) to mount hosts, e.g. `registerExtension(manifest)` + `installSharedGlobals()`. Shared test helpers that import core go into `*.test-support.ts` files (exempt from the import rule like tests; never import them from extension code).
 - `bun run lint && bun run check:extensions && bun run test`.
 - Catalog bundle: `bun run build:extensions` → `public/extensions/<id>/<version>/{index.js, style.css, extension.json}`. Users install it from the Extensions page; projects that use it list it in `requires` and ask for it when opened elsewhere.
 

@@ -285,6 +285,8 @@ declare module '@pixelmapper/extension-api' {
    *
    * All outputs (including ArtNet) and all hardware controllers are extensions.
    * Connector configuration is per user/device, never project state.
+   * Extensions manage the user's connector instances through `connectors`
+   * (API 1.4).
    */
 
   /** Connection state of a connector. */
@@ -373,9 +375,54 @@ declare module '@pixelmapper/extension-api' {
        * and logs are rendered by the host.
        */
       settings?: Component;
+      /**
+       * True when the `settings` component renders the output → universe
+       * mapping itself (e.g. a port table); the host then hides its generic
+       * Outputs section on the connector card. Optional (API 1.4); absent = false.
+       */
+      ownsOutputMapping?: boolean;
   }
   /** Identity helper for typing a connector definition. */
   export function defineConnector(def: ConnectorDefinition): ConnectorDefinition;
+  /**
+   * The current user's connector instances on this device (the set shown on
+   * the Connectors page). Setups are per user and device, never project state
+   * (ADR D18); the host persists them.
+   */
+  export interface ConnectorSet {
+      /**
+       * The instances, optionally only those of one connector `type`. Reactive
+       * when read inside a `computed`/template; do not mutate the array.
+       */
+      list(type?: string): readonly Connector[];
+      /**
+       * Adds an instance (e.g. created with your definition's `create` or
+       * `fromConfig`) and persists it. Instances whose `alwaysConnected()` is
+       * true are connected right away; others wait for the user (or connect on
+       * the next start when `canAutoConnect()`).
+       */
+      add(connector: Connector): void;
+      /** Disconnects and removes the instance with this id, and persists. No-op for unknown ids. */
+      remove(id: string): void;
+      /**
+       * Persists the current `getConfig()` of the instance with this id. Call it
+       * when a connector changed its own config outside the settings component
+       * (e.g. it learned a device id or a new IP), so the change survives a
+       * reload even when the card was never opened. No-op for unknown ids.
+       */
+      persist(id: string): void;
+  }
+  /**
+   * The user's connector set (API 1.4). Works outside components (connectors,
+   * plain modules); throws outside the app (no host).
+   *
+   * @example
+   * // Add a connector for a device found on the network.
+   * connectors.add(MyConnector.fromConfig(crypto.randomUUID(), { host: '2.0.0.5' }));
+   * // A connector that learned something about its device saves it.
+   * this.deviceId = id; connectors.persist(this.id);
+   */
+  export const connectors: ConnectorSet;
   /** Information about a MIDI port used for auto-detection. */
   export interface MidiPortInfo {
       id: string;
@@ -705,6 +752,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** The implementation of the API composables, provided by the host. */
   export interface HostApi {
       /** Semver of the API the host implements. */
@@ -730,6 +778,12 @@ declare module '@pixelmapper/extension-api' {
       onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
       /** Definition lookup by RDM IDs (API 1.3). */
       findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
+      /** Stores a definition as a new custom fixture (API 1.4). */
+      saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
+      /** The user's connector instances (API 1.4, `connectors.ts`). */
+      connectors: ConnectorSet;
+      /** Key of the current user for per-user storage (API 1.4, `user.ts`). */
+      getUserKey(): string;
   }
   /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */
   export interface SharedGlobals {
@@ -1021,7 +1075,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.3.0";
+  export const API_VERSION = "1.4.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1328,7 +1382,9 @@ declare module '@pixelmapper/extension-api' {
    * - `onFixturePatchChange` — observe patch changes from any source (local
    *   edits, undo/redo, collaborators),
    * - `findFixtureDefinitionByRdm` — find a fixture definition (custom fixtures,
-   *   then the Open Fixture Library) by RDM manufacturer and model ID.
+   *   then the Open Fixture Library) by RDM manufacturer and model ID,
+   * - `saveCustomFixtureDefinition` — store a generated definition as a custom
+   *   fixture of the user (API 1.4).
    *
    * Writes go through commands: `commands.addFixtures`,
    * `commands.setStartAddress`, `commands.setFixtureMode`, `commands.batch`.
@@ -1390,6 +1446,30 @@ declare module '@pixelmapper/extension-api' {
    * is unreachable.
    */
   export function findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
+  /**
+   * Stores a fixture definition in Open Fixture Library JSON format as a NEW
+   * custom fixture of the user (API 1.4) — e.g. one generated from a device's
+   * RDM slot descriptions — so the user can edit it in the custom fixture
+   * editor. Never replaces an existing custom fixture: a name already in use
+   * gets a numeric suffix. Validated like the editor's OFL import (`name`,
+   * non-empty `modes` with `channels`, `availableChannels` and/or
+   * `templateChannels`); every mode must build.
+   *
+   * Set `rdm.modelId`, `pixelmapper.rdmManufacturerId` and the modes'
+   * `rdmPersonalityIndex` so `findFixtureDefinitionByRdm` finds the definition
+   * next time. Returns the key `'custom/<id>'` for `commands.addFixtures`.
+   *
+   * @throws Error when the definition is invalid.
+   *
+   * @example
+   * const key = saveCustomFixtureDefinition({
+   *   name: 'Acme Bar (RDM)', categories: ['Pixel Bar'],
+   *   rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
+   *   availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
+   *   modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
+   * });
+   */
+  export function saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
   /** Anything that occupies DMX channels (e.g. a `FixtureSummary`). */
   export interface AddressOccupant {
       /** Fixture id, matched by `FindFreeAddressOptions.ignore`. */
@@ -2005,6 +2085,12 @@ declare module '@pixelmapper/extension-api' {
       channelCount: number;
       /** Kind id for kind fixtures. */
       kindId?: string;
+      /**
+       * Namespaced extension data (`extensionData[extensionId][key]`), present
+       * only when the fixture has some (API 1.4) — enough to find e.g. the
+       * fixtures linked to a device without building full fixture views.
+       */
+      extensionData?: Record<string, Record<string, Json>>;
   }
   /** Current selection. Provided at the app root. */
   export interface SelectionInfo {
@@ -2293,6 +2379,17 @@ declare module '@pixelmapper/extension-api' {
       /** Menu entry for `:items` positions in `PmMenuGroup`. */
       menuItem?: MenuItemSpec;
   }
+
+  // ── packages/extension-api/src/user.ts ──────────────────────────
+  /**
+   * Key of the current user for per-user storage: the signed-in user's id,
+   * else `'local'`. Reactive when read inside a `computed`/template, so state
+   * keyed by it follows a sign-in or user switch.
+   *
+   * @example
+   * const key = computed(() => `pm:my-extension:dismissed:${getUserKey()}`);
+   */
+  export function getUserKey(): string;
 
   // ── packages/extension-api/src/index.ts ─────────────────────────
   /**

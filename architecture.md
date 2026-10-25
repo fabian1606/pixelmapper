@@ -98,7 +98,7 @@ pixelmapper/
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
-- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes, tube firmware updates; bridge contract (1.0.0 candidate, mirrored in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
+- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes (v1 = M6: device list, add, addressing, sync, status badge — [connectors.md › RDM devices](architecture/connectors.md#rdm-devices-plan-m6-v1)), tube firmware updates; bridge contract (1.0.0 candidate, authoritative in `pixelmapper-hardware` `protocol/bridge-ws.md`, mirrored here and in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
 - [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
 - [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.1, distribution, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN` v2 (distribution block)

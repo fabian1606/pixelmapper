@@ -66,7 +66,7 @@ export default defineExtension({
 | `connector-artnet` | distribution | `artnet-node` (one connector per Art-Net 4 node found by the bridge `pmnet serve`, see below) and `artnet` — “ArtNet (manual target)”: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to the old local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
 | `connector-esp` | catalog | `serial` (ESP32 DMX node over platform serial — Web Serial or native, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
 
-### Art-Net nodes (`extensions/connector-artnet`, plan M5)
+### Art-Net nodes (`extensions/connector-artnet`, plan M5, M6)
 
 All Art-Net 4 / RDM packets, timers and procedures live in the Rust bridge **`pmnet serve`** (crate `pixelmapper-net`, hardware repo). The extension sends intents and receives state over the [bridge WebSocket protocol](artnet-bridge-ws-protocol.md) and never builds packets.
 
@@ -80,7 +80,18 @@ connector-artnet
 │   ├── shared.ts            getArtNetBackend() / getNodeDirectory() / retainArtNetDiscovery(), bridge URL setting
 │   └── testing/             FakeArtNetBackend, FakeBridgeSocket, fixtures (for tests of later milestones)
 ├── node/              artnet-node connector, output ports + mapping, status, suggestions, dismissals
-└── components/        NodeSuggestions (slot), NodeConnectorSettings, NodePortTable, BridgeStatusHint, …
+├── devices/           RDM devices on the node ports (M6)
+│   ├── device-store.ts      devices from TODs: rdmDescribe once, DEVICE_INFO re-read (45 s, TOD change, after SETs,
+│   │                        LOCAL_RDM_SET), presence, SETs (address, personality, identify), Rediscover
+│   ├── fixture-matching.ts  D10 cascade: RDM lookup → generated from slots → generic (stored as custom fixtures)
+│   ├── add-devices.ts       Add / Add all: addFixtures + link extension data as ONE batch
+│   ├── conflicts.ts, addressing.ts   overlaps by footprint; Assign free address; Auto-address
+│   ├── patch-sync.ts        linked fixture → RDM SETs; Write to device / Take from device
+│   ├── universe-guard.ts    confirm before leaving the port's universe; unlink / re-link
+│   ├── link.ts, link-status.ts, fixture-link-state.ts   link data, effective link, Connected/Mismatch/Offline/Unlinked
+│   └── device-runtime.ts    one runtime per app (activate): store + matcher + sync + guard while node connectors exist
+└── components/        NodeSuggestions (slot), NodeConnectorSettings, NodePortTable, DeviceDiscoveryList,
+                       RdmStatusBadge (slot) + MismatchPopover, BridgeStatusHint, …
 ```
 
 - **Backend seam.** UI and connectors use only `ArtNetBackend` (`request(type, args)`, `on(event, cb)`, `sendDmx(target, data)`, `addPollTarget(ip)`, reactive `state`). `WsBridgeBackend` is used in the browser and the desktop app; a native backend (embedded `pixelmapper-net` via Tauri) can replace it with `installArtNetBackend()` without touching UI code. One instance per app. **Start policy:** the backend runs only while something holds `retainArtNetDiscovery()` — the node suggestions on the Connectors page (mounted) and every `artnet-node` connector — so users who never use Art-Net get no bridge connection (no browser local-network prompt, no connection errors).
@@ -89,6 +100,17 @@ connector-artnet
 - **DMX out** (M5.4): `sendFrame(universe)` → `backend.sendDmx({ nodeId, portAddress }, data)` for every output port mapped to that universe. The backend collects one rendered frame into one binary frame set (+ `dmxRoutes` when routes change); the bridge sends unicast ArtDmx and a broadcast ArtSync. Fire-and-forget; dropped while the socket is backed up.
 - **Port mapping** (M5.5): per port the universe, the node's Port-Address (read-only) and *Write port address to node* (`artAddress`) — the only write to the node; the new state comes back as a `node` event (D5).
 - **Suggestions** (M5.2): contributed into the core slot `connections/outputs:before`: *Art-Net node found: name · IP — Connect / Dismiss* for discovered output nodes without a connector, *Add by IP* (the bridge then polls that IP), and the bridge hint. *Connect* adds the connector with `connectors.add` (API 1.4). Dismissals: `pm:artnet:dismissed-nodes:<getUserKey()>`, following sign-in/user switches.
+
+#### RDM devices (plan M6, v1)
+
+- **Device list** (M6.1, D9) in the node's card under the port table: one row per UID of the port TODs — address (`U<port universe>.<DMX start address>`), label, model, personality, firmware, state *new / linked / conflict / offline*; Identify (switched off when the card closes), Add, Assign free address; for the node *Add all*, *Auto-address*, *Rediscover* (`todControl` flush per output port). State comes only from device answers (D5): DEVICE_INFO is re-read every 45 s, on TOD changes, after every SET and when the node queues LOCAL_RDM_SET (a SET from its panel, node contract §7).
+- **Link** (D13): fixture extension data `connector-artnet.rdmLink = { uid, nodeId, port, portAddress, state: 'linked' | 'unlinked' }`. **Effective** while `linked` and the fixture sits in the universe of its node port (connector mapping, default = Port-Address).
+- **Add / Add all** (M6.3): device's current address and personality → mode (matching cascade M6.2; generated definitions are new custom fixtures with one mode per personality), `addFixtures` + `setExtensionData` links in ONE `batch` — one undo step, placement like the add dialog.
+- **Conflicts and addressing** (M6.4): a device occupies its DEVICE_INFO footprint (a mode's channel count can differ — warned on add); conflicts with any project fixture except its own and with other devices. *Assign free address* = `findFreeAddressSpan` in the port universe → RDM SET → the linked fixture follows the device's answer. *Auto-address* = the node's linked devices per port universe in canvas order, gap-free; SETs first, then one batch for the acknowledged ones; failures per device.
+- **Sync** (M6.5): `onFixturePatchChange` for local/undo/redo changes of effective links → DMX_PERSONALITY (mode → personality) then DMX_START_ADDRESS, ordered per device, then re-read. Changes made by this extension (Take from device, Assign free address, Auto-address) and collaborators' changes are not sent. Device-side differences only show as **Mismatch**.
+- **Universe guard** (M6.6, D14): `onBeforeFixtureChange` confirms *“This fixture is bound to a physical node port (<node> port <n>). Change anyway?”*; the change then writes `state: 'unlinked'` (UID kept, nothing sent); moving it back into the port universe writes `linked` again (no write to the device — Mismatch shows a difference).
+- **Status badge** (M6.7, D15): `scene/fixture:badges` for fixtures with a link — Connected / Mismatch / Offline / Unlinked, tooltip with reasons, UID, firmware, last seen. Mismatch opens a popover (*Write to device* / *Take from device*), teleported with `data-overlay-root` (in `FLOATING_OVERLAY_SELECTORS`).
+- **Activation:** the manifest's `activate` installs the `DeviceRuntime`; store, sync and guard run only while an `artnet-node` connector exists. Tests: `FakeArtNetBackend` + `devices/testing/fake-devices.ts` (simulated tubes) + `harness.test-support.ts` (real host).
 
 ### ESP firmware protocol (`extensions/connector-esp/protocol.ts`)
 
