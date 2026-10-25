@@ -8,13 +8,14 @@
  *   UDP in the desktop app, the old local bridge in the browser — kept
  *   unchanged for existing setups.
  *
- * Discovery runs while the extension is active (`activate` starts the
- * shared bridge connection).
+ * Discovery (the shared bridge connection) runs only while the Connectors
+ * page shows the node suggestions or at least one `artnet-node` connector
+ * exists (`retainArtNetDiscovery`), so users who never use Art-Net get no
+ * bridge connection and no browser local-network prompt.
  */
 import { defineConnector, defineExtension } from '@pixelmapper/extension-api';
 import { ArtNetConnector } from './artnet-connector';
 import { ArtNetNodeConnector, NODE_CONNECTOR_TYPE } from './node/node-connector';
-import { startArtNetDiscovery } from './bridge/shared';
 import { EXTENSION_VERSION } from './version';
 import ArtNetSettings from './components/ArtNetSettings.vue';
 import NodeConnectorSettings from './components/NodeConnectorSettings.vue';
@@ -54,5 +55,4 @@ export default defineExtension({
     // Discovered nodes without a connector, above the output connectors.
     slots: [{ slot: 'connections/outputs:before', component: NodeSuggestions }],
   },
-  activate: () => startArtNetDiscovery(),
 });

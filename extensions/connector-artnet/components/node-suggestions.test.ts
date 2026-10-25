@@ -1,7 +1,8 @@
 /**
  * Node suggestions (plan M5.2): suggestion rules, dismissals per user, the
  * Connectors-page component with Connect / Dismiss, and the bridge hints
- * (not running, Safari) — against the fake backend.
+ * (not running, Safari), and the discovery start policy — against the
+ * fake backend.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nextTick } from 'vue';
@@ -10,7 +11,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { readStoredConnectors, useConnectionsStore } from '~/stores/connections-store';
 import { installSharedGlobals } from '~/utils/extensions/shared-globals';
 import { setCurrentUserId } from '~/utils/extensions/connector-api';
-import { getNodeDirectory, installArtNetBackend } from '../bridge/shared';
+import { artNetDiscoveryDemand, getNodeDirectory, installArtNetBackend } from '../bridge/shared';
 import { FakeArtNetBackend } from '../bridge/testing/fake-backend';
 import { makeNode } from '../bridge/testing/fixtures';
 import { ArtNetNodeConnector, activeNodeConnectors } from '../node/node-connector';
@@ -130,5 +131,32 @@ describe('NodeSuggestions', () => {
     await nextTick();
     expect(wrapper.text()).toContain('Art-Net discovery is not supported in Safari');
     wrapper.unmount();
+  });
+});
+
+describe('discovery start policy', () => {
+  it('runs only while the Connectors page is shown or an artnet-node connector exists', async () => {
+    expect(backend.state.value.kind).toBe('idle'); // the extension alone starts nothing
+
+    const page = mount(NodeSuggestions);
+    await nextTick();
+    expect(backend.state.value.kind).toBe('connected');
+    page.unmount();
+    expect(backend.state.value.kind).toBe('idle');
+
+    // A node connector keeps discovery running without the page.
+    const c = ArtNetNodeConnector.fromConfig('n1', ArtNetNodeConnector.configForNode(makeNode()));
+    useConnectionsStore().add(c); // always connected → connect()
+    await nextTick();
+    expect(backend.state.value.kind).toBe('connected');
+    const again = mount(NodeSuggestions);
+    again.unmount();
+    expect(backend.state.value.kind).toBe('connected');
+    expect(artNetDiscoveryDemand()).toBe(1);
+
+    useConnectionsStore().remove('n1');
+    await nextTick();
+    expect(artNetDiscoveryDemand()).toBe(0);
+    expect(backend.state.value.kind).toBe('idle');
   });
 });

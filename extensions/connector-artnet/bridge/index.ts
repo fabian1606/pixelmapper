@@ -26,6 +26,7 @@ export {
   getBridgeUrl,
   getNodeDirectory,
   installArtNetBackend,
+  artNetDiscoveryDemand,
+  retainArtNetDiscovery,
   setBridgeUrl,
-  startArtNetDiscovery,
 } from './shared';

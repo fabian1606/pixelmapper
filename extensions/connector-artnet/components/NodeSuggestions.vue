@@ -4,16 +4,21 @@
  * slot `connections/outputs:before`): “Art-Net node found: <name> · <IP> —
  * Connect / Dismiss” for nodes without a connector, manual add by IP, and
  * the bridge hint when the bridge is missing, outdated or unsupported.
+ * Mounting it starts discovery (`retainArtNetDiscovery`), unmounting
+ * releases it.
  */
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { connectors } from '@pixelmapper/extension-api';
 import type { NodeState } from '../bridge/protocol-model';
-import { getArtNetBackend, getNodeDirectory } from '../bridge/shared';
+import { getArtNetBackend, getNodeDirectory, retainArtNetDiscovery } from '../bridge/shared';
 import { ArtNetNodeConnector, activeNodeConnectors } from '../node/node-connector';
 import { suggestNodes, unconnectedNodes, useDismissedNodes } from '../node/suggestions';
 import BridgeStatusHint from './BridgeStatusHint.vue';
 import NodeAddByIp from './NodeAddByIp.vue';
 
+// Discovery runs while the Connectors page shows this (and while node connectors exist).
+const releaseDiscovery = retainArtNetDiscovery();
+onBeforeUnmount(releaseDiscovery);
 const backend = getArtNetBackend();
 const directory = getNodeDirectory();
 const { dismissed, dismiss, restore } = useDismissedNodes();

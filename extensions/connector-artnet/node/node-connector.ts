@@ -14,7 +14,7 @@ import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeDirectory } from '../bridge/node-directory';
 import type { NodeId, NodeState, PortRef } from '../bridge/protocol-model';
 import { formatPortAddress, parsePortKey, portKey, portLabel, samePort } from '../bridge/protocol-model';
-import { getArtNetBackend, getNodeDirectory } from '../bridge/shared';
+import { getArtNetBackend, getNodeDirectory, retainArtNetDiscovery } from '../bridge/shared';
 import { nodeConnectorStatus } from './node-status';
 import { outputPortsOf, portAddressWriteError, reconcileOutputs, sameOutputs } from './output-ports';
 
@@ -25,6 +25,12 @@ export const NODE_CONNECTOR_TYPE = 'artnet-node';
 export interface NodeConnectorDeps {
   backend: ArtNetBackend;
   directory: NodeDirectory;
+  /**
+   * Keeps discovery running while the connector lives; returns the release
+   * function. Default: `retainArtNetDiscovery` of the shared backend; when
+   * absent (tests) the connector just starts `backend`.
+   */
+  retain?: () => () => void;
 }
 
 /**
@@ -50,6 +56,7 @@ export class ArtNetNodeConnector extends ConnectorBase {
 
   private scope: EffectScope | null = null;
   private releasePoll: (() => void) | null = null;
+  private releaseDiscovery: (() => void) | null = null;
   private offEvents: (() => void)[] = [];
   private injected: NodeConnectorDeps | null;
 
@@ -83,7 +90,10 @@ export class ArtNetNodeConnector extends ConnectorBase {
     const { backend } = this.deps;
     if (this.scope) return backend.reconnectNow();
     activeNodeConnectors.add(this);
-    backend.start();
+    // Discovery runs while at least one node connector exists (A.2 policy).
+    const { retain } = this.deps;
+    if (retain) this.releaseDiscovery = retain();
+    else backend.start();
     this.autoReconnect.value = true;
     this.scope = effectScope(true);
     this.scope.run(() => {
@@ -105,6 +115,8 @@ export class ArtNetNodeConnector extends ConnectorBase {
     this.scope = null;
     this.releasePoll?.();
     this.releasePoll = null;
+    this.releaseDiscovery?.();
+    this.releaseDiscovery = null;
     for (const off of this.offEvents) off();
     this.offEvents = [];
     activeNodeConnectors.delete(this);
@@ -180,7 +192,7 @@ export class ArtNetNodeConnector extends ConnectorBase {
 
   /** Shared backend/directory unless injected. */
   private get deps(): NodeConnectorDeps {
-    return this.injected ?? { backend: getArtNetBackend(), directory: getNodeDirectory() };
+    return this.injected ?? { backend: getArtNetBackend(), directory: getNodeDirectory(), retain: retainArtNetDiscovery };
   }
 
   /**

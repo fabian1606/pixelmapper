@@ -75,15 +75,33 @@ export function getNodeDirectory(): NodeDirectory {
   return directory ??= new NodeDirectory(getArtNetBackend());
 }
 
+/** Holders that currently need discovery (see `retainArtNetDiscovery`). */
+let discoveryDemand = 0;
+
 /**
- * Starts the backend so discovery runs while the extension is active
- * (called from the manifest's `activate`). Returns the stop function.
+ * Keeps the shared backend (bridge connection, discovery) running until the
+ * returned release function is called; the backend starts with the first
+ * holder and stops after the last one. Holders are the Connectors page
+ * (node suggestions) and every `artnet-node` connector, so users who never
+ * use Art-Net get no bridge connection — no browser local-network prompt,
+ * no connection errors in the console. Releasing twice is a no-op.
  */
-export function startArtNetDiscovery(): () => void {
+export function retainArtNetDiscovery(): () => void {
   const b = getArtNetBackend();
   getNodeDirectory();
-  b.start();
-  return () => b.stop();
+  if (discoveryDemand++ === 0) b.start();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    discoveryDemand = Math.max(0, discoveryDemand - 1);
+    if (discoveryDemand === 0) getArtNetBackend().stop();
+  };
+}
+
+/** Number of current discovery holders (tests, diagnostics). */
+export function artNetDiscoveryDemand(): number {
+  return discoveryDemand;
 }
 
 /**
@@ -95,4 +113,5 @@ export function installArtNetBackend(next: ArtNetBackend | null): void {
   directory?.dispose();
   directory = null;
   backend = next;
+  discoveryDemand = 0;
 }
