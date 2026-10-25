@@ -12,10 +12,14 @@
  * page shows the node suggestions or at least one `artnet-node` connector
  * exists (`retainArtNetDiscovery`), so users who never use Art-Net get no
  * bridge connection and no browser local-network prompt.
+ *
+ * `activate` installs the RDM device runtime (plan M6): device store,
+ * patch sync and universe guard for fixtures linked to devices.
  */
 import { defineConnector, defineExtension } from '@pixelmapper/extension-api';
 import { ArtNetConnector } from './artnet-connector';
 import { ArtNetNodeConnector, NODE_CONNECTOR_TYPE } from './node/node-connector';
+import { installDeviceRuntime } from './devices/device-runtime';
 import { EXTENSION_VERSION } from './version';
 import ArtNetSettings from './components/ArtNetSettings.vue';
 import NodeConnectorSettings from './components/NodeConnectorSettings.vue';
@@ -55,4 +59,6 @@ export default defineExtension({
     // Discovered nodes without a connector, above the output connectors.
     slots: [{ slot: 'connections/outputs:before', component: NodeSuggestions }],
   },
+  // RDM devices: store, sync of linked fixtures, universe guard (M6).
+  activate: api => installDeviceRuntime(api),
 });
