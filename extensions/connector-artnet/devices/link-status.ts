@@ -48,8 +48,9 @@ export function computeLinkStatus(input: LinkStatusInput): LinkStatus {
   if (portUniverse !== null && fixture.universe !== portUniverse) {
     return { kind: 'unlinked', reasons: [`The fixture is in U${fixture.universe}, ${input.portName} outputs U${portUniverse}`] };
   }
-  if (!input.bridgeConnected) return { kind: 'offline', reasons: ['The Art-Net bridge is not connected'] };
+  // Without a connector there is no bridge connection either: name the actual cause.
   if (portUniverse === null) return { kind: 'offline', reasons: [`No Art-Net node connector for ${input.portName}`] };
+  if (!input.bridgeConnected) return { kind: 'offline', reasons: ['The Art-Net bridge is not connected'] };
   if (!input.nodeOnline) return { kind: 'offline', reasons: ['The node is offline'] };
   if (!device?.present) return { kind: 'offline', reasons: [`The device is not on ${input.portName}`] };
   if (device.noAnswer) return { kind: 'offline', reasons: ['The device does not answer'] };
