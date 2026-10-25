@@ -6,9 +6,9 @@
  * the bridge hint when the bridge is missing, outdated or unsupported.
  */
 import { computed, ref } from 'vue';
+import { connectors } from '@pixelmapper/extension-api';
 import type { NodeState } from '../bridge/protocol-model';
 import { getArtNetBackend, getNodeDirectory } from '../bridge/shared';
-import { getHostConnectorSet } from '../host-connectors';
 import { ArtNetNodeConnector, activeNodeConnectors } from '../node/node-connector';
 import { suggestNodes, unconnectedNodes, useDismissedNodes } from '../node/suggestions';
 import BridgeStatusHint from './BridgeStatusHint.vue';
@@ -28,14 +28,16 @@ const connected = computed(() => backend.state.value.kind === 'connected');
 const addOpen = ref(false);
 const error = ref<string | null>(null);
 
-/** Adds a connector through the host; false when the host cannot be reached. */
+/** Adds a connector to the user's connector set (API 1.4); false when that fails. */
 function addConnector(config: Record<string, unknown>): boolean {
-  const host = getHostConnectorSet();
-  if (!host) {
+  try {
+    connectors.add(ArtNetNodeConnector.fromConfig(crypto.randomUUID(), config));
+  }
+  catch (err) {
+    console.error('[artnet] cannot add the node connector:', err);
     error.value = 'Use “+ Art-Net node” above and choose the node there.';
     return false;
   }
-  host.add(ArtNetNodeConnector.fromConfig(crypto.randomUUID(), config));
   error.value = null;
   return true;
 }

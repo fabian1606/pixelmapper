@@ -1,11 +1,11 @@
 /**
  * Node suggestions on the Connectors page (plan M5.2): discovered nodes that
  * have no connector yet and were not dismissed. Dismissals are stored per
- * user and device (like connector setups).
+ * user (`getUserKey`, API 1.4) and device, like connector setups.
  */
-import { ref, type Ref } from 'vue';
+import { computed, ref, type ComputedRef, type Ref } from 'vue';
+import { getUserKey } from '@pixelmapper/extension-api';
 import type { NodeState } from '../bridge/protocol-model';
-import { hostUserKey } from '../host-connectors';
 
 /** Identity of a configured node connector. */
 export interface TakenNode {
@@ -41,61 +41,73 @@ export function suggestNodes(nodes: Iterable<NodeState>, taken: Iterable<TakenNo
 /** localStorage key prefix; the user key is appended. */
 const DISMISSED_PREFIX = 'pm:artnet:dismissed-nodes:';
 
-const dismissed: Ref<ReadonlySet<string>> = ref(new Set<string>());
-let loadedKey: string | null = null;
+/** Loaded lists by storage key (one per user seen in this session). */
+const lists = new Map<string, Ref<ReadonlySet<string>>>();
+
+/** Key of the current user (API 1.4, reactive); `'local'` without a host (tests). */
+function userKey(): string {
+  try {
+    return getUserKey();
+  }
+  catch {
+    return 'local';
+  }
+}
 
 /** Storage key of the current user. */
 function storageKey(): string {
-  return DISMISSED_PREFIX + hostUserKey();
+  return DISMISSED_PREFIX + userKey();
 }
 
-/** Loads the current user's list when the user changed. */
-function ensureLoaded() {
-  const key = storageKey();
-  if (key === loadedKey) return;
-  loadedKey = key;
+/** The list stored under `key`, loaded on first use. */
+function listFor(key: string): Ref<ReadonlySet<string>> {
+  let list = lists.get(key);
+  if (list) return list;
+  let initial = new Set<string>();
   try {
     const parsed = JSON.parse(localStorage.getItem(key) ?? '[]');
-    dismissed.value = new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []);
+    if (Array.isArray(parsed)) initial = new Set(parsed.filter((x): x is string => typeof x === 'string'));
   }
-  catch {
-    dismissed.value = new Set();
-  }
+  catch { /* malformed or no storage: empty list */ }
+  list = ref<ReadonlySet<string>>(initial);
+  lists.set(key, list);
+  return list;
 }
 
-/** Replaces and stores the list. */
+/** Replaces and stores the current user's list. */
 function save(next: Set<string>) {
-  dismissed.value = next;
+  const key = storageKey();
+  listFor(key).value = next;
   try {
-    localStorage.setItem(storageKey(), JSON.stringify([...next]));
+    localStorage.setItem(key, JSON.stringify([...next]));
   }
   catch (err) {
     console.warn('[artnet] cannot store dismissed nodes:', err);
   }
 }
 
-/** Dismissed node ids of the current user, with dismiss/restore. */
+/**
+ * Dismissed node ids of the current user, with dismiss/restore. The list
+ * follows a sign-in or user switch (the user key is reactive).
+ */
 export function useDismissedNodes() {
-  ensureLoaded();
+  const dismissed: ComputedRef<ReadonlySet<string>> = computed(() => listFor(storageKey()).value);
   return {
-    dismissed: dismissed as Readonly<Ref<ReadonlySet<string>>>,
+    dismissed,
     /** Hides the suggestion for a node. */
     dismiss(nodeId: string) {
-      ensureLoaded();
-      save(new Set([...dismissed.value, nodeId]));
+      save(new Set([...listFor(storageKey()).value, nodeId]));
     },
     /** Shows the suggestions for these nodes again. */
     restore(nodeIds: Iterable<string>) {
-      ensureLoaded();
-      const next = new Set(dismissed.value);
+      const next = new Set(listFor(storageKey()).value);
       for (const id of nodeIds) next.delete(id);
       save(next);
     },
   };
 }
 
-/** Forgets the in-memory list (tests). */
+/** Forgets the loaded lists (tests). */
 export function resetDismissedNodesForTests(): void {
-  loadedKey = null;
-  dismissed.value = new Set();
+  lists.clear();
 }

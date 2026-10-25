@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { useConnectionsStore } from '~/stores/connections-store';
+import { readStoredConnectors, useConnectionsStore } from '~/stores/connections-store';
+import { installSharedGlobals } from '~/utils/extensions/shared-globals';
+import { setCurrentUserId } from '~/utils/extensions/connector-api';
 import { getNodeDirectory, installArtNetBackend } from '../bridge/shared';
 import { FakeArtNetBackend } from '../bridge/testing/fake-backend';
 import { makeNode } from '../bridge/testing/fixtures';
@@ -17,12 +19,14 @@ import NodeSuggestions from './NodeSuggestions.vue';
 
 let backend: FakeArtNetBackend;
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
   resetDismissedNodesForTests();
   setActivePinia(createPinia());
-  // The host creates its connections store at boot; the app creates the directory on activation.
-  useConnectionsStore();
+  // The host API (connectors, user key) and the user's loaded connector set.
+  installSharedGlobals();
+  setCurrentUserId(null);
+  await useConnectionsStore().load(null);
   backend = new FakeArtNetBackend();
   installArtNetBackend(backend);
   getNodeDirectory();
@@ -52,6 +56,17 @@ describe('suggestNodes', () => {
     expect(useDismissedNodes().dismissed.value.has('7FF0:8A1B2C3D')).toBe(true);
     useDismissedNodes().restore(['7FF0:8A1B2C3D']);
     expect(useDismissedNodes().dismissed.value.size).toBe(0);
+  });
+
+  it('follows the signed-in user (getUserKey)', () => {
+    const { dismissed, dismiss } = useDismissedNodes();
+    dismiss('A');
+    setCurrentUserId('user-1');
+    expect(dismissed.value.size).toBe(0); // another user's list
+    dismiss('B');
+    expect(JSON.parse(localStorage.getItem('pm:artnet:dismissed-nodes:user-1')!)).toEqual(['B']);
+    setCurrentUserId(null);
+    expect([...dismissed.value]).toEqual(['A']);
   });
 });
 
@@ -96,6 +111,11 @@ describe('NodeSuggestions', () => {
     expect([c.ip.value, c.manual.value]).toEqual(['10.0.0.50', true]);
     expect(backend.pollTargets.get('10.0.0.50')).toBe(1);
     wrapper.unmount();
+
+    // What the connector learns is saved without its card (connectors.persist).
+    backend.emit({ type: 'node', node: makeNode({ ip: '10.0.0.50' }) });
+    await nextTick();
+    expect(readStoredConnectors(null)[0]!.config).toMatchObject({ nodeId: '7FF0:8A1B2C3D', ports: ['1.0', '2.0', '3.0', '4.0'] });
   });
 
   it('explains how to start the bridge, and that Safari is unsupported', async () => {

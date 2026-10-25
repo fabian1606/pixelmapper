@@ -9,7 +9,7 @@
  * DMX goes through the shared backend, never directly (M5.4).
  */
 import { computed, effectScope, ref, shallowReactive, shallowRef, watch, type ComputedRef, type EffectScope, type Ref, type ShallowRef } from 'vue';
-import { ConnectorBase } from '@pixelmapper/extension-api';
+import { ConnectorBase, connectors } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeDirectory } from '../bridge/node-directory';
 import type { NodeId, NodeState, PortRef } from '../bridge/protocol-model';
@@ -183,24 +183,46 @@ export class ArtNetNodeConnector extends ConnectorBase {
     return this.injected ?? { backend: getArtNetBackend(), directory: getNodeDirectory() };
   }
 
-  /** Follows identity, IP and output ports of the node (state only from the network, D5). */
+  /**
+   * Follows identity, IP and output ports of the node (state only from the
+   * network, D5) and saves what it learned, even while the card is closed.
+   */
   private onNodeChange(node: NodeState | null, prev: NodeState | null) {
     if (!node) {
       if (prev) this.pushLog(`[artnet] ${prev.shortName || prev.nodeId} offline`);
       return;
     }
     if (!prev) this.pushLog(`[artnet] ${node.shortName || node.nodeId} online at ${node.ip}`);
-    if (this.nodeId.value !== node.nodeId) this.nodeId.value = node.nodeId;
+    let learned = false;
+    if (this.nodeId.value !== node.nodeId) {
+      this.nodeId.value = node.nodeId;
+      learned = true;
+    }
     if (this.ip.value !== node.ip) {
       if (prev && this.ip.value) this.pushLog(`[artnet] IP changed ${this.ip.value} → ${node.ip}`);
       this.ip.value = node.ip;
+      learned = true;
     }
-    if (!this.label.value) this.label.value = node.shortName || node.ip;
+    if (!this.label.value) {
+      this.label.value = node.shortName || node.ip;
+      learned = true;
+    }
     const next = reconcileOutputs(this.ports.value, this.outputMapping.value, outputPortsOf(node));
-    if (sameOutputs(this.ports.value, this.outputMapping.value, next.ports, next.mapping)) return;
-    this.ports.value = next.ports;
-    this.outputCount = next.ports.length;
-    this.outputMapping.value = next.mapping;
+    if (!sameOutputs(this.ports.value, this.outputMapping.value, next.ports, next.mapping)) {
+      this.ports.value = next.ports;
+      this.outputCount = next.ports.length;
+      this.outputMapping.value = next.mapping;
+      learned = true;
+    }
+    if (learned) this.persistConfig();
+  }
+
+  /** Asks the host to save the current config (API 1.4); there is no host in unit tests. */
+  private persistConfig() {
+    try {
+      connectors.persist(this.id);
+    }
+    catch { /* no host */ }
   }
 
   private updateStatus() {

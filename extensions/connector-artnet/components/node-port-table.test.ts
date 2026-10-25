@@ -2,7 +2,7 @@
  * Port mapping UI (plan D7, M5.5): universe per port, the node's
  * Port-Address read-only, and “Write port address to node” → ArtAddress.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick, shallowRef } from 'vue';
 import { mount } from '@vue/test-utils';
 import type { SharedGlobals } from '@pixelmapper/extension-api';
@@ -16,11 +16,14 @@ import NodeConnectorSettings from './NodeConnectorSettings.vue';
 
 let backend: FakeArtNetBackend;
 let connector: ArtNetNodeConnector;
+/** Host stub of `connectors.persist` (API 1.4). */
+let persist: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   // Host stub: the project scope has one fixture in universe 1.
   const project = shallowRef({ fixtures: [{ id: 'f1', name: 'Tube', startAddress: 1, channelCount: 3 }] });
-  globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { useScope: () => project } as unknown as SharedGlobals['api'] };
+  persist = vi.fn();
+  globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { useScope: () => project, connectors: { persist } } as unknown as SharedGlobals['api'] };
   backend = new FakeArtNetBackend();
   const directory = new NodeDirectory(backend);
   backend.start();
@@ -61,16 +64,17 @@ describe('NodePortTable', () => {
     wrapper.unmount();
   });
 
-  it('persists what the connector learns from the network while the card is open', async () => {
+  it('persists what the connector learns from the network, card open or not', async () => {
     installArtNetBackend(backend);
     const wrapper = mount(NodeConnectorSettings, { props: { connector } });
     await nextTick();
-    expect(wrapper.emitted('change')?.[0]?.[0]).toMatchObject({ nodeId: '7FF0:8A1B2C3D', ip: '2.27.44.61', ports: ['1.0', '2.0', '3.0', '4.0'] });
+    expect(wrapper.text()).toContain('Port 1');
+    wrapper.unmount();
+    persist.mockClear();
     backend.emit({ type: 'node', node: makeNode({ ip: '10.0.0.9' }) });
     await nextTick();
-    await nextTick();
-    expect(wrapper.emitted('change')?.at(-1)?.[0]).toMatchObject({ ip: '10.0.0.9' });
-    wrapper.unmount();
+    expect(connector.getConfig().ip).toBe('10.0.0.9');
+    expect(persist).toHaveBeenCalledWith('n1');
     installArtNetBackend(null);
   });
 

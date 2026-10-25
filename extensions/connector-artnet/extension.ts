@@ -23,7 +23,7 @@ import NodeSuggestions from './components/NodeSuggestions.vue';
 export default defineExtension({
   id: 'connector-artnet',
   version: EXTENSION_VERSION,
-  apiVersion: '^1.2.0',
+  apiVersion: '^1.4.0',
   displayName: 'ArtNet output',
   description: 'Sends DMX universes as Art-Net: to Art-Net 4 nodes found on the network through the local bridge pmnet, or to a manual target (direct UDP in the desktop app, local bridge in the browser).',
   contributes: {
@@ -37,6 +37,8 @@ export default defineExtension({
         create: id => new ArtNetNodeConnector(id),
         fromConfig: (id, config) => ArtNetNodeConnector.fromConfig(id, config),
         settings: NodeConnectorSettings,
+        // The settings render the port table (universe per port, D7).
+        ownsOutputMapping: true,
       }),
       defineConnector({
         type: 'artnet',
