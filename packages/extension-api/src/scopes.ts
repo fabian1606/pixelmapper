@@ -57,6 +57,12 @@ export interface FixtureSummary {
   channelCount: number;
   /** Kind id for kind fixtures. */
   kindId?: string;
+  /**
+   * Namespaced extension data (`extensionData[extensionId][key]`), present
+   * only when the fixture has some (API 1.4) — enough to find e.g. the
+   * fixtures linked to a device without building full fixture views.
+   */
+  extensionData?: Record<string, Record<string, Json>>;
 }
 
 /** Current selection. Provided at the app root. */

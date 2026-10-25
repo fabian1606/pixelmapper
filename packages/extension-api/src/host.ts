@@ -14,6 +14,7 @@ import type { LiveFrame, LiveTarget, LiveValueOf, LiveValueOptions, OnFrameOptio
 import type { PmInputName } from './replaceables';
 import type { FixtureView, ScopeName, ScopeRef } from './scopes';
 import type { Platform } from './platform';
+import type { ConnectorSet } from './connectors';
 import type { FixtureSummary } from './scopes';
 import type {
   AddressOccupant,
@@ -60,6 +61,10 @@ export interface HostApi {
   findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
   /** Stores a definition as a new custom fixture (API 1.4). */
   saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
+  /** The user's connector instances (API 1.4, `connectors.ts`). */
+  connectors: ConnectorSet;
+  /** Key of the current user for per-user storage (API 1.4, `user.ts`). */
+  getUserKey(): string;
 }
 
 /** Shape of `globalThis.__PIXELMAPPER_SHARED__`. */

@@ -13,7 +13,7 @@ This guide is self-contained: hand it (together with `packages/extension-api/src
 | Support a hardware controller (MIDI grid …) | `controllers` | [Add a controller](#add-a-controller) |
 | Add a live-mode widget | `liveWidgets` | [Add a live widget](#add-a-live-widget) |
 | Persist own state / own undoable operations | `setExtensionData`, `commands` | [State and commands](#state-and-commands) |
-| Add fixtures from definitions, change address/mode, guard or observe patch changes | `ctx.commands`, `onBeforeFixtureChange`, `onFixturePatchChange` | [Patch fixtures](#patch-fixtures-api-13) |
+| Add fixtures from definitions, change address/mode, guard or observe patch changes | `ctx.commands`, `onBeforeFixtureChange`, `onFixturePatchChange`, `saveCustomFixtureDefinition` | [Patch fixtures](#patch-fixtures-api-13) |
 
 ## Rules (enforced)
 
@@ -242,6 +242,18 @@ const match = await findFixtureDefinitionByRdm(0x7ff0, 1);
 //   modeByPersonality: { 1: 0, 2: 1, … } }   — null when nothing matches
 ```
 
+No definition? Generate one (OFL JSON) and store it as a **new custom fixture** the user can edit (API 1.4; never replaces an existing one, a taken name gets " (2)"); set the RDM IDs and `rdmPersonalityIndex` so the next lookup finds it:
+
+```ts
+import { saveCustomFixtureDefinition } from '@pixelmapper/extension-api';
+
+const key = saveCustomFixtureDefinition({
+  name: 'Acme Bar', categories: ['Pixel Bar'], rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
+  availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
+  modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
+}); // 'custom/custom-…'; throws for invalid definitions
+```
+
 **Add fixtures + your data as one undo step.** `addFixtures` is async (library definitions load on demand) and returns a command that already knows the new ids; `batch` combines it with `setExtensionData`:
 
 ```ts
@@ -266,6 +278,8 @@ import { findFreeAddressSpan, listFixtures } from '@pixelmapper/extension-api';
 
 const start = findFreeAddressSpan(listFixtures(), footprint, 1, { universe: 2, ignore: [fixtureId] }); // null = no room in universe 2
 ```
+
+`listFixtures()` entries carry `extensionData` when a fixture has some (API 1.4), so finding "my" fixtures needs no full fixture views: `listFixtures().filter(f => f.extensionData?.['my-extension']?.link)`.
 
 **Guard user changes.** `onBeforeFixtureChange(change => …)` runs before the core UI (inspector address fields, address grid drag, Mode select) changes a fixture's address, universe or mode. Return nothing / `{ action: 'allow' }`, `{ action: 'confirm', message, confirmLabel? }` (core dialog; default button "Change anyway") or `{ action: 'deny', message? }`. `change.before` / `change.after` are `FixturePatchState`s (`startAddress`, `universe`, `localAddress`, `channelCount`, `modeIndex`). Guards never block `ctx.run`, undo/redo or collaborators — derive state such as "unlinked" from the fixture (e.g. its universe) instead of from the guard answer.
 
@@ -310,8 +324,10 @@ connectors: [defineConnector({
 
 - `outputCount > 0`: the host calls `sendFrame(512 bytes, universe)` per mapped output per frame. `outputCount = 0`: implement `onEngineState({ bpm, elapsedMs, beatTime, dmxBuffer })`.
 - Keep config in fields; `getConfig()`/`applyConfig(patch)` (call `super`) round-trip it. The host persists it **per user and device** (never in the project).
-- A `settings` component (prop `connector`, emits `change(patch)`) renders type-specific fields; label, connect/disconnect, output mapping and logs are rendered by the host.
+- A `settings` component (prop `connector`, emits `change(patch)`) renders type-specific fields; label, connect/disconnect, output mapping and logs are rendered by the host. Set `ownsOutputMapping: true` on the definition when your settings component renders the output → universe mapping itself (e.g. a port table): the host then hides its generic Outputs section (API 1.4).
 - `canAutoConnect()` → `true` when connecting needs no user gesture.
+- **The user's connector set** (API 1.4, needs `apiVersion: '^1.4.0'`): `connectors.list(type?)` (reactive), `connectors.add(connector)` (e.g. *Connect* on a device you discovered; always-connected instances connect at once), `connectors.remove(id)`, and `connectors.persist(id)` — call it when a connector changed its own config outside the settings component (learned a device id, followed a new IP), so it survives a reload without the card being open.
+- **Per-user state** outside the project (dismissed suggestions …): namespace storage keys with `getUserKey()` (signed-in user id, else `'local'`; reactive).
 - Fixture data from a connector: `getFixture(id)` (re-read occasionally, not per frame).
 - Details and the ESP protocol: [connectors.md](../connectors.md).
 

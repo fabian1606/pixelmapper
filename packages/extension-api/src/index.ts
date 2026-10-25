@@ -24,5 +24,6 @@ export * from './commands';
 export * from './patch';
 export * from './manifest';
 export * from './platform';
+export * from './user';
 export { getHostApi, registerExtension } from './host';
 export type { HostApi, SharedGlobals } from './host';
