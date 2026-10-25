@@ -28,7 +28,8 @@ describe('computeLinkStatus', () => {
   });
 
   it('is Unlinked for the stored state or another universe than the port’s', () => {
-    expect(computeLinkStatus(input({ link: { ...link, state: 'unlinked' } })).kind).toBe('unlinked');
+    expect(computeLinkStatus(input({ link: { ...link, state: 'unlinked' } }))).toEqual({ kind: 'unlinked', reasons: ['Unlinked — changes are not sent to the device'] });
+    expect(computeLinkStatus(input({ link: { ...link, state: 'unlinked' }, fixture: { universe: 2, localAddress: 1 } })).reasons).toEqual(['Moved to another universe — changes are not sent to the device']);
     expect(computeLinkStatus(input({ fixture: { universe: 2, localAddress: 1 } })).reasons).toEqual(['The fixture is in U2, PM Node port 1 outputs U1']);
     expect(isEffectivelyLinked(link, 1, 1)).toBe(true);
     expect(isEffectivelyLinked(link, 2, 1)).toBe(false);

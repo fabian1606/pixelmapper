@@ -44,7 +44,11 @@ export function isEffectivelyLinked(link: RdmLink, fixtureUniverse: number, port
 /** Computes the badge status. */
 export function computeLinkStatus(input: LinkStatusInput): LinkStatus {
   const { link, fixture, portUniverse, device } = input;
-  if (link.state === 'unlinked') return { kind: 'unlinked', reasons: ['Moved to another universe — changes are not sent to the device'] };
+  if (link.state === 'unlinked') {
+    // Unlinked by moving it out of the port's universe (D14), or explicitly in the inspector.
+    const moved = portUniverse !== null && fixture.universe !== portUniverse;
+    return { kind: 'unlinked', reasons: [moved ? 'Moved to another universe — changes are not sent to the device' : 'Unlinked — changes are not sent to the device'] };
+  }
   if (portUniverse !== null && fixture.universe !== portUniverse) {
     return { kind: 'unlinked', reasons: [`The fixture is in U${fixture.universe}, ${input.portName} outputs U${portUniverse}`] };
   }
