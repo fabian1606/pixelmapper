@@ -28,7 +28,7 @@ beforeEach(async () => {
   const directory = new NodeDirectory(backend);
   backend.start();
   backend.emit({ type: 'node', node: makeNode() });
-  connector = ArtNetNodeConnector.fromConfig('n1', { ...ArtNetNodeConnector.configForNode(makeNode()), outputMapping: [1, 3, 4, 5] }, { backend, directory });
+  connector = ArtNetNodeConnector.fromConfig('n1', { ...ArtNetNodeConnector.configForNode(makeNode()), outputMapping: [2, 2, 3, 4] }, { backend, directory });
   await connector.connect();
 });
 
@@ -44,15 +44,15 @@ describe('NodePortTable', () => {
     const text = wrapper.text();
     expect(text).toContain('Port 1');
     expect(text).toContain('node 0:0:1');
-    expect(text).toContain('no fixtures'); // U3–U5 carry no fixtures
+    expect(text).toContain('no fixtures'); // U2–U4 carry no fixtures (the fixture is in U1)
     const writes = wrapper.findAll('button').filter(b => b.text() === 'Write port address to node');
-    expect(writes).toHaveLength(1); // only port 1: U1 ≠ Port-Address 1 + 1
+    expect(writes).toHaveLength(1); // only port 1: U2 ≠ Port-Address 1
 
     await writes[0]!.trigger('click');
     await nextTick();
     const req = backend.requests.find(r => r.type === 'artAddress');
-    expect(req?.args).toEqual({ nodeId: '7FF0:8A1B2C3D', ports: [{ port: { bind: 1, index: 0 }, outputPortAddress: 0 }] });
-    expect(connector.logs.at(-1)?.text).toMatch(/Port 1 → 0:0:0/);
+    expect(req?.args).toEqual({ nodeId: '7FF0:8A1B2C3D', ports: [{ port: { bind: 1, index: 0 }, outputPortAddress: 2 }] });
+    expect(connector.logs.at(-1)?.text).toMatch(/Port 1 → 0:0:2/);
     wrapper.unmount();
   });
 
@@ -60,7 +60,7 @@ describe('NodePortTable', () => {
     const wrapper = mount(NodePortTable, { props: { connector } });
     await wrapper.findAll('input')[1]!.setValue('9');
     await wrapper.findAll('input')[1]!.trigger('change');
-    expect(wrapper.emitted('change')?.at(-1)).toEqual([{ outputMapping: [1, 9, 4, 5] }]);
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([{ outputMapping: [2, 9, 3, 4] }]);
     wrapper.unmount();
   });
 

@@ -4,7 +4,9 @@
  * Output `i` of an `artnet-node` connector is the node's `i`-th output port
  * (ordered by BindIndex, then port). The stored port list keeps the order
  * stable while the node is offline; the mapping per port defaults to the
- * port's Port-Address + 1 (Pixelmapper universes are 1-based).
+ * port's Port-Address itself (D7, changed in WP3): the node's factory
+ * Port-Addresses are 1–4 and Art-Net 4 deprecates Port-Address 0, so
+ * U1–U4 meet ports 1–4 without writing anything. Port-Address 0 maps to U1.
  */
 import type { NodeState, PortRef, PortState } from '../bridge/protocol-model';
 import { isPortAddress, portKey, samePort } from '../bridge/protocol-model';
@@ -14,15 +16,18 @@ export function outputPortsOf(node: NodeState): PortState[] {
   return node.ports.filter(p => p.canOutput && (p.direction === 'output' || p.direction === 'both'));
 }
 
-/** Default Pixelmapper universe of a port: its Port-Address + 1. */
+/** Default Pixelmapper universe of a port: its Port-Address (the deprecated Port-Address 0 → U1). */
 export function defaultUniverse(port: PortState): number {
-  return port.outputPortAddress + 1;
+  return Math.max(1, port.outputPortAddress);
 }
 
-/** Port-Address that matches a 1-based Pixelmapper universe (null when out of range). */
+/**
+ * Port-Address that matches a 1-based Pixelmapper universe: the same number
+ * (null when out of range, i.e. above 32767). “Write port address to node”
+ * writes it.
+ */
 export function portAddressForUniverse(universe: number): number | null {
-  const pa = universe - 1;
-  return isPortAddress(pa) ? pa : null;
+  return universe >= 1 && isPortAddress(universe) ? universe : null;
 }
 
 /**

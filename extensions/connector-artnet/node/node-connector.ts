@@ -4,7 +4,7 @@
  * Config = node identity (UID, else MAC — `nodeId`), the last known IP
  * (followed from bridge events) and the order of the node's output ports.
  * Outputs = the node's output ports; output `i` maps to a Pixelmapper
- * universe like any connector (default: the port's Port-Address + 1, D7).
+ * universe like any connector (default: the port's Port-Address, D7).
  * Status comes from the shared backend and from whether the node answers.
  * DMX goes through the shared backend, never directly (M5.4).
  */

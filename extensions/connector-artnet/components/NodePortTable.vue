@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Port mapping of an `artnet-node` connector (plan D7, M5.5): per output
- * port the Pixelmapper universe (default Port-Address + 1), the node's
+ * port the Pixelmapper universe (default = the Port-Address), the node's
  * Port-Address read-only, and “Write port address to node” (ArtAddress)
  * when they differ. Nothing is written to the node without that click.
  */
