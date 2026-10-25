@@ -144,6 +144,24 @@ describe('Universe guard (M6.6)', () => {
   });
 });
 
+describe('Runtime activation', () => {
+  it('runs the device features only while an artnet-node connector exists', async () => {
+    const { a } = await linkedTubes();
+    await h.connector.disconnect(); // connector removed
+    await h.settle();
+    expect(h.runtime.store.get(A)?.present).toBe(false);
+    const n = h.tubes.sets.length;
+    h.runAsUser(h.runtime.api.commands.setStartAddress({ fixtureId: a, startAddress: 30 }));
+    await h.settle();
+    expect(setsSince(n)).toEqual([]);
+
+    await h.connector.connect(); // added again
+    await h.settle();
+    expect(h.runtime.store.get(A)?.present).toBe(true);
+    expect(h.statusOf(a)).toBe('mismatch'); // the device kept 1 while nobody could tell it
+  });
+});
+
 describe('Offline (M6.7)', () => {
   it('is Offline when the device is unplugged, the node is gone or the bridge is lost', async () => {
     const { a, b } = await linkedTubes();

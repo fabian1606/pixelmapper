@@ -6,7 +6,7 @@
  * answers what the UI needs: linked fixtures, port universes, the mode ↔
  * personality maps of definitions.
  */
-import { shallowReactive } from 'vue';
+import { shallowReactive, watch, type WatchStopHandle } from 'vue';
 import { findFixtureDefinitionByRdm, listFixtures } from '@pixelmapper/extension-api';
 import type { Command, CoreCommandFactory, FixtureDefinitionKey, FixtureId } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
@@ -52,6 +52,7 @@ export class DeviceRuntime {
 
   private pendingMaps = new Map<FixtureDefinitionKey, Promise<PersonalityMaps | null>>();
   private stops: (() => void)[] = [];
+  private stopWatch: WatchStopHandle | null = null;
 
   constructor(readonly api: DeviceRuntimeApi, deps: DeviceRuntimeDeps = {}) {
     this.backend = deps.backend ?? getArtNetBackend();
@@ -66,16 +67,37 @@ export class DeviceRuntime {
     });
   }
 
-  /** Starts the store, the patch sync and the universe guard. */
+  /**
+   * Runs the store, the patch sync and the universe guard while at least one
+   * `artnet-node` connector exists. Without one there is no device to talk
+   * to (every link resolves to no port universe), so users who never use
+   * Art-Net pay nothing — not even the core's patch observation.
+   */
   start(): void {
-    this.store.start();
-    this.stops.push(startPatchSync(this), startUniverseGuard(this));
+    if (this.stopWatch) return;
+    this.stopWatch = watch(() => activeNodeConnectors.size > 0, (active) => {
+      if (active) this.activate();
+      else this.deactivate();
+    }, { immediate: true });
   }
 
   /** Stops everything. */
   stop(): void {
+    this.stopWatch?.();
+    this.stopWatch = null;
+    this.deactivate();
+  }
+
+  /** Starts the device features (idempotent). */
+  private activate() {
+    if (this.stops.length) return;
+    this.store.start();
+    this.stops.push(() => this.store.stop(), startPatchSync(this), startUniverseGuard(this));
+  }
+
+  /** Stops the device features (idempotent). */
+  private deactivate() {
     for (const stop of this.stops.splice(0)) stop();
-    this.store.stop();
   }
 
   // ── Fixtures ─────────────────────────────────
