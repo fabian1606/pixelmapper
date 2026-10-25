@@ -15,7 +15,8 @@
  *
  * Slots: node suggestions on the Connectors page, the RDM status badge in
  * the fixture list (D15) and the RDM section of the fixture inspector
- * (`properties:after`, D18) for fixtures linked to a device.
+ * (`selection:after`, below address and mode, D18) for fixtures linked to
+ * a device.
  *
  * `activate` installs the RDM device runtime (plan M6): device store,
  * patch sync and universe guard for fixtures linked to devices; and the
@@ -71,9 +72,9 @@ export default defineExtension({
       { slot: 'connections/outputs:before', component: NodeSuggestions },
       // RDM status of fixtures linked to a device (D15), only for those.
       { slot: 'scene/fixture:badges', component: RdmStatusBadge, when: s => !!readLink(s.fixture?.extensionData as never) },
-      // RDM section of the fixture inspector (D18): the properties panel provides
-      // `fixture` only for a single selection, so multi-selections show nothing.
-      { slot: 'properties:after', component: RdmInspectorSection, when: s => !!readLink(s.fixture?.extensionData as never) },
+      // RDM section of the fixture inspector (D18), below address and mode: the
+      // slot exists for a single selected fixture only (scope `fixture`).
+      { slot: 'selection:after', component: RdmInspectorSection, when: s => !!readLink(s.fixture?.extensionData as never) },
     ],
   },
   // RDM devices: store, sync of linked fixtures, universe guard (M6);

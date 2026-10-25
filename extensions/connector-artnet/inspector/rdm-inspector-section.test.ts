@@ -2,7 +2,8 @@
  * RDM section of the fixture inspector (plan M7.2, D18): status, UID, node
  * port and firmware of the linked device, Identify with auto-off, the
  * DEVICE_LABEL written and read back, Unlink / Re-link as one undo step,
- * discovery held while mounted, and the slot only for linked fixtures.
+ * discovery held while mounted, and the slot (`selection:after`, below the
+ * fixture's address and mode) only for one selected, linked fixture.
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defineComponent, h as render, nextTick, shallowRef } from 'vue';
@@ -15,6 +16,8 @@ import { fixtureView } from '~/utils/extensions/scope-views';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { findFixtureInTree } from '~/utils/engine/scene-tree';
 import type { SceneNode } from '~/utils/engine/core/group';
+import type { Fixture } from '~/utils/engine/core/fixture';
+import { registerExtension } from '~/utils/extensions/registry';
 import manifest from '../extension';
 import { artNetDiscoveryDemand } from '../bridge/shared';
 import { addDevices } from '../devices/add-devices';
@@ -148,10 +151,11 @@ describe('RdmInspectorSection', () => {
     wrapper.unmount();
   });
 
-  it('is contributed to properties:after only for fixtures with an RDM link', async () => {
+  it('is contributed to selection:after only for fixtures with an RDM link', async () => {
     const [a] = await twoTubes();
-    const slot = manifest.contributes!.slots!.find(s => s.slot === 'properties:after')!;
+    const slot = manifest.contributes!.slots!.find(s => s.slot === 'selection:after')!;
     expect(slot.component).toBe(RdmInspectorSection);
+    expect(manifest.contributes!.slots!.some(s => s.slot === 'properties:after')).toBe(false);
     expect(slot.when!({ fixture: getFixture(a) as never })).toBe(true);
     expect(slot.when!({ fixture: { ...getFixture(a)!, extensionData: undefined } as never })).toBe(false);
     // Multi-selection: the inspector provides no `fixture` scope.
@@ -161,4 +165,25 @@ describe('RdmInspectorSection', () => {
     expect(wrapper.find('[data-rdm-inspector]').exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it('shows below the fixture fields of the selection inspector for one linked tube, not for two', async () => {
+    const [a, b] = await twoTubes();
+    // The manifest's slot and `when`, rendering the section with the harness runtime.
+    const slot = manifest.contributes!.slots!.find(s => s.slot === 'selection:after')!;
+    registerExtension({
+      id: 'artnet-inspector-test', version: '1.0.0', apiVersion: manifest.apiVersion, displayName: 'Test', description: 'RDM section with the test runtime.',
+      contributes: { slots: [{ slot: slot.slot, when: slot.when, component: defineComponent(() => () => render(RdmInspectorSection, { runtime: h.runtime })) }] },
+    });
+    const SelectionInfoSection = (await import('~/components/engine/SelectionInfoSection.vue')).default;
+    const nodes = useEngineStore().sceneNodes as SceneNode[];
+    const [fa, fb] = [findFixtureInTree(nodes, a) as Fixture, findFixtureInTree(nodes, b) as Fixture];
+    const wrapper = mount(SelectionInfoSection, { props: { selectedFixtures: [fa], allFixtures: [fa, fb] }, attachTo: document.body });
+    await refresh();
+    expect(wrapper.find('[data-selection-after] [data-rdm-uid]').text()).toBe(A);
+
+    await wrapper.setProps({ selectedFixtures: [fa, fb] });
+    await refresh();
+    expect(wrapper.find('[data-rdm-inspector]').exists()).toBe(false);
+    wrapper.unmount();
+  }, 30_000); // Imports the inspector tree; slow under a parallel full run.
 });
