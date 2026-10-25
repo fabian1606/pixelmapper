@@ -42,9 +42,9 @@ beforeEach(() => {
 describe('ESP protocol', () => {
   it('frames packets', () => {
     const d = dmxFrame(3, new Uint8Array(512).fill(9));
-    expect([d[0], d[1], d[2], d[3] | (d[4]! << 8), d[5], d[6]]).toEqual([0xaa, 0x55, TYPE_DMX_FRAME, 513, 3, 9]);
+    expect([d[0], d[1], d[2], d[3]! | (d[4]! << 8), d[5], d[6]]).toEqual([0xaa, 0x55, TYPE_DMX_FRAME, 513, 3, 9]);
     const s = stripSlots([{ pin: 5, chipType: 'SK6812-RGBW', ledCount: 300, groupSize: 2, ledsPerMeter: 60 }]);
-    expect([s[2], s[5], s[6], s[7], s[8] | (s[9]! << 8)]).toEqual([TYPE_STRIP_SLOTS, 1, 5, 3, 300]);
+    expect([s[2], s[5], s[6], s[7], s[8]! | (s[9]! << 8)]).toEqual([TYPE_STRIP_SLOTS, 1, 5, 3, 300]);
     const p = pixelFrame(1, Uint8Array.from([1, 2, 3]));
     expect([p[2], p[5], p[6], p.length]).toEqual([TYPE_PIXEL_FRAME, 1, 3, 11]);
   });

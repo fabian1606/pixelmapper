@@ -1,0 +1,33 @@
+{
+  // Type-check program for the extensions (Nuxt layers / workspace packages)
+  // and the extension API package, which `nuxt typecheck` does not cover.
+  // Run with `bun run typecheck:extensions`.
+  //
+  // Extends Nuxt's combined generated config (`nuxt prepare`, run by
+  // postinstall): same compiler options and path aliases (`~`, `@`, `#app`,
+  // `#platform`, ...) as the app.
+  "extends": "./.nuxt/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    // App ambient types: auto-imports such as `defineNuxtPlugin` (plugins/*.ts),
+    // components, `#app` augmentations.
+    "./.nuxt/nuxt.d.ts",
+    // Build-time ambient types: `defineNuxtConfig` in each layer's nuxt.config.ts.
+    "./.nuxt/nuxt.node.d.ts",
+    // Extension sources, SFCs and their Vitest tests.
+    "./extensions/**/*.ts",
+    "./extensions/**/*.vue",
+    // Public extension API (`@pixelmapper/extension-api`).
+    "./packages/extension-api/src/**/*.ts"
+  ],
+  "exclude": [
+    "./node_modules",
+    "./extensions/*/node_modules",
+    // Catalog bundles are written to public/extensions/ (scripts/build-extensions.ts),
+    // not into the extension folders; guard against stray build outputs anyway.
+    "./extensions/*/dist",
+    "./public"
+  ]
+}

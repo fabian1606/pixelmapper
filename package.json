@@ -37,6 +37,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "nuxt typecheck",
+    "typecheck:extensions": "vue-tsc --noEmit -p tsconfig.extensions.json",
     "lint": "eslint extensions",
     "check:extensions": "bun run scripts/check-extensions.ts",
     "build:plugins": "bun run scripts/build-plugins.ts",
