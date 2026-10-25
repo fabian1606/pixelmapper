@@ -52,6 +52,13 @@ describe('ArtNetNodeConnector — node binding', () => {
     expect(c.status.value).toBe('connected');
     expect(c.errorMessage.value).toBeNull();
 
+    // A rejected DMX route table is shown; accepted routes keep their output.
+    backend.dmxError.value = 'duplicate route 1';
+    await nextTick();
+    expect([c.status.value, c.errorMessage.value]).toEqual(['connected', 'The bridge rejected the DMX routes: duplicate route 1']);
+    backend.dmxError.value = null;
+    await nextTick();
+
     backend.emit({ type: 'node', node: makeNode({ ip: '10.0.0.7' }) });
     await nextTick();
     expect(c.ip.value).toBe('10.0.0.7');

@@ -29,6 +29,8 @@ const FAKE_INFO: BackendInfo = {
 
 export class FakeArtNetBackend implements ArtNetBackend {
   readonly state: ShallowRef<BackendState> = shallowRef<BackendState>({ kind: 'idle' });
+  /** Set it to simulate a rejected DMX route table. */
+  readonly dmxError: ShallowRef<string | null> = shallowRef<string | null>(null);
   /** Every command sent, in order. */
   readonly requests: { type: PublicCommandType; args: unknown }[] = [];
   /** Every DMX universe queued while connected. */

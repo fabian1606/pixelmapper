@@ -76,6 +76,12 @@ export class BridgeCommandError extends Error {
 export interface ArtNetBackend {
   /** Connection state (reactive). */
   readonly state: Readonly<Ref<BackendState>>;
+  /**
+   * Why the bridge rejected the last DMX route table (it then keeps the
+   * previous one, so new routes get no DMX), or null. Cleared when a table
+   * is accepted or the connection is re-established (reactive).
+   */
+  readonly dmxError: Readonly<Ref<string | null>>;
   /** Starts connecting and keeps reconnecting with backoff (idempotent). */
   start(): void;
   /** Disconnects and stops reconnecting. */

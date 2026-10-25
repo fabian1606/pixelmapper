@@ -200,7 +200,8 @@ export interface BridgeCommandMap {
   ipProg: { args: IpProgArgs; result: { ip: string; mask: string; gateway: string; dhcp: boolean } };
   artInput: { args: { nodeId: NodeId; bind: number; disabled: boolean[] }; result: { node: NodeState } };
   imageInfo: { args: { hex: string }; result: FirmwareImageInfo };
-  flash: { args: RdmAddress & { hex: string; allowDowngrade: boolean }; result: { job: FlashJob } };
+  /** `allowDowngrade` defaults to false (contract §6). */
+  flash: { args: RdmAddress & { hex: string; allowDowngrade?: boolean }; result: { job: FlashJob } };
   flashCancel: { args: { jobId: string }; result: Empty };
   flashJobs: { args: Empty; result: { jobs: FlashJob[] } };
   dmxRoutes: { args: { routes: DmxRoute[] }; result: Empty };

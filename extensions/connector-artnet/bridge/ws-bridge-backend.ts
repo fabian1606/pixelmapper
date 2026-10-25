@@ -6,6 +6,10 @@
  * version, reconnects with exponential backoff, correlates commands with
  * results, fans out events, keeps poll targets across reconnects and sends
  * DMX as one binary frame set per rendered frame. Builds no Art-Net packets.
+ *
+ * Results are correlated by `id` only: the bridge runs network commands
+ * (RDM, TOD, ArtAddress, …) concurrently, so their replies may overtake each
+ * other and later commands. Nothing here assumes in-order results.
  */
 import { shallowRef, type ShallowRef } from 'vue';
 import {
@@ -31,6 +35,8 @@ import {
 } from './protocol-messages';
 import { DmxRouter } from './dmx-router';
 import { encodeFrameSet } from './frame-set';
+import { commandArgsProblem, dmxTargetProblem, MAX_MESSAGE_BYTES, utf8ByteLength } from './command-limits';
+import type { NetInterface } from './protocol-model';
 
 // ── Timing ─────────────────────────────────────
 
@@ -60,6 +66,14 @@ const MAX_BUFFERED_BYTES = 256 * 1024;
 /** WebSocket readyState OPEN. */
 const WS_OPEN = 1;
 
+/** Close codes of the contract (§1) with the text logged when the bridge uses one. */
+const CLOSE_REASONS: Readonly<Record<number, string>> = {
+  4001: 'incompatible protocol',
+  4002: 'no client hello within 10 s',
+  4003: 'this app read the bridge\'s messages too slowly (its queue overflowed)',
+  1001: 'the bridge is shutting down',
+};
+
 /** Constructor of a WebSocket (injectable for tests). */
 export type WebSocketFactory = new (url: string) => WebSocket;
 
@@ -84,6 +98,7 @@ interface Pending {
 
 export class WsBridgeBackend implements ArtNetBackend {
   readonly state: ShallowRef<BackendState> = shallowRef<BackendState>({ kind: 'idle' });
+  readonly dmxError: ShallowRef<string | null> = shallowRef<string | null>(null);
 
   private ws: WebSocket | null = null;
   private started = false;
@@ -94,7 +109,11 @@ export class WsBridgeBackend implements ArtNetBackend {
   private pending = new Map<number, Pending>();
   private listeners = new Map<BridgeEventType, Set<(event: never) => void>>();
   private pollTargets = new Map<string, number>();
-  private router = new DmxRouter();
+  /** Interfaces of the bridge host (hello, bridgeStatus): broadcast check of DMX targets. */
+  private interfaces: NetInterface[] = [];
+  /** DMX targets already reported as invalid (logged once). */
+  private refusedTargets = new Set<string>();
+  private router = new DmxRouter(undefined, target => dmxTargetProblem(target, this.interfaces));
   private flushScheduled = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,6 +159,9 @@ export class WsBridgeBackend implements ArtNetBackend {
   // ── Commands and events ──────────────────────
 
   request<C extends PublicCommandType>(type: C, args: CommandArgs<C>, options?: RequestOptions): Promise<CommandResult<C>> {
+    // Fail early with the bridge's code for what it would reject anyway.
+    const problem = commandArgsProblem(type, args);
+    if (problem) return Promise.reject(new BridgeCommandError('badRequest', problem.message, { field: problem.field }));
     return this.send(type, args, options);
   }
 
@@ -167,7 +189,8 @@ export class WsBridgeBackend implements ArtNetBackend {
 
   sendDmx(target: DmxTarget, data: Uint8Array): void {
     if (!this.handshaken) return;
-    this.router.queue(target, data);
+    const refused = this.router.queue(target, data);
+    if (refused) return this.reportRefusedTarget(target, refused);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
     queueMicrotask(() => this.flush());
@@ -197,7 +220,12 @@ export class WsBridgeBackend implements ArtNetBackend {
       this.helloTimer = setTimeout(() => this.onIncompatible('noHello', null, null), HELLO_TIMEOUT_MS);
     });
     ws.addEventListener('message', (ev: MessageEvent) => { if (this.ws === ws) this.onMessage(ev.data); });
-    ws.addEventListener('close', () => { if (this.ws === ws) this.onSocketDown(); });
+    ws.addEventListener('close', (ev: CloseEvent) => {
+      if (this.ws !== ws) return;
+      const reason = CLOSE_REASONS[ev?.code];
+      if (reason) this.emitLog('warn', `The bridge closed the connection (${ev.code}: ${reason}); reconnecting`);
+      this.onSocketDown();
+    });
     ws.addEventListener('error', () => { /* `close` follows */ });
   }
 
@@ -268,6 +296,7 @@ export class WsBridgeBackend implements ArtNetBackend {
     if (msg.type === 'hello') return this.onHello(msg);
     if (msg.type === 'result') return this.settle(msg.id, p => p.resolve(msg.result ?? {}));
     if (msg.type === 'error') return this.onError(msg);
+    if (msg.type === 'bridgeStatus' && Array.isArray(msg.interfaces)) this.interfaces = msg.interfaces;
     if (this.handshaken) this.emit(msg.type, msg);
   }
 
@@ -277,11 +306,14 @@ export class WsBridgeBackend implements ArtNetBackend {
     const verdict = checkProtocol(String(hello.protocol ?? ''));
     if (verdict !== 'ok') return this.onIncompatible(verdict, hello.bridge ?? null, hello.protocol ?? null);
     const ws = this.ws;
+    this.interfaces = hello.interfaces ?? [];
     this.send('hello', { client: 'pixelmapper', clientVersion: this.options.clientVersion, protocol: PROTOCOL_VERSION }, {}, true)
       .then(() => {
         if (this.ws !== ws) return;
         this.handshaken = true;
         this.attempts = 0;
+        this.dmxError.value = null;
+        this.refusedTargets.clear();
         for (const ip of this.pollTargets.keys()) this.fireAndForget('addPollTarget', { ip });
         this.state.value = {
           kind: 'connected',
@@ -291,8 +323,11 @@ export class WsBridgeBackend implements ArtNetBackend {
       })
       .catch((e: BridgeCommandError) => {
         if (this.ws !== ws) return;
-        if (e.code === 'incompatibleProtocol') this.onIncompatible('appTooOld', hello.bridge, hello.protocol);
-        else this.onSocketDown();
+        if (e.code !== 'incompatibleProtocol') return this.onSocketDown();
+        // `details.protocol` carries the bridge's version (contract §1); it says who must update.
+        const theirs = typeof e.details.protocol === 'string' ? e.details.protocol : hello.protocol;
+        const verdict = checkProtocol(String(theirs ?? ''));
+        this.onIncompatible(verdict === 'bridgeTooOld' ? 'bridgeTooOld' : 'appTooOld', hello.bridge, theirs ?? null);
       });
   }
 
@@ -336,6 +371,11 @@ export class WsBridgeBackend implements ArtNetBackend {
       return Promise.reject(new BridgeCommandError('notConnected', 'The Art-Net bridge is not connected'));
     }
     const id = this.nextId++;
+    const text = JSON.stringify({ ...args, type, id });
+    // The bridge ends connections that send more than 4 MiB (contract §1).
+    if (text.length * 3 > MAX_MESSAGE_BYTES && utf8ByteLength(text) > MAX_MESSAGE_BYTES) {
+      return Promise.reject(new BridgeCommandError('badRequest', `"${type}" is larger than 4 MiB`));
+    }
     const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS[type] ?? DEFAULT_TIMEOUT_MS;
     return new Promise<CommandResult<C>>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -344,7 +384,7 @@ export class WsBridgeBackend implements ArtNetBackend {
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
       try {
-        ws.send(JSON.stringify({ ...args, type, id }));
+        ws.send(text);
       }
       catch (err) {
         this.settle(id, p => p.reject(new BridgeCommandError('disconnected', (err as Error).message ?? 'send failed')));
@@ -365,12 +405,35 @@ export class WsBridgeBackend implements ArtNetBackend {
     const ws = this.ws;
     if (!ws || !this.handshaken) return this.router.clearPending();
     const { routes, entries } = this.router.take();
-    if (routes) this.fireAndForget('dmxRoutes', { routes });
+    if (routes) this.sendRoutes(routes);
     if (!entries.length || ws.bufferedAmount > MAX_BUFFERED_BYTES) return;
     try {
       ws.send(encodeFrameSet(entries, true));
     }
     catch { /* the close handler takes over */ }
+  }
+
+  /**
+   * Sends the route table. The bridge accepts it all or nothing (an invalid
+   * table is rejected and the old one stays), so a rejection is kept in
+   * `dmxError` for the connectors' status instead of being retried per frame.
+   */
+  private sendRoutes(routes: CommandArgs<'dmxRoutes'>['routes']) {
+    this.send('dmxRoutes', { routes })
+      .then(() => { this.dmxError.value = null; })
+      .catch((e: BridgeCommandError) => {
+        if (e.code === 'disconnected' || e.code === 'notConnected') return;
+        this.dmxError.value = e.message;
+        this.emitLog('error', `DMX routes rejected: ${e.message}`);
+      });
+  }
+
+  /** Logs a DMX target the bridge would reject (once per target and connection). */
+  private reportRefusedTarget(target: DmxTarget, problem: string) {
+    const key = JSON.stringify(target);
+    if (this.refusedTargets.has(key)) return;
+    this.refusedTargets.add(key);
+    this.emitLog('warn', `DMX not sent: ${problem}`);
   }
 
   // ── Helpers ──────────────────────────────────

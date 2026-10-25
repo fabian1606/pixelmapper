@@ -32,13 +32,21 @@ export function backendProblem(state: BackendState): string | null {
 
 /**
  * Connector status: `connected` only when the bridge is connected and the
- * node answers; errors the user must fix are `error` (card offers Retry).
+ * node answers (with a message when the bridge rejected the DMX route
+ * table); errors the user must fix are `error` (card offers Retry).
  */
-export function nodeConnectorStatus(state: BackendState, node: NodeState | null, bound: { nodeId: string | null; ip: string | null }): NodeConnectorStatus {
+export function nodeConnectorStatus(
+  state: BackendState,
+  node: NodeState | null,
+  bound: { nodeId: string | null; ip: string | null },
+  dmxError: string | null = null,
+): NodeConnectorStatus {
   if (state.kind === 'unsupported' || state.kind === 'incompatible') return { status: 'error', message: backendProblem(state) };
   if (state.kind === 'unreachable') return { status: 'connecting', message: backendProblem(state) };
   if (state.kind !== 'connected') return { status: 'connecting', message: null };
-  if (node) return { status: 'connected', message: null };
+  // The bridge kept its old route table: routes added since get no DMX. The
+  // status stays connected so the accepted routes keep their output.
+  if (node) return { status: 'connected', message: dmxError ? `The bridge rejected the DMX routes: ${dmxError}` : null };
   if (bound.nodeId) return { status: 'connecting', message: 'Node offline — waiting for its ArtPollReply' };
   if (bound.ip) return { status: 'connecting', message: `Waiting for a reply from ${bound.ip}` };
   return { status: 'connecting', message: 'Choose a node below' };

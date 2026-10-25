@@ -263,3 +263,104 @@ describe('WsBridgeBackend — DMX', () => {
     b.stop();
   });
 });
+
+describe('WsBridgeBackend — contract limits (bridge-ws.md)', () => {
+  /** A handshaken backend; the bridge host has 2.0.0.1/8 (directed broadcast 2.255.255.255). */
+  async function connected() {
+    const b = makeBackend();
+    const logs: string[] = [];
+    b.on('log', e => logs.push(e.text));
+    b.start();
+    const s = FakeBridgeSocket.last;
+    s.open();
+    s.receive({ type: 'hello', bridge: '0.1.0', protocol: '1.0.0', interfaces: [{ name: 'en7', ip: '2.0.0.1', mask: '255.0.0.0', mac: null }], udp: { bound: true, port: 6454, error: null } });
+    s.answer('hello');
+    await tick();
+    return { b, s, logs };
+  }
+
+  it('reconnects after close 4003 (client too slow) and logs why', async () => {
+    vi.useFakeTimers();
+    const b = makeBackend();
+    const logs: string[] = [];
+    b.on('log', e => logs.push(e.text));
+    b.start();
+    FakeBridgeSocket.last.handshake();
+    await vi.advanceTimersByTimeAsync(0);
+    FakeBridgeSocket.last.drop(4003);
+    expect(logs.at(-1)).toMatch(/4003: this app read the bridge's messages too slowly/);
+    expect(b.state.value).toMatchObject({ kind: 'unreachable', retryInMs: 1000 });
+    vi.advanceTimersByTime(1000);
+    FakeBridgeSocket.last.handshake();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.state.value.kind).toBe('connected');
+    b.stop();
+  });
+
+  it('matches results that overtake each other by id', async () => {
+    const { b, s } = await connected();
+    const port = { bind: 1, index: 0 };
+    const first = b.request('rdmGet', { nodeId: 'n', port, uid: '7FF0:00000001', pid: 0x0060 });
+    const second = b.request('todRequest', { nodeId: 'n', port });
+    const [c1, c2] = s.commands.slice(-2);
+    s.receive({ type: 'result', id: c2!.id, result: {} });
+    s.receive({ type: 'result', id: c1!.id, result: { data: '01' } });
+    await expect(second).resolves.toEqual({});
+    await expect(first).resolves.toEqual({ data: '01' });
+    b.stop();
+  });
+
+  it('reads who must update from details.protocol of incompatibleProtocol', async () => {
+    const b = makeBackend();
+    b.start();
+    const s = FakeBridgeSocket.last;
+    s.open();
+    s.receive({ type: 'hello', bridge: '0.1.0', protocol: '1.0.0', interfaces: [], udp: { bound: true, port: 6454, error: null } });
+    s.receive({ type: 'error', id: s.command('hello')!.id, code: 'incompatibleProtocol', message: 'no', details: { protocol: '0.9.0' } });
+    await tick();
+    expect(b.state.value).toMatchObject({ kind: 'incompatible', reason: 'bridgeTooOld', protocol: '0.9.0' });
+    b.stop();
+  });
+
+  it('rejects arguments the bridge would reject, without sending them', async () => {
+    const { b, s } = await connected();
+    const sent = s.commands.length;
+    const port = { bind: 1, index: 0 };
+    await expect(b.request('artAddress', { nodeId: 'n', shortName: 'x'.repeat(18) })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'shortName' } });
+    await expect(b.request('artAddress', { nodeId: 'n', longName: 'ü'.repeat(32) })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'longName' } }); // 64 bytes
+    await expect(b.request('rdmDescribe', { nodeId: 'n', port, uid: 'FFFF:FFFFFFFF' })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'uid' } });
+    await expect(b.request('flash', { nodeId: 'n', port, uid: '7FF0:FFFFFFFF', hex: ':00' })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.request('imageInfo', { hex: 'x'.repeat(4 * 1024 * 1024) })).rejects.toMatchObject({ code: 'badRequest' });
+    expect(s.commands).toHaveLength(sent);
+    b.stop();
+  });
+
+  it('keeps invalid DMX targets out of the route table and surfaces a rejected table', async () => {
+    const { b, s, logs } = await connected();
+    b.sendDmx({ ip: '2.255.255.255', portAddress: 1 }, new Uint8Array(4)); // directed broadcast of en7
+    b.sendDmx({ ip: '255.255.255.255', portAddress: 1 }, new Uint8Array(4));
+    b.sendDmx({ nodeId: 'A', portAddress: 40_000 }, new Uint8Array(4));
+    b.sendDmx({ ip: '2.255.255.255', portAddress: 1 }, new Uint8Array(4)); // logged once
+    b.sendDmx({ nodeId: 'A', portAddress: 1 }, new Uint8Array(4));
+    await tick();
+    expect(s.command('dmxRoutes')).toMatchObject({ routes: [{ route: 1, nodeId: 'A', portAddress: 1 }] });
+    expect(logs.filter(l => l.includes('DMX not sent'))).toHaveLength(3);
+
+    // The bridge rejects the table (all or nothing): reported, not retried per frame.
+    s.receive({ type: 'error', id: s.command('dmxRoutes')!.id, code: 'badRequest', message: 'duplicate route 1', details: { field: 'routes[1].route' } });
+    await tick();
+    expect(b.dmxError.value).toBe('duplicate route 1');
+    const tables = s.commands.filter(c => c.type === 'dmxRoutes').length;
+    b.sendDmx({ nodeId: 'A', portAddress: 1 }, new Uint8Array(4));
+    await tick();
+    expect(s.commands.filter(c => c.type === 'dmxRoutes')).toHaveLength(tables);
+
+    // A new route sends the table again; an accepted table clears the error.
+    b.sendDmx({ nodeId: 'B', portAddress: 2 }, new Uint8Array(4));
+    await tick();
+    s.answer('dmxRoutes');
+    await tick();
+    expect(b.dmxError.value).toBeNull();
+    b.stop();
+  });
+});

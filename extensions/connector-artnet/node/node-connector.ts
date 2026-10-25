@@ -88,7 +88,7 @@ export class ArtNetNodeConnector extends ConnectorBase {
     this.scope = effectScope(true);
     this.scope.run(() => {
       watch(this.node, (node, prev) => this.onNodeChange(node, prev ?? null), { immediate: true });
-      watch([backend.state, this.node, this.nodeId, this.ip], () => this.updateStatus(), { immediate: true });
+      watch([backend.state, backend.dmxError, this.node, this.nodeId, this.ip], () => this.updateStatus(), { immediate: true });
       watch([this.manual, this.ip], ([manual, ip]) => {
         this.releasePoll?.();
         this.releasePoll = manual && ip ? backend.addPollTarget(ip) : null;
@@ -226,7 +226,8 @@ export class ArtNetNodeConnector extends ConnectorBase {
   }
 
   private updateStatus() {
-    const { status, message } = nodeConnectorStatus(this.deps.backend.state.value, this.node.value, { nodeId: this.nodeId.value, ip: this.ip.value });
+    const { backend } = this.deps;
+    const { status, message } = nodeConnectorStatus(backend.state.value, this.node.value, { nodeId: this.nodeId.value, ip: this.ip.value }, backend.dmxError.value);
     this.status.value = status;
     this.errorMessage.value = message;
   }

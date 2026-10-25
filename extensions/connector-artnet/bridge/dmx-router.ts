@@ -44,21 +44,36 @@ export class DmxRouter {
   private dirty = false;
   private nextRoute = 1;
 
-  constructor(private readonly now: () => number = () => Date.now()) {}
+  /**
+   * @param now Clock (tests).
+   * @param validate Returns why a new target is invalid (null = valid). The
+   *   bridge rejects a route table with one invalid route as a whole and
+   *   keeps the old one, so invalid targets never enter the table.
+   */
+  constructor(
+    private readonly now: () => number = () => Date.now(),
+    private readonly validate: (target: DmxTarget) => string | null = () => null,
+  ) {}
 
-  /** Queues `data` (copied, max 512 bytes) for `target` in the current frame set. */
-  queue(target: DmxTarget, data: Uint8Array): void {
+  /**
+   * Queues `data` (copied, max 512 bytes) for `target` in the current frame
+   * set. Returns why the target was refused, or null when queued.
+   */
+  queue(target: DmxTarget, data: Uint8Array): string | null {
     const key = targetKey(target);
     let entry = this.routes.get(key);
     if (!entry) {
+      const problem = this.validate(target);
+      if (problem) return problem;
       const route = this.allocate();
-      if (route === null) return;
+      if (route === null) return 'Too many DMX routes';
       entry = { route, target: { ...target }, lastUsed: 0 };
       this.routes.set(key, entry);
       this.dirty = true;
     }
     entry.lastUsed = this.now();
     this.pending.set(entry.route, data.slice(0, MAX_DMX_LENGTH));
+    return null;
   }
 
   /** True when universes are queued. */

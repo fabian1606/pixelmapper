@@ -61,10 +61,10 @@ export class FakeBridgeSocket {
     this.fire('message', { data: typeof msg === 'string' ? msg : JSON.stringify(msg) });
   }
 
-  /** Drops the connection from the bridge side. */
-  drop(): void {
+  /** Drops the connection from the bridge side (optionally with a close code, e.g. 4003). */
+  drop(code?: number): void {
     this.readyState = 3;
-    this.fire('close', {});
+    this.fire('close', code === undefined ? {} : { code });
   }
 
   /** The last command of a type. */
