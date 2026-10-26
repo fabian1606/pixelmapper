@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { connectors } from '@pixelmapper/extension-api';
 import type { NodeState } from '../bridge/protocol-model';
+import { formatNodeId } from '../bridge/protocol-model';
 import { getArtNetBackend, getNodeDirectory, retainArtNetDiscovery } from '../bridge/shared';
 import { ArtNetNodeConnector, activeNodeConnectors } from '../node/node-connector';
 import { suggestNodes, unconnectedNodes, useDismissedNodes } from '../node/suggestions';
@@ -86,7 +87,7 @@ function addIp(ip: string) {
       class="flex items-center gap-2 text-xs"
     >
       <span class="flex-1 min-w-0 truncate">
-        Art-Net node found: <span class="font-medium">{{ node.shortName || node.longName || node.nodeId }}</span>
+        Art-Net node found: <span class="font-medium">{{ node.shortName || node.longName || formatNodeId(node.nodeId) }}</span>
         · <span class="font-mono">{{ node.ip }}</span>
       </span>
       <button

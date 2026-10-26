@@ -6,6 +6,7 @@
  */
 import type {
   DmxRoute,
+  FailsafeMode,
   FirmwareImageInfo,
   FlashJob,
   NetInterface,
@@ -156,6 +157,10 @@ export interface ArtAddressPortChange {
   outputStyle?: 'delta' | 'continuous';
   protocol?: 'artnet' | 'sacn';
   clearOutput?: true;
+  /** AcFailHold/Zero/Full/Scene to the port's BindIndex (all its ports on multi-port nodes). */
+  failsafe?: FailsafeMode;
+  /** AcFailRecord to the port's BindIndex. */
+  recordFailsafeScene?: true;
 }
 
 /** Arguments of `artAddress` (all optional except `nodeId`). */
@@ -164,14 +169,16 @@ export interface ArtAddressArgs {
   shortName?: string;
   longName?: string;
   ports?: ArtAddressPortChange[];
-  failsafe?: 'hold' | 'zero' | 'full' | 'scene';
-  recordFailsafeScene?: true;
   indicator?: 'normal' | 'mute' | 'locate';
   cancelMerge?: true;
   resetRxFlags?: true;
 }
 
-/** Arguments of `ipProg`. */
+/**
+ * Arguments of `ipProg`. Only `nodeId` = a read (ArtIpProg Command 0).
+ * `dhcp: true` goes alone (no ip/mask/gateway/resetToDefault) and
+ * `dhcp: false` needs `ip`; else `badRequest` with `details.field: "dhcp"`.
+ */
 export interface IpProgArgs {
   nodeId: NodeId;
   dhcp?: boolean;

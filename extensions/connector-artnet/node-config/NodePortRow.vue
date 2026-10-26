@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * Settings of one node port (plan D8, M7.3): mode (output / input / off),
- * Port-Address, and for outputs merge, RDM and output style; the node's
- * per-port PIDs (DMX timing, background discovery) behind “DMX timing”.
+ * Port-Address, and for outputs merge, RDM, output style and the port's
+ * failsafe (`NodePortFailsafe`); the node's per-port PIDs (DMX timing,
+ * background discovery) behind “DMX timing”.
  *
  * Every control shows the node's state (D5): a write locks the row until
  * the bridge answers, and the new value appears with the node's `node`
@@ -13,6 +14,7 @@ import { useReplaceable } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { ArtAddressPortChange, RdmAddress } from '../bridge/protocol-messages';
 import type { NodeState, PortState, RdmDeviceDescription } from '../bridge/protocol-model';
+import { portAddressOf } from '../bridge/protocol-model';
 import RdmParameterForm from '../rdm/parameter-form/RdmParameterForm.vue';
 import { useCommandRunner } from './use-node-context';
 import {
@@ -31,6 +33,7 @@ import {
   type PortMode,
 } from './port-rules';
 import ConfirmBox from './ConfirmBox.vue';
+import NodePortFailsafe from './NodePortFailsafe.vue';
 import PortAddressEditor from './PortAddressEditor.vue';
 
 const props = defineProps<{
@@ -47,6 +50,8 @@ const props = defineProps<{
   online: boolean;
   /** The node's RDM responder, when it is a Pixelmapper Node (per-port PIDs). */
   rdm: { address: RdmAddress; description: RdmDeviceDescription } | null;
+  /** Node-change counter: every change re-reads the per-port PIDs shown. */
+  rereadOn?: number;
 }>();
 
 const Select = useReplaceable('pm.select');
@@ -111,7 +116,7 @@ async function applyMode(target: PortMode) {
   pendingMode.value = null;
 }
 
-/** Writes the staged Port-Address (input address of input ports, else output address). */
+/** Writes the staged Port-Address (the field of the current direction: input address of input ports, else output address). */
 function writeAddress(portAddress: number) {
   const change: Omit<ArtAddressPortChange, 'port'> = addressField.value === 'inputPortAddress' ? { inputPortAddress: portAddress } : { outputPortAddress: portAddress };
   return writePort('address', change);
@@ -119,7 +124,7 @@ function writeAddress(portAddress: number) {
 
 /** Checks a staged Port-Address against the shared Net/Sub-Net of the BindIndex. */
 function validateAddress(portAddress: number): string | null {
-  return sharedSubNetError(props.node, props.port.port, addressField.value, portAddress);
+  return sharedSubNetError(props.node, props.port.port, portAddress);
 }
 </script>
 
@@ -146,7 +151,7 @@ function validateAddress(portAddress: number): string | null {
       <span class="w-20 shrink-0 text-muted-foreground">Port-Address</span>
       <PortAddressEditor
         class="flex-1"
-        :model-value="port[addressField]"
+        :model-value="portAddressOf(port)"
         :disabled="!online || (busy !== null && busy !== 'address')"
         :busy="busy === 'address'"
         :validate="validateAddress"
@@ -171,6 +176,7 @@ function validateAddress(portAddress: number): string | null {
         <component :is="Select" v-if="node.status.outputStyleSwitchable" :model-value="port.output.style" :options="OUTPUT_STYLE_OPTIONS" variant="segmented" size="sm" :disabled="locked" class="ml-auto w-36" data-style @update:model-value="(v: string) => writePort('style', { outputStyle: v as 'delta' | 'continuous' })" />
         <span v-else class="ml-auto text-muted-foreground">{{ port.output.style === 'continuous' ? 'Continuous' : 'Delta' }}</span>
       </div>
+      <NodePortFailsafe :node="node" :port="port" :label="label" :backend="backend" :online="online" />
       <p v-if="port.output.shortCircuit" class="text-[10px] text-destructive">The node detected a short circuit on the DMX line.</p>
     </template>
     <p v-if="inputs" class="text-[10px] text-muted-foreground">
@@ -181,7 +187,7 @@ function validateAddress(portAddress: number): string | null {
       <button type="button" class="self-start text-[10px] text-muted-foreground hover:text-foreground" :aria-expanded="showTiming" @click="showTiming = !showTiming">
         {{ showTiming ? '▾' : '▸' }} DMX timing &amp; discovery
       </button>
-      <RdmParameterForm v-if="showTiming" :address="rdm.address" :description="rdm.description" :backend="backend" :only="timingPids" :title="`${label} timing`" />
+      <RdmParameterForm v-if="showTiming" :address="rdm.address" :description="rdm.description" :backend="backend" :only="timingPids" :title="`${label} timing`" :reread-on="rereadOn" />
     </template>
   </div>
 </template>

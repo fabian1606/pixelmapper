@@ -13,10 +13,10 @@ import { ConnectorBase, connectors } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { NodeDirectory } from '../bridge/node-directory';
 import type { NodeId, NodeState, PortRef } from '../bridge/protocol-model';
-import { parsePortKey, portKey, samePort } from '../bridge/protocol-model';
+import { parsePortKey, portAddressOf, portKey, samePort } from '../bridge/protocol-model';
 import { getArtNetBackend, getNodeDirectory, retainArtNetDiscovery } from '../bridge/shared';
 import { nodeConnectorStatus } from './node-status';
-import { outputPortsOf, reconcileOutputs, sameOutputs } from './output-ports';
+import { isOutputPort, outputPortsOf, reconcileOutputs, sameOutputs } from './output-ports';
 
 /** Connector type id. */
 export const NODE_CONNECTOR_TYPE = 'artnet-node';
@@ -163,8 +163,9 @@ export class ArtNetNodeConnector extends ConnectorBase {
     for (let i = 0; i < ports.length; i++) {
       if (mapping[i] !== universe) continue;
       const port = node.ports.find(p => samePort(p.port, ports[i]!));
-      if (!port?.canOutput) continue;
-      this.deps.backend.sendDmx({ nodeId: node.nodeId, portAddress: port.outputPortAddress }, dmxBuffer);
+      // Only ports that output now: a port switched to input carries no output Port-Address (contract §4).
+      if (!port || !isOutputPort(port)) continue;
+      this.deps.backend.sendDmx({ nodeId: node.nodeId, portAddress: portAddressOf(port) }, dmxBuffer);
     }
   }
 

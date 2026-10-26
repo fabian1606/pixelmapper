@@ -8,7 +8,7 @@
  */
 import { computed } from 'vue';
 import { useScope } from '@pixelmapper/extension-api';
-import { formatPortAddress, portLabel, samePort } from '../bridge/protocol-model';
+import { formatPortAddress, portAddressOf, portLabel, samePort } from '../bridge/protocol-model';
 import type { ArtNetNodeConnector } from '../node/node-connector';
 import { portAddressForUniverse } from '../node/output-ports';
 
@@ -35,7 +35,8 @@ const rows = computed(() => props.connector.ports.value.map((port, i) => {
   const state = node.value?.ports.find(p => samePort(p.port, port)) ?? null;
   const universe = props.connector.outputMapping.value[i] ?? 0;
   const target = universe > 0 ? portAddressForUniverse(universe) : null;
-  const portAddress = state?.outputPortAddress ?? null;
+  // The field of the port's current direction is its Port-Address (contract §4).
+  const portAddress = state ? portAddressOf(state) : null;
   const differs = node.value !== null && portAddress !== null && target !== null && portAddress !== target;
   return { i, port, label: portLabel(port, props.connector.ports.value), state, universe, portAddress, differs };
 }));

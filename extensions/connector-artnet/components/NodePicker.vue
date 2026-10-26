@@ -6,6 +6,7 @@
  */
 import { computed } from 'vue';
 import type { NodeState } from '../bridge/protocol-model';
+import { formatNodeId } from '../bridge/protocol-model';
 import { getNodeDirectory } from '../bridge/shared';
 import { ArtNetNodeConnector, activeNodeConnectors } from '../node/node-connector';
 import { unconnectedNodes } from '../node/suggestions';
@@ -40,7 +41,7 @@ function addIp(ip: string) {
       class="flex items-center gap-2 px-2 py-1 rounded border border-border hover:bg-accent transition-colors text-left text-xs"
       @click="pick(node)"
     >
-      <span class="font-medium truncate">{{ node.shortName || node.longName || node.nodeId }}</span>
+      <span class="font-medium truncate">{{ node.shortName || node.longName || formatNodeId(node.nodeId) }}</span>
       <span class="font-mono text-muted-foreground">{{ node.ip }}</span>
       <span class="ml-auto text-muted-foreground">{{ node.ports.filter(p => p.canOutput).length }} outputs</span>
     </button>

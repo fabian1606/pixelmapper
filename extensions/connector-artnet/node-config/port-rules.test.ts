@@ -19,7 +19,10 @@ import {
   planModeChange,
   portAddressNote,
   portAddressPartsError,
+  failsafeHint,
   portModeOptions,
+  portsSharingFailsafe,
+  recordSceneConfirm,
   sharedSubNetError,
   splitPortAddress,
   type PortEnableState,
@@ -83,9 +86,36 @@ describe('Port-Address', () => {
   it('keeps the shared Net/Sub-Net of a BindIndex', () => {
     // A node with two ports in BindIndex 1 at Sub-Net 0.
     const node = makeNode({ ports: [makePort(1, 1), { ...makePort(1, 2), port: { bind: 1, index: 1 } }] });
-    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 'outputPortAddress', 5)).toBeNull();
-    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 'outputPortAddress', 0x15)).toMatch(/keep 0:0:x/);
-    expect(sharedSubNetError(makeNode(), { bind: 1, index: 0 }, 'outputPortAddress', 0x15)).toBeNull(); // one port per BindIndex
+    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 5)).toBeNull();
+    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 0x15)).toMatch(/keep 0:0:x/);
+    expect(sharedSubNetError(makeNode(), { bind: 1, index: 0 }, 0x15)).toBeNull(); // one port per BindIndex
+  });
+
+  it('compares with the address of the other port\'s current direction (rev 2)', () => {
+    // The other port is an input at 0:2:3; its output field only carries Net/Sub-Net with universe 0.
+    const input = { ...makePort(1, 0x23, { direction: 'input', canInput: true }), port: { bind: 1, index: 1 } };
+    expect(input.outputPortAddress).toBe(0x20);
+    const node = makeNode({ ports: [makePort(1, 0x21), input] });
+    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 0x25)).toBeNull();
+    expect(sharedSubNetError(node, { bind: 1, index: 0 }, 0x35)).toMatch(/keep 0:2:x/);
+  });
+});
+
+describe('failsafe per port (contract rev 2)', () => {
+  it('names the ports of the same BindIndex that the AcFail* commands affect', () => {
+    expect(portsSharingFailsafe(makeNode(), { bind: 2, index: 0 })).toEqual([]); // Pixelmapper Node: one port per BindIndex
+    const multi = makeNode({ ports: [makePort(1, 1), { ...makePort(1, 2), port: { bind: 1, index: 1 } }] });
+    expect(portsSharingFailsafe(multi, { bind: 1, index: 0 }).map(p => p.port)).toEqual([{ bind: 1, index: 1 }]);
+  });
+
+  it('explains the mode, also when the bridge does not report it', () => {
+    expect(failsafeHint('zero')).toMatch(/0 when Art-Net stops/);
+    expect(failsafeHint(null)).toMatch(/unknown/);
+  });
+
+  it('asks before recording the scene of a port', () => {
+    expect(recordSceneConfirm('Port 2')).toBe('Record the current output of Port 2 as the failsafe scene? The stored scene is replaced.');
+    expect(recordSceneConfirm('Port 1.1', ['Port 1.2'])).toMatch(/Port 1\.1 and Port 1\.2 \(one BindIndex\)/);
   });
 });
 

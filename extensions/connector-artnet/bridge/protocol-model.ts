@@ -8,7 +8,11 @@
 
 // ── Identifiers ────────────────────────────────
 
-/** Stable node identity: `"7FF0:8A1B2C3D"` (UID), `"mac:…"` or `"ip:…"`. */
+/**
+ * Stable node identity: `"7FF0:8A1B2C3D"` (UID), `"mac:…"` or `"ip:…"`. The
+ * IP form carries a UDP port for nodes that do not use 6454 (simulators):
+ * `"ip:127.0.0.1:50000"` (contract §3).
+ */
 export type NodeId = string;
 
 /** RDM UID, `"MMMM:DDDDDDDD"` uppercase hex. */
@@ -39,15 +43,19 @@ export interface NetInterface {
   mac: string | null;
 }
 
-/** State of the bridge's Art-Net UDP socket (port 6454). */
+/** State of the bridge's Art-Net UDP socket. */
 export interface UdpState {
   bound: boolean;
+  /** The bound local UDP port (6454). */
   port: number;
-  /** Bind error, e.g. `"address in use"`. */
+  /** Bind error, e.g. `"Address already in use"`; an unbound socket is retried (`bridgeStatus` follows). */
   error: string | null;
 }
 
 // ── Nodes ──────────────────────────────────────
+
+/** Failsafe modes of a port (Status3 bits 7–6, ArtAddress AcFailHold/Zero/Full/Scene). */
+export type FailsafeMode = 'hold' | 'zero' | 'full' | 'scene';
 
 /** Decoded Status1/2/3 of the node's root ArtPollReply. */
 export interface NodeStatus {
@@ -64,7 +72,7 @@ export interface NodeStatus {
   squawking: boolean;
   outputStyleSwitchable: boolean;
   rdmSwitchable: boolean;
-  failsafe: 'hold' | 'zero' | 'full' | 'scene';
+  /** Status3 bit 5; the failsafe mode itself is per port (`PortState.failsafe`). */
   failsafeProgrammable: boolean;
   llrp: boolean;
   portDirectionSwitchable: boolean;
@@ -104,10 +112,20 @@ export interface PortState {
   canInput: boolean;
   /** From PortTypes bits 7/6; the current direction for switchable ports (node contract §3). */
   direction: 'output' | 'input' | 'both' | 'none';
-  /** 15-bit Port-Address of the output (Net/Sub/SwOut). */
+  /**
+   * 15-bit Port-Address of the output (Net/Sub/SwOut). Only the field of the
+   * port's current `direction` is meaningful (the Pixelmapper Node leaves
+   * universe 0 in the other one, contract §4): read it with `portAddressOf`.
+   */
   outputPortAddress: number;
-  /** 15-bit Port-Address of the input (Net/Sub/SwIn). */
+  /** 15-bit Port-Address of the input (Net/Sub/SwIn); see `outputPortAddress`. */
   inputPortAddress: number;
+  /**
+   * Failsafe mode of this port (Status3 bits 7–6 of its ArtPollReply; per
+   * BindIndex). Null = not known (pmnet-bridge 0.1 reports it for the
+   * lowest BindIndex only, contract §11).
+   */
+  failsafe: FailsafeMode | null;
   output: PortOutputState;
   input: PortInputState;
 }
@@ -142,7 +160,10 @@ export interface Tod {
   nodeId: NodeId;
   port: PortRef;
   portAddress: number;
-  /** False when the node answered TodNak. */
+  /**
+   * False when the node answered TodNak: no TOD on this port, e.g. a port
+   * without RDM (off, input, or RDM disabled; node contract §6.1).
+   */
   available: boolean;
   /** Sorted ascending; empty when `!available`. */
   uids: RdmUid[];
@@ -281,6 +302,7 @@ export interface FlashJob {
   phase: FlashPhase;
   pagesDone: number;
   pagesTotal: number;
+  /** Pages rewritten after an APP_CRC mismatch (all pages of the differing chunks). */
   rewrites: number;
   inBootloader: boolean;
   image: FirmwareImageInfo;
@@ -325,6 +347,40 @@ export function portLabel(port: PortRef, allPorts: readonly PortRef[]): string {
 /** Formats a 15-bit Port-Address as `Net:Sub:Uni` (e.g. `0:1:3`). */
 export function formatPortAddress(portAddress: number): string {
   return `${(portAddress >> 8) & 0x7f}:${(portAddress >> 4) & 0x0f}:${portAddress & 0x0f}`;
+}
+
+/**
+ * The Port-Address of a port: the field of its current direction (input
+ * ports: `inputPortAddress`, else `outputPortAddress`). The other field is
+ * not meaningful (contract §4: universe 0 on the Pixelmapper Node).
+ */
+export function portAddressOf(port: Pick<PortState, 'direction' | 'outputPortAddress' | 'inputPortAddress'>): number {
+  return port.direction === 'input' ? port.inputPortAddress : port.outputPortAddress;
+}
+
+/** What a node id says: an RDM UID, a MAC or an IP (with the UDP port of a simulator). */
+export type ParsedNodeId =
+  | { kind: 'uid'; uid: RdmUid }
+  | { kind: 'mac'; mac: string }
+  | { kind: 'ip'; ip: string; port: number | null };
+
+/** Parses a node id (`"7FF0:8A1B2C3D"`, `"mac:…"`, `"ip:2.0.0.5"`, `"ip:127.0.0.1:50000"`). */
+export function parseNodeId(nodeId: NodeId): ParsedNodeId {
+  if (nodeId.startsWith('mac:')) return { kind: 'mac', mac: nodeId.slice(4) };
+  if (nodeId.startsWith('ip:')) {
+    const m = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?$/.exec(nodeId.slice(3));
+    if (m) return { kind: 'ip', ip: m[1]!, port: m[2] !== undefined ? Number(m[2]) : null };
+    return { kind: 'ip', ip: nodeId.slice(3), port: null };
+  }
+  return { kind: 'uid', uid: nodeId };
+}
+
+/** Identity of a node id for display: `UID 7FF0:8A1B2C3D`, `MAC 02:…`, `IP 2.0.0.5` or `IP 127.0.0.1:50000`. */
+export function formatNodeId(nodeId: NodeId): string {
+  const id = parseNodeId(nodeId);
+  if (id.kind === 'mac') return `MAC ${id.mac}`;
+  if (id.kind === 'ip') return `IP ${id.ip}${id.port !== null ? `:${id.port}` : ''}`;
+  return `UID ${id.uid}`;
 }
 
 /** True for a valid 15-bit Port-Address. */

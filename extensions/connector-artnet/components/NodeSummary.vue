@@ -4,6 +4,7 @@
  * IP, identity (UID or MAC), firmware, indicator and node report.
  */
 import { computed } from 'vue';
+import { formatNodeId } from '../bridge/protocol-model';
 import type { ArtNetNodeConnector } from '../node/node-connector';
 
 const props = defineProps<{ connector: ArtNetNodeConnector }>();
@@ -13,13 +14,13 @@ const node = computed(() => props.connector.node.value);
 /** Firmware as `major.minor` from VersInfo. */
 const firmware = computed(() => (node.value ? `${node.value.firmware >> 8}.${node.value.firmware & 0xff}` : null));
 
-/** Identity shown to the user. */
+/** Identity shown to the user (UID, MAC, or IP with the UDP port of a simulator). */
 const identity = computed(() => {
   const n = node.value;
   if (n?.uid) return `UID ${n.uid}`;
   if (n?.mac) return `MAC ${n.mac}`;
-  const id = props.connector.nodeId.value;
-  return id ? (id.startsWith('mac:') ? `MAC ${id.slice(4)}` : `UID ${id}`) : null;
+  const id = n?.nodeId ?? props.connector.nodeId.value;
+  return id ? formatNodeId(id) : null;
 });
 </script>
 

@@ -9,16 +9,24 @@
  * U1–U4 meet ports 1–4 without writing anything. Port-Address 0 maps to U1.
  */
 import type { NodeState, PortRef, PortState } from '../bridge/protocol-model';
-import { isPortAddress, portKey, samePort } from '../bridge/protocol-model';
+import { isPortAddress, portAddressOf, portKey, samePort } from '../bridge/protocol-model';
 
-/** Ports of `node` that currently output DMX (PortTypes show the current direction). */
-export function outputPortsOf(node: NodeState): PortState[] {
-  return node.ports.filter(p => p.canOutput && (p.direction === 'output' || p.direction === 'both'));
+/** True when the port currently outputs DMX (PortTypes show the current direction). */
+export function isOutputPort(port: PortState): boolean {
+  return port.canOutput && (port.direction === 'output' || port.direction === 'both');
 }
 
-/** Default Pixelmapper universe of a port: its Port-Address (the deprecated Port-Address 0 → U1). */
+/** Ports of `node` that currently output DMX. */
+export function outputPortsOf(node: NodeState): PortState[] {
+  return node.ports.filter(isOutputPort);
+}
+
+/**
+ * Default Pixelmapper universe of a port: its Port-Address (the field of
+ * its current direction, `portAddressOf`; the deprecated Port-Address 0 → U1).
+ */
 export function defaultUniverse(port: PortState): number {
-  return Math.max(1, port.outputPortAddress);
+  return Math.max(1, portAddressOf(port));
 }
 
 /**

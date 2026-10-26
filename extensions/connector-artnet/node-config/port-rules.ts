@@ -5,8 +5,8 @@
  * switch needs a confirmation, the Net:Sub:Uni editor's arithmetic and the
  * node's per-port PIDs from `pids.toml`. Pure TypeScript, no Vue.
  */
-import type { NodeState, PortRef, PortState } from '../bridge/protocol-model';
-import { samePort } from '../bridge/protocol-model';
+import type { FailsafeMode, NodeState, PortRef, PortState } from '../bridge/protocol-model';
+import { portAddressOf, samePort } from '../bridge/protocol-model';
 
 // ── Modes ──────────────────────────────────────
 
@@ -138,24 +138,29 @@ export function portAddressNote(portAddress: number): string | null {
   return portAddress === 0 ? 'Port-Address 0 is deprecated in Art-Net 4' : null;
 }
 
-/** Which address the editor shows and writes: the input address of input ports, else the output address. */
+/**
+ * Which address the editor writes: the field of the port's current
+ * direction (input ports: the input address, else the output address). It
+ * is the only meaningful one (contract §4); `portAddressOf` reads it.
+ */
 export function editedAddressField(port: PortState): 'outputPortAddress' | 'inputPortAddress' {
   return port.direction === 'input' ? 'inputPortAddress' : 'outputPortAddress';
 }
 
 /**
  * Ports of one BindIndex share NetSwitch and SubSwitch (bridge `artAddress`):
- * an address for one port must keep the Net and Sub-Net of the other ports
- * of its BindIndex. Returns the problem, or null.
+ * an address for one port must keep the Net and Sub-Net of the current
+ * address (`portAddressOf`) of every other port of its BindIndex. Returns
+ * the problem, or null.
  */
-export function sharedSubNetError(node: NodeState, port: PortRef, field: 'outputPortAddress' | 'inputPortAddress', portAddress: number): string | null {
-  const other = node.ports.find(p => p.port.bind === port.bind && !samePort(p.port, port) && p[field] >> 4 !== portAddress >> 4);
+export function sharedSubNetError(node: NodeState, port: PortRef, portAddress: number): string | null {
+  const other = node.ports.find(p => p.port.bind === port.bind && !samePort(p.port, port) && portAddressOf(p) >> 4 !== portAddress >> 4);
   if (!other) return null;
-  const { net, subNet } = splitPortAddress(other[field]);
+  const { net, subNet } = splitPortAddress(portAddressOf(other));
   return `Ports of BindIndex ${port.bind} share Net and Sub-Net: keep ${net}:${subNet}:x`;
 }
 
-// ── Node-wide settings ─────────────────────────
+// ── Choices ────────────────────────────────────
 
 /** A choice with a label and an explanation. */
 export interface LabeledOption<T extends string> {
@@ -164,8 +169,8 @@ export interface LabeledOption<T extends string> {
   hint: string;
 }
 
-/** Failsafe modes (ArtAddress AcFailHold/Zero/Full/Scene). */
-export const FAILSAFE_OPTIONS: readonly LabeledOption<'hold' | 'zero' | 'full' | 'scene'>[] = [
+/** Failsafe modes of a port (ArtAddress AcFailHold/Zero/Full/Scene). */
+export const FAILSAFE_OPTIONS: readonly LabeledOption<FailsafeMode>[] = [
   { value: 'hold', label: 'Hold', hint: 'Keeps the last values when Art-Net stops' },
   { value: 'zero', label: 'Zero', hint: 'Sets all channels to 0 when Art-Net stops' },
   { value: 'full', label: 'Full', hint: 'Sets all channels to full when Art-Net stops' },
@@ -184,8 +189,31 @@ export const OUTPUT_STYLE_OPTIONS: readonly LabeledOption<'continuous' | 'delta'
   { value: 'delta', label: 'Delta', hint: 'DMX is sent only when values change' },
 ];
 
-/** Confirmation of “Record scene”. */
-export const RECORD_SCENE_CONFIRM = 'Record the current output of all ports as the failsafe scene? The stored scene is replaced.';
+// ── Failsafe (per port, contract rev 2) ────────
+
+/**
+ * Other ports of the port's BindIndex: the AcFail* commands carry no port
+ * number, so a node with several ports per BindIndex applies the failsafe
+ * mode and the scene recording to all of them (bridge `artAddress`).
+ */
+export function portsSharingFailsafe(node: NodeState, port: PortRef): PortState[] {
+  return node.ports.filter(p => p.port.bind === port.bind && !samePort(p.port, port));
+}
+
+/** Hint for a port's failsafe mode; `null` = the bridge does not report it (pmnet-bridge 0.1, ports 2–4). */
+export function failsafeHint(mode: FailsafeMode | null): string {
+  if (mode === null) return 'Current mode unknown: the bridge does not report it for this port';
+  return FAILSAFE_OPTIONS.find(o => o.value === mode)?.hint ?? '';
+}
+
+/**
+ * Confirmation of “Record scene” of one port (`label`, e.g. `Port 2`);
+ * `shared` = labels of the ports of the same BindIndex that record along.
+ */
+export function recordSceneConfirm(label: string, shared: readonly string[] = []): string {
+  const what = shared.length ? `${label} and ${shared.join(', ')} (one BindIndex)` : label;
+  return `Record the current output of ${what} as the failsafe scene? The stored scene is replaced.`;
+}
 
 // ── Node PIDs per port (pids.toml) ─────────────
 

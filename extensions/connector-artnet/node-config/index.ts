@@ -11,6 +11,7 @@ export { default as NodePortsSection } from './NodePortsSection.vue';
 export { default as NodeNetworkSection } from './NodeNetworkSection.vue';
 export { default as NodeDeviceSection } from './NodeDeviceSection.vue';
 export { default as NodeAdvancedSection } from './NodeAdvancedSection.vue';
+export { default as NodePortFailsafe } from './NodePortFailsafe.vue';
 export {
   NODE_DESCRIPTION_KEY,
   isDeviceDescription,
@@ -26,6 +27,7 @@ export {
   type NodeDescription,
 } from './use-node-context';
 export { FOLLOW_TIMEOUT_MS, useNodeFollow, type FollowState, type FollowTarget } from './use-node-follow';
+export { NODE_CHANGE_DEBOUNCE_MS, nodeSettingsSignature, stripReportCounter, useNodeChangeSignal } from './use-node-change-signal';
 export { usePortEnabled, type PortEnabledHandle } from './use-port-enabled';
 export * from './ipv4';
 export * from './network-draft';

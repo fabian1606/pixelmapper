@@ -9,8 +9,10 @@
  */
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useReplaceable } from '@pixelmapper/extension-api';
+import { formatNodeId } from '../bridge/protocol-model';
 import { RDM_PID } from '../bridge/rdm-constants';
 import { LONG_NAME_MAX_BYTES, SHORT_NAME_MAX_BYTES, formatVersInfo, nameError } from './device-rules';
+import { useNodeChangeSignal } from './use-node-change-signal';
 import { useCommandRunner, useNodeContext, useSharedNodeDescription, type NodeConfigProps } from './use-node-context';
 import NodeDeviceLabel from './NodeDeviceLabel.vue';
 
@@ -22,6 +24,8 @@ const desc = useSharedNodeDescription(ctx);
 const runner = useCommandRunner();
 const { busy, error } = runner;
 const Toggle = useReplaceable('pm.toggle');
+/** Goes up when the node changed: the RDM DEVICE_LABEL is read again. */
+const nodeChanges = useNodeChangeSignal(() => node.value);
 
 /** The two ArtAddress names. */
 const NAMES = [
@@ -108,7 +112,7 @@ const INPUT = 'w-full rounded border border-border bg-background px-1.5 py-0.5 t
         <component :is="Toggle" :model-value="locating" :disabled="!online || busy === 'identify'" size="sm" class="ml-auto" @update:model-value="setIdentify" />
       </div>
       <p v-if="error" class="text-[10px] text-destructive">{{ error }}</p>
-      <NodeDeviceLabel v-if="labelAddress" :address="labelAddress" :backend="backend" :disabled="!online" />
+      <NodeDeviceLabel v-if="labelAddress" :address="labelAddress" :backend="backend" :disabled="!online" :reread-on="nodeChanges" />
       <dl class="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-0.5 text-[11px]" data-field="info">
         <dt class="text-muted-foreground">Firmware</dt>
         <dd class="font-mono">
@@ -123,7 +127,7 @@ const INPUT = 'w-full rounded border border-border bg-background px-1.5 py-0.5 t
           <dd>{{ description.deviceModelDescription }}<template v-if="description.manufacturerLabel"> · {{ description.manufacturerLabel }}</template></dd>
         </template>
         <dt class="text-muted-foreground">Identity</dt>
-        <dd class="font-mono">{{ node.uid ? `UID ${node.uid}` : node.mac ? `MAC ${node.mac}` : node.nodeId }}</dd>
+        <dd class="font-mono">{{ node.uid ? `UID ${node.uid}` : node.mac ? `MAC ${node.mac}` : formatNodeId(node.nodeId) }}</dd>
       </dl>
     </template>
   </div>

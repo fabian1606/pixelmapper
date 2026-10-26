@@ -23,7 +23,6 @@ export function makeStatus(overrides: Partial<NodeStatus> = {}): NodeStatus {
     squawking: false,
     outputStyleSwitchable: true,
     rdmSwitchable: true,
-    failsafe: 'hold',
     failsafeProgrammable: true,
     llrp: false,
     portDirectionSwitchable: true,
@@ -34,16 +33,24 @@ export function makeStatus(overrides: Partial<NodeStatus> = {}): NodeStatus {
   };
 }
 
-/** One DMX output port at BindIndex `bind` with Port-Address `portAddress`. */
+/**
+ * One DMX output port at BindIndex `bind` with Port-Address `portAddress`.
+ * Like the Pixelmapper Node (contract §4), only the field of the current
+ * direction carries the Port-Address; the other keeps Net/Sub-Net with
+ * universe 0. Pass `direction: 'input'` to get an input port.
+ */
 export function makePort(bind: number, portAddress: number, overrides: Partial<PortState> = {}): PortState {
+  const input = overrides.direction === 'input';
+  const other = portAddress & ~0x0f;
   return {
     port: { bind, index: 0 },
     protocol: 'dmx512',
     canOutput: true,
     canInput: false,
     direction: 'output',
-    outputPortAddress: portAddress,
-    inputPortAddress: portAddress,
+    outputPortAddress: input ? other : portAddress,
+    inputPortAddress: input ? portAddress : other,
+    failsafe: 'hold',
     output: { data: false, merging: false, merge: 'htp', shortCircuit: false, sacn: false, rdm: true, style: 'continuous', discoveryRunning: false, backgroundDiscovery: true },
     input: { data: false, disabled: false, errors: false, sacn: false },
     ...overrides,
@@ -78,6 +85,11 @@ export function makeNode(overrides: Partial<NodeState> = {}): NodeState {
 /** A TOD of the port at BindIndex `bind`. */
 export function makeTod(nodeId: string, bind: number, uids: string[], portAddress = bind): Tod {
   return { nodeId, port: { bind, index: 0 }, portAddress, available: true, uids: [...uids].sort() };
+}
+
+/** A TodNak of the port at BindIndex `bind` (no RDM on that port). */
+export function makeTodNak(nodeId: string, bind: number, portAddress = bind): Tod {
+  return { nodeId, port: { bind, index: 0 }, portAddress, available: false, uids: [] };
 }
 
 // ── RDM devices ────────────────────────────────

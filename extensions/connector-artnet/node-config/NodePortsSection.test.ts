@@ -3,7 +3,8 @@
  * node directory only (a write changes nothing until the node event),
  * direction change with confirmation while data flows, “off” via RDM
  * `PORTn_ENABLED` and ArtInput, Port-Address editor, failsafe + record
- * scene, per-port PIDs, errors.
+ * scene per port (contract rev 2), per-port PIDs, re-reads on node changes,
+ * errors.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
@@ -151,19 +152,53 @@ describe('NodePortsSection', () => {
     expect(row(w, 1).find('[data-part="universe"] [data-pm="number"]').attributes('data-value')).toBe('5');
   });
 
-  it('sets the failsafe mode and records the scene after confirmation', async () => {
+  it('sets the failsafe mode per port and records the port\'s scene after confirmation', async () => {
     const w = await mountSection();
-    await w.find('[data-failsafe] select').setValue('zero');
+    expect(w.findAll('[data-failsafe]')).toHaveLength(4); // one per output port, no node-wide control
+    await row(w, 2).find('[data-failsafe] select').setValue('zero');
     await flushPromises();
-    expect(h.argsOf('artAddress')).toEqual([{ nodeId: NODE_UID, failsafe: 'zero' }]);
-    expect(w.find('[data-failsafe] select').attributes('data-value')).toBe('hold');
+    expect(h.argsOf('artAddress')).toEqual([{ nodeId: NODE_UID, ports: [{ port: { bind: 2, index: 0 }, failsafe: 'zero' }] }]);
+    expect(row(w, 2).find('[data-failsafe] select').attributes('data-value')).toBe('hold'); // until the node reports it
+    h.update({ ports: switchablePorts(b => (b === 2 ? { failsafe: 'zero' } : {})) });
+    await flushPromises();
+    expect(row(w, 2).find('[data-failsafe] select').attributes('data-value')).toBe('zero');
+    expect(row(w, 1).find('[data-failsafe] select').attributes('data-value')).toBe('hold');
 
-    await w.find('[data-record-scene]').trigger('click');
-    expect(w.find('[data-confirm]').text()).toContain('Record the current output of all ports as the failsafe scene?');
+    await row(w, 3).find('[data-record-scene]').trigger('click');
+    expect(w.find('[data-confirm]').text()).toContain('Record the current output of Port 3 as the failsafe scene?');
     await w.find('[data-confirm-ok]').trigger('click');
     await flushPromises();
-    expect(h.argsOf('artAddress').at(-1)).toEqual({ nodeId: NODE_UID, recordFailsafeScene: true });
-    expect(w.text()).toContain('Scene recorded');
+    expect(h.argsOf('artAddress').at(-1)).toEqual({ nodeId: NODE_UID, ports: [{ port: { bind: 3, index: 0 }, recordFailsafeScene: true }] });
+    expect(row(w, 3).text()).toContain('Scene recorded');
+  });
+
+  it('shows a failsafe mode the bridge does not report as unknown, still writable', async () => {
+    h.update({ ports: switchablePorts(b => (b > 1 ? { failsafe: null } : {})) }); // pmnet-bridge 0.1: lowest BindIndex only
+    const w = await mountSection();
+    expect(row(w, 1).find('[data-failsafe-unknown]').exists()).toBe(false);
+    expect(row(w, 3).find('[data-failsafe-unknown]').text()).toBe('unknown');
+    expect(row(w, 3).find('[data-failsafe] select').attributes('data-value')).toBe('');
+    await row(w, 3).find('[data-failsafe] select').setValue('full');
+    await flushPromises();
+    expect(h.argsOf('artAddress')).toEqual([{ nodeId: NODE_UID, ports: [{ port: { bind: 3, index: 0 }, failsafe: 'full' }] }]);
+  });
+
+  it('re-reads the node\'s RDM-only port settings when the node changes, not on its poll counter', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const w = await mountSection();
+    const reads = () => h.pidsOf('rdmGet').filter(p => p === 0x8103).length;
+    expect(reads()).toBe(1);
+    h.update({ nodeReport: '#0001 [0002] OK', lastSeen: 1 }); // counter only
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+    expect(reads()).toBe(1);
+
+    h.rdm.set(0x8103, '00'); // switched off at the node's display; the queued message went elsewhere
+    h.update({ shortName: 'Changed at the panel' });
+    vi.advanceTimersByTime(1000);
+    await flushPromises();
+    expect(reads()).toBe(2);
+    expect(mode(row(w, 3)).attributes('data-value')).toBe('off');
   });
 
   it('shows the per-port node PIDs of one port', async () => {
@@ -193,7 +228,8 @@ describe('NodePortsSection', () => {
     expect(choices(mode(row(w, 1)))).toEqual(['output', 'off']);
     expect(row(w, 1).find('[data-rdm] [data-pm="toggle"]').exists()).toBe(false);
     expect(row(w, 1).find('select[data-style]').exists()).toBe(false);
-    expect(w.find('[data-failsafe] select').exists()).toBe(false);
+    expect(row(w, 1).find('[data-failsafe] select').exists()).toBe(false);
+    expect(row(w, 1).find('[data-failsafe]').text()).toContain('Hold');
     expect(w.find('[data-record-scene]').exists()).toBe(false);
   });
 
