@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Platform, SharedGlobals, UdpApi } from '@pixelmapper/extension-api';
-import { ArtNetConnector } from './artnet-connector';
+import { ArtNetConnector, LEGACY_BRIDGE_URL, migrateLegacyBridgeUrl } from './artnet-connector';
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(udp: UdpApi | null) {
@@ -85,8 +85,35 @@ describe('ArtNetConnector — bridge fallback', () => {
     expect(c.directUdp).toBe(false);
     expect(c.alwaysConnected()).toBe(false);
     await c.connect();
-    expect(urls).toEqual(['ws://localhost:7777']);
+    // Port 7778: 7777 belongs to `pmnet-bridge serve` (plan M3.4).
+    expect(urls).toEqual(['ws://localhost:7778']);
     expect(c.status.value).toBe('connecting');
     await c.disconnect();
+  });
+});
+
+describe('ArtNetConnector — bridge URL migration (plan M3.4)', () => {
+  it('moves a stored former default URL (port 7777) to the new default', () => {
+    expect(LEGACY_BRIDGE_URL).toBe('ws://localhost:7778');
+    for (const former of ['ws://localhost:7777', 'ws://127.0.0.1:7777']) {
+      const c = ArtNetConnector.fromConfig('m1', { bridgeUrl: former, targetIp: '2.0.0.10' });
+      expect(c.bridgeUrl.value).toBe(LEGACY_BRIDGE_URL);
+      // The host persists the migrated value with its next save.
+      expect(c.getConfig()).toMatchObject({ bridgeUrl: LEGACY_BRIDGE_URL, targetIp: '2.0.0.10' });
+    }
+  });
+
+  it('keeps custom URLs and configs without a bridge URL', () => {
+    for (const custom of ['ws://10.0.0.5:7777', 'ws://localhost:9000', 'ws://localhost:7777/', '']) {
+      expect(ArtNetConnector.fromConfig('m2', { bridgeUrl: custom }).bridgeUrl.value).toBe(custom);
+    }
+    expect(ArtNetConnector.fromConfig('m3', { targetIp: '2.0.0.10' }).bridgeUrl.value).toBe(LEGACY_BRIDGE_URL);
+    expect(migrateLegacyBridgeUrl('ws://192.168.1.2:7777')).toBe('ws://192.168.1.2:7777');
+  });
+
+  it('takes a URL typed in the settings literally', () => {
+    const c = ArtNetConnector.fromConfig('m4', {});
+    c.applyConfig({ bridgeUrl: 'ws://localhost:7777' });
+    expect(c.bridgeUrl.value).toBe('ws://localhost:7777');
   });
 });

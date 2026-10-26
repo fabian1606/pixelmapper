@@ -4,8 +4,9 @@
  *
  * Two transports (ADR 0003): when the platform can send UDP (desktop app),
  * ArtDMX packets go straight to the target. In the browser, frames go to a
- * small local bridge over WebSocket as `[universe u16 LE][512 bytes]` and
- * the bridge emits the UDP packets.
+ * small local bridge (`tools/artnet-bridge`, default `ws://localhost:7778`)
+ * over WebSocket as `[universe u16 LE][512 bytes]` and the bridge emits the
+ * UDP packets.
  */
 import { ref } from 'vue';
 import { ConnectorBase, getPlatform, type ConnectorStatus, type UdpApi, type UdpSocket } from '@pixelmapper/extension-api';
@@ -14,6 +15,24 @@ import { ARTNET_PORT, ArtDmxSequencer, encodeArtDmx, toArtNetUniverse } from './
 /** Connect timeout and retry interval. */
 const CONNECT_TIMEOUT_MS = 5000;
 const RETRY_INTERVAL_MS = 2000;
+
+/**
+ * Default URL of the old local bridge (`tools/artnet-bridge`). Port 7778:
+ * 7777 belongs to the Art-Net 4 bridge `pmnet-bridge serve` (plan M3.4),
+ * which does not serve this connector's protocol.
+ */
+export const LEGACY_BRIDGE_URL = 'ws://localhost:7778';
+
+/** Former default bridge URLs (port 7777), migrated when a stored config is restored. */
+const FORMER_DEFAULT_BRIDGE_URLS: ReadonlySet<string> = new Set(['ws://localhost:7777', 'ws://127.0.0.1:7777']);
+
+/**
+ * Maps a stored bridge URL to the current one: exactly the former default →
+ * `LEGACY_BRIDGE_URL`; any other (custom) URL is kept as is.
+ */
+export function migrateLegacyBridgeUrl(url: string): string {
+  return FORMER_DEFAULT_BRIDGE_URLS.has(url) ? LEGACY_BRIDGE_URL : url;
+}
 
 /** The platform's UDP access, or `null` (browser, or no host in tests). */
 function platformUdp(): UdpApi | null {
@@ -28,7 +47,7 @@ function platformUdp(): UdpApi | null {
 export class ArtNetConnector extends ConnectorBase {
   readonly meta = { type: 'artnet', label: 'ArtNet (manual target)', icon: 'network' };
 
-  bridgeUrl = ref('ws://localhost:7777');
+  bridgeUrl = ref(LEGACY_BRIDGE_URL);
   targetIp = ref('255.255.255.255');
   artnetPort = ref(ARTNET_PORT);
 
@@ -126,10 +145,16 @@ export class ArtNetConnector extends ConnectorBase {
     if ('targetIp' in config || 'artnetPort' in config) this.sendConfig();
   }
 
-  /** Restores an instance from a stored config. */
+  /**
+   * Restores an instance from a stored config. A stored bridge URL that is
+   * exactly the former default (port 7777) moves to `LEGACY_BRIDGE_URL`; the
+   * host persists it with the next save. URLs typed in the settings later
+   * (`applyConfig`) are taken literally.
+   */
   static fromConfig(id: string, config: Record<string, unknown>): ArtNetConnector {
     const c = new ArtNetConnector(id);
-    c.applyConfig(config);
+    const stored = typeof config.bridgeUrl === 'string' ? { ...config, bridgeUrl: migrateLegacyBridgeUrl(config.bridgeUrl) } : config;
+    c.applyConfig(stored);
     return c;
   }
 

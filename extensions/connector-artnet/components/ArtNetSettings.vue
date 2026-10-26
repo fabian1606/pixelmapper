@@ -3,7 +3,7 @@
  * ArtNet settings: bridge URL (browser only), target IP/port, universe count. Emits
  * `change(patch)`; the host applies and persists it.
  */
-import type { ArtNetConnector } from '../artnet-connector';
+import { LEGACY_BRIDGE_URL, type ArtNetConnector } from '../artnet-connector';
 
 const props = defineProps<{ connector: ArtNetConnector }>();
 const emit = defineEmits<{ change: [patch: Record<string, unknown>] }>();
@@ -20,7 +20,7 @@ const input = 'mt-1 w-full rounded border border-border bg-background text-xs px
       <input
         type="text"
         :class="[input, 'font-mono']"
-        placeholder="ws://localhost:7777"
+        :placeholder="LEGACY_BRIDGE_URL"
         :value="props.connector.bridgeUrl.value"
         :disabled="props.connector.status.value === 'connected' || props.connector.status.value === 'connecting'"
         @change="emit('change', { bridgeUrl: val($event) })"

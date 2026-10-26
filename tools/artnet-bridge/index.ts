@@ -5,12 +5,18 @@
 // via a JSON `config` text frame right after connecting. Binary frames are
 // `[u16 LE universe][≤512 B DMX]`.
 //
-// Run: `bun run tools/artnet-bridge/index.ts`  (also auto-started by `bun dev`)
+// Used only by the legacy “ArtNet (manual target)” connector (`artnet`) in the
+// browser, on ws://localhost:7778. Art-Net 4 nodes (`artnet-node`) go through
+// `pmnet-bridge serve` on port 7777 instead.
+//
+// Run: `bun run artnet-bridge`  (also auto-started by `bun run dev`)
 
 import dgram from 'node:dgram';
 import { ARTNET_PORT, ArtDmxSequencer, encodeArtDmx, toArtNetUniverse } from '../../extensions/connector-artnet/art-dmx';
 
-const PORT = Number(process.env.PORT ?? 7777);
+// 7778: port 7777 belongs to the Art-Net 4 bridge `pmnet-bridge serve`, which
+// does not serve this protocol (plan M3.4).
+const PORT = Number(process.env.PORT ?? 7778);
 
 interface ClientState {
   targetIp:   string;
