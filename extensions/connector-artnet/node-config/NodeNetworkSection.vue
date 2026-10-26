@@ -5,12 +5,15 @@
  *
  * The current values come from the node (an ArtIpProg without changes is
  * answered with its ArtIpProgReply). Edits are staged and validated
- * locally; “Apply…” asks first (new IP, connections drop), sends only the
- * diff, and then follows the node by its identity to its new address
- * (`follow` event). “Reset network to defaults…” asks as well.
+ * locally — including the bridge's DHCP rule (contract rev 2: DHCP on goes
+ * alone, DHCP off needs a static IP) — “Apply…” asks first (new IP,
+ * connections drop), sends only the diff, and then follows the node by its
+ * identity to its new address (`follow` event). “Reset network to
+ * defaults…” asks as well.
  */
 import { computed, reactive, ref, shallowRef, watch } from 'vue';
 import { useReplaceable } from '@pixelmapper/extension-api';
+import { ipProgArgsProblem } from '../bridge/command-limits';
 import { PREFIX_OPTIONS } from './ipv4';
 import {
   CONNECTION_DROP_WARNING,
@@ -59,7 +62,9 @@ const follow = useNodeFollow(backend, directory, () => props.nodeId, (found) => 
 
 const change = computed(() => (current.value ? networkChanges(current.value, draft) : null));
 const errors = computed(() => validateNetworkDraft(draft));
-const valid = computed(() => Object.keys(errors.value).length === 0);
+/** The diff breaks the bridge's DHCP rule (it would answer `badRequest`, field `dhcp`); null when fine. */
+const argsProblem = computed(() => (change.value ? ipProgArgsProblem(change.value)?.message ?? null : null));
+const valid = computed(() => Object.keys(errors.value).length === 0 && argsProblem.value === null);
 const locked = computed(() => !online.value || busy.value !== null);
 const dhcpOffered = computed(() => !!node.value?.status.dhcpCapable || !!current.value?.dhcp);
 const modeOptions = computed(() => [...(dhcpOffered.value ? [{ value: 'dhcp', label: 'DHCP' }] : []), { value: 'static', label: 'Static' }]);
@@ -113,6 +118,12 @@ async function apply() {
   const diff = change.value;
   const previousIp = node.value?.ip ?? before?.ip ?? '';
   if (!before || !diff) return;
+  const problem = ipProgArgsProblem(diff);
+  if (problem) {
+    error.value = problem.message;
+    confirming.value = null;
+    return;
+  }
   // `as`: assigned inside the callback, so TypeScript must not narrow it to null.
   let reply = null as NetworkSettings | null;
   await runner.run('apply', async () => {
@@ -173,6 +184,7 @@ const BUTTON = 'px-1.5 py-0.5 rounded border border-border hover:bg-accent trans
         <input type="text" :class="INPUT" :value="draft.dhcp ? (current.gateway === '0.0.0.0' ? '' : current.gateway) : draft.gateway" placeholder="none" :disabled="locked || draft.dhcp" aria-label="Gateway" @input="draft.gateway = text($event)">
       </div>
       <p v-if="errors.gateway" class="text-[10px] text-destructive">{{ errors.gateway }}</p>
+      <p v-if="argsProblem && !Object.keys(errors).length" class="text-[10px] text-destructive" data-args-problem>{{ argsProblem }}</p>
       <div class="flex items-center justify-end gap-1">
         <span v-if="reading" class="mr-auto text-[10px] text-muted-foreground/70">Reading…</span>
         <button v-if="change" type="button" :class="BUTTON" :disabled="busy !== null" @click="setCurrent(current!, true)">Discard</button>

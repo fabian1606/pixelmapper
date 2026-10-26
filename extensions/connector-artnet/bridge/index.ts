@@ -10,6 +10,7 @@ export {
   MAX_MESSAGE_BYTES,
   NODE_NAME_MAX_BYTES,
   dmxTargetProblem,
+  ipProgArgsProblem,
   isBroadcastIp,
   isBroadcastUid,
   nodeNameError,

@@ -39,6 +39,22 @@ export function isBroadcastUid(uid: RdmUid): boolean {
   return /^[0-9A-F]{4}:FFFFFFFF$/i.test(uid);
 }
 
+/**
+ * The DHCP rule of `ipProg` (contract §6, rev 2): `dhcp: true` cannot be
+ * combined with `ip`, `mask`, `gateway` or `resetToDefault` (the node
+ * ignores them once DHCP is on), and `dhcp: false` needs `ip` (Art-Net
+ * switches DHCP off by programming a static IP). The bridge answers both
+ * with `badRequest`, `details.field: "dhcp"`; null when the arguments are fine.
+ */
+export function ipProgArgsProblem(args: Omit<CommandArgs<'ipProg'>, 'nodeId'>): ArgumentProblem | null {
+  const has = (v: unknown) => v !== undefined && v !== null && v !== '' && v !== false;
+  if (args.dhcp === true && (has(args.ip) || has(args.mask) || has(args.gateway) || has(args.resetToDefault))) {
+    return { field: 'dhcp', message: 'DHCP cannot be combined with an IP, mask, gateway or reset' };
+  }
+  if (args.dhcp === false && !has(args.ip)) return { field: 'dhcp', message: 'Switching DHCP off needs a static IP' };
+  return null;
+}
+
 /** Checks command arguments against the contract limits; null when fine. */
 export function commandArgsProblem<C extends PublicCommandType>(type: C, args: CommandArgs<C>): ArgumentProblem | null {
   if (type === 'artAddress') {
@@ -48,6 +64,10 @@ export function commandArgsProblem<C extends PublicCommandType>(type: C, args: C
       const message = typeof value === 'string' ? nodeNameError(field, value) : null;
       if (message) return { field, message };
     }
+  }
+  if (type === 'ipProg') {
+    const problem = ipProgArgsProblem(args as CommandArgs<'ipProg'>);
+    if (problem) return problem;
   }
   if (type === 'rdmDescribe' || type === 'flash') {
     const uid = (args as CommandArgs<'rdmDescribe'>).uid;

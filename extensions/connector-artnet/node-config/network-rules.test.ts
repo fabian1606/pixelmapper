@@ -6,6 +6,7 @@
  * confirmation texts.
  */
 import { describe, expect, it } from 'vitest';
+import { ipProgArgsProblem } from '../bridge/command-limits';
 import {
   PREFIX_OPTIONS,
   broadcastAddress,
@@ -129,6 +130,14 @@ describe('network draft', () => {
     expect(changesAddress(STATIC, { mask: '255.255.0.0' })).toBe(false);
     expect(changesAddress(STATIC, { dhcp: true })).toBe(true);
     expect(changesAddress(STATIC, { resetToDefault: true })).toBe(true);
+  });
+
+  it('produces only changes the bridge accepts (DHCP rule, contract rev 2)', () => {
+    for (const change of [
+      networkChanges(STATIC, draft(STATIC, { dhcp: true })),
+      networkChanges(DHCP, draft(DHCP, { dhcp: false, ip: '192.168.1.50' })),
+      networkChanges(STATIC, draft(STATIC, { ip: '10.0.0.30', prefix: 16 })),
+    ]) expect(ipProgArgsProblem(change!)).toBeNull();
   });
 
   it('names the new IP in the confirmation', () => {

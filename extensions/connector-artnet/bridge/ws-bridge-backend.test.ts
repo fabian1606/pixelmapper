@@ -331,6 +331,10 @@ describe('WsBridgeBackend — contract limits (bridge-ws.md)', () => {
     await expect(b.request('rdmDescribe', { nodeId: 'n', port, uid: 'FFFF:FFFFFFFF' })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'uid' } });
     await expect(b.request('flash', { nodeId: 'n', port, uid: '7FF0:FFFFFFFF', hex: ':00' })).rejects.toMatchObject({ code: 'badRequest' });
     await expect(b.request('imageInfo', { hex: 'x'.repeat(4 * 1024 * 1024) })).rejects.toMatchObject({ code: 'badRequest' });
+    // ipProg DHCP rule (contract rev 2): DHCP on goes alone, DHCP off needs an IP.
+    await expect(b.request('ipProg', { nodeId: 'n', dhcp: true, ip: '10.0.0.2' })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'dhcp' } });
+    await expect(b.request('ipProg', { nodeId: 'n', dhcp: true, resetToDefault: true })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'dhcp' } });
+    await expect(b.request('ipProg', { nodeId: 'n', dhcp: false, mask: '255.0.0.0' })).rejects.toMatchObject({ code: 'badRequest', details: { field: 'dhcp' } });
     expect(s.commands).toHaveLength(sent);
     b.stop();
   });
