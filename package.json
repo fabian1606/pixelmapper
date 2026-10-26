@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "build": "bun run build:plugins && bun run build:extensions && nuxt build",
-    "dev": "bun run build:wasm && bun run build:extensions && concurrently -n nuxt,canvas,core,artnet,plugins -c cyan,yellow,green,magenta,blue \"nuxt dev\" \"cargo watch --postpone -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch --postpone -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run tools/artnet-bridge/index.ts\" \"bun run scripts/build-plugins.ts --watch\"",
+    "dev": "bun run build:wasm && bun run build:extensions && concurrently -n nuxt,canvas,core,pmnet-bridge,artnet-legacy,plugins -c cyan,yellow,green,magenta,gray,blue \"nuxt dev\" \"cargo watch --postpone -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'\" \"cargo watch --postpone -C rs-engine/core -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core'\" \"bun run scripts/start-pmnet-bridge.ts\" \"bun run tools/artnet-bridge/index.ts\" \"bun run scripts/build-plugins.ts --watch\"",
+    "pmnet-bridge": "bun run scripts/start-pmnet-bridge.ts",
     "artnet-bridge": "bun run tools/artnet-bridge/index.ts",
     "dev:nuxt": "bun run build:plugins && bun run build:extensions && nuxt dev",
     "dev:wasm:canvas": "cargo watch -C rs-engine/canvas -s 'wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas'",
