@@ -52,8 +52,23 @@ function personalityText(d: DeviceEntry): string {
   return `${info.currentPersonality}/${info.personalityCount} · ${name}`;
 }
 
-/** Rows of the devices of `nodeId()`, in store order (port, address, UID). */
-export function useDeviceList(runtime: DeviceRuntime, nodeId: () => NodeId | null): { rows: ComputedRef<DeviceRow[]> } {
+/** A node port without RDM (TodNak) for the list's hint. */
+export interface NoRdmPort {
+  port: PortRef;
+  /** `Port 3`. */
+  label: string;
+}
+
+/**
+ * Rows of the devices of `nodeId()`, in store order (port, address, UID),
+ * and the node's ports whose TOD is a TodNak (`noRdmPorts`: no RDM there,
+ * so no devices can be listed for them).
+ */
+export function useDeviceList(runtime: DeviceRuntime, nodeId: () => NodeId | null): { rows: ComputedRef<DeviceRow[]>; noRdmPorts: ComputedRef<NoRdmPort[]> } {
+  const noRdmPorts = computed<NoRdmPort[]>(() => {
+    const id = nodeId();
+    return id ? runtime.store.portsWithoutRdm(id).map(port => ({ port, label: portDisplayName(id, port) })) : [];
+  });
   const rows = computed<DeviceRow[]>(() => {
     const id = nodeId();
     if (!id) return [];
@@ -88,5 +103,5 @@ export function useDeviceList(runtime: DeviceRuntime, nodeId: () => NodeId | nul
       };
     });
   });
-  return { rows };
+  return { rows, noRdmPorts };
 }

@@ -2,7 +2,7 @@
  * Device list in the node card (plan M6.1): rows with address, label,
  * model, personality, firmware and state; Add all as one undo step; Assign
  * free address on a conflict; Identify switched off when the card closes;
- * Rediscover = ArtTodControl flush.
+ * Rediscover = ArtTodControl flush; ports without RDM (TodNak) are named.
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { nextTick } from 'vue';
@@ -11,6 +11,7 @@ import { listFixtures } from '@pixelmapper/extension-api';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { RDM_PID } from '../bridge/rdm-constants';
+import { makeTodNak } from '../bridge/testing/fixtures';
 import { createHarness, stubEngineGlobals, type Harness } from '../devices/testing/harness.test-support';
 import DeviceDiscoveryList from './DeviceDiscoveryList.vue';
 
@@ -74,6 +75,22 @@ describe('DeviceDiscoveryList', () => {
     expect(h.tubes.devices.get(B)!.info.dmxStartAddress).toBe(13);
     expect(wrapper.text()).toContain('Moved to address 13');
     expect(wrapper.findAll('span').filter(s => s.text() === 'conflict')).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it('says that RDM is not available on a port that answers TodNak', async () => {
+    h = await createHarness(t => t.add(A, 3));
+    const wrapper = mountList();
+    await nextTick();
+    expect(wrapper.text()).toContain('1 found');
+    expect(wrapper.find('[data-no-rdm]').exists()).toBe(false);
+    h.backend.emit({ type: 'tod', ...makeTodNak(h.tubes.node.nodeId, 3) });
+    h.backend.emit({ type: 'tod', ...makeTodNak(h.tubes.node.nodeId, 4) });
+    await h.settle();
+    await nextTick();
+    expect(wrapper.text()).toContain('0 found');
+    expect(wrapper.text()).not.toContain('No RDM devices found');
+    expect(wrapper.find('[data-no-rdm]').text()).toBe('Port 3, Port 4: RDM is not available on these ports (off, input, or RDM disabled).');
     wrapper.unmount();
   });
 

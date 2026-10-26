@@ -5,7 +5,9 @@
  * · personality · firmware · state) with Identify, Add and Assign free
  * address, and for the node Add all (one undo step), Auto-address and
  * Rediscover (ArtTodControl flush). Devices reach the canvas only through
- * Add / Add all. Identify is switched off when the card closes.
+ * Add / Add all. Identify is switched off when the card closes. Ports that
+ * answered TodNak (no RDM: port off, input, or RDM disabled) are named
+ * instead of looking like empty ports.
  */
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import type { RdmUid } from '../bridge/protocol-model';
@@ -13,7 +15,7 @@ import type { ArtNetNodeConnector } from '../node/node-connector';
 import { addDevices } from '../devices/add-devices';
 import { assignFreeAddress, autoAddress } from '../devices/addressing';
 import { getDeviceRuntime, type DeviceRuntime } from '../devices/device-runtime';
-import { useDeviceList } from '../devices/use-device-list';
+import { useDeviceList, type NoRdmPort } from '../devices/use-device-list';
 import DeviceRow from './DeviceRow.vue';
 
 const props = defineProps<{
@@ -23,7 +25,16 @@ const props = defineProps<{
 }>();
 
 const runtime = props.runtime ?? getDeviceRuntime();
-const { rows } = runtime ? useDeviceList(runtime, () => props.connector.nodeId.value) : { rows: computed(() => []) };
+const { rows, noRdmPorts } = runtime
+  ? useDeviceList(runtime, () => props.connector.nodeId.value)
+  : { rows: computed(() => []), noRdmPorts: computed((): NoRdmPort[] => []) };
+
+/** “Port 3: RDM is not available on this port …” (one line for all ports without RDM), or null. */
+const noRdmText = computed(() => {
+  if (!props.connector.node.value || !noRdmPorts.value.length) return null;
+  const ports = noRdmPorts.value.map(p => p.label).join(', ');
+  return `${ports}: RDM is not available on ${noRdmPorts.value.length === 1 ? 'this port' : 'these ports'} (off, input, or RDM disabled).`;
+});
 
 /** UIDs with an action in flight, and per-device messages of the last action. */
 const busy = reactive(new Set<RdmUid>());
@@ -168,9 +179,10 @@ onBeforeUnmount(() => {
       </span>
     </div>
     <p v-if="!runtime" class="text-[11px] text-muted-foreground">Device discovery is not active.</p>
-    <p v-else-if="!rows.length" class="text-[11px] text-muted-foreground">
+    <p v-else-if="!rows.length && !noRdmText" class="text-[11px] text-muted-foreground">
       {{ connector.node.value ? 'No RDM devices found on the node’s ports.' : 'The node is offline.' }}
     </p>
+    <p v-if="runtime && noRdmText" class="text-[11px] text-muted-foreground" data-no-rdm>{{ noRdmText }}</p>
     <DeviceRow
       v-for="row in rows"
       :key="row.uid"

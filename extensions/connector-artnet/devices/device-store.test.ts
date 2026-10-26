@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { NodeDirectory } from '../bridge/node-directory';
 import { FakeArtNetBackend } from '../bridge/testing/fake-backend';
+import { makeTodNak } from '../bridge/testing/fixtures';
 import { DeviceStore } from './device-store';
 import { FakeRdmDevices } from './testing/fake-devices';
 
@@ -78,6 +79,28 @@ describe('DeviceStore', () => {
     backend.emit({ type: 'nodeGone', nodeId: tubes.node.nodeId, lastSeen: 0 });
     await settle();
     expect(store.get('7FF0:00000001')?.present).toBe(false);
+  });
+
+  it('drops the devices of a port that answers TodNak and names the port (contract rev 2)', async () => {
+    tubes.add('7FF0:00000001', 1);
+    tubes.add('7FF0:00000002', 2);
+    store.start();
+    tubes.announce();
+    await settle();
+    expect(store.portsWithoutRdm(tubes.node.nodeId)).toEqual([]);
+
+    // RDM switched off on port 2 (or the port became an input): TodNak.
+    backend.emit({ type: 'tod', ...makeTodNak(tubes.node.nodeId, 2) });
+    await settle();
+    expect(store.get('7FF0:00000002')).toBeUndefined(); // not kept as a stale offline entry
+    expect(store.get('7FF0:00000001')?.present).toBe(true);
+    expect(store.portsWithoutRdm(tubes.node.nodeId)).toEqual([{ bind: 2, index: 0 }]);
+
+    // RDM back on: the device is listed and described again.
+    tubes.emitTod(2);
+    await settle();
+    expect(store.get('7FF0:00000002')?.present).toBe(true);
+    expect(store.portsWithoutRdm(tubes.node.nodeId)).toEqual([]);
   });
 
   it('re-reads after a SET from the node panel and periodically', async () => {

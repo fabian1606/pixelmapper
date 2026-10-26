@@ -8,6 +8,11 @@
  * panel (LOCAL_RDM_SET queued message). Nothing here is derived from what
  * Pixelmapper sent. One shared instance per app (`device-runtime.ts`).
  *
+ * A TodNak (`Tod.available: false`, contract rev 2) means the port has no
+ * RDM now (port off, input, or RDM disabled): its devices are dropped
+ * instead of being kept as offline entries, and `portsWithoutRdm` names
+ * such ports for the device list.
+ *
  * While a device's firmware is written (plan M7.4) its reads are held
  * (`holdReads`): the tube runs its bootloader, and GETs would only time out
  * and compete with the update for the port.
@@ -140,6 +145,17 @@ export class DeviceStore {
       .filter(d => d.nodeId === nodeId)
       .sort((a, b) => a.port.bind - b.port.bind || a.port.index - b.port.index
         || (a.info?.dmxStartAddress ?? 0xffff) - (b.info?.dmxStartAddress ?? 0xffff) || a.uid.localeCompare(b.uid));
+  }
+
+  /**
+   * Ports of a node whose last TOD was a TodNak (no RDM on the port), in
+   * port order. Reactive (reads the directory's TODs).
+   */
+  portsWithoutRdm(nodeId: NodeId): PortRef[] {
+    return [...this.directory.tods.values()]
+      .filter(t => t.nodeId === nodeId && !t.available)
+      .map(t => ({ ...t.port }))
+      .sort((a, b) => a.bind - b.bind || a.index - b.index);
   }
 
   /** True while reads of the device are held (its firmware is being written). */
@@ -300,10 +316,14 @@ export class DeviceStore {
       if (!nodes.has(tod.nodeId)) continue;
       const key = portId(tod.nodeId, tod.port);
       seen.add(key);
-      const signature = tod.uids.join(',');
+      const signature = tod.available ? tod.uids.join(',') : '!nak';
       const changed = this.lastTods.get(key) !== signature;
       this.lastTods.set(key, signature);
       if (!changed) continue;
+      if (!tod.available) {
+        this.dropPort(tod.nodeId, tod.port);
+        continue;
+      }
       const listed = new Set(tod.uids);
       // Devices that left this port.
       for (const d of this.devices.values()) {
@@ -316,6 +336,17 @@ export class DeviceStore {
       if (seen.has(key)) continue;
       this.lastTods.delete(key);
       for (const d of this.devices.values()) if (portId(d.nodeId, d.port) === key && d.present) this.patch(d.uid, { present: false });
+    }
+  }
+
+  /**
+   * TodNak: the port has no RDM (contract rev 2). Its devices are removed —
+   * not kept as offline entries, which would claim they were unplugged;
+   * linked fixtures show “not on this port” until RDM is back.
+   */
+  private dropPort(nodeId: NodeId, port: PortRef) {
+    for (const d of [...this.devices.values()]) {
+      if (d.nodeId === nodeId && samePort(d.port, port)) this.devices.delete(d.uid);
     }
   }
 
