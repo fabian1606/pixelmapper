@@ -36,6 +36,7 @@
     "monitor:bridge": "bun run scripts/flash.ts bridge --monitor",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:artnet": "vitest run --config vitest.e2e.config.ts",
     "typecheck": "nuxt typecheck",
     "typecheck:extensions": "vue-tsc --noEmit -p tsconfig.extensions.json",
     "lint": "eslint extensions",

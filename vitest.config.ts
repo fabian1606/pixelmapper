@@ -36,6 +36,8 @@ export default defineConfig({
       'scripts/**/*.test.ts',
       'plugins/**/*.test.ts',
     ],
-    exclude: ['**/node_modules/**', 'ofl-data/**'],
+    // `*.e2e.test.ts` need external processes (bridge + simulator): opt-in via
+    // their own config, e.g. `bun run test:e2e:artnet` (vitest.e2e.config.ts).
+    exclude: ['**/node_modules/**', 'ofl-data/**', '**/*.e2e.test.ts'],
   },
 });
