@@ -22,6 +22,12 @@ const identity = computed(() => {
   const id = n?.nodeId ?? props.connector.nodeId.value;
   return id ? formatNodeId(id) : null;
 });
+
+/**
+ * NodeReport without its `[nnnn]` reply counter: the bridge sends no `node`
+ * event for counter-only changes, so a shown counter would look frozen.
+ */
+const report = computed(() => node.value?.nodeReport.replace(/\s*\[\d+\]\s*/, ' ').trim() ?? '');
 </script>
 
 <template>
@@ -36,6 +42,6 @@ const identity = computed(() => {
       <span v-if="identity">{{ identity }}</span>
       <span v-if="firmware">FW {{ firmware }}</span>
     </div>
-    <div v-if="node?.nodeReport" class="text-[10px] text-muted-foreground/80 truncate" :title="node.nodeReport">{{ node.nodeReport }}</div>
+    <div v-if="report" class="text-[10px] text-muted-foreground/80 truncate" :title="report">{{ report }}</div>
   </div>
 </template>
