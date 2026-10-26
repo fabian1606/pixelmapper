@@ -65,10 +65,14 @@ export function flashProgressFraction(job: Pick<FlashJob, 'phase' | 'pagesDone' 
   }
 }
 
-/** One-line status of a job, e.g. `Writing 12 / 94 pages`. */
+/**
+ * One-line status of a job, e.g. `Writing 12 / 94 pages` or `Verifying (8
+ * pages rewritten)` — `rewrites` counts pages (contract rev 2: all pages of
+ * the chunks whose APP_CRC differed).
+ */
 export function describeFlashPhase(job: Pick<FlashJob, 'phase' | 'pagesDone' | 'pagesTotal' | 'rewrites'>): string {
   const label = FLASH_PHASE_LABELS[job.phase];
   if (job.phase === 'writing' && job.pagesTotal > 0) return `${label} ${job.pagesDone} / ${job.pagesTotal} pages`;
-  if (job.phase === 'verifying' && job.rewrites > 0) return `${label} (${job.rewrites} ${job.rewrites === 1 ? 'chunk' : 'chunks'} rewritten)`;
+  if (job.phase === 'verifying' && job.rewrites > 0) return `${label} (${job.rewrites} ${job.rewrites === 1 ? 'page' : 'pages'} rewritten)`;
   return label;
 }

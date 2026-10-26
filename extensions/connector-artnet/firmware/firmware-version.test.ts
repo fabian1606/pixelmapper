@@ -61,7 +61,8 @@ describe('flash progress', () => {
 
   it('describes phases in English', () => {
     expect(describeFlashPhase(makeJob({ phase: 'writing', pagesDone: 12 }))).toBe('Writing 12 / 94 pages');
-    expect(describeFlashPhase(makeJob({ phase: 'verifying', rewrites: 1 }))).toBe('Verifying (1 chunk rewritten)');
+    expect(describeFlashPhase(makeJob({ phase: 'verifying', rewrites: 1 }))).toBe('Verifying (1 page rewritten)');
+    expect(describeFlashPhase(makeJob({ phase: 'verifying', rewrites: 8 }))).toBe('Verifying (8 pages rewritten)');
     expect(describeFlashPhase(makeJob({ phase: 'entering' }))).toBe('Starting bootloader');
     expect(isTerminalPhase('cancelled')).toBe(true);
     expect(isTerminalPhase('confirming')).toBe(false);
