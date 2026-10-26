@@ -63,7 +63,7 @@ export default defineExtension({
 
 | Extension | Set | Connectors |
 |---|---|---|
-| `connector-artnet` | distribution | `artnet-node` (one connector per Art-Net 4 node found by the bridge `pmnet-bridge serve`, see below) and `artnet` — “ArtNet (manual target)”: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to the old local WebSocket→UDP bridge (`tools/artnet-bridge`), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
+| `connector-artnet` | distribution | `artnet-node` (one connector per Art-Net 4 node found by the bridge `pmnet-bridge serve`, see below) and `artnet` — “ArtNet (manual target)”: direct ArtDMX over `getPlatform().udp` in the desktop app; in the browser universes go to the old local WebSocket→UDP bridge (`tools/artnet-bridge`, default `ws://localhost:7778`, see [Bridges in development](#bridges-in-development-plan-m34)), frames `[universe u16 LE][512 bytes]`, JSON config message for target IP/port |
 | `connector-esp` | catalog | `serial` (ESP32 DMX node over platform serial — Web Serial or native, firmware OTA), `websocket` (ESP32-S3 LED strip node, USB setup wizard), `espnow-bridge` (audience color broadcast) |
 
 ### Art-Net nodes (`extensions/connector-artnet`, plan M5–M7)
@@ -131,6 +131,20 @@ connector-artnet
 - **Advanced:** the node's remaining PIDs through the generic RDM parameter form (M7.1).
 
 State is always the node's answer (D5). Confirmations are inline boxes (`ConfirmBox`) inside the card, not modal dialogs. RDM-only settings (the parameter forms, `PORTn_ENABLED`, DEVICE_LABEL) follow queued messages and are re-read every 45 s while shown **and when the node changes** (`useNodeChangeSignal`: a settings signature of the node without `lastSeen`, the NodeReport counter and data-flow flags; bursts such as the BindIndex pages of a restart count once; a node that answers again counts): the node has one queue of queued messages for all controllers, so a second Pixelmapper (or another RDM controller) can consume the message of a change (contract rev 2: `rdmQueued` is best effort). `node` events are no heartbeat — the bridge sends them only on real changes. The node's description is read again when its firmware (VersInfo) changes. Identities: `nodeId` may be `ip:a.b.c.d:port` (simulators); `formatNodeId` shows it as `IP 127.0.0.1:50000`.
+
+#### Bridges in development (plan M3.4)
+
+Two local bridges, one port each:
+
+| Port | Process | Serves |
+|---|---|---|
+| 7777 | `pmnet-bridge serve` (Rust, `pixelmapper-hardware`) | `artnet-node` connectors, node suggestions, RDM, firmware: the [bridge WebSocket protocol](artnet-bridge-ws-protocol.md) (app default `ws://127.0.0.1:7777`, per-device setting `pm:artnet:bridge-url`) |
+| 7778 | `tools/artnet-bridge` (Bun) | the legacy `artnet` connector (“ArtNet (manual target)”) in the browser: `[universe u16 LE][512 bytes]` + JSON `config` (default `ws://localhost:7778`); the desktop app sends direct UDP and needs neither |
+
+- **`bun run dev`** starts both (concurrently processes `pmnet-bridge` and `artnet-legacy`). `scripts/start-pmnet-bridge.ts` looks for `pmnet-bridge` on `PATH`, else `$PIXELMAPPER_HARDWARE_DIR/target/{release,debug}/pmnet-bridge`, and runs `pmnet-bridge serve --port 7777` (stdio inherited, SIGINT/SIGTERM forwarded). Without a binary it prints how to build it (`cargo build --release -p pmnet-bridge` in `pixelmapper-hardware`) and exits 0, so the rest of `dev` keeps running.
+- **Standalone:** `bun run pmnet-bridge` (extra arguments go to `serve`, e.g. `--mock` for a simulated node with three tubes, `--offline`, `-v`, `--port`), `bun run artnet-bridge` (`PORT` overrides 7778).
+- **Port move:** both bridges used to listen on 7777, and `pmnet-bridge` does not serve legacy clients (contract §7 *Legacy clients*: a `config` message gets `badRequest`, close `4002`). Stored `artnet` configs whose `bridgeUrl` is exactly the former default (`ws://localhost:7777` or `ws://127.0.0.1:7777`) move to `ws://localhost:7778` when they are restored (`ArtNetConnector.fromConfig`, persisted with the next save); custom URLs and URLs typed in the settings are kept as they are.
+- **No release binaries yet** (plan M3.3 is open: the hardware repo has no remote/CI), so `PMNET_DOWNLOAD_URL` is `null` and the bridge hint shows the start command without a download link.
 
 #### End-to-end test against the real bridge (WP8)
 

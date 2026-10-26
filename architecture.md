@@ -70,14 +70,15 @@ pixelmapper/
 │   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
 │   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
 ├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs), config, icons — ADR 0003
-├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
-├── tools/artnet-bridge/           # Old local WebSocket → UDP ArtNet bridge (manual-target connector; replaced by `pmnet-bridge serve`, plan M3.4)
+├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs, start-pmnet-bridge
+├── tools/artnet-bridge/           # Old local WebSocket → UDP ArtNet bridge on :7778, only for the manual-target connector in the browser (Art-Net 4 nodes: `pmnet-bridge serve` on :7777)
 ├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)
 └── pio*/                          # ESP32 firmware (out of scope; must implement frames 0x21/0x22)
 ```
 
 ## Tooling
 
+- `bun run dev` also starts both Art-Net bridges: `pmnet-bridge serve` on :7777 (`scripts/start-pmnet-bridge.ts`: `PATH`, else `$PIXELMAPPER_HARDWARE_DIR/target/{release,debug}`; without a binary it prints how to build it and the rest keeps running) and the legacy `tools/artnet-bridge` on :7778. Standalone: `bun run pmnet-bridge [--mock]`, `bun run artnet-bridge` ([connectors.md](architecture/connectors.md#bridges-in-development-plan-m34)).
 - `bun run dev:tauri` / `bun run build:tauri` — desktop app (Tauri 2, `src-tauri/`; SPA build with the native `#platform`, ADR 0003). `cargo test --manifest-path src-tauri/Cargo.toml` tests the native commands.
 - `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
 - `bun run test:e2e:artnet` — opt-in end-to-end test of the Art-Net plugin against the real `pmnet-bridge` + `pmnet sim` (`vitest.e2e.config.ts`, `*.e2e.test.ts`, needs the hardware repo; see [connectors.md](architecture/connectors.md#end-to-end-test-against-the-real-bridge-wp8)).

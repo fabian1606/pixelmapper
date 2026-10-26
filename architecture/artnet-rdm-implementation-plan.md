@@ -2,6 +2,12 @@
 
 Goal: Pixelmapper talks Art-Net 4 to the **Pixelmapper Node** (CH32V307, 4 ports), discovers the RDM devices on its ports (XBAR500 tubes), shows them with their addresses, adds them to the canvas on request, keeps their patch in sync via RDM, and updates tube firmware over the network.
 
+## Status (2026-10-26)
+
+- **Done (code):** M1 and M2 by the hardware team in `pixelmapper-hardware` (crate `pixelmapper-net`, CLI `pmnet` with `poll`, `tod`, `rdm`, `node`, `dmx`, `flash` incl. tube updates, `sim`); M3.1/M3.2 (contract `protocol/bridge-ws.md` revision 2, authoritative, mirrored in [artnet-bridge-ws-protocol.md](artnet-bridge-ws-protocol.md); bridge `crates/pmnet-bridge` with `PixelmapperNetBackend`, binary `pmnet-bridge serve` instead of `pmnet serve`); M3.4 (`bun run dev` starts the bridge, legacy bridge kept on port 7778); M4–M7 in this repo (`connector-artnet` 1.3.0).
+- **Tested how:** this repo — Vitest unit and component tests (`bun run test`) against `FakeArtNetBackend` (simulated node, tubes and firmware jobs) and a fake bridge socket; `bun run test:e2e:artnet` runs the real plugin code against the real `pmnet-bridge` and `pmnet sim` (handshake, discovery, TODs/TodNak, `rdmDescribe`, matching, SET + read-back, per-port failsafe, DMX frame set, `ipProg`, a tube flash; [connectors.md](connectors.md#end-to-end-test-against-the-real-bridge-wp8)). Hardware repo (their `docs/STATUS.md`) — Rust tests and an end-to-end test (`tools/e2e.sh`) of `pixelmapper-net` against a virtual node built from the real node firmware code, with the RS-485 bus and the tubes simulated. **Nothing has run on the real node or tubes yet.**
+- **Remains:** every hardware *Done when* on the real Pixelmapper Node with XBAR500 tubes (M1.6, M2.3, M5.5, M6 v1, M7); **M3.3 release** (the hardware repo has no remote/CI yet, so no release binaries; `PMNET_DOWNLOAD_URL` stays `null`, the bridge hint shows only the start command); the open items in [Deviations from the plan](#deviations-from-the-plan) (legacy bridge still needed, queued messages with two controllers) and [Known risks](#known-risks), plus contract §10 (hosted app origins in the bridge's Origin allow-list, DMX input, authentication).
+
 This plan is the order of work. The specs are binding:
 
 - **Art-Net 4** (Artistic Licence) and **ANSI E1.20 RDM** / E1.37-1/-2 — implemented **exactly**. If something does not work with a device, it must be the device's deviation, not ours.
@@ -49,30 +55,39 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 ## M1 — `pixelmapper-net`: codecs and CLI (hardware repo)
 
-- [ ] **M1.1 Crate skeleton.** + `crates/pixelmapper-net` (edition 2024, tokio), + `crates/pmnet` (binary). `protocol/pids.toml` → generated Rust constants (build script), shared with the C firmware.
+- [x] **M1.1 Crate skeleton.** + `crates/pixelmapper-net` (edition 2024, tokio), + `crates/pmnet` (binary). `protocol/pids.toml` → generated Rust constants (build script), shared with the C firmware.
   *Done when:* `cargo test` runs; constants for 0x8000/0x8010–0x8013 come from `pids.toml`.
-- [ ] **M1.2 Art-Net codecs.** Encode/decode for all D4 opcodes, exactly per spec: header, ProtVer 14, little-endian OpCode, ArtPollReply incl. `BindIndex`, `DefaultRespUID`, Status1/2/3, GoodInput/GoodOutput, port-addresses; ArtTodData multi-packet (`UidTotal`, `BlockCount`); ArtRdm **without** 0xCC start code.
+- [x] **M1.2 Art-Net codecs.** Encode/decode for all D4 opcodes, exactly per spec: header, ProtVer 14, little-endian OpCode, ArtPollReply incl. `BindIndex`, `DefaultRespUID`, Status1/2/3, GoodInput/GoodOutput, port-addresses; ArtTodData multi-packet (`UidTotal`, `BlockCount`); ArtRdm **without** 0xCC start code.
   *Done when:* round-trip tests against `protocol/vectors/*.json` for every opcode; malformed/short packets are rejected, never panic.
-- [ ] **M1.3 RDM codecs.** E1.20 message framing + checksum; response types ACK, ACK_TIMER, ACK_OVERFLOW, NACK (reasons); DEVICE_INFO, SUPPORTED_PARAMETERS, PARAMETER_DESCRIPTION, labels, SOFTWARE_VERSION_LABEL, DMX_START_ADDRESS, DMX_PERSONALITY(+_DESCRIPTION), SLOT_INFO, SLOT_DESCRIPTION, DEFAULT_SLOT_VALUE, IDENTIFY_DEVICE, QUEUED_MESSAGE, STATUS_MESSAGES. Generic PID value codec driven by PARAMETER_DESCRIPTION (data type, PDL, min/max/default, unit, prefix).
+- [x] **M1.3 RDM codecs.** E1.20 message framing + checksum; response types ACK, ACK_TIMER, ACK_OVERFLOW, NACK (reasons); DEVICE_INFO, SUPPORTED_PARAMETERS, PARAMETER_DESCRIPTION, labels, SOFTWARE_VERSION_LABEL, DMX_START_ADDRESS, DMX_PERSONALITY(+_DESCRIPTION), SLOT_INFO, SLOT_DESCRIPTION, DEFAULT_SLOT_VALUE, IDENTIFY_DEVICE, QUEUED_MESSAGE, STATUS_MESSAGES. Generic PID value codec driven by PARAMETER_DESCRIPTION (data type, PDL, min/max/default, unit, prefix).
   *Done when:* vector tests; a parameter described by PARAMETER_DESCRIPTION can be read/written without PID-specific code.
-- [ ] **M1.4 Network engine.** UDP 6454 (`SO_REUSEADDR`/`SO_REUSEPORT`), interface enumeration, broadcast to each interface's subnet **and** 2.255.255.255 when an interface is in 2.0.0.0/8 (§2). ArtPoll every 2.5–3 s with Flags bit 1. Node table keyed by UID (fallback MAC), merged by IP + `BindIndex`, IP changes followed. Own ArtPollReply when polled.
-- [ ] **M1.5 RDM transactions.** Per-port queue (max 1–4 in flight), 500 ms timeout, 2 retries (§6.2), ACK_TIMER wait, ACK_OVERFLOW reassembly, queued-message fetch when the message count of a node response is > 0.
-- [ ] **M1.6 CLI.** `pmnet poll`, `pmnet tod <node> <port>`, `pmnet rdm get|set <node> <port> <uid> <pid> [data]`, `pmnet address …` (ArtAddress), `pmnet ipprog …`.
+- [x] **M1.4 Network engine.** UDP 6454 (`SO_REUSEADDR`/`SO_REUSEPORT`), interface enumeration, broadcast to each interface's subnet **and** 2.255.255.255 when an interface is in 2.0.0.0/8 (§2). ArtPoll every 2.5–3 s with Flags bit 1. Node table keyed by UID (fallback MAC), merged by IP + `BindIndex`, IP changes followed. Own ArtPollReply when polled.
+- [x] **M1.5 RDM transactions.** Per-port queue (max 1–4 in flight), 500 ms timeout, 2 retries (§6.2), ACK_TIMER wait, ACK_OVERFLOW reassembly, queued-message fetch when the message count of a node response is > 0.
+- [x] **M1.6 CLI.** `pmnet poll`, `pmnet tod <node> <port>`, `pmnet rdm get|set <node> <port> <uid> <pid> [data]`, `pmnet address …` (ArtAddress), `pmnet ipprog …`.
   *Done when:* the CLI lists the Pixelmapper Node and the tubes on its ports and reads their DEVICE_INFO.
+
+*Status 2026-10-26:* done by the hardware team in `pixelmapper-hardware` (crate `crates/pixelmapper-net`; `pmnet` is a binary of that crate instead of a separate `crates/pmnet`; the PID constants are generated by `protocol/gen.py` into `pids_generated.rs` instead of a build script; configuration commands under `pmnet node`, plus `pmnet dmx` and the simulator `pmnet sim`). Verified by their end-to-end test (`tools/e2e.sh`) against a virtual node built from the real node firmware code (simulated RS-485 bus and tubes), not yet on the real node: the M1.6 *Done when* on hardware is open.
 
 ## M2 — Tube firmware update in Rust (hardware repo)
 
-- [ ] **M2.1 Image reader.** Intel HEX → image; validate 16-byte trailer (magic 0x4D50, format 1, manufacturer, model, FW_VERSION_ID, length, CRC16 over app + 0x17F0..0x17FB).
-- [ ] **M2.2 Update procedure §9.1.** Check trailer → DEVICE_INFO manufacturer/model → SET 0x8000 "BOOT" → poll BOOT_INFO until the bootloader answers, re-check manufacturer/model → write pages (skip all-0xFF pages; **trailer page first with empty trailer, real trailer last**; resend on NACK BUFFER_FULL) → APP_CRC in 256-B chunks, rewrite differing chunks once → FINISH → after ~3 s verify DEVICE_INFO / SOFTWARE_VERSION_LABEL. Progress events; cancel leaves the tube in the bootloader (recoverable).
-- [ ] **M2.3 CLI.** `pmnet flash <node> <port> <uid> <file.hex> [--allow-downgrade]`.
+- [x] **M2.1 Image reader.** Intel HEX → image; validate 16-byte trailer (magic 0x4D50, format 1, manufacturer, model, FW_VERSION_ID, length, CRC16 over app + 0x17F0..0x17FB).
+- [x] **M2.2 Update procedure §9.1.** Check trailer → DEVICE_INFO manufacturer/model → SET 0x8000 "BOOT" → poll BOOT_INFO until the bootloader answers, re-check manufacturer/model → write pages (skip all-0xFF pages; **trailer page first with empty trailer, real trailer last**; resend on NACK BUFFER_FULL) → APP_CRC in 256-B chunks, rewrite differing chunks once → FINISH → after ~3 s verify DEVICE_INFO / SOFTWARE_VERSION_LABEL. Progress events; cancel leaves the tube in the bootloader (recoverable).
+- [x] **M2.3 CLI.** `pmnet flash <node> <port> <uid> <file.hex> [--allow-downgrade]`.
   *Done when:* a real tube is updated through the node; `flash_rdm.py` and `pmnet flash` produce byte-identical RDM traffic for the same image (compare logs).
+
+*Status 2026-10-26:* done by the hardware team in `pixelmapper-net` (`pmnet flash tube`; also node updates and the `BOOT_CATCH` rescue). Verified by their end-to-end test against the virtual node (tube flash with `BOOT_CATCH` rescue); the M2.3 *Done when* (a real tube, traffic compared with `flash_rdm.py`) is open.
 
 ## M3 — `pmnet serve` and the WebSocket contract (hardware repo)
 
-- [ ] **M3.1 Contract.** Finalize [artnet-bridge-ws-protocol.md](artnet-bridge-ws-protocol.md) and move it to `protocol/bridge-ws.md`; keep a pointer here.
-- [ ] **M3.2 Server.** `pmnet serve [--port 7777]`: binds `127.0.0.1` only, checks `Origin`, sends `hello` (bridge version, protocol version, interfaces). Implements every command/event of the contract. DMX frames are binary messages.
+*Status 2026-10-26:* M3.1, M3.2 and M3.4 done, **M3.3 open**. The bridge is `pmnet-bridge serve` (crate `crates/pmnet-bridge`), not `pmnet serve` (see [Deviations](#deviations-from-the-plan)).
+
+- [x] **M3.1 Contract.** Finalize [artnet-bridge-ws-protocol.md](artnet-bridge-ws-protocol.md) and move it to `protocol/bridge-ws.md`; keep a pointer here.
+  *Done:* `protocol/bridge-ws.md` revision 2 (wire version `1.0.0`) is authoritative; [artnet-bridge-ws-protocol.md](artnet-bridge-ws-protocol.md) is a marked mirror of it.
+- [x] **M3.2 Server.** `pmnet serve [--port 7777]`: binds `127.0.0.1` only, checks `Origin`, sends `hello` (bridge version, protocol version, interfaces). Implements every command/event of the contract. DMX frames are binary messages.
 - [ ] **M3.3 Release.** CI builds `pmnet` for macOS (arm64/x64), Windows, Linux; GitHub Releases.
-- [ ] **M3.4 Dev integration (this repo).** ~ `package.json` `dev` starts `pmnet serve` if found on `PATH` instead of `tools/artnet-bridge`; − `tools/artnet-bridge` once M5 works.
+  *Open:* the hardware repo has no remote and no CI yet, so there are no release binaries; `PMNET_DOWNLOAD_URL` (`bridge/shared.ts`) stays `null` and the bridge hint shows only the start command. Developers build it themselves (`cargo build --release -p pmnet-bridge`).
+- [x] **M3.4 Dev integration (this repo).** ~ `package.json` `dev` starts `pmnet serve` if found on `PATH` instead of `tools/artnet-bridge`; − `tools/artnet-bridge` once M5 works.
+  *Done (WP10):* + `scripts/start-pmnet-bridge.ts` — `pmnet-bridge` on `PATH`, else `$PIXELMAPPER_HARDWARE_DIR/target/{release,debug}/pmnet-bridge` → `pmnet-bridge serve --port 7777` (stdio inherited, SIGINT/SIGTERM forwarded); no binary → one hint how to build it, exit 0 so the rest of `dev` keeps running. `dev` runs it as the process `pmnet-bridge`; standalone `bun run pmnet-bridge` (extra arguments go to `serve`, e.g. `--mock`). *Deviation:* `tools/artnet-bridge` is **kept** (process `artnet-legacy`, `bun run artnet-bridge`) because the legacy “ArtNet (manual target)” connector needs it in the browser and `pmnet-bridge` does not serve legacy clients; it moved to port **7778** (the clash on 7777 is resolved), the connector's default `bridgeUrl` is `ws://localhost:7778`, and stored configs with exactly the former default (`ws://localhost:7777`, `ws://127.0.0.1:7777`) are migrated when restored. Details: [connectors.md](connectors.md#bridges-in-development-plan-m34).
 
 ## M4 — Core API extensions (this repo, no Art-Net code)
 
@@ -136,7 +151,8 @@ Decided while building M4–M7; the sections above say where they apply.
 - **Discovery on demand:** the bridge connection runs only while something holds `retainArtNetDiscovery()` (Connectors page suggestions, `artnet-node` connectors, the inspector's RDM section) instead of “whenever the extension is active” — no browser local-network prompt and no bridge traffic for users who never use Art-Net. The device features and the firmware manager follow the same demand.
 - **D7 default changed:** the default Pixelmapper universe of a port is its Port-Address (Port-Address 0 → U1), not Port-Address + 1 — the node's factory Port-Addresses 1–4 meet U1–U4 without writing anything.
 - **Bridge binary:** the bridge is `pmnet-bridge serve` (binary/crate `pmnet-bridge` in `pixelmapper-hardware`), not `pmnet serve`; the hint and messages name `pmnet-bridge serve` until the `pmnet` CLI embeds it.
-- **M1/M2 by the hardware team:** the codecs, network engine, RDM transactions and the tube update procedure (M1, M2) were implemented by the hardware team in `pixelmapper-net` (with `pmnet-bridge`), not in this work package; their boxes above track that repo.
+- **M1/M2 by the hardware team:** the codecs, network engine, RDM transactions and the tube update procedure (M1, M2) were implemented by the hardware team in `pixelmapper-net` (with `pmnet-bridge`), not in this work package; their boxes above track that repo. Unlike “no node simulator” above, the hardware team tests against a virtual node built from the real firmware code, and `pmnet sim` serves this repo's end-to-end test.
+- **Legacy bridge kept (M3.4):** `tools/artnet-bridge` is not removed: the legacy `artnet` connector needs it in the browser and `pmnet-bridge` does not serve its protocol. It listens on port 7778 (`pmnet-bridge` keeps 7777); stored legacy configs with the former default URL are migrated on restore. It can go once the legacy connector is dropped or `pmnet-bridge` serves legacy clients (contract §7, optional).
 - **Inline confirmations:** the node configuration asks inline (`ConfirmBox` in the card) for network apply/reset, direction changes while data flows and *Record scene*, instead of modal dialogs.
 - **Failsafe per port (contract rev 2, WP8):** first built node-wide (one control at the top of Ports); bridge contract revision 2 made it per port (`PortState.failsafe`, `artAddress` `ports[].failsafe` / `recordFailsafeScene`), so every output port row now has its failsafe mode and *Record scene…*.
 - **Output port “off” only on the Pixelmapper Node:** Art-Net has no “disable output” command (ArtInput affects inputs only); output ports are switched off through the node's RDM PID `PORTn_ENABLED`, so other nodes offer output / input only.
