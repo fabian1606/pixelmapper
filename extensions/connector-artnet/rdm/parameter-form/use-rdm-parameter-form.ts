@@ -6,8 +6,9 @@
  * Last-writer-wins (plan D5): a field always shows what the device answered
  * — after a write the device is read again, and queued messages
  * (`rdmQueued`, e.g. a change at the node's display) replace the value.
- * Values are also re-read periodically (`rereadMs`): the node keeps one
- * queue of queued messages for all controllers, so with a second
+ * Values are also re-read periodically (`rereadMs`) and whenever
+ * `rereadOn` changes (e.g. the node changed, contract rev 2): the node
+ * keeps one queue of queued messages for all controllers, so with a second
  * Pixelmapper (or another RDM controller) fetching it this form can miss a
  * change.
  */
@@ -50,6 +51,8 @@ export interface RdmParameterFormOptions {
   onWritten?: (field: RdmParameterField, value: RdmFieldValue | null) => void;
   /** Re-read every value this often while connected (ms; 0 / unset = never). */
   rereadMs?: number;
+  /** Re-read every value whenever this changes (e.g. a node-change counter). */
+  rereadOn?: MaybeRefOrGetter<unknown>;
 }
 
 /** Runs `worker` over `items` with at most `limit` running at once. */
@@ -182,6 +185,13 @@ export function useRdmParameterForm(options: RdmParameterFormOptions) {
       if (connected.value && !loading.value) void refresh();
     }, options.rereadMs);
     onScopeDispose(() => clearInterval(timer));
+  }
+
+  // A change elsewhere (e.g. the node's `node` event) may come with changed values.
+  if (options.rereadOn !== undefined) {
+    watch(() => toValue(options.rereadOn), () => {
+      if (connected.value && !loading.value) void refresh();
+    });
   }
 
   // Queued messages carry the GET response of a changed PID (node contract §6.3, §7).

@@ -4,11 +4,12 @@
  * (ArtInput only affects inputs, contract §5), so the Ports section reads
  * these PIDs, writes them, and follows queued messages. The value shown is
  * always the node's answer (D5): a write is followed by a GET. They are also
- * re-read every 45 s while shown: the node has one queue of queued messages
- * for all controllers, so another Pixelmapper may consume the message of a
+ * re-read every 45 s while shown and whenever `rereadOn` changes (the node
+ * changed, contract rev 2): the node has one queue of queued messages for
+ * all controllers, so another Pixelmapper may consume the message of a
  * change at the node's display.
  */
-import { computed, onScopeDispose, reactive, watch } from 'vue';
+import { computed, onScopeDispose, reactive, watch, type WatchSource } from 'vue';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { PortRef } from '../bridge/protocol-model';
 import type { RdmResult } from '../bridge/protocol-messages';
@@ -25,8 +26,11 @@ export function decodeEnabled(answer: Pick<RdmResult, 'data' | 'value'>): boolea
   return Number.isNaN(byte) ? null : byte !== 0;
 }
 
-/** `PORTn_ENABLED` of every port of the node (see file comment); `rereadMs` 0 = no periodic re-read. */
-export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription, rereadMs: number = RDM_SETTINGS_REREAD_MS) {
+/**
+ * `PORTn_ENABLED` of every port of the node (see file comment); `rereadMs`
+ * 0 = no periodic re-read; every change of `rereadOn` re-reads.
+ */
+export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription, rereadMs: number = RDM_SETTINGS_REREAD_MS, rereadOn?: WatchSource<unknown>) {
   /** Last reported value by port number 1–4; missing = not read. */
   const values = reactive<Record<number, boolean | null>>({});
 
@@ -90,6 +94,13 @@ export function usePortEnabled(backend: ArtNetBackend, desc: NodeDescription, re
     }
   });
   onScopeDispose(off);
+
+  // The node changed (e.g. at its display): values may have changed with it.
+  if (rereadOn) {
+    watch(rereadOn, () => {
+      if (backend.state.value.kind === 'connected' && supported.value.size) void refresh();
+    });
+  }
 
   // Periodic re-read (see file comment), only while the bridge is connected.
   if (rereadMs > 0) {

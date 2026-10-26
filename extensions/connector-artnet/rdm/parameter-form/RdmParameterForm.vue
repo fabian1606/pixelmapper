@@ -7,7 +7,8 @@
  * Values are read from the device (a few GETs at a time), written on commit
  * and read back: the form shows the device's answer, not the requested
  * value (last-writer-wins, D5); values are re-read every 45 s while shown
- * (queued messages can be consumed by another controller). Compact enough for the node's connector card
+ * and whenever `rereadOn` changes (queued messages can be consumed by
+ * another controller). Compact enough for the node's connector card
  * (Advanced, D8) and the fixture inspector's RDM section (D18).
  *
  * Usage: `<RdmParameterForm :address="{ nodeId, port, uid }" :description="describeResult" />`
@@ -37,7 +38,9 @@ const props = withDefaults(defineProps<{
   concurrency?: number;
   /** Periodic re-read of all values in ms (default 45 s; 0 = off). */
   rereadMs?: number;
-}>(), { backend: undefined, exclude: undefined, only: undefined, title: 'Parameters', concurrency: 2, rereadMs: RDM_SETTINGS_REREAD_MS });
+  /** Any value; every change re-reads all values (e.g. the node-change counter of the node configuration). */
+  rereadOn?: number;
+}>(), { backend: undefined, exclude: undefined, only: undefined, title: 'Parameters', concurrency: 2, rereadMs: RDM_SETTINGS_REREAD_MS, rereadOn: undefined });
 
 const emit = defineEmits<{
   /** A write was accepted; `value` is what the device reports afterwards. */
@@ -52,6 +55,7 @@ const form = useRdmParameterForm({
   concurrency: props.concurrency,
   onWritten: (field, value) => emit('written', { pid: field.pid, value }),
   rereadMs: props.rereadMs,
+  rereadOn: () => props.rereadOn,
 });
 const { fields, states, connected, loading } = form;
 

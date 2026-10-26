@@ -124,7 +124,10 @@ export function useNodeDescription(ctx: NodeContext): NodeDescription {
     return node?.uid && first ? { nodeId: node.nodeId, port: { ...first.port }, uid: node.uid } : null;
   });
   // Stable identity of the address: the computed above re-creates the object on every node event.
-  const addressKey = computed(() => (address.value ? `${address.value.nodeId}|${address.value.uid}|${address.value.port.bind}.${address.value.port.index}` : ''));
+  // The node's firmware is part of it: after an update the PIDs and their descriptions may differ.
+  const addressKey = computed(() => (address.value
+    ? `${address.value.nodeId}|${address.value.uid}|${address.value.port.bind}.${address.value.port.index}|${ctx.node.value?.firmware ?? ''}`
+    : ''));
   const pixelmapperNode = computed(() => {
     const d = description.value;
     return !!d && isPixelmapperNode(uidManufacturer(d.uid), d.deviceInfo.deviceModelId);
@@ -155,8 +158,8 @@ export function useNodeDescription(ctx: NodeContext): NodeDescription {
     }
   }
 
-  // Another node/UID, or the bridge (re)connected: read again. The last good
-  // description stays while the node is briefly away (e.g. after an IP change).
+  // Another node/UID/firmware, or the bridge (re)connected: read again. The last
+  // good description stays while the node is briefly away (e.g. after an IP change).
   let loadedFor = '';
   watch([addressKey, ctx.connected], ([key, connected]) => {
     if (!connected) {
