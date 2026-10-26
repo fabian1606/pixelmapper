@@ -80,6 +80,7 @@ pixelmapper/
 
 - `bun run dev:tauri` / `bun run build:tauri` — desktop app (Tauri 2, `src-tauri/`; SPA build with the native `#platform`, ADR 0003). `cargo test --manifest-path src-tauri/Cargo.toml` tests the native commands.
 - `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
+- `bun run test:e2e:artnet` — opt-in end-to-end test of the Art-Net plugin against the real `pmnet-bridge` + `pmnet sim` (`vitest.e2e.config.ts`, `*.e2e.test.ts`, needs the hardware repo; see [connectors.md](architecture/connectors.md#end-to-end-test-against-the-real-bridge-wp8)).
 - `bun run typecheck` — `nuxt typecheck` (vue-tsc).
 - `bun run typecheck:extensions` — vue-tsc over `extensions/**` and `packages/extension-api` (`tsconfig.extensions.json`; `nuxt typecheck` does not cover them). It also reports the app files the extensions' tests import, so judge it by the `extensions/` lines.
 - `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
