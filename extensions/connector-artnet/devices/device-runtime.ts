@@ -69,7 +69,7 @@ export class DeviceRuntime {
 
   /**
    * Runs the store, the patch sync and the universe guard while at least one
-   * `artnet-node` connector exists. Without one there is no device to talk
+   * `artnet` connector exists. Without one there is no device to talk
    * to (every link resolves to no port universe), so users who never use
    * Art-Net pay nothing — not even the core's patch observation.
    */

@@ -121,7 +121,7 @@ const discoveryDemand = shallowRef(0);
  * Keeps the shared backend (bridge connection, discovery) running until the
  * returned release function is called; the backend starts with the first
  * holder and stops after the last one. Holders are the Connectors page
- * (node suggestions) and every `artnet-node` connector, so users who never
+ * (node suggestions) and every `artnet` connector, so users who never
  * use Art-Net get no bridge connection — no browser local-network prompt,
  * no connection errors in the console. Releasing twice is a no-op.
  */

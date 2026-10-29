@@ -1075,7 +1075,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.4.0";
+  export const API_VERSION = "1.6.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1608,24 +1608,6 @@ declare module '@pixelmapper/extension-api' {
   // ── packages/extension-api/src/platform.ts ──────────────────────
   /** Which runtime the app is running in. */
   export type PlatformKind = 'web' | 'tauri';
-  /** Options for opening a UDP socket. */
-  export interface UdpBindOptions {
-      /** Local port; 0 or omitted = any free port. */
-      port?: number;
-      /** Allow sending to broadcast addresses (e.g. `2.255.255.255`). */
-      broadcast?: boolean;
-  }
-  /** An open UDP socket. */
-  export interface UdpSocket {
-      /** Sends one datagram (fire-and-forget; errors are logged by the platform). */
-      send(data: Uint8Array, host: string, port: number): void;
-      /** Closes the socket. */
-      close(): Promise<void>;
-  }
-  /** Direct UDP access (native only). */
-  export interface UdpApi {
-      bind(options?: UdpBindOptions): Promise<UdpSocket>;
-  }
   /** Options for opening a serial port. */
   export interface SerialOpenOptions {
       baudRate: number;
@@ -1687,12 +1669,51 @@ declare module '@pixelmapper/extension-api' {
           sysex?: boolean;
       }): Promise<MidiAccessHandle>;
   }
+  /**
+   * Callbacks of an in-process Art-Net bridge session. They carry exactly the
+   * messages of the bridge WebSocket contract (`protocol/bridge-ws.md`), so the
+   * caller keeps all protocol logic.
+   *
+   * No callback runs before `connect()` has resolved: messages the bridge sends
+   * earlier (its `hello`) are queued and delivered in order afterwards. Nothing
+   * is delivered after `onClose` or after `ArtNetBridgeSession.close()`.
+   */
+  export interface ArtNetBridgeHandlers {
+      /** One JSON text message of the bridge (event, result or error). */
+      onMessage(text: string): void;
+      /**
+       * The bridge ended the session: a contract close code (4001/4002/4003/1001)
+       * or 1006 with an empty reason when it ended without one. Not called after
+       * the caller's own `close()`.
+       */
+      onClose(code: number, reason: string): void;
+  }
+  /** An open session with the in-process Art-Net bridge. */
+  export interface ArtNetBridgeSession {
+      /** Sends one JSON text message; rejects when the session is gone. */
+      sendText(text: string): Promise<void>;
+      /** Sends one binary message (DMX frame set); fire-and-forget, failures are logged. */
+      sendBinary(data: Uint8Array): void;
+      /** Bytes of binary messages handed over but not yet accepted by the bridge (backpressure). */
+      readonly bufferedAmount: number;
+      /** Ends the session. Idempotent. */
+      close(): void;
+  }
+  /**
+   * The Art-Net bridge running inside the app (desktop only): the same bridge
+   * core as `pmnet-bridge serve`, reached without a WebSocket.
+   */
+  export interface ArtNetBridgeApi {
+      /** Opens a session; rejects (Error) when the bridge cannot start. */
+      connect(handlers: ArtNetBridgeHandlers): Promise<ArtNetBridgeSession>;
+  }
   /** Platform-dependent capabilities. `null` = not available here. */
   export interface Platform {
       readonly kind: PlatformKind;
-      readonly udp: UdpApi | null;
       readonly serial: SerialApi | null;
       readonly midi: MidiApi | null;
+      /** In-process Art-Net bridge (desktop, API 1.5); `null` = use `pmnet-bridge serve` over WebSocket. */
+      readonly artnetBridge: ArtNetBridgeApi | null;
   }
   /** Returns the platform of the running host (connectors, drivers, components). */
   export function getPlatform(): Platform;

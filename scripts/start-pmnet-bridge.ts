@@ -65,7 +65,7 @@ export function missingBridgeHint(hardwareDir?: string): string {
   const where = hardwareDir
     ? `not on PATH, not built in ${hardwareDir}/target/{release,debug}`
     : 'not on PATH, PIXELMAPPER_HARDWARE_DIR not set';
-  return `pmnet-bridge not found (${where}): Art-Net 4 nodes (artnet-node) stay unreachable, everything else keeps running.\n`
+  return `pmnet-bridge not found (${where}): Art-Net devices (artnet connectors) stay unreachable, everything else keeps running.\n`
     + 'Build it in pixelmapper-hardware with `cargo build --release -p pmnet-bridge`, then put target/release on PATH '
     + 'or set PIXELMAPPER_HARDWARE_DIR=<pixelmapper-hardware checkout>.';
 }

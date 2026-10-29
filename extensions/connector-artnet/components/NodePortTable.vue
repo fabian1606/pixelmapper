@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Port mapping of an `artnet-node` connector (plan D7, M5.5): per output
+ * Port mapping of an `artnet` connector (plan D7, M5.5): per output
  * port the Pixelmapper universe (default = the Port-Address) and the
  * node's Port-Address, read-only. When they differ the row says so; the
  * Port-Address itself is written only in the node configuration's Ports

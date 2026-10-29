@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * One-line facts about the node of an `artnet-node` connector: long name,
+ * One-line facts about the node of an `artnet` connector: long name,
  * IP, identity (UID or MAC), firmware, indicator and node report.
  */
 import { computed } from 'vue';
@@ -33,7 +33,7 @@ const report = computed(() => node.value?.nodeReport.replace(/\s*\[\d+\]\s*/, ' 
 <template>
   <div class="flex flex-col gap-0.5 text-xs">
     <div class="flex items-center gap-2 min-w-0">
-      <span class="font-medium truncate">{{ node?.longName || node?.shortName || connector.label.value || 'Art-Net node' }}</span>
+      <span class="font-medium truncate">{{ node?.longName || node?.shortName || connector.label.value || 'Art-Net device' }}</span>
       <span v-if="node?.status.indicator === 'locate'" class="text-[10px] px-1 rounded bg-primary/15 text-primary">Locating</span>
       <span v-if="node?.status.indicator === 'mute'" class="text-[10px] px-1 rounded bg-muted text-muted-foreground">Display off</span>
     </div>

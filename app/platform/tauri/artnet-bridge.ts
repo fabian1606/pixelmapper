@@ -5,7 +5,7 @@
  * same bridge core as `pmnet-bridge serve`. Only the transport differs from
  * the WebSocket: bridge text messages and the close arrive on a `Channel`,
  * text goes out through `artnet_send_text`, DMX frame sets as raw IPC bodies
- * through `artnet_send_binary` (session id in a header, like `udp_send`).
+ * through `artnet_send_binary` (session id in a header).
  *
  * Ordering: the bridge greets (`hello`) as soon as the session exists, often
  * before `artnet_connect` resolves. Channel events are queued until the

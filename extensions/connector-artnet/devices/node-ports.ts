@@ -1,6 +1,6 @@
 /**
  * Node ports as the device features see them: the Pixelmapper universe a
- * node port outputs (from its `artnet-node` connector, D7) and display
+ * node port outputs (from its `artnet` connector, D7) and display
  * names for messages. Reads the live node connectors, so it is reactive
  * inside `computed`s.
  */

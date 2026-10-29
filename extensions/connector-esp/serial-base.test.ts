@@ -18,7 +18,7 @@ class TestSerialConnector extends SerialPortConnector {
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(serial: SerialApi | null) {
-  const platform: Platform = { kind: 'web', udp: null, serial, midi: null, artnetBridge: null };
+  const platform: Platform = { kind: 'web', serial, midi: null, artnetBridge: null };
   globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { platform } as unknown as SharedGlobals['api'] };
 }
 

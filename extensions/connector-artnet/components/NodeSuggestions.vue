@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * Art-Net node suggestions on the Connectors page, Outputs tab (plan M5.2;
- * slot `connections/outputs:before`): “Art-Net node found: <name> · <IP> —
- * Connect / Dismiss” for nodes without a connector, manual add by IP, and
- * the bridge hint when the bridge is missing, outdated or unsupported.
+ * Art-Net device suggestions on the Connectors page, Outputs tab (plan M5.2;
+ * slot `connections/outputs:before`): “Art-Net device found: <name> · <IP> —
+ * Connect / Dismiss” for devices without a connector, manual add by IP
+ * (also for devices that never answer ArtPoll: manual target), and the
+ * bridge hint when the bridge is missing, outdated or unsupported.
  * Mounting it starts discovery (`retainArtNetDiscovery`), unmounting
  * releases it.
  */
@@ -41,7 +42,7 @@ function addConnector(config: Record<string, unknown>): boolean {
   }
   catch (err) {
     console.error('[artnet] cannot add the node connector:', err);
-    error.value = 'Use “+ Art-Net node” above and choose the node there.';
+    error.value = 'Use “+ Art-Net” above and choose the device there.';
     return false;
   }
   error.value = null;
@@ -53,14 +54,14 @@ function connect(node: NodeState) {
 }
 
 function addIp(ip: string) {
-  if (addConnector({ ip, manual: true, label: ip })) addOpen.value = false;
+  if (addConnector(ArtNetNodeConnector.configForIp(ip))) addOpen.value = false;
 }
 </script>
 
 <template>
   <div class="flex flex-col gap-2 px-3 py-2.5 rounded border border-border bg-background text-sm">
     <div class="flex items-center gap-2">
-      <span class="text-xs font-medium">Art-Net nodes</span>
+      <span class="text-xs font-medium">Art-Net devices</span>
       <span v-if="connected" class="text-xs text-muted-foreground">
         {{ directory.nodes.size }} on the network
       </span>
@@ -87,7 +88,7 @@ function addIp(ip: string) {
       class="flex items-center gap-2 text-xs"
     >
       <span class="flex-1 min-w-0 truncate">
-        Art-Net node found: <span class="font-medium">{{ node.shortName || node.longName || formatNodeId(node.nodeId) }}</span>
+        Art-Net device found: <span class="font-medium">{{ node.shortName || node.longName || formatNodeId(node.nodeId) }}</span>
         · <span class="font-mono">{{ node.ip }}</span>
       </span>
       <button

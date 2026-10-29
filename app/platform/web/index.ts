@@ -1,8 +1,8 @@
 /**
  * Web platform (ADR 0003): what the browser can do on its own.
  *
- * No UDP (Art-Net falls back to the local bridge); serial and MIDI where the
- * browser supports them. The Tauri platform starts from this one and
+ * Serial and MIDI where the browser supports them; Art-Net goes through
+ * `pmnet-bridge serve` over WebSocket. The Tauri platform starts from this one and
  * replaces capabilities with native implementations (ADR 0003 D4).
  */
 import type { Platform } from '@pixelmapper/extension-api';
@@ -14,7 +14,6 @@ import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 export function createWebPlatform(): Platform {
   return {
     kind: 'web',
-    udp: null,
     serial: createWebSerial(),
     midi: createWebMidi(),
     // Browsers reach the Art-Net bridge over WebSocket (`pmnet-bridge serve`).

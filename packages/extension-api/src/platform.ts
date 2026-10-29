@@ -2,8 +2,8 @@
  * Platform contract (ADR 0003).
  *
  * Transport-shaped access to I/O that differs between the web app and the
- * native (Tauri) app: UDP datagrams, serial ports, MIDI ports and the
- * in-process Art-Net bridge. Protocol logic stays in the callers;
+ * native (Tauri) app: serial ports, MIDI ports and the in-process Art-Net
+ * bridge. Protocol logic stays in the callers;
  * implementations only move bytes.
  *
  * A capability the current platform cannot provide is `null`. Callers must
@@ -14,29 +14,6 @@ import type { MidiPortInfo } from './connectors';
 
 /** Which runtime the app is running in. */
 export type PlatformKind = 'web' | 'tauri';
-
-// ── UDP ─────────────────────────────────────────────
-
-/** Options for opening a UDP socket. */
-export interface UdpBindOptions {
-  /** Local port; 0 or omitted = any free port. */
-  port?: number;
-  /** Allow sending to broadcast addresses (e.g. `2.255.255.255`). */
-  broadcast?: boolean;
-}
-
-/** An open UDP socket. */
-export interface UdpSocket {
-  /** Sends one datagram (fire-and-forget; errors are logged by the platform). */
-  send(data: Uint8Array, host: string, port: number): void;
-  /** Closes the socket. */
-  close(): Promise<void>;
-}
-
-/** Direct UDP access (native only). */
-export interface UdpApi {
-  bind(options?: UdpBindOptions): Promise<UdpSocket>;
-}
 
 // ── Serial ──────────────────────────────────────────
 
@@ -159,7 +136,6 @@ export interface ArtNetBridgeApi {
 /** Platform-dependent capabilities. `null` = not available here. */
 export interface Platform {
   readonly kind: PlatformKind;
-  readonly udp: UdpApi | null;
   readonly serial: SerialApi | null;
   readonly midi: MidiApi | null;
   /** In-process Art-Net bridge (desktop, API 1.5); `null` = use `pmnet-bridge serve` over WebSocket. */

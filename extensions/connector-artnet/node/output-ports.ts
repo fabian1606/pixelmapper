@@ -1,7 +1,7 @@
 /**
  * Output ports of a node as connector outputs (plan D7, M5.3/M5.5).
  *
- * Output `i` of an `artnet-node` connector is the node's `i`-th output port
+ * Output `i` of an `artnet` connector is the node's `i`-th output port
  * (ordered by BindIndex, then port). The stored port list keeps the order
  * stable while the node is offline; the mapping per port defaults to the
  * port's Port-Address itself (D7, changed in WP3): the node's factory
@@ -48,6 +48,28 @@ export function reconcileOutputs(prevPorts: readonly PortRef[], prevMapping: rea
     ports: nodePorts.map(p => ({ ...p.port })),
     mapping: nodePorts.map(p => prev.get(portKey(p.port)) ?? defaultUniverse(p)),
   };
+}
+
+/**
+ * Mapping of a manual target's outputs (universe + Port-Address each) onto
+ * the node's output ports once the device answers ArtPoll: a port whose
+ * Port-Address a manual output used gets that output's universe, the other
+ * ports the default (D7).
+ */
+export function adoptManualOutputs(portAddresses: readonly number[], mapping: readonly number[], nodePorts: readonly PortState[]): { ports: PortRef[]; mapping: number[] } {
+  const byAddress = new Map<number, number>();
+  portAddresses.forEach((pa, i) => {
+    if (!byAddress.has(pa) && (mapping[i] ?? 0) > 0) byAddress.set(pa, mapping[i]!);
+  });
+  return {
+    ports: nodePorts.map(p => ({ ...p.port })),
+    mapping: nodePorts.map(p => byAddress.get(portAddressOf(p)) ?? defaultUniverse(p)),
+  };
+}
+
+/** Default Port-Address of a manual output for `universe` (the same number, D7; 0 when out of range). */
+export function defaultManualPortAddress(universe: number): number {
+  return portAddressForUniverse(universe) ?? 0;
 }
 
 /** True when two reconcile results describe the same outputs. */

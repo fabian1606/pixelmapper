@@ -10,22 +10,17 @@
 mod artnet;
 mod files;
 mod menu;
-mod udp;
 
 /// Builds and runs the Tauri app.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(udp::UdpSockets::default())
         // Built-in Art-Net bridge; started on the first `artnet_connect`.
         .manage(artnet::ArtNetBridge::default())
         // Native menu bar; clicks are forwarded to the frontend as `app-menu` events.
         .setup(|app| Ok(menu::setup(app.handle())?))
         .invoke_handler(tauri::generate_handler![
-            udp::udp_bind,
-            udp::udp_send,
-            udp::udp_close,
             artnet::artnet_connect,
             artnet::artnet_send_text,
             artnet::artnet_send_binary,

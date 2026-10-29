@@ -145,7 +145,7 @@ describe('Universe guard (M6.6)', () => {
 });
 
 describe('Runtime activation', () => {
-  it('runs the device features only while an artnet-node connector exists', async () => {
+  it('runs the device features only while an artnet connector exists', async () => {
     const { a } = await linkedTubes();
     await h.connector.disconnect(); // connector removed
     await h.settle();

@@ -77,16 +77,16 @@ describe('NodeSuggestions', () => {
     backend.emit({ type: 'node', node: makeNode() });
     const wrapper = mount(NodeSuggestions);
     await nextTick();
-    expect(wrapper.text()).toContain('Art-Net node found: PM Node · 2.27.44.61');
+    expect(wrapper.text()).toContain('Art-Net device found: PM Node · 2.27.44.61');
 
     await wrapper.findAll('button').find(b => b.text() === 'Connect')!.trigger('click');
     await nextTick();
     const store = useConnectionsStore();
     expect(store.connectors).toHaveLength(1);
     const c = store.connectors[0] as unknown as ArtNetNodeConnector;
-    expect([c.meta.type, c.nodeId.value, c.outputCount]).toEqual(['artnet-node', '7FF0:8A1B2C3D', 4]);
+    expect([c.meta.type, c.nodeId.value, c.outputCount]).toEqual(['artnet', '7FF0:8A1B2C3D', 4]);
     expect(c.status.value).toBe('connected');
-    expect(wrapper.text()).not.toContain('Art-Net node found');
+    expect(wrapper.text()).not.toContain('Art-Net device found');
     wrapper.unmount();
   });
 
@@ -96,9 +96,9 @@ describe('NodeSuggestions', () => {
     const wrapper = mount(NodeSuggestions);
     await nextTick();
     await wrapper.findAll('button').find(b => b.text() === 'Dismiss')!.trigger('click');
-    expect(wrapper.text()).not.toContain('Art-Net node found');
+    expect(wrapper.text()).not.toContain('Art-Net device found');
     await wrapper.findAll('button').find(b => b.text().startsWith('Show dismissed'))!.trigger('click');
-    expect(wrapper.text()).toContain('Art-Net node found');
+    expect(wrapper.text()).toContain('Art-Net device found');
     wrapper.unmount();
   });
 
@@ -135,7 +135,7 @@ describe('NodeSuggestions', () => {
 });
 
 describe('discovery start policy', () => {
-  it('runs only while the Connectors page is shown or an artnet-node connector exists', async () => {
+  it('runs only while the Connectors page is shown or an artnet connector exists', async () => {
     expect(backend.state.value.kind).toBe('idle'); // the extension alone starts nothing
 
     const page = mount(NodeSuggestions);

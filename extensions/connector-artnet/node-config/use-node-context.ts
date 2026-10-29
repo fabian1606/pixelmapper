@@ -104,7 +104,7 @@ export interface NodeDescription {
 }
 
 /** Injection key of the panel-wide description. */
-export const NODE_DESCRIPTION_KEY: InjectionKey<NodeDescription> = Symbol('artnet-node-description');
+export const NODE_DESCRIPTION_KEY: InjectionKey<NodeDescription> = Symbol('artnet-device-description');
 
 /** True when `value` has the fields the sections rely on (guards against malformed bridge answers). */
 export function isDeviceDescription(value: unknown): value is RdmDeviceDescription {

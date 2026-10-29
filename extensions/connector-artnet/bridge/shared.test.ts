@@ -13,7 +13,7 @@ import { backendProblem } from '../node/node-status';
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(artnetBridge: ArtNetBridgeApi | null) {
-  const platform: Platform = { kind: artnetBridge ? 'tauri' : 'web', udp: null, serial: null, midi: null, artnetBridge };
+  const platform: Platform = { kind: artnetBridge ? 'tauri' : 'web', serial: null, midi: null, artnetBridge };
   globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { platform } as unknown as SharedGlobals['api'] };
 }
 

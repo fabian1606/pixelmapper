@@ -1,5 +1,5 @@
 /**
- * Connector status of an `artnet-node` connector from the backend state and
+ * Connector status of an `artnet` connector from the backend state and
  * whether the node currently answers (M5.3). Also the user-facing texts for
  * backend states, shared by the connector and the bridge hint.
  */
@@ -52,14 +52,16 @@ function builtInBridgeProblem(state: BackendState): string | null {
 }
 
 /**
- * Connector status: `connected` only when the bridge is connected and the
- * node answers (with a message when the bridge rejected the DMX route
- * table); errors the user must fix are `error` (card offers Retry).
+ * Connector status: `connected` when the bridge is connected and the node
+ * answers, or the device is a manual target (added by IP, never answered
+ * ArtPoll: DMX goes unicast to its IP) — with a message when the bridge
+ * rejected the DMX route table; errors the user must fix are `error` (card
+ * offers Retry).
  */
 export function nodeConnectorStatus(
   state: BackendState,
   node: NodeState | null,
-  bound: { nodeId: string | null; ip: string | null },
+  bound: { nodeId: string | null; ip: string | null; manual?: boolean },
   dmxError: string | null = null,
 ): NodeConnectorStatus {
   if (state.kind === 'unsupported' || state.kind === 'incompatible') return { status: 'error', message: backendProblem(state) };
@@ -67,7 +69,9 @@ export function nodeConnectorStatus(
   if (state.kind !== 'connected') return { status: 'connecting', message: null };
   // The bridge kept its old route table: routes added since get no DMX. The
   // status stays connected so the accepted routes keep their output.
-  if (node) return { status: 'connected', message: dmxError ? `The bridge rejected the DMX routes: ${dmxError}` : null };
+  const routesRejected = dmxError ? `The bridge rejected the DMX routes: ${dmxError}` : null;
+  if (node) return { status: 'connected', message: routesRejected };
+  if (bound.manual && bound.ip && !bound.nodeId) return { status: 'connected', message: routesRejected };
   if (bound.nodeId) return { status: 'connecting', message: 'Node offline — waiting for its ArtPollReply' };
   if (bound.ip) return { status: 'connecting', message: `Waiting for a reply from ${bound.ip}` };
   return { status: 'connecting', message: 'Choose a node below' };

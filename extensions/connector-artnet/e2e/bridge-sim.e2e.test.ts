@@ -13,9 +13,12 @@
  * cascade and the firmware update manager — through the contract flows:
  * handshake, discovery, TODs (also TodNak), describe, matching, RDM SET +
  * read-back, per-port failsafe, the node-change signal of the node
- * configuration, DMX, ipProg and a tube firmware flash. The steps run in
+ * configuration, DMX (node routes and the manual target's `ip` routes),
+ * ipProg and a tube firmware flash. The steps run in
  * order and share the processes and the connection.
  */
+import { createSocket, type Socket } from 'node:dgram';
+import { networkInterfaces } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { BridgeCommandError } from '../bridge/backend';
@@ -23,6 +26,7 @@ import { NodeDirectory } from '../bridge/node-directory';
 import { checkProtocol, type FlashProgressEvent, type LogEvent } from '../bridge/protocol-messages';
 import { formatNodeId, parseNodeId, portAddressOf, type NodeState, type PortRef, type RdmDeviceDescription, type Tod } from '../bridge/protocol-model';
 import { RDM_PID } from '../bridge/rdm-constants';
+import { ArtNetNodeConnector } from '../node/node-connector';
 import { WsBridgeBackend, type WebSocketFactory } from '../bridge/ws-bridge-backend';
 import { DeviceStore } from '../devices/device-store';
 import { createDeviceMatcher, type DeviceMatch } from '../devices/fixture-matching';
@@ -75,6 +79,19 @@ async function waitFor<T>(what: string, probe: () => T | null | undefined | fals
     if (Date.now() - started > timeoutMs) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
     await new Promise(resolve => setTimeout(resolve, 50));
   }
+}
+
+/**
+ * Binds a UDP socket on `address:port`; null when that fails. `reuseAddr`:
+ * a running Art-Net program on `*:6454` (e.g. the desktop app) does not
+ * block it, and unicast to `address` reaches the more specific socket.
+ */
+function bindUdp(port: number, address: string): Promise<Socket | null> {
+  return new Promise((resolve) => {
+    const socket = createSocket({ type: 'udp4', reuseAddr: true });
+    socket.once('error', () => { socket.close(); resolve(null); });
+    socket.bind(port, address, () => resolve(socket));
+  });
 }
 
 /** Runs `fn` and returns its BridgeCommandError (fails when it resolves). */
@@ -385,6 +402,44 @@ describe.skipIf(!HARDWARE_DIR)('Art-Net plugin ↔ pmnet-bridge ↔ pmnet sim', 
     expect(flowing).toBe(true);
     // Port 2 got nothing.
     expect(simNode()!.ports[1]!.output.data).toBe(false);
+  });
+
+  it('sends a manual target unicast through an ip route, by its Port-Address', async () => {
+    // A device that never answers ArtPoll: a UDP socket on the Art-Net port of
+    // this machine's LAN address (127.0.0.1 is the simulated node, which answers).
+    const ip = Object.values(networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address ?? '10.255.255.1';
+    const device = ip === '10.255.255.1' ? null : await bindUdp(6454, ip);
+    const received: { portAddress: number; length: number; first: number }[] = [];
+    device?.on('message', (msg) => {
+      // ArtDmx: "Art-Net\0", OpCode 0x5000 (LE), ProtVer, Sequence, Physical, SubUni, Net, Length (BE), data.
+      if (msg.length < 18 || msg.toString('latin1', 0, 8) !== 'Art-Net\0' || msg.readUInt16LE(8) !== 0x5000) return;
+      received.push({ portAddress: (msg[15]! << 8) | msg[14]!, length: msg.readUInt16BE(16), first: msg[18]! });
+    });
+    const c = ArtNetNodeConnector.fromConfig('e2e-manual', { ...ArtNetNodeConnector.configForIp(ip, 'Legacy device'), ...ArtNetNodeConnector.manualOutputsPatch([{ universe: 9, portAddress: 0x123 }]) }, { backend, directory });
+    await c.connect();
+    try {
+      expect([c.isManualTarget.value, c.status.value]).toEqual([true, 'connected']);
+      const data = new Uint8Array(512).fill(0x42);
+      c.sendFrame(data, 9);
+      // The bridge accepted the route table with the ip route.
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(backend.dmxError.value).toBeNull();
+      expect(logs.filter(l => l.level === 'warn' && /route|DMX not sent/i.test(l.text))).toEqual([]);
+      if (device) {
+        const packet = await waitFor(`ArtDmx at ${ip}:6454`, () => received[0], 5000);
+        expect(packet).toEqual({ portAddress: 0x123, length: 512, first: 0x42 });
+      }
+      findings.manualTarget = { ip, udp6454: device ? 'bound' : 'unavailable, receive check skipped', packets: received.length };
+      // Broadcast addresses never enter the route table (Art-Net 4: ArtDmx unicast only).
+      backend.sendDmx({ ip: '255.255.255.255', portAddress: 1 }, data);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(logs.some(l => /broadcast address/.test(l.text))).toBe(true);
+      expect(backend.dmxError.value).toBeNull();
+    }
+    finally {
+      await c.disconnect();
+      device?.close();
+    }
   });
 
   it('reads the network settings with ipProg and refuses contradicting DHCP arguments', async () => {
