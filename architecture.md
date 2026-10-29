@@ -60,6 +60,7 @@ pixelmapper/
 ├── packages/
 │   ├── extension-api/             # @pixelmapper/extension-api — the only core surface extensions may import
 │   ├── extension-build/           # Vite lib preset → ES bundle + extension.json
+│   ├── mcp-bridge/                # pixelmapper-mcp: stdio MCP server ⇄ app over ws://127.0.0.1:7778 (ADR 0002 D16)
 │   ├── plugin-sdk/                # @pixelmapper/plugin-sdk (AssemblyScript)
 │   └── plugin-toolchain/          # compile → instrument → validate → hash (CLI + in-browser)
 ├── public/extensions/             # Built catalog bundles + catalog.json
@@ -86,6 +87,7 @@ pixelmapper/
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
 - `bun run check:zero-extensions` — builds without any extension (`PM_NO_EXTENSIONS=1`) and runs the zero-extension smoke test.
 - `bun run build:plugins` / `bun run build:extensions` — compile built-in content plugins / build catalog extension bundles into `public/extensions/`.
+- `bun run mcp` — `pixelmapper-mcp` stdio MCP server for Claude Code / Claude Desktop (`bun run mcp token` prints the pairing token); see [packages/mcp-bridge/README.md](packages/mcp-bridge/README.md).
 - `bun run docs:ai` — regenerate `docs/ai/` (extension-API and plugin-SDK declarations, `index.json`). The dev page `/dev/slots` lists every slot rendered in the session.
 
 ## Documentation Map
@@ -94,6 +96,7 @@ pixelmapper/
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - **Decisions:** [ADR 0002 — Operations, Observation & Agent Layer](architecture/adr/0002-agent-and-operations-layer.md)
 - **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the ADR 0003 Tauri steps)
+- **Contract:** [MCP bridge WebSocket protocol](architecture/mcp-bridge-protocol.md) — `pixelmapper-mcp` ⇄ app (hello/semver, token + Origin, dynamic tool list, `call`/`result`, relay mode)
 - **Decisions:** [ADR 0003 — Platform Layer: Web First, Native Where It Pays Off](architecture/adr/0003-native-platform-layer.md) (Tauri 2, `#platform`, `getPlatform()`, migration steps)
 - **Decisions:** [ADR 0004 — Offline-First Projects](architecture/adr/0004-offline-first.md) (local-first store, outbox, rebase + 3-way merge, optional account on desktop); package notes in [architecture/offline/](architecture/offline/) (`wp-p0`, `wp-merge`, `wp-store`, `wp-server`, `wp-tauri`, `wp-records`, `wp-sync`, `wp-account`)
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
@@ -227,6 +230,16 @@ An Express + LangGraph backend uses LLMs to parse fixture manuals and extract ph
 - **Typed output:** simple nodes use `withStructuredOutput`; nested arrays (channels, modes) use tool calling bound to Zod schemas (e.g. `OflChannelSchema`), which splits the context and keeps outputs strictly typed.
 - **SSE streaming:** status messages stream to `CustomFixtureEditorDialog.vue` before the final assembled `OflFixture` is returned.
 - The AI agent loop for generating plugins is out of scope of ADR 0001; it builds on the self-describing surfaces in `docs/ai/`.
+
+## MCP Bridge (pixelmapper-mcp)
+
+External agents (Claude Code, Claude Desktop) drive the running app through MCP (ADR 0002 D16; plan M3).
+- **CLI** `packages/mcp-bridge` (Bun): a thin stdio MCP server. It serves the tool list the **app announces** (dynamic `tools/list` plus `notifications/tools/list_changed`) and forwards `tools/call` to the app. Tools execute in the app.
+- **Transport:** the app (tab or Tauri webview) connects as a WebSocket client to `ws://127.0.0.1:7778`. Auth uses an Origin allow-list plus a pairing token from `~/.pixelmapper/mcp-token`. Only the latest app connection is active. Contract: [mcp-bridge-protocol.md](architecture/mcp-bridge-protocol.md).
+- **Several MCP clients:** the first CLI process is the **hub**; later ones connect to it as **relays**, and a relay takes over the port when the hub exits. Every call carries the MCP client name, so the app attributes it as actor `agent:mcp:<client>`.
+- **Offline behaviour:** with no app connected, `tools/list` returns the last-known list (`~/.pixelmapper/mcp-tools.json`) or built-in placeholders, plus the local `pixelmapper_status` tool. Calls fail with a pairing hint.
+- **Prompts:** `docs/ai/skills/**/prompts/*.md` (YAML frontmatter `name`, `description`, `arguments`; `{{arg}}` placeholders) are served as MCP prompts.
+- The hub uses `node:http` + `ws` rather than `Bun.serve`, so the same code runs under Bun and under Vitest (Node).
 
 ## Direct DMX Control (Universe Inspector)
 
