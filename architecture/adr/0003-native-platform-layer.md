@@ -38,7 +38,7 @@ Requirements from the product side:
 │        │ extensions: getPlatform() via HostApi                        │
 ├────────┴─────────────────────────────────────────────────────────────┤
 │ Platform contract  (@pixelmapper/extension-api/platform)             │
-│   kind · udp · serial · midi   (later: touch · engine)               │
+│   kind · udp · serial · midi · artnetBridge  (later: touch · engine) │
 ├──────────────────────────────┬───────────────────────────────────────┤
 │ app/platform/web             │ app/platform/tauri                    │
 │ Web Serial, Web MIDI,        │ = web platform + native overrides     │
@@ -66,8 +66,11 @@ interface Platform {
   readonly udp: UdpApi | null;      // direct UDP datagrams (Art-Net, sACN)
   readonly serial: SerialApi | null; // serial ports (ESP devices)
   readonly midi: MidiApi | null;     // MIDI ports (hardware controllers)
+  readonly artnetBridge: ArtNetBridgeApi | null; // built-in Art-Net/RDM bridge (desktop), API 1.5
 }
 ```
+
+`artnetBridge` is the one capability that is not a raw byte pipe: it carries the messages of the Art-Net bridge contract (`artnet-bridge-ws-protocol.md`) to the bridge core embedded in the desktop app (`connect(handlers) → session { sendText, sendBinary, bufferedAmount, close }`, handlers `onMessage(text)` / `onClose(code, reason)`). It is still transport-shaped — the same JSON texts and binary frame sets as on the WebSocket, interpreted by the same TypeScript client — and the protocol logic itself stays in one Rust crate (D5). Web: `null` (the extension uses `pmnet-bridge serve` over WebSocket).
 
 - A capability that the current platform cannot provide MUST be `null`. Callers MUST check for `null` and either fall back (Art-Net → bridge) or show a clear message ("Needs Chrome/Edge or the desktop app").
 - The contract is **transport-shaped** (bytes in, bytes out, port lists), never feature-shaped. Protocol logic (ArtDMX encoding, ESP line protocol, APC note mapping) stays in TypeScript, shared by both platforms.
@@ -81,7 +84,7 @@ interface Platform {
 `app/platform/tauri` starts from `createWebPlatform()` and replaces individual capabilities with native ones as they are implemented. Anything not yet ported keeps working exactly as on the web (where WKWebView supports it). This keeps every migration step small and shippable.
 
 ### D5 — Native I/O lives in shared Rust crates
-Native implementations that contain protocol or device logic live in workspace crates (e.g. `rs-engine/io-touch`); thin transports such as UDP sockets MAY live directly in `src-tauri/`. The Tauri backend links them directly; the standalone bridges for the web (Art-Net bridge, touch bridge) become thin binaries over the same crates. There MUST be one implementation per protocol, not one per target.
+Native implementations that contain protocol or device logic live in workspace crates (e.g. `rs-engine/io-touch`); thin transports such as UDP sockets MAY live directly in `src-tauri/`. The Tauri backend links them directly; the standalone bridges for the web (Art-Net bridge, touch bridge) become thin binaries over the same crates. There MUST be one implementation per protocol, not one per target. Crates from another repository are linked as git dependencies pinned to a commit — the Art-Net bridge core is `pmnet-bridge` from `pixelmapper-hardware` (`default-features = false`: the core without its WebSocket server; `pmnet-bridge serve` for the browser is the same core plus that server).
 
 ### D6 — Raw touch (planned)
 `touch: TouchSourceApi | null` streams normalized contacts (`id, x, y, w, h`). Web: `null` (pointer events are used directly; the WebSocket touch bridge remains an opt-in dev tool). Tauri: the `hidapi` reader from `gesture-lab/bridge`, delivered over a Tauri `Channel`. Consumers already use the `TouchSource` interface from the gesture lab.
@@ -111,6 +114,7 @@ Open points for step 2:
 
 ## 5. Status
 
+- **Built-in Art-Net bridge** (2026-10-29, API 1.5.0, `connector-artnet` 1.4.0): `src-tauri/src/artnet.rs` embeds the transport-independent bridge core `pmnet_bridge::bridge` (git dependency on `pixelmapper-hardware`, pinned rev) with the real `PixelmapperNetBackend`, started on the first `artnet_connect` with `serve`'s defaults (UDP 6454, all interfaces; unbindable → `udp.bound = false`). Commands `artnet_connect` (`Channel` of `{kind: 'message', text}` / final `{kind: 'close', code, reason}`, returns a session id), `artnet_send_text`, `artnet_send_binary` (raw IPC body, header `x-session`), `artnet_disconnect`. Frontend: `app/platform/tauri/artnet-bridge.ts` → `Platform.artnetBridge` (web: `null`); it queues channel messages until `connect()` resolved and sends one `artnet_send_*` at a time, because Tauri runs async commands concurrently and the contract needs in-order processing. `connector-artnet` picks its in-process transport when the capability exists. No `pmnet-bridge` process or WebSocket in the desktop app. Details: [connectors.md](../connectors.md#art-net-nodes-extensionsconnector-artnet-plan-m5m7).
 - **Step 2 implemented** (2026-10-16): Tauri 2 shell in `src-tauri/` (`udp_bind`/`udp_send`/`udp_close` in `src/udp.rs`, raw IPC bodies, target in headers), `app/platform/tauri/udp.ts`, `ssr: false` when `TAURI_ENV_PLATFORM` is set, scripts `dev:tauri`/`build:tauri`. The Art-Net connector sends directly from the desktop app. The web bundle contains no Tauri code (checked). Icons in `src-tauri/icons` are placeholders. macOS window uses an overlay title bar (`titleBarStyle: Overlay`, traffic lights positioned in `tauri.conf.json`); the app header doubles as the title bar (`data-tauri-drag-region`, left inset from `getWindowChrome()` exported by each `#platform` entry, dropped in native fullscreen via `onFullscreenChange` since the traffic lights hide there, `WindowDragStrip.vue` for pages without the header). WebKit pitfalls fixed in `nuxt.config.ts`: deps the Vite scanner misses are listed in `optimizeDeps.include` (a mid-load re-optimization left WKWebView with two Vue module graphs), and Supabase uses `useSsrCookies: false` in Tauri builds (WebKit drops `Secure` cookies on `http://localhost`, so edge functions got no session and returned 401). Known gap: in release builds the Nitro routes (`/api/fixtures`, `/api/firmware-proxy`) are missing (they work in `dev:tauri`, which runs the Nuxt dev server).
 - **App menu** (2026-10-16): each `#platform` entry exports `getAppShell()` (`app/platform/app-shell.ts`): native menu bar (`src-tauri/src/menu.rs`, items emit `app-menu` events with command ids) and `.pmproject` dialogs (`src-tauri/src/files.rs`, `tauri-plugin-dialog`, raw IPC bodies); web: no menu, download / file input. Commands live in `app/composables/app-menu` (File: New ⌘N, Open… ⌘O, Open Recent, Save ⌘S, Export… ⌘⇧E; View: All Projects ⌘⇧H, Design/Live/Connections ⌘1–3). Open Recent is a per-device list in localStorage, names synced from `get-projects`. In the browser only ⌘O and ⌘⇧E are bound (the browser keeps ⌘N, ⌘1–3). The header export button was removed.
 - **Step 1 implemented** (2026-10-16): `packages/extension-api/src/platform.ts` (API 1.1.0), `app/platform/{web,tauri}`, `#platform` alias in `nuxt.config.ts`/`vitest.config.ts`, `HostApi.platform`. Migrated: `connector-esp/serial-base.ts`, `controller-akai-apc-mini-mk2/driver.ts`, `connector-artnet` (direct-UDP path + shared `art-dmx.ts`, also used by `tools/artnet-bridge`).
