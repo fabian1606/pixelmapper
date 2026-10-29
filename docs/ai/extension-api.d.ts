@@ -1207,14 +1207,43 @@ declare module '@pixelmapper/extension-api' {
    * group `g` on in step `s`). Default input: `pm.steps`.
    */
   export type StepsParam = ParamBase<'steps', StepsValue>;
+  /**
+   * State of a momentary `trigger` param (ABI 1.3). The host records the
+   * edges; times are in engine-clock ms (the same clock as `Frame.timeMs`).
+   */
+  export interface TriggerValue {
+      /** True while the button is held. */
+      pressed: boolean;
+      /** Engine-clock ms of the last press; absent = never pressed. */
+      pressedAt?: number;
+      /** Engine-clock ms of the last release; absent = never released. */
+      releasedAt?: number;
+      /** Presses in the current multi-click burst (1 = single, 2 = double, …; 0 = never pressed). */
+      clicks?: number;
+  }
+  /**
+   * Momentary input (hold / release / double-click), e.g. "hold = blackout,
+   * release = shock wave, double-click = flash". Not saved as a look: the host
+   * updates it on press/release (card button or a live `button` widget mapped
+   * via `effect-param`) without an undo step. Manifest default: `{ "pressed": false }`.
+   *
+   * Wire: 4 f32 — `pressed (0/1), pressedAt, releasedAt, clicks` with the
+   * times in engine-clock ms (−1e9 = never). `render` stays pure: the SDK's
+   * `triggerMsSincePress(params, slot, ctx)` etc. subtract them from
+   * `ctx.timeMs`. Default input: `pm.button`.
+   */
+  export interface TriggerParam extends ParamBase<'trigger', TriggerValue> {
+      /** Max ms between a release and the next press that still counts as a multi-click. Default 350. */
+      multiClickMs?: number;
+  }
   /** Any param definition. */
-  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam | GradientParam | StepsParam;
+  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam | GradientParam | StepsParam | TriggerParam;
   /** Param type discriminator. */
   export type ParamType = ParamDef['type'];
   /** An ordered list of param definitions. Order defines the wire layout. */
   export type ParamSchema = ParamDef[];
   /** Runtime value of any param. */
-  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue;
+  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue | TriggerValue;
   /** Number of f32 slots each param type occupies in the params block. */
   export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>>;
   /** Default `pm.*` input per param type (D13). */
