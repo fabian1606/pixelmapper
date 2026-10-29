@@ -1,5 +1,6 @@
 import { triggerRef } from 'vue';
 import { registerLiveOp } from '~/stores/live-bus-store';
+import { fixtureDragKey } from './coalesce-keys';
 
 interface FixtureDragPayload {
   fixtures: Array<{ id: string | number; x: number; y: number; z?: number }>;  // normalized 0-1
@@ -10,6 +11,8 @@ registerLiveOp<FixtureDragPayload>('fixture.drag', {
   throttle: 'raf',
   merge: 'replace',
   persistent: true,
+  // Per dragged fixture set — dragging A then B keeps both positions (ADR 0004 D8).
+  coalesceKey: fixtureDragKey,
   apply: ({ fixtures }, _userId, ctx) => {
     const flat = ctx.engineStore.flatFixtures;
     let mutated = false;

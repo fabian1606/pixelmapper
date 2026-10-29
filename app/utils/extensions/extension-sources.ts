@@ -5,6 +5,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '~/types/database.types';
+import { isOnline } from '~/utils/sync/connectivity';
 
 /** A catalog listing entry. */
 export interface ExtensionListing {
@@ -62,11 +63,18 @@ export function catalogSource(baseUrl = '/extensions'): ExtensionSource {
   };
 }
 
+/** Throws when connectivity tracking reports offline. */
+function assertOnline(): void {
+  if (!isOnline.value) throw new Error('offline');
+}
+
 /** The Supabase extension registry. */
 export function registrySource(supabase: SupabaseClient<Database>): ExtensionSource {
   const bucket = () => supabase.storage.from('extensions');
   return {
     async list() {
+      // Offline: fail fast instead of waiting on the auth refresh (ADR 0004 D10).
+      assertOnline();
       const { data, error } = await supabase.from('extensions').select('id, version, manifest').order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
       return (data ?? []).map((r) => {
@@ -75,6 +83,7 @@ export function registrySource(supabase: SupabaseClient<Database>): ExtensionSou
       });
     },
     async fetch(id, version) {
+      assertOnline();
       const url = (path: string) => bucket().getPublicUrl(`${id}/${version}/${path}`).data.publicUrl;
       const info = JSON.parse(await text(url('extension.json'))) as Record<string, unknown>;
       const files = info.files as { js?: string; css?: string | null } | undefined;

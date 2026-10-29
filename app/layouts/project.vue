@@ -19,12 +19,22 @@ const collab = useCollaboration(projectId.value);
 
 onMounted(async () => {
   await engineStore.loadProject(projectId.value);
-  collab.connect();
+  // Local-only projects never talk to the server (ADR 0004 D3).
+  if (engineStore.projectOrigin === 'cloud') collab.connect();
 });
 
 onUnmounted(() => {
-  engineStore.commitPendingPersistence();
+  const leftProjectId = projectId.value;
   collab.cleanup();
+  // Hand queued changes to the outbox/sync, then end the project's session:
+  // no sync engine, timers, unload handlers or snapshot writer may outlive
+  // the page (they would act for this account after a sign-out or switch).
+  void (async () => {
+    try { await engineStore.commitPendingPersistence(); }
+    catch (err) { console.warn('[project] committing pending changes failed:', err); }
+    // Another project may have been opened meanwhile; its session stays.
+    if (engineStore.currentProjectId === leftProjectId) await engineStore.closeSession();
+  })();
 });
 </script>
 
@@ -49,6 +59,14 @@ onUnmounted(() => {
         <div class="text-center space-y-3 max-w-sm px-4">
           <h2 class="text-lg font-semibold">Incompatible project</h2>
           <p class="text-sm text-muted-foreground">This project was created with an incompatible version of Pixelmapper and cannot be opened.</p>
+          <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
+        </div>
+      </div>
+
+      <div v-else-if="projectError === 'offline-unavailable'" class="flex items-center justify-center h-full">
+        <div class="text-center space-y-3 max-w-sm px-4">
+          <h2 class="text-lg font-semibold">Not available offline</h2>
+          <p class="text-sm text-muted-foreground">This project has not been downloaded to this device yet. Connect to the internet (and sign in) to open it once; afterwards it also opens offline.</p>
           <NuxtLink to="/" class="inline-block mt-2 text-sm text-primary hover:underline">← Back to projects</NuxtLink>
         </div>
       </div>

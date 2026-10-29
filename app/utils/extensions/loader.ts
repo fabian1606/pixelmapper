@@ -15,6 +15,7 @@
  */
 import semver from 'semver';
 import type { ExtensionManifest } from '@pixelmapper/extension-api';
+import { isOnline } from '~/utils/sync/connectivity';
 import { getExtension, registerExtension } from './registry';
 import { createIdbBundleCache, createMemoryBundleCache, type BundleCache, type CachedBundle } from './extension-cache';
 import type { ExtensionListing, ExtensionSource } from './extension-sources';
@@ -64,6 +65,27 @@ export function localInstalledStore(userId: string | null): InstalledStore {
   };
 }
 
+// ── Remote timeouts ──────────────────────────────
+
+/**
+ * Max wait for one remote call (installed list, source listing). Every
+ * Supabase data call first awaits `auth.getSession()`, which retries an
+ * expired-token refresh for ~30 s while offline (ADR 0004 D10).
+ */
+export const REMOTE_TIMEOUT_MS = 4000;
+
+/** Resolves with the value, or null after `ms` (the promise keeps running). */
+export async function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), ms); });
+  try {
+    return await Promise.race([Promise.resolve(promise), timeout]);
+  }
+  finally {
+    if (timer != null) clearTimeout(timer);
+  }
+}
+
 // ── Loader state ─────────────────────────────────
 
 let cache: BundleCache = typeof indexedDB === 'undefined' ? createMemoryBundleCache() : createIdbBundleCache();
@@ -94,7 +116,9 @@ export async function listAvailableExtensions(): Promise<ExtensionListing[]> {
     out.set(`${b.id}@${b.version}`, { id: b.id, version: b.version, apiVersion: info.apiVersion ?? '*', displayName: info.displayName ?? b.id, description: info.description ?? '', source: 'cache' });
   }
   for (const s of sources) {
-    for (const l of await s.list().catch(() => [] as ExtensionListing[])) {
+    // A hanging remote (e.g. auth refresh offline) must not stall boot.
+    const listed = await withTimeout(s.list(), REMOTE_TIMEOUT_MS).catch(() => null);
+    for (const l of listed ?? []) {
       if (!out.has(`${l.id}@${l.version}`)) out.set(`${l.id}@${l.version}`, l);
     }
   }
@@ -106,12 +130,15 @@ export function pickVersion(versions: string[], range: string): string | null {
   return semver.maxSatisfying(versions.filter(v => semver.valid(v)), range || '*');
 }
 
-/** A cached bundle, downloading it when absent. */
-async function obtain(id: string, range: string): Promise<CachedBundle | null> {
+/**
+ * A cached bundle, downloading it when absent. `listings` lets a boot pass
+ * share one source listing for all installed extensions.
+ */
+async function obtain(id: string, range: string, listings: () => Promise<ExtensionListing[]> = listAvailableExtensions): Promise<CachedBundle | null> {
   const cached = pickVersion(await cache.versions(id), range);
   // Prefer the newest published version satisfying the range when online.
-  const listings = (await listAvailableExtensions()).filter(l => l.id === id);
-  const published = pickVersion(listings.map(l => l.version), range);
+  const matching = (await listings()).filter(l => l.id === id);
+  const published = pickVersion(matching.map(l => l.version), range);
   const version = published && (!cached || semver.gt(published, cached)) ? published : cached;
   if (!version) return null;
   const hit = await cache.get(id, version);
@@ -163,10 +190,10 @@ async function importBundle(bundle: CachedBundle): Promise<ExtensionManifest> {
 }
 
 /** Loads one installed extension. */
-export async function loadExtension(entry: InstalledExtension): Promise<LoadResult> {
+export async function loadExtension(entry: InstalledExtension, listings?: () => Promise<ExtensionListing[]>): Promise<LoadResult> {
   if (getExtension(entry.id)) return { id: entry.id, status: 'layer' };
   try {
-    const bundle = await obtain(entry.id, entry.versionRange);
+    const bundle = await obtain(entry.id, entry.versionRange, listings);
     if (!bundle) return { id: entry.id, status: 'missing', error: `no version satisfies ${entry.versionRange}` };
     injectCss(bundle);
     registerExtension(await importBundle(bundle), 'bundle');
@@ -182,8 +209,11 @@ export async function loadExtension(entry: InstalledExtension): Promise<LoadResu
 export function startLoading(): Promise<LoadResult[]> {
   ready = (async () => {
     const list = await installed.list().catch(() => [] as InstalledExtension[]);
+    // One source listing per pass (each remote listing is bounded by a timeout).
+    let listing: Promise<ExtensionListing[]> | null = null;
+    const listings = () => (listing ??= listAvailableExtensions());
     const results: LoadResult[] = [];
-    for (const entry of list) results.push(await loadExtension(entry));
+    for (const entry of list) results.push(await loadExtension(entry, listings));
     return results;
   })();
   return ready;
@@ -226,9 +256,14 @@ export function supabaseInstalledStore(
   const local = localInstalledStore(userId);
   return {
     async list() {
-      const { data, error } = await supabase.from('user_extensions').select('extension_id, version_range').eq('user_id', userId);
-      if (error) return local.list();
-      const list = (data ?? []).map(r => ({ id: r.extension_id, versionRange: r.version_range }));
+      // Offline or slow: the mirror is the last known list (no network wait).
+      if (!isOnline.value) return local.list();
+      const res = await withTimeout(
+        supabase.from('user_extensions').select('extension_id, version_range').eq('user_id', userId),
+        REMOTE_TIMEOUT_MS,
+      ).catch(() => null);
+      if (!res || res.error) return local.list();
+      const list = (res.data ?? []).map(r => ({ id: r.extension_id, versionRange: r.version_range }));
       await local.set(list);
       return list;
     },

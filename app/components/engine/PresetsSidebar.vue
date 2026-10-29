@@ -12,6 +12,7 @@ import { SavePresetCommand, DeletePresetCommand, OverwritePresetCommand } from '
 import { UpdatePresetMetadataCommand } from '~/components/engine/commands/update-preset-metadata-command';
 import type { Preset, PresetCategory, PresetCategoryType } from '~/utils/engine/preset-types';
 import { CHANNEL_CATEGORIES } from '~/utils/engine/channel-categories';
+import { newPrefixedId } from '~/utils/ids';
 import {
   Settings,
   Save,
@@ -122,7 +123,7 @@ function quickSave() {
   const name = `Preset ${savedPresets.value.length + 1}`;
   // Capture ALL currently programmed channels (null = no diff, full snapshot)
   const categories = extractCategories(props.fixtures, props.effects, null, props.nodes);
-  const id = `preset-${Date.now()}`;
+  const id = newPrefixedId('preset'); // UUID (ADR 0004 D6)
   const preset: Preset = {
     id,
     name,
@@ -169,7 +170,7 @@ function quickSaveVariant(basePreset: Preset) {
   const name = `Variant ${existingVariants.length + 1}`;
   const resolvedBase = resolvePreset(basePreset, savedPresets.value);
   const categories = extractCategories(props.fixtures, props.effects, resolvedBase, props.nodes);
-  const id = `preset-${Date.now()}`;
+  const id = newPrefixedId('preset'); // UUID (ADR 0004 D6)
   const preset: Preset = {
     id,
     name,
@@ -376,7 +377,7 @@ function createPresetFromSelection(selectedIds: Set<string | number>) {
 
   const name = `Preset ${savedPresets.value.length + 1}`;
   const categories = extractCategories(selectedFixtures, props.effects, null, props.nodes);
-  const id = `preset-${Date.now()}`;
+  const id = newPrefixedId('preset'); // UUID (ADR 0004 D6)
   const preset: Preset = {
     id,
     name,

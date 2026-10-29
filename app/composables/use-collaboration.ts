@@ -1,5 +1,5 @@
 import { triggerRef, watch } from 'vue';
-import { useHistory, lastSeenSequenceNumber } from '~/components/engine/composables/use-history';
+import { useHistory } from '~/components/engine/composables/use-history';
 import { commandFromPayload } from '~/components/engine/commands/serializable-command';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore, type CollaboratorPresence, type PresenceController, TAB_SESSION_ID } from '~/stores/live-bus-store';
@@ -8,6 +8,10 @@ import { useControllerStore } from '~/stores/controller-store';
 import { userColor } from '~/composables/live-ops/colors';
 import { dispatchChannelUpdate } from '~/composables/dispatch-channel-update';
 import { snapshotTwinStates } from '~/composables/live-ops/twin-state-hub';
+import { isNetworkError, isOnline, onReconnect, reportNetworkFailure } from '~/utils/sync/connectivity';
+import { getOpenSyncEngine } from '~/utils/sync/open-sync-engine';
+import { handleRestoreMarker } from '~/utils/sync/remote-restore';
+import type { RemoteInsert } from '~/utils/sync/sync-engine';
 
 // Side-effect imports: register all live ops and live widget commands
 import '~/composables/live-ops';
@@ -151,36 +155,118 @@ export function useCollaboration(projectId: string): CollaborationContext {
   });
 
   // ── Postgres Changes: committed commands (existing tier) ──────────────────
+  // Realtime is the fast path; the project's SyncEngine dedupes rows by
+  // change id (own echoes, rows already pulled) and records them so pulls
+  // never apply them twice (ADR 0004 §3.2). Live-op rows are not handled
+  // here (`false`): the engine replays them through its state port, because
+  // a peer that edited offline never broadcast them.
+  /** Apply a foreign committed command (history, so it can be undone). */
+  function applyRemoteRow(row: RemoteInsert): boolean {
+    // A restore marker reloads the project from the server (remote-restore.ts).
+    if (handleRestoreMarker(row.commandType)) return true;
+    const cmd = commandFromPayload(row.commandType, row.payload as object, engineStore.getReplayContext());
+    if (!cmd) return false;
+    history.executeRemote(cmd);
+    triggerRef(engineStore.sceneNodes);
+    engineStore.scheduleWorkingSnapshot();
+    return true;
+  }
+
   channel.on(
     'postgres_changes' as any,
     { event: 'INSERT', schema: 'public', table: 'project_changes', filter: `project_id=eq.${projectId}` },
     (change: any) => {
-      const { sequence_number, user_id, command_type, payload } = change.new ?? {};
-      if (sequence_number == null) return;
-      if (sequence_number <= lastSeenSequenceNumber.value) return;
-      lastSeenSequenceNumber.value = Math.max(lastSeenSequenceNumber.value, sequence_number);
-      if (user_id === user.value?.id) return;
-
-      const ctx = engineStore.getReplayContext();
-      const cmd = commandFromPayload(command_type, payload, ctx);
-      if (cmd) {
-        history.executeRemote(cmd);
-        triggerRef(engineStore.sceneNodes);
-      }
+      const { sequence_number, change_id, user_id, command_type, payload } = change.new ?? {};
+      if (typeof sequence_number !== 'number') return;
+      const engine = getOpenSyncEngine(projectId);
+      // No engine (signed out / unbound copy): nothing is synced, ignore.
+      if (!engine) return;
+      engine.setRemoteApplier(applyRemoteRow);
+      engine.handleRemoteInsert({
+        sequenceNumber: sequence_number,
+        // Rows without a change id (very old clients) get a stable stand-in.
+        changeId: typeof change_id === 'string' && change_id ? change_id : `seq:${sequence_number}`,
+        userId: user_id ?? '',
+        commandType: command_type,
+        payload,
+      });
     },
   );
 
 
   // ── Connect ────────────────────────────────────────────────────────────────
-  async function connect() {
-    // Force-refresh the session so setAuth always sends a valid (non-expired) JWT
-    await supabase.auth.refreshSession();
-    await supabase.realtime.setAuth();
+  // Offline-tolerant (ADR 0004 D9/D10): connecting never throws. While offline
+  // the subscription is deferred to `onReconnect`; after a reconnect the JWT
+  // is refreshed and handed to realtime so the socket's rejoin succeeds.
+  let disposed = false;
+  let subscribed = false;
+  let stopReconnect: (() => void) | null = null;
 
-    channel.subscribe(async (status, err) => {
+  /** Refresh the session (if possible) and pass the JWT to realtime. Never throws. */
+  async function refreshRealtimeAuth(): Promise<void> {
+    try {
+      // Force-refresh so setAuth always sends a valid (non-expired) JWT.
+      const { error } = await supabase.auth.refreshSession();
+      if (error && isNetworkError(error)) reportNetworkFailure();
+      await supabase.realtime.setAuth();
+    } catch (err) {
+      if (isNetworkError(err)) reportNetworkFailure();
+      console.warn('[collab] auth refresh failed:', err);
+    }
+  }
+
+  /** Subscribe once online; offline → wait for the reconnect listener. */
+  async function connect() {
+    // Re-auth + (re)subscribe on every offline → online transition.
+    stopReconnect ??= onReconnect(() => { void handleReconnect(); });
+    if (!isOnline.value) {
+      console.info('[collab] offline — realtime connection deferred until reconnect');
+      return;
+    }
+    await refreshRealtimeAuth();
+    subscribeChannel();
+  }
+
+  /** Back online: fresh JWT for the socket, subscribe if never/no longer joined. */
+  async function handleReconnect() {
+    if (disposed) return;
+    await refreshRealtimeAuth();
+    if (disposed) return;
+    // A closed channel (never joined, or closed by the server) can be
+    // re-subscribed; a joined/errored one is rejoined by realtime itself.
+    if (!subscribed || channel.state === 'closed') subscribeChannel();
+  }
+
+  /** Subscribe the channel and wire presence/bus on SUBSCRIBED. */
+  function subscribeChannel() {
+    if (disposed) return;
+    subscribed = true;
+    try {
+      channel.subscribe(onChannelStatus);
+    } catch (err) {
+      console.warn('[collab] subscribe failed:', err);
+    }
+  }
+
+  /** Channel status callback (SUBSCRIBED → wire bus + track presence). */
+  async function onChannelStatus(status: string, err?: Error) {
+    try {
+      await handleChannelStatus(status, err);
+    } catch (e) {
+      // Never let a presence/auth hiccup become an unhandled rejection.
+      if (isNetworkError(e)) reportNetworkFailure();
+      console.warn('[collab] channel status handling failed:', e);
+    }
+  }
+
+  /** Status handling proper — may throw; wrapped by `onChannelStatus`. */
+  async function handleChannelStatus(status: string, err?: Error) {
+    {
       console.info('[collab] channel status:', status, err ?? '');
 
       if (status === 'SUBSCRIBED') {
+        // Events may have been missed while (re)joining: pull to fill the gap.
+        getOpenSyncEngine(projectId)?.handleRealtimeSubscribed();
         let userId = user.value?.id;
         let email = user.value?.email ?? '';
         let displayName = (user.value?.user_metadata as any)?.display_name ?? '';
@@ -206,13 +292,13 @@ export function useCollaboration(projectId: string): CollaborationContext {
         });
       }
 
-      // On JWT expiry: refresh and re-authenticate so the next reconnect succeeds
-      if (status === 'CHANNEL_ERROR') {
+      // On JWT expiry: refresh and re-authenticate so the next reconnect
+      // succeeds. Offline this is skipped — `handleReconnect` does it later.
+      if (status === 'CHANNEL_ERROR' && isOnline.value) {
         console.warn('[collab] channel error, refreshing auth:', err);
-        await supabase.auth.refreshSession();
-        await supabase.realtime.setAuth();
+        await refreshRealtimeAuth();
       }
-    });
+    }
   }
 
   // Re-track presence when user navigates between editor and live sub-pages
@@ -226,18 +312,23 @@ export function useCollaboration(projectId: string): CollaborationContext {
         if (!liveBus.isConnected) return;
         const viewMode = getViewMode(path as string);
         const livePageIdValue = (livePageId as string | null) ?? undefined;
-        const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
-        const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
-        // Update presence for avatars / initial follow target.
-        await channel.track({
-          userId,
-          displayName,
-          sessionId: TAB_SESSION_ID,
-          clockEpoch: engineStore.clockEpoch,
-          viewMode,
-          livePageId: livePageIdValue,
-          controllers: snapshotControllers(),
-        });
+        // Offline-safe: a failed presence update must not become an unhandled rejection.
+        try {
+          const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
+          const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
+          // Update presence for avatars / initial follow target.
+          await channel.track({
+            userId,
+            displayName,
+            sessionId: TAB_SESSION_ID,
+            clockEpoch: engineStore.clockEpoch,
+            viewMode,
+            livePageId: livePageIdValue,
+            controllers: snapshotControllers(),
+          });
+        } catch (err) {
+          console.warn('[collab] presence update failed:', err);
+        }
         // Emit explicit page-change event so followers navigate exactly once.
         liveBus.dispatch('user.pageChange', { viewMode, livePageId: livePageIdValue });
       },
@@ -253,17 +344,22 @@ export function useCollaboration(projectId: string): CollaborationContext {
       () => snapshotControllers(),
       async () => {
         if (!liveBus.isConnected) return;
-        const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
-        const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
-        await channel.track({
-          userId,
-          displayName,
-          sessionId: TAB_SESSION_ID,
-          clockEpoch: engineStore.clockEpoch,
-          viewMode: getViewMode(route.path),
-          livePageId: liveModeStore.activePageId ?? undefined,
-          controllers: snapshotControllers(),
-        });
+        // Offline-safe: a failed presence update must not become an unhandled rejection.
+        try {
+          const userId = user.value?.id ?? (await supabase.auth.getUser()).data.user?.id ?? 'anon';
+          const displayName = (user.value?.user_metadata as any)?.display_name ?? userId;
+          await channel.track({
+            userId,
+            displayName,
+            sessionId: TAB_SESSION_ID,
+            clockEpoch: engineStore.clockEpoch,
+            viewMode: getViewMode(route.path),
+            livePageId: liveModeStore.activePageId ?? undefined,
+            controllers: snapshotControllers(),
+          });
+        } catch (err) {
+          console.warn('[collab] presence update failed:', err);
+        }
       },
       { deep: true },
     );
@@ -277,6 +373,9 @@ export function useCollaboration(projectId: string): CollaborationContext {
   }
 
   function cleanup() {
+    disposed = true;
+    stopReconnect?.();
+    stopReconnect = null;
     stopRouteWatch?.();
     stopControllerWatch?.();
     liveBus.disconnect();

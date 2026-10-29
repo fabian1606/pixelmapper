@@ -12,9 +12,12 @@ defineEmits<{ change: [patch: Record<string, unknown>] }>();
   <div class="flex flex-col gap-1.5 text-xs">
     <div class="flex items-center gap-2 text-muted-foreground">
       <span>Firmware: {{ props.connector.firmwareVersion.value ? `v${props.connector.firmwareVersion.value}` : '—' }}</span>
-      <span v-if="props.connector.latestVersion.value" class="text-muted-foreground/60">(latest v{{ props.connector.latestVersion.value }})</span>
+      <span v-if="props.connector.latestFirmware.value" class="text-muted-foreground/60">
+        (latest v{{ props.connector.latestFirmware.value.version }}{{ props.connector.latestFirmware.value.origin === 'bundled' ? ', bundled' : '' }})
+      </span>
+      <span v-else-if="props.connector.status.value === 'connected'" class="text-muted-foreground/60">(no firmware available offline)</span>
       <button
-        v-if="props.connector.latestBinUrl.value && props.connector.status.value === 'connected' && !props.connector.isFlashing.value"
+        v-if="props.connector.latestFirmware.value && props.connector.status.value === 'connected' && !props.connector.isFlashing.value"
         type="button"
         class="ml-auto px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors"
         title="Flash the latest firmware"

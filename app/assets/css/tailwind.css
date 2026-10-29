@@ -136,10 +136,33 @@
      Chrome's swipe-back history navigation. preventDefault on the wheel
      handlers isn't enough — the browser arms the gesture before the event
      reaches JS — so overscroll chaining is disabled at the root. Chrome
-     honors this only on the root scroller, hence both html and body. */
+     honors this only on the root scroller, hence both html and body.
+     The vertical axis is disabled too: when a nested scroll area hits its
+     top/bottom edge, the scroll would otherwise chain to the root and the
+     whole page (header included) rubber-bands on macOS. */
   html,
   body {
-    overscroll-behavior-x: none;
+    overscroll-behavior: none;
+  }
+
+  /* Nested scroll areas keep their own elastic overscroll ("contain" still
+     bounces, unlike "none") but never hand the leftover scroll to the page.
+     Covers the shadcn ScrollArea viewport and plain overflow utilities;
+     lives in the base layer so an explicit overscroll-* utility wins. */
+  [data-slot='scroll-area-viewport'],
+  .overflow-auto {
+    overscroll-behavior: contain;
+  }
+
+  /* Single-axis scrollers only contain their own axis — otherwise a vertical
+     wheel over e.g. a horizontal tab strip could no longer scroll the
+     surrounding panel. */
+  .overflow-y-auto {
+    overscroll-behavior-y: contain;
+  }
+
+  .overflow-x-auto {
+    overscroll-behavior-x: contain;
   }
 
   body {

@@ -1,0 +1,199 @@
+# WP-SYNC — Sync engine and local-first loading
+
+Implements the integration package of [ADR 0004](../adr/0004-offline-first.md): D1 (local-first), D4 (rebase + 3-way merge), D5 (safety snapshot), D8 (outbox), D9 (connectivity), D13 (mirroring service), D17 (sync UI), §3.
+
+## Modules (`app/utils/sync/`)
+
+| File | Role |
+|---|---|
+| `sync-engine.ts` | `SyncEngine`, one per open cloud project: lock, triggers, push hook, realtime intake, status |
+| `sync-context.ts` | Shared deps/state types, `mergePending` |
+| `sync-cycle.ts` | Pull step: classify pulled rows, apply directly or rebase |
+| `sync-rebase.ts` | `computeRebase` (synchronous, over the state port), payload migration |
+| `sync-push.ts` | Push outbox, safety snapshot (D5), base checkpoint, `lastSyncedAt` |
+| `sync-reject.ts` | Permanently rejected pushes (4xx): isolate row by row, discard + report |
+| `sync-position.ts` | `SyncPosition` (floor / cursor / seen ids), pack/unpack of stored snapshots |
+| `sync-transport.ts` | Paged `pullAll`, chunked `pushRows` |
+| `sync-status.ts` | Pure status mapping for the header icon |
+| `sync-restore.ts`, `remote-api-restore.ts` | "Restore state before sync" (`restore-snapshot`) |
+| `project-state-port.ts`, `engine-state-port.ts` | Port to the live state: `capture` / `apply` / `replay` |
+| `open-project.ts`, `open-flow.ts` | Local-first open, first-open download |
+| `open-legacy-rows.ts` | First open: settle migrated (legacy WAL) outbox rows by pushing them once |
+| `project-session.ts` | Per-open-project session: writer + engine + push hook, binding rules |
+| `working-snapshot-writer.ts` | Debounced working snapshot (1 s quiet, 5 s max) |
+| `unload-handlers.ts` | `visibilitychange`/`beforeunload`: durable writes, best-effort keepalive |
+| `project-mirror.ts`, `project-sync-service-impl.ts`, `open-sync-engine.ts` | `ProjectSyncService` (headless mirror / push, delegation to the open engine) |
+| `legacy-wal.ts` | One-time `migrateLegacyWal` (plugin + before every open) |
+| `current-user.ts` | Signed-in user id without network |
+| `sync-conflicts.ts`, `describe-conflicts.ts` | Conflict report contract, human-readable lines |
+| `remote-api-snapshots.ts`, `version-history.ts`, `version-history-controller.ts`, `relative-time.ts` | Version history: list wrapper, view logic, state + restore (see "Version history") |
+
+Persist side: `app/utils/persistence/outbox-writer.ts` (new), `persist-queue.ts` (outbox instead of WAL). `wal.ts` is removed. UI: `app/components/sync/SyncStatusIndicator.vue` (in `AppHeader.vue`), `app/composables/use-sync-conflict-toast.ts` (plugin `06.sync-conflict-toast`), actions/lines in `use-notifications.ts` + `ToastStack.vue`. Service registration: plugin `07.project-sync.client.ts`.
+
+## Persist path (D8)
+
+```
+history command / persistent live-op
+  → persist queue (memory: order, dedupKey coalescing, settle 50 ms, backoff)
+      → outbox-writer: appendOutbox (commands immediately, live-ops batched 50 ms)
+  → flush → push hook = SyncEngine.pushForQueue
+      → (backlog? full cycle : push) — pushes the STORED outbox, acks rows
+```
+
+- One serialized write chain keeps the store `order` equal to the creation order (commands flush the pending live-op batch first).
+- A failed `appendOutbox` puts the unwritten rows of the batch back at the front of the queue (superseded dedupKey rows dropped) and retries with `backoffDelay`; until then they stay "unconfirmed", so no checkpoint can drop them.
+- The persist queue no longer calls `reportNetworkSuccess()` after a hook result: the hook may resolve without a request (local-only, unbound copy). Real requests report connectivity in `invokeRemote`.
+- The outbox is authoritative for what is sent; the queue only triggers pushes and gets sequence numbers back (rebased payloads are therefore what goes out).
+- Local-only projects: `setPersistProjectId(id, { outbox: false })`, the push hook resolves `undefined` — no rows, no requests. Their persistence is the working snapshot.
+- Cloud copies that must not sync (signed out, another account, `remoteDeletedAt`): rows are written and kept, the push hook sends nothing.
+
+## Stored data
+
+Snapshots in the `ProjectStore` carry `pmSync` (`StoredSyncSnapshot`):
+
+- **position**: `floor`, `cursor`, `seen[{id, seq}]` — every change ≤ floor is reflected, above it exactly the `seen` ids. Pulls restart at `floor` (`PULL_OVERLAP` = 200 sequence numbers below the cursor) and skip seen ids. This handles out-of-order commits (wp-server.md open issue) and makes realtime + pulls idempotent.
+- **outboxOrder** (working only): highest outbox `order` the snapshot reflects. Reopening replays rows with a higher order. The writer first writes all queued outbox rows, so no reflected row can get a higher order later.
+- Base snapshot = server state at its position, nothing pending. Written on download, after a rebase, and as a **checkpoint** (live capture) whenever nothing is pending after a push. `meta.serverCursor` = base cursor.
+
+## Open (`engine-store.loadProject` → `open-flow.ts`)
+
+1. Close the previous session (working snapshot written first; persist gate closed), `extensionsReady()`, **await `initEngine()`** (WASM ready, bounded 15 s), reset queue/hooks, `ensureLegacyWalMigrated()`.
+2. Local copy (working, else base) → extension gate → apply → replay outbox rows above `outboxOrder`. Works offline and signed out. A local project with meta only opens with `emptyProjectSnapshot()`.
+3. No local copy, cloud: signed out → `offline-unavailable`; else `load-project` (+ `pull-changes` when `tailTruncated`; cursor from `snapshotSequence`/last tail row — the old `snapshot.sequence_number` bug is gone). Network error → `offline-unavailable` ("Not available offline" view in `layouts/project.vue`), 401 → `resolveUnauthorized` (+ `endSession` from WP-ACCOUNT), 403 → `unauthorized`. Stores meta (`origin: 'cloud'`, `ownerUserId` = user), base and working. Outbox rows already present (legacy WAL) are acked when in the tail; the others are pushed once (`open-legacy-rows.ts`, idempotent by change id): a sequence ≤ `snapshotSequence` means the snapshot already contains the row (ack, no replay — previously it was applied twice), a higher one makes it a server change of the base (replayed after the tail, recorded in the position), an unconfirmed one stays pending on top. Like older builds, these rows are pushed as recorded (no rebase).
+4. Persist gate opens (`setPersistProjectId(projectId, …)`, dirty flag reset) — only after the apply. Before that, and after `closeSession`, the persist queue drops entries and no server snapshot is saved.
+5. `startProjectSession`: writer, and a `SyncEngine` only if `origin === 'cloud'` and `syncBlocker(meta, userId)` is null. Collaboration (`useCollaboration.connect`) only for cloud projects.
+
+## Sync cycle (§3.2)
+
+Lock: every network operation of an engine (cycle or push) runs serialized. Triggers: start, `onReconnect`, realtime `SUBSCRIBED` (gap), every 60 s, and the persist queue while a backlog exists.
+
+1. Pull all pages after `min(live.floor, base.floor)`.
+2. Pending = stored outbox ∪ rows still being written (`mergePending`). Pulled rows whose id is pending are own → acked.
+3. **Direct** (no backlog, or nothing pending, or no foreign rows the **base** lacks): replay foreign rows the live state lacks, record all pulled rows in the live position, advance it. Pulled own rows (lost ack) are acked and their sequence numbers handed to the persist queue.
+4. **Rebase** (backlog + pending + foreign rows the **base** does not reflect — decided on the base, not the live position, so a row already applied via realtime still forces the rebase), synchronously via the state port:
+   `previous[i]` = old base + original pending[0..i-1]; new base = old base + rows the base does not reflect (server order); each pending row is migrated (`migrateModifiersDeep`, `modifier.update` legacy fields), `rebaseChange(row, current, previous[i])`, replayed; skipped rows dropped. Live state = result. Then: `updateOutbox` (rebased payloads), ack skipped + own rows, store base + working, remember the D5 snapshot.
+5. Push: first the `before offline sync` server snapshot (new base at its highest sequence) — if it fails nothing is pushed; then the outbox in order (chunks of 200, stop at the first unconfirmed row). An empty outbox clears the pending safety snapshot (nothing to protect); every rebase resets the id offered for "Restore state before sync". A non-retryable rejection (403/400/422/409) is isolated by pushing the remaining rows one by one: rejected rows are removed from the outbox and reported as a status error ("N changes were rejected by the server and discarded"), the others go through.
+6. On success: backlog cleared, conflicts reported (toast with "Restore state before sync"), base checkpoint when nothing is pending, `meta.lastSyncedAt`.
+
+**Backlog** is set when the outbox had rows at open, when the app goes offline, and when a push fails with a network error. Without backlog (normal online editing, rows in flight for milliseconds) remote rows apply in arrival order as before — no rebase, no safety snapshot.
+
+**Realtime**: CDC rows go to `handleRemoteInsert`; known ids (reflected, own) are only recorded; foreign command rows are applied via the collaboration applier (`history.executeRemote`); rows the applier does not handle (it returns `false`, e.g. live-ops) and all rows without an applier are replayed through the state port — a peer that edited offline never broadcast them, and live-op values are absolute, so a second application via broadcast is harmless. During a cycle rows are deferred and decided afterwards.
+
+## Session lifecycle and account binding
+
+A session ends on every project switch, when the project page unmounts (`layouts/project.vue` → `engineStore.closeSession()`), on sign-out (`finishSignOut` → `teardownAccountSession`, before any cache clear) and on `SIGNED_OUT` / an account switch (`05.account.client.ts` via `account-events.ts`). `closeSession` is idempotent and:
+
+- bumps a load generation, so a `loadProject` still in flight does not start its session afterwards;
+- removes the unload handlers and unsubscribes the per-load token listener (`onAuthStateChange`);
+- clears the undo/redo history (`clearHistory()`), which belongs to the closed project;
+- awaits `ProjectSession.close()`: stop the engine first, then flush and dispose the working-snapshot writer (later `flush()` calls are no-ops, so a cleared cache is never refilled).
+
+`SyncEngine.stop()` is async: it removes the triggers and waits for the running cycle/push (at most 5 s). As a backstop the engine wraps its `SyncDeps` (`sync-guard.ts`): once stopped, or once the signed-in account differs from `boundUserId`, remote calls, store writes and live-state access through the shared port throw `SyncBlockedError`, and `writeWorking` / `onLiveChanged` / `onSequence` / `onRebased` become no-ops. A late step of project A therefore never captures or replays into project B, and never pushes with account B's token.
+
+The signed-in account is published synchronously by the account plugin (`utils/auth/current-account.ts`; `undefined` before the first auth event = not blocking). `cycle()`, `pushAndSettle()` and `pushForQueue()` (throws like offline, rows stay in the outbox) check `canSync()`; the unload keepalive is skipped when `!engine.canSync()`. The token cached for keepalive is cleared on sign-out.
+
+After a rebase the engine calls `deps.onRebased()` (from `pullStep`'s `rebased` flag, no change in `sync-cycle.ts`); the engine store clears the undo/redo stacks then, because their before/after payloads predate the merged peer changes.
+
+## Server snapshots (autosave)
+
+Unchanged timers (10 s idle / 30 s cap / every 20 commands / Cmd+S), now only for sessions with an engine, online, with an empty persist queue and outbox (`canSaveServerSnapshot`). Uses `remote-api.saveSnapshot`.
+
+## Version history (D17)
+
+Clicking the header sync indicator opens a popover (`SyncStatusIndicator.vue`): the current status (state, pending count, last sync relative + absolute; view model in `composables/sync/use-sync-status-view.ts`) and below it the **version history** (`VersionHistoryPanel.vue`, `VersionHistoryItem.vue`).
+
+- **Data:** `remote-api-snapshots.listSnapshots()` → `list-snapshots` (WP-SERVER, migration 010): newest first, pages of 30 with a keyset cursor ("Load more"). Each entry: relative + absolute time, label badge (Autosave / Before offline sync / Uploaded / Imported / Restored / custom label), author name, summary "N fixtures · N groups · N modifiers" computed server-side. The full snapshot is never downloaded for the list.
+- **Retention:** the server thins old snapshots (WP-SERVER "Snapshot retention", migration 013): older entries become hourly / daily / weekly; labeled versions always stay. No-change autosaves (same content hash, ignoring `clockEpoch` and group `expanded`) are not listed, pruned on the server, and not even sent: `doSaveSnapshot` skips a save whose content hash equals the last one this session saved (`snapshot-content-hash.ts`).
+- **Collapsing:** runs of 3+ consecutive autosaves (label `null`) show the newest one plus a "N more autosaves" row that expands (`version-history.ts`, pure).
+- **Controller:** `version-history-controller.ts` (`createVersionHistory`, deps injected; wired by `composables/sync/use-version-history.ts`). Keeps the last list per project in memory: offline it is shown with a note and restore disabled; local-only projects show "Local project — no version history".
+- **Restore:** confirmation dialog ("Restore this version? Your current state is kept in history.", mentions unsynced changes). Then: pending changes (outbox + unconfirmed) → `engine.flushNow()`; still pending → cancelled with a warning toast (otherwise they would be replayed on top of the restored state). Then `SyncEngine.restoreSnapshot(id)` → the same path as "Restore state before sync" (`sync-restore.ts`: `restore_snapshot` RPC marker + snapshot at its sequence, local base/working replaced, project reloaded; collaborators reload on the marker). Disabled offline, for viewers (role from the local project meta) and while a restore runs.
+- **Change details:** each entry has a chevron (`aria-expanded`, `aria-controls`) that expands it to show what changed compared to the next older entry of the list (`VersionHistoryDetails.vue`, mounted only when expanded → lazy load):
+  - **Data:** `remote-api-snapshot-details.getSnapshotDetails()` → `snapshot-details` (WP-SERVER, migration 012) returns both snapshots, the change log between them aggregated per author × command type in SQL (`activity`, never raw payloads), restore markers in that range and `restoredFrom` (the marker at the snapshot's own sequence). The client passes `compareToId` = the next older loaded entry; for the last loaded entry the server picks the older neighbour itself (none → "First version").
+  - **Diff:** `utils/sync/version-diff/` (pure, `diffSnapshots(prev, next, { modifierName })`): id-keyed comparison like `merge/`; the scene tree is flattened (nested groups) with the parent group as a field, so moving a fixture into another group is a "group" change. Fields map to human labels per kind (fixtures: position, rotation, size, address, color/channels, fixture type…; groups: name, members/order, parent group; effects: effect type, speed, strength, … plus one label per changed plugin param; presets: name, content, type, color; live pages: layout, widgets, sections…); unknown keys are humanized. Project settings: BPM and active preset with from → to, other top-level keys by name (`clockEpoch` and group `expanded` ignored).
+  - **View:** `version-details-view.ts` builds sections Fixtures / Groups / Effects / Presets / Live pages / Project settings (added `+`, removed `−`, changed `~` with "(was <old name>)"; 8 lines then "+N more") and the activity (`version-activity.ts`: one `COMMAND_LABELS` table for commands and persistent live-ops, unknown types raw; "Ada · 3× Move fixture · 1× Change effect"; "Restored the version from …"). Restored entries show which version was restored (marker, else the `Restored from snapshot <seq>` label).
+  - **Controller:** `version-details-controller.ts` (`createVersionDetails`, wired by `composables/sync/use-version-details.ts`, effect names from plugin manifests) — per-snapshot state `idle/loading/ready/error/offline`, in-flight dedupe, views cached in memory per (projectId, snapshotId) (immutable data; max 100). Offline without cache: "Details need a connection" (reloads when back online); errors show Retry.
+- **Hover preview:** hovering (or keyboard-focusing) an entry for **300 ms** shows a preview card left of the popover (below the entry when there is no room on the left) showing **what is special about the version** compared with the next older list entry, caption "<badge> · <relative time>" + summary ("N more not shown" when capped). No thumbnails are stored. The pointer may move onto the card (it keeps it open; 120 ms grace across the gap); ← / → on the focused list switch its chips.
+  - **Data:** `remote-api-snapshot-preview.getSnapshotPreview()` → `snapshot-preview` (WP-SERVER, migration 014): a compact layout computed in SQL from `sceneNodes` (recursive): per fixture `[x, y, w, h, r, c, s, b, g]` = normalized position, size multipliers, rotation, base color (single COLOR channel color or null → neutral), shape (single head / multi-beam bar / kind AABB), beam count, top-level group index; plus top-level group names, `total`, `truncated`. ≤ 400 fixtures ≈ 18 KB JSON (≈ 1.5 KB gzipped). The full snapshot is never downloaded on hover.
+  - **Model:** `utils/sync/version-preview/preview-model.ts` (pure): world-px placement with the workspace extents (single head radius 16 × size, bars/kinds ±18 × size), pixel grid of multi-beam fixtures, group outlines = padded bounding boxes of their members, `fitCamera` (centered, max zoom 3).
+  - **Rendering:** `preview-wasm.ts` reuses the workspace renderer: one hidden WebGL canvas + one `WasmCanvas` of `rs-engine-canvas` on the **main thread** (the module `FixtureCanvas.vue` already loads for hit-testing; no second engine or worker), created lazily and warmed during the first hover delay. Per preview: `sync_fixtures` with synthetic `FixtureCanvasData` (`preview-canvas-data.ts`: one COLOR channel per distinct base color at DMX 255), camera, one `draw()`, copy into the card's 2D canvas in the same task, dashed group outlines on top. If WASM/WebGL fails, `preview-svg.ts` + `VersionPreviewSchematic.vue` draw the same model as SVG (also used in tests).
+  - **Measured** (headless Chrome on macOS/Apple Silicon, DPR 2, 320 × 200, a benchmark harness outside the repo making the same calls as `preview-wasm.ts`): 400 fixtures / 5 groups — model 0.6–3 ms, WebGL render (sync + draw + copy) median 8–9 ms, first 12–35 ms, max 19 ms; one-time renderer init 28–137 ms (warmed during the hover delay); SVG fallback 2–6 ms. 9 fixtures: render ~2 ms.
+  - **Controller:** `version-preview/preview-controller.ts` (`createVersionPreview`, wired by `composables/sync/use-version-preview.ts`): per-snapshot state `idle/loading/ready/error/offline`, models cached in memory per (projectId, snapshotId) (max 100). A load runs only while the card is shown: leaving aborts the request (`AbortSignal` → `invokeRemote` returns kind `aborted`, which does not touch connectivity) and resets the state. `version-preview/hover-intent.ts`: 300 ms dwell, immediate switch while a card is shown, 120 ms hide grace; list scroll, list refresh, project switch and unmount cancel.
+  - **Highlights (migration 015):** `snapshot-preview` also returns `highlights` (request `compareToId` = next older loaded entry, else the server's neighbour — same rule as the details): category counts and the payloads of changed entities only (live pages, modifiers, presets, layout indices of changed fixtures, `fixtureIndex` id → layout index). Parsed defensively by `remote-api-snapshot-highlights.ts` (types `version-preview/highlight-types.ts`); a missing block (older server) → plain layout. The controller caches model + highlights + the compare base; a new base (list paged further) reloads, a failed reload keeps the old result.
+  - **Ranking** (`version-preview/highlight-ranking.ts`, pure): chips for the changed categories Live view / Effects / Presets / Fixtures (count = added + changed + removed, fixtures + changed groups). Default = fixed priority **live view > effect > preset > fixtures**, except a structural rig change (≥ 5 fixtures added/removed) wins when every higher-ranked category is minor (nothing added/removed and ≤ 1 entity changed). Project settings get no chip but a note ("Project settings changed: BPM, active preset"); settings only → layout. First version → layout + "First version"; no change → "No changes to the project content."; truncated payloads → "Some changes are not shown."
+  - **Views:**
+    - *Live view* — `VersionLivePagePreview.vue`: read-only miniature of the changed page without live values. `layoutLivePage` (`version-preview/live-page-preview.ts`) fits the page (`getPageResolution`) into 320 × 200 and maps each widget to a rect with status (added / changed / same), kind and label; malformed snapshot JSON is repaired (default page settings, widgets clamped into the page, default sizes, colours validated). `VersionLiveWidgetGlyph.vue` draws each widget in the style of the live widgets (extension types: dashed box + label). Changed pages: added widgets emerald, changed amber, unchanged dimmed; an added page gets one emerald frame. Removed widgets/pages listed as text (3 names, then "+N more"); pages ordered by widget changes, a pager switches pages. 100 widgets ≈ 27 ms (happy-dom).
+    - *Effect* — `VersionEffectPreview.vue`: the layout on a 2D canvas, the modifier **animated live at ~30 fps on its target fixtures** (`targetFixtureIds` via `fixtureIndex`, none = all) through the main-thread preview pool (`renderPoints` with its own `instanceKey` slot, released on unmount — no second engine/worker); multi-beam bars sample one point per pixel (head / headCount). Non-targets dimmed. Caption: effect name (manifest) + changed params in words ("Speed 2 s → 1 s · Color · Strength 50 % → 80 %", `effect-text.ts`). Unknown plugin / not loaded / broken → static layout with the targets highlighted; starts animating when the instance becomes ready (`previewRevision`). `prefers-reduced-motion: reduce` → one static frame. The loop (`effect-animator.ts`) stops on unmount (card hidden) and while `document.hidden`. Measured with real builtin plugins (plugin render + colour mapping, per frame, median / p95): 400 single heads 0.16–0.21 / 0.4–1.1 ms, 50 bars × 8 px 0.14 / 0.28 ms; browser rasterization not included (`data-frame-ms` on the canvas for in-browser measurement).
+    - *Preset* — `VersionPresetPreview.vue`: the layout recoloured with the preset's values (`highlight-map.ts` `presetFixtureColors`: per category RGB(+W) scaled by DIMMER, programmed fixtures without colour light grey, untouched fixtures dark), swatch + name + "Added"/"Changed: content", summary "Color · Movement · 2 effects · 12 fixtures", removed presets, pager.
+    - *Fixtures* — the layout renderer (`VersionLayoutPreview.vue`, WebGL or SVG) with an SVG ring overlay in the same camera (`highlightRings`): added emerald, moved sky, changed amber; caption "Fixtures: 2 added · 3 moved · 1 changed · 1 removed · 1 group changed".
+  - **Touch:** on devices without hover (`(hover: hover)` false) pointer hover is ignored and each entry gets an eye button that toggles the card.
+- **Tests:** `version-diff/version-diff.test.ts` (diff tables: nested groups, rename, move, modifier params, presets, settings), `version-details.test.ts` (labels, aggregation, view model, controller cache/offline/retry), `remote-api-snapshot-details.test.ts` (wrapper), `components/sync/version-history-details.test.ts` (expand/collapse, lazy load, error/retry, offline, compare ids), `remote-api-snapshots.test.ts` (wrapper, mocked client), `version-history.test.ts` (labels, summary, collapsing, controller: paging, offline cache, viewer, flush-before-restore), `components/sync/version-history-ui.test.ts` (panel + popover, happy-dom), `version-preview/version-preview.test.ts` (wrapper + abort, model geometry, SVG and canvas payload mapping, hover intent with fake timers, loader cache/cancel/offline), `components/sync/version-preview-ui.test.ts` (hover delay, abort on leave, cache, focus, touch button, offline/empty card), `version-preview/highlights.test.ts` (highlights parsing, ranking, captions, rings, preset colours, controller compare base), `version-preview/live-page-preview.test.ts`, `version-preview/effect-preview.test.ts` (points, colours, change text, animator incl. reduced motion), `components/sync/version-preview-highlights-ui.test.ts` (chips, default view, rings, preset recolouring, first/no-change/old server, hover on the card, arrow keys), `version-live-page-preview.test.ts`, `version-effect-preview.test.ts` (mocked pool: frames on targets only, stop on unmount, static fallback).
+
+## Service (`ProjectSyncService`)
+
+- `mirrorProject(head, userId)`: open project → `engine.requestSync()` (if bound to `userId`). Closed: skipped for local projects, other accounts and projects with pending rows (also without meta: legacy-WAL rows have no account and are bound by the first signed-in open, never by a background pass); nothing is written when `userId` is no longer the signed-in account after the download; otherwise, if the server snapshot is newer than the local copy, it becomes base + working (`load-project`; the tail after it is pulled on the next open — headless code cannot replay).
+- `flushAll(userId)`: cloud projects with `ownerUserId === userId` and no `remoteDeletedAt`. Open → `engine.flushNow()`. Closed → `pushHeadless`: pushes only if there is no foreign change since the base (no rebase needed) and records the acked ids in the working snapshot's position — only rows with `order <= outboxOrder` (contained in the snapshot); newer rows are pulled as server changes on the next open; otherwise the rows stay (rebased on the next open). Returns the pending count of all projects bound to the account.
+- `countPending(projectId?)`: outbox count.
+
+## Contract changes (additive)
+
+- `persist-queue.setPersistProjectId(id, { outbox?: boolean })`; `flushPersistWal` now flushes the outbox writer (name kept).
+- `use-history.setPersistenceHooks`: `walAppend` / `currentProjectId` removed (the queue writes the outbox row); `WalEntryForHooks` removed.
+- `engine-store`: `projectOrigin`, `scheduleWorkingSnapshot()`, `projectError: 'offline-unavailable'`.
+- `ProjectSyncService` signatures unchanged; `SyncEngine.boundUserId`, `flushNow()`.
+- `SyncEngine.stop()` returns a promise; `SyncEngine.canSync()`; `SyncDeps.onRebased?()`; `SessionInput.onRebased?`; `engine-store.closeSession()` exported; `use-history.clearHistory()`.
+- `restore-snapshot` edge function: CORS + JSON errors (needs deployment).
+- `SyncEngine.restoreSnapshot(snapshotId)` (version history); `SyncStatusIndicator` takes a `projectId` prop.
+- `invokeRemote(..., { signal })` and `RemoteErrorKind` `'aborted'` (hover preview cancellation).
+
+## Known limits
+
+- **Snapshot-only state** (mutations that only mark the engine dirty, no command/live-op) is part of the working snapshot but not of the outbox; a rebase rebuilds the state from base + outbox and drops it.
+- `previous[i]` ignores remote rows the live state already had above the base (rare: base is checkpointed whenever the outbox drains).
+- A row acked by a push whose working snapshot write did not happen yet (crash between `ackOutbox` and the checkpoint's working write) is neither in the outbox nor in the working position: the next open pulls it as a foreign change and applies it on top of a state that already has it (harmless for absolute payloads).
+- Rows discarded after a permanent rejection stay applied in the local live state (and in the next checkpoint) until the server state overwrites those values or the project is reloaded from the server.
+- `pushHeadless` does not isolate rejected rows (a rejection keeps the closed project's rows until it is opened).
+- A successful outbox write retry does not trigger a push by itself; the rows go out with the next push, cycle or periodic sync.
+- Since migration 009 a restore appends a `restore-snapshot` marker change and stores the snapshot at its sequence. Clients never replay the marker: `remote-restore.ts` (called from `engine-state-port.replayChange` for pulls/rebases and from the realtime applier in `use-collaboration.ts`) schedules one reload of the open project from the server and blocks server snapshots until it finished. If the download fails (offline), the local copy is opened and the restore is only picked up on the next fresh open.
+- Headless mirroring stores the server snapshot only; changes after it need an online open (or arrive with the next sync while open).
+- `load-project` does not return the project name: a first open without meta stores `name: ''` until mirroring / the project list updates it.
+- Not verified in a real browser / Tauri yet (see the report of this package).
+- Desktop mirroring (`mirrorProject`) treats a project as closed until its session registered the sync engine; a mirror pass running while that project is opening may store a newer server snapshot as base + working behind the open (skipped when rows are pending). The open session rewrites the working copy and the next cycle pulls from the live floor, so nothing is lost, but the base is briefly ahead of the live position.
+- On a peer's presence join, `use-collaboration.ts` re-dispatches the whole local state as **persistent** live-ops (`fixture.drag` for all fixtures, `modifier.sync` with the full list). They become outbox rows/server changes of this client; `modifier.sync` replaces the whole modifier list when replayed (ADR §1). Gated by the persist gate, but a design issue on its own.
+
+## Tests
+
+Fake port + in-memory fake server (`sync-test-kit.ts`, `sync-test-server.ts`: global sequence numbers, reserved late commits, unconfirmed acks, HTTP failure injection per function or per change id).
+
+| Scenario (ADR 0004) | Test file → test |
+|---|---|
+| Offline open, first open, tail continuation, migrated rows (incl. covered by the snapshot) | `sync-open.test.ts` |
+| Outbox order, acks, unconfirmed acks, offline push | `sync-outbox-push.test.ts` |
+| Rebase: offline edit of A vs. remote add of B, rebased payload pushed, base/cursor advanced; same-field conflict + restore; skipped `modifier.update`; skip-only rebase leaves no stale D5 snapshot | `sync-rebase-engine.test.ts` |
+| Second client replays the pushed payload and keeps B; `modifier.update` rebase; failing D5 snapshot → nothing pushed, retried next cycle; skipped `RenameNode`/`DeleteNodes`; restore id per rebase | `sync-rebase-safety.test.ts` |
+| Overlap dedup, late lower sequence, realtime/own echoes, realtime row during a backlog still rebases | `sync-overlap.test.ts` |
+| Local-only never calls remote, close + reopen yields the identical state; unbound copies (signed out / other account / deleted) | `sync-session.test.ts` |
+| `mirrorProject` (closed, other account, open project: delegation, concurrent requests apply once), `flushAll` binding rules | `sync-service.test.ts` |
+| Crash recovery on fake-indexeddb: restart, offline reopen, lost ack, idempotent re-push | `sync-recovery.test.ts` |
+| Realtime live-ops, failed outbox writes, headless ack vs. `outboxOrder`, rejected pushes | `sync-hardening.test.ts` |
+| Session lifecycle: stop waits for an in-flight push; a step finishing after stop cannot touch the next project; no sync as another account / signed out / after a switch mid-cycle; `onRebased` | `sync-engine-lifecycle.test.ts` |
+| Headless mirror: legacy rows without meta stay unbound; no write-back after sign-out | `project-mirror-account.test.ts` |
+| Close: final working write, disposed writer never writes again | `sync-session.test.ts` › close |
+| Reload on `/project/<id>`: WASM ready after the local open — scene, working copy, outbox and server snapshot keep the project; nothing persisted while loading or after close (real engine store, stubbed worker, fake-indexeddb, fake server) | `app/stores/engine-store-load-race.test.ts` |
+
+Also `persist-queue.test.ts` (outbox, no false "online"), `describe-conflicts.test.ts`, adapter tests in `merge/`.
+
+### Bugs fixed by these tests
+
+- **Data loss: demo grid overwrote the opened project** (`engine-store.ts`, test `app/stores/engine-store-load-race.test.ts`). `initEngine()` awaited `engine.ready` and then unconditionally set a 20-fixture demo grid (numeric ids 0–19). Since the local-first open finishes almost instantly, a hard reload on `/project/<id>` (Tauri webview reload after a WebContent crash, Cmd+R) applied the project before WASM was ready; the demo grid then replaced it while the sync session was already active, so edits on it were pushed as the project's changes (`fixture.drag` with numeric ids) and the autosave uploaded it as the project's server snapshot. Fix: `initEngine` is idempotent, returns a shared promise and never touches project state (demo seeding removed); `loadProject` awaits it before applying; persist gate (see Open, step 4) — `persist-queue.test.ts` › safety gate.
+- Realtime row received during a backlog made the cycle skip the rebase and push stale payloads (`sync-cycle.ts`, rebase decided on the base).
+- Skip-only rebase left `state.safety` set → stale `before offline sync` snapshot on a later push (`sync-push.ts`).
+- Conflicts of a later rebase offered the snapshot of an earlier one for restore (`sync-cycle.ts` resets `safetySnapshotId`).
+- Own rows confirmed by a pull returned no sequence number to the persist queue (`sync-cycle.ts`).
+- Realtime live-op rows were marked seen but never applied (`sync-realtime.ts`, `use-collaboration.ts`).
+- Failed outbox writes lost the rest of the batch (`outbox-writer.ts`).
+- `pushHeadless` marked rows newer than the working snapshot as reflected (`project-mirror.ts`).
+- Migrated rows covered by the server snapshot were applied twice on first open (`open-flow.ts`, `open-legacy-rows.ts`).
+- A permanently rejected row blocked every later push (`sync-push.ts`, `sync-reject.ts`).
+- The persist queue reported "online" after hooks that made no request (`persist-queue.ts`).
+
+Not covered yet: realtime rows deferred during a running cycle (`drain`), the real `EngineStatePort` (tests use the fake port), browser/Tauri runs.

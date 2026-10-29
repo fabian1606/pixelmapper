@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { isSerializable, type SerializableCommand } from '../commands/serializable-command';
+import { newUuid } from '~/utils/ids';
 
 export interface Command {
   description: string;
@@ -22,27 +23,13 @@ const commandsSinceSnapshot = ref(0);
 
 export const lastSeenSequenceNumber = ref<number>(0);
 
-export interface WalEntryForHooks {
-  id: string;
-  projectId: string;
-  commandType: string;
-  payload: unknown;
-  enqueuedAt: number;
-}
-
 const persistenceHooks = {
   /** Persist a single command. `changeId` is the client-generated idempotency key
-   *  (UUID) which must match the WAL entry written via `walAppend`. */
+   *  (UUID); the persist queue appends it to the outbox before sending it. */
   pushChange: null as ((commandType: string, payload: object, changeId: string) => Promise<number | undefined>) | null,
   saveSnapshot: null as (() => Promise<void>) | null,
   /** Called after any local mutation that may need to land in a snapshot. */
   markDirty: null as (() => void) | null,
-  /** Append a pending change to the IndexedDB WAL. Fire-and-forget — local
-   *  apply does not block on the write, but the entry IS durable before any
-   *  network call happens because the WAL write is queued first. */
-  walAppend: null as ((entry: WalEntryForHooks) => Promise<void>) | null,
-  /** Current project id — needed for WAL scoping. */
-  currentProjectId: null as (() => string | null) | null,
   /** Called for every persisted command (requires bookkeeping, ADR §5.8). */
   onPersist: null as ((commandType: string, payload: object) => void) | null,
 };
@@ -51,16 +38,24 @@ export function setPersistenceHooks(hooks: {
   pushChange: (commandType: string, payload: object, changeId: string) => Promise<number | undefined>;
   saveSnapshot: () => Promise<void>;
   markDirty?: () => void;
-  walAppend?: (entry: WalEntryForHooks) => Promise<void>;
-  currentProjectId?: () => string | null;
   onPersist?: (commandType: string, payload: object) => void;
 }) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
   persistenceHooks.markDirty = hooks.markDirty ?? null;
-  persistenceHooks.walAppend = hooks.walAppend ?? null;
-  persistenceHooks.currentProjectId = hooks.currentProjectId ?? null;
   persistenceHooks.onPersist = hooks.onPersist ?? null;
+}
+
+/**
+ * Drop the undo/redo stacks (project switch / close, and after a sync
+ * rebase). The stored commands capture before/after states of the old live
+ * state; undoing or redoing them after a rebase that merged a peer's edits
+ * would push those stale payloads and silently revert the peer's changes.
+ */
+export function clearHistory(): void {
+  past.value = [];
+  future.value = [];
+  version.value++;
 }
 
 export function triggerSaveSnapshot() {
@@ -68,7 +63,8 @@ export function triggerSaveSnapshot() {
 }
 
 /**
- * Single point of truth for: (1) WAL write, (2) server push, (3) snapshot-counter.
+ * Single point of truth for: (1) outbox write + server push (persist queue),
+ * (2) snapshot-counter.
  * All four call sites (persistChange, execute, undo-inverse, redo) funnel through here.
  */
 function persistOne(commandType: string, payload: object, label: string) {
@@ -79,23 +75,10 @@ function persistOne(commandType: string, payload: object, label: string) {
   catch (err) {
     console.warn(`[history] onPersist failed (${label}):`, err);
   }
-  const changeId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const changeId = newUuid();
 
-  // WAL FIRST — durable before any network call. The promise is not awaited so
-  // local apply stays synchronous, but the IDB transaction is already queued.
-  const projectId = persistenceHooks.currentProjectId?.() ?? '';
-  if (projectId && persistenceHooks.walAppend) {
-    persistenceHooks.walAppend({
-      id: changeId,
-      projectId,
-      commandType,
-      payload,
-      enqueuedAt: Date.now(),
-    }).catch(err => console.warn(`[history] WAL append failed (${label}):`, err));
-  }
-
+  // The persist queue appends the outbox row (durable) before any network
+  // call; local apply stays synchronous.
   persistenceHooks.pushChange(commandType, payload, changeId).then((seq) => {
     if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
     commandsSinceSnapshot.value++;

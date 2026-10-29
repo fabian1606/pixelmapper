@@ -60,7 +60,23 @@ A `Beam` lives inside a `Fixture` and represents a single output point of light.
 | Custom SVG (with `headPositions`) | SVG element centroid: `(pos.x − 0.5) × 0.95` |
 | Custom SVG (legacy, no `headPositions`) | Uniform grid fallback |
 
-For custom SVG fixtures the true element centroid is computed once at save-time (see `computeHeadElementCentroids` in `app/utils/engine/svg-element-positions.ts`) and stored in `pixelmapper.customSvg.headPositions`. This ensures modifier fanning spreads phase correctly even for non-linear arrangements (circles, fans, etc.).
+For custom SVG fixtures the true element centroid is computed once at save-time (see `computeHeadElementCentroids` in `app/utils/engine/svg-element-positions.ts`) and stored in `pixelmapper.customSvg.headPositions`. The bbox center is mapped through the element→root CTM, so heads placed via `transform` (typical for Affinity/Illustrator/Figma exports) get distinct positions. `createFixtureFromOfl` recomputes the centroids from the SVG whenever a DOM is available and only falls back to the stored ones otherwise. This ensures modifier fanning spreads phase correctly even for non-linear arrangements (circles, fans, etc.).
+
+### Multi-head fixtures in 3D
+
+`buildSceneModel` (`app/components/three/scene/fixture-adapter.ts`) places every beam at its own position on the fixture footprint. Multi-head fixtures additionally get:
+
+- **Emitting face** (`SegmentModel`, rendered by `pixel-segments.ts`): one quad per head on the body box's top face, filled with that head's live color every frame, so pixel effects are readable along a bar.
+- **Per-head beam cones**: when the fixture has a lens or pan/tilt, each head gets its own cone at its position and color (no moving-head box). Single-head fixtures keep one cone with a head box at the fixture origin.
+
+### Moving heads in 3D
+
+Single-head fixtures with a positional PAN or TILT channel get a procedural model (`moving-head-geometry.ts` for proportions, `beam-cones.ts` for the rig): the base is the fixture's selection body box, a pan bearing and U-yoke rotate with pan, and the head barrel tilts about the yoke axis with a lens that glows in the beam color. The cone starts at the lens.
+
+- **Frame**: origin = center of the base's bottom face (mounting plane). The neutral pose (pan/tilt at their DMX midpoint) points the beam along local +Y — up for a floor-standing fixture. Hanging fixtures use the fixture's Tilt = 180°.
+- **Size**: OFL `physical.dimensions` [w, h, d] mm, persisted as `Fixture.dimensionsMm`; without them the median OFL moving head (296×389×243 mm) scaled to the footprint.
+- **Motion range**: `Fixture.motionRange` (`app/utils/engine/core/motion-range.ts`) stores the OFL `angleStart`/`angleEnd` of the positional Pan/Tilt capability at creation (channel `oflCapabilities` are not persisted). Angles are centered: DMX 0 → −range/2, DMX max → +range/2; inverted ranges keep their direction. Percent angles fall back to 540°/270°; `PanContinuous`/`TiltContinuous`-only channels are speed controls and don't move the pose.
+- **Resolution**: coarse PAN/TILT are linked to their fine channel whenever OFL `fineChannelAliases` is set (`dmxValueResolution` is optional in OFL and only gives the unit of ranges/defaults), so the 3D pose and the engine's head targets are 16-bit.
 
 When `buildLayoutBin` computes `world_x/world_y` for each channel, it uses `beamWorldPx(fixture, beam)` (`app/utils/kinds/kind-host.ts`): kind beams rotate their `offsetPx` about the fixture origin; classic beams scale the normalized offset by the fixture footprint and rotate it:
 

@@ -8,6 +8,7 @@
 - Supports drag-and-drop to update `fixture.fixturePosition`.
 - Positions are normalized (0–1), making them resolution-independent.
 - Updated positions are immediately encoded into the next `layoutPacket` rebuild (via the `watch(flatFixtures)` watcher in engine-store).
+- **Swap handles (Figma-style)**: with ≥2 fixtures selected (groups count via their members, max 400), an SVG overlay draws a small grey dot at each selected fixture's visual center. Dragging a dot drags that fixture with the pointer. Every fixture's pre-drag footprint is frozen at drag start as its hover zone (`pointInFootprint`, +4 px). Hovering another fixture's zone moves that fixture into the dragged fixture's original place and shows a ghost outline (`fixtureFootprint`) of the dragged fixture where the partner stood. Leaving the zone sends the partner back. Releasing on a partner snaps into the ghost; both changes are one `MoveFixtureCommand` (x/y only; z and rotation stay). Releasing elsewhere or leaving the viewport returns everything to the original positions. Code: `composables/use-swap-handles.ts` (pointer, live placement, ghost) and `utils/engine/swap-positions.ts` (pure math — kind fixtures swap by AABB center, not origin).
 
 ### 60 fps Rendering Optimizations
 
@@ -66,6 +67,6 @@ Domain inputs (faders, number fields, color/XY inputs, tap tempo, trigger button
 
 `FixtureSidebar.vue` provides a navigable tree of all fixtures and groups with:
 
-- **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor.
+- **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor. Hovering a fixture in the 2D canvas highlights its row (`canvas-hover-store.ts`), also inside a selected group, and scrolls it into view.
 - **Preset/programmer tab** — Active preset management.
 - **Selection info** — Average X/Y position for multi-selections; full channel details (address, type, manufacturer, model) for single selections.

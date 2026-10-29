@@ -1,29 +1,21 @@
 /**
  * USB serial DMX node (ESP32): streams rendered universes (plan P6.2 —
  * no on-device rendering any more) and updates its firmware over the same
- * port (native OTA packets).
+ * port (native OTA packets). The firmware comes from the app bundle
+ * (desktop, offline) or the latest GitHub release (see `firmware-source.ts`).
  */
-import { computed, ref } from 'vue';
+import { computed, ref, shallowRef } from 'vue';
+import { getPlatform } from '@pixelmapper/extension-api';
 import { SerialPortConnector } from './serial-base';
 import { dmxFrame, otaBegin, otaChunk, otaEnd, universeMap, versionRequest } from './protocol';
+import {
+  fetchLatestRelease, isNewer, pickFirmware, readBundledFirmware, type FirmwareCandidate,
+} from './firmware-source';
 
-/** Release feed of the firmware. */
-const RELEASES_URL = 'https://api.github.com/repos/fabian1606/pixelmapper/releases/latest';
+export { isNewer };
+
 /** OTA chunk size (fits the device's 8 KB RX buffer). */
 const OTA_CHUNK = 2048;
-
-/** True when `latest` is a newer semver than `current` (`dev` is always outdated). */
-export function isNewer(latest: string | null, current: string | null): boolean {
-  if (!latest || !current) return false;
-  if (current === 'dev') return true;
-  const a = latest.split('.').map(Number);
-  const b = current.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((a[i] ?? 0) > (b[i] ?? 0)) return true;
-    if ((a[i] ?? 0) < (b[i] ?? 0)) return false;
-  }
-  return false;
-}
 
 export class EspSerialConnector extends SerialPortConnector {
   readonly meta = { type: 'serial', label: 'USB Serial (ESP32)', icon: 'usb' };
@@ -32,7 +24,10 @@ export class EspSerialConnector extends SerialPortConnector {
 
   firmwareVersion = ref<string | null>(null);
   latestVersion = ref<string | null>(null);
-  latestBinUrl = ref<string | null>(null);
+  /** Firmware offered for flashing (newest of bundled / GitHub), `null` if none. */
+  latestFirmware = shallowRef<FirmwareCandidate | null>(null);
+  /** Bundled fallback when a GitHub download fails (desktop only). */
+  private bundledFirmware: FirmwareCandidate | null = null;
   isFlashing = ref(false);
   flashProgress = ref(0);
   updateAvailable = computed(() => isNewer(this.latestVersion.value, this.firmwareVersion.value));
@@ -91,17 +86,15 @@ export class EspSerialConnector extends SerialPortConnector {
 
   // ── Firmware ───────────────────────────────────
 
-  /** Downloads the latest release and flashes it over OTA. */
+  /** Loads the offered firmware (bundled or downloaded) and flashes it over OTA. */
   async flashFirmware(): Promise<void> {
     if (this.isFlashing.value || !this.writable) return;
-    if (!this.latestBinUrl.value) { this.pushLog('[flash] latest version unknown'); return; }
+    const firmware = this.latestFirmware.value;
+    if (!firmware) { this.pushLog('[flash] no firmware available'); return; }
     this.isFlashing.value = true;
     this.flashProgress.value = 0;
-    this.pushLog(`[flash] fetching v${this.latestVersion.value}`);
     try {
-      const res = await fetch(`/api/firmware-proxy?url=${encodeURIComponent(this.latestBinUrl.value)}`);
-      if (!res.ok) throw new Error(`Firmware download failed: ${res.statusText}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = await this.loadFirmware(firmware);
       // Begin (the device erases its partition first — can take seconds).
       const begun = this.waitForLine(l => l.includes('[ota] begin'), 10000);
       this.send(otaBegin(bytes.length));
@@ -131,17 +124,54 @@ export class EspSerialConnector extends SerialPortConnector {
     }
   }
 
-  /** Reads the latest release version and binary URL. */
-  private async fetchLatestVersion(): Promise<void> {
+  /**
+   * Loads the binary; a failed GitHub download falls back to the bundled
+   * firmware (desktop, e.g. when the connection dropped meanwhile).
+   */
+  private async loadFirmware(firmware: FirmwareCandidate): Promise<Uint8Array> {
+    this.pushLog(`[flash] loading v${firmware.version} (${firmware.origin})`);
     try {
-      const res = await fetch(RELEASES_URL);
-      if (!res.ok) return this.pushLog(`[version] fetch failed: HTTP ${res.status}`);
-      const data = await res.json() as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
-      this.latestVersion.value = data.tag_name?.replace(/^v/, '') ?? null;
-      this.latestBinUrl.value = data.assets?.find(a => a.name === 'firmware.bin')?.browser_download_url ?? null;
+      return await firmware.load();
     }
     catch (e) {
-      this.pushLog(`[version] fetch error: ${(e as Error)?.message ?? e}`);
+      const fallback = this.bundledFirmware;
+      if (firmware.origin !== 'github' || !fallback) throw e;
+      this.pushLog(`[flash] download failed (${(e as Error)?.message ?? e}) — using bundled v${fallback.version}`);
+      this.latestFirmware.value = fallback;
+      this.latestVersion.value = fallback.version;
+      return await fallback.load();
     }
+  }
+
+  /**
+   * Determines the firmware to offer: the bundled copy (offline) and, when
+   * reachable, the latest GitHub release — whichever is newer. The bundled
+   * copy is offered right away; the (time-limited) remote check only
+   * upgrades it.
+   */
+  private async fetchLatestVersion(): Promise<void> {
+    const platform = getPlatform();
+    try {
+      this.bundledFirmware = await readBundledFirmware(platform);
+    }
+    catch (e) {
+      this.pushLog(`[version] bundled firmware unreadable: ${(e as Error)?.message ?? e}`);
+    }
+    // Offer the bundled firmware immediately — no waiting on the network.
+    if (this.bundledFirmware) {
+      this.latestFirmware.value = this.bundledFirmware;
+      this.latestVersion.value = this.bundledFirmware.version;
+    }
+    let remote: FirmwareCandidate | null = null;
+    try {
+      remote = await fetchLatestRelease(platform);
+    }
+    catch (e) {
+      // Offline is normal on the desktop; the bundled firmware still works.
+      this.pushLog(`[version] release check failed: ${(e as Error)?.message ?? e}`);
+    }
+    const picked = pickFirmware(this.bundledFirmware, remote);
+    this.latestFirmware.value = picked;
+    this.latestVersion.value = picked?.version ?? null;
   }
 }

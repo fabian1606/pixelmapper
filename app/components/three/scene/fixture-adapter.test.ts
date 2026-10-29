@@ -54,3 +54,74 @@ describe('buildSceneModel (kind fixtures)', () => {
     expect(p[2]).toBeCloseTo(-1);
   });
 });
+
+describe('buildSceneModel (multi-head OFL fixtures)', () => {
+  it('gives a lens-bearing LED bar one cone per head at the head positions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { createFixtureFromOfl } = await import('~/utils/ofl/fixture-factory');
+    // Stairville LED Bar 240/8: 8 pixels, lens 30°, 24-channel per-pixel mode.
+    const ofl = JSON.parse(readFileSync('ofl-data/fixtures/stairville/led-bar-240-8.json', 'utf8'));
+    const mode = ofl.modes.findIndex((m: { name: string }) => m.name === '24-channel');
+    const f = createFixtureFromOfl(ofl, mode);
+    const model = buildSceneModel([f]);
+
+    expect(model.beams).toHaveLength(8);
+    expect(model.beams.every(b => !b.showHead)).toBe(true);
+    // Cones sit on the pixels, not stacked at the fixture center.
+    const coneX = model.beams.map(b => b.position.x);
+    const pixelX = Array.from(model.pixels.positions).filter((_, i) => i % 3 === 0);
+    coneX.forEach((x, i) => expect(x).toBeCloseTo(pixelX[i]!));
+    expect(Math.max(...coneX) - Math.min(...coneX)).toBeGreaterThan(0.8);
+
+    // Emitting face: one segment per head on top of the body, spanning the bar.
+    expect(model.segments).toHaveLength(8);
+    model.segments.forEach((sgm, i) => {
+      expect(sgm.position.x).toBeCloseTo(pixelX[i]!);
+      expect(sgm.position.y).toBeGreaterThan(model.bodies[0]!.position.y);
+    });
+    const totalWidth = model.segments.reduce((sum, sgm) => sum + sgm.width, 0);
+    expect(totalWidth).toBeGreaterThan(0.9);
+  });
+});
+
+describe('buildSceneModel (moving heads)', () => {
+  /** OFL moving head through factory + project save/load (definition and capabilities dropped). */
+  async function loadSpica() {
+    const { readFileSync } = await import('node:fs');
+    const { createFixtureFromOfl } = await import('~/utils/ofl/fixture-factory');
+    const { serializeFixture, deserializeFixture } = await import('~/utils/engine/serialize');
+    // 5star Systems Spica 250M: pan 530°, tilt 280°, 427×459×373 mm, 16-bit.
+    const ofl = JSON.parse(readFileSync('ofl-data/fixtures/5star-systems/spica-250m.json', 'utf8'));
+    const created = createFixtureFromOfl(ofl, 0);
+    return { created, reloaded: deserializeFixture(JSON.parse(JSON.stringify(serializeFixture(created)))) };
+  }
+
+  it('keeps the OFL motion range and housing size across a project reload', async () => {
+    const { created, reloaded } = await loadSpica();
+    for (const f of [created, reloaded]) {
+      const beam = buildSceneModel([f]).beams[0]!;
+      expect(beam.panRange).toEqual([0, 530]);
+      expect(beam.tiltRange).toEqual([0, 280]);
+      expect(beam.panFineIdx).toBeGreaterThanOrEqual(0);
+      expect(beam.movingHead?.height).toBeCloseTo(0.459);
+      expect(beam.movingHead?.width).toBeCloseTo(0.427);
+    }
+  });
+
+  it('builds a model whose head clears the yoke over the full tilt travel', async () => {
+    const { created } = await loadSpica();
+    const model = buildSceneModel([created]);
+    const d = model.beams[0]!.movingHead!;
+    // Pointing straight down, the head's back must stay above the crossbar.
+    expect(d.tiltAxisY - d.headLength / 2).toBeGreaterThanOrEqual(d.crossbarTop);
+    // Pointing up, the lens stays within the housing height.
+    expect(d.tiltAxisY + d.headLength / 2).toBeLessThanOrEqual(d.height + 1e-9);
+    // Head fits between the arms.
+    expect(d.headRadius).toBeLessThan(d.armX - d.armThickness / 2);
+    // The base box is the selection body, sitting on the mounting plane.
+    const body = model.bodies[0]!;
+    expect(body.localOffset?.y).toBeCloseTo(d.baseHeight / 2);
+    // The lens shows the color — no static pixel dot at the origin.
+    expect(model.pixels.count).toBe(0);
+  });
+});

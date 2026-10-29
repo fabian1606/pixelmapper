@@ -1,6 +1,7 @@
 import { Fixture, type FixtureKindInstance } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
+import type { MotionRange } from './core/motion-range'
 import { Beam } from './core/beam'
 import type { Preset } from './preset-types'
 import type { ModifierInstance } from './types'
@@ -71,6 +72,10 @@ export interface SerializedFixture {
   rollZ?: number
   /** OFL lens beam angle range in degrees — drives 3D beam cones. */
   lensDegreesMinMax?: [number, number]
+  /** Pan/tilt travel from OFL capabilities — drives the 3D motion range. */
+  motionRange?: MotionRange
+  /** OFL housing size [w, h, d] in mm — shapes the 3D moving-head model. */
+  dimensionsMm?: [number, number, number]
   manufacturer: string
   fixtureType: string
   oflKey?: string
@@ -160,6 +165,8 @@ export function serializeFixture(f: Fixture): SerializedFixture {
     tiltX: f.tiltX,
     rollZ: f.rollZ,
     lensDegreesMinMax: f.lensDegreesMinMax ? [...f.lensDegreesMinMax] : undefined,
+    motionRange: f.motionRange ? cloneJson(f.motionRange) : undefined,
+    dimensionsMm: f.dimensionsMm ? [...f.dimensionsMm] : undefined,
     manufacturer: f.manufacturer,
     fixtureType: f.fixtureType,
     oflKey: f.oflKey,
@@ -273,6 +280,8 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.tiltX = data.tiltX ?? 0
   f.rollZ = data.rollZ ?? 0
   f.lensDegreesMinMax = data.lensDegreesMinMax ? [...data.lensDegreesMinMax] : undefined
+  f.motionRange = data.motionRange ? cloneJson(data.motionRange) : undefined
+  f.dimensionsMm = data.dimensionsMm ? [...data.dimensionsMm] : undefined
   f.manufacturer = data.manufacturer
   f.fixtureType = data.fixtureType
   f.oflKey = data.oflKey

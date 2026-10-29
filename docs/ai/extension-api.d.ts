@@ -926,7 +926,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.2.0";
+  export const API_VERSION = "1.3.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1302,12 +1302,36 @@ declare module '@pixelmapper/extension-api' {
           sysex?: boolean;
       }): Promise<MidiAccessHandle>;
   }
+  /**
+   * Native HTTP GET without browser CORS restrictions (API 1.3).
+   * Native implementations MAY restrict the allowed hosts (the desktop app
+   * allows the GitHub release hosts only).
+   */
+  export interface HttpApi {
+      /** Downloads a URL (redirects followed); rejects on network errors and non-2xx answers. */
+      getBytes(url: string): Promise<Uint8Array>;
+  }
+  /**
+   * Read-only files shipped inside the app bundle (API 1.3), e.g. the
+   * firmware matching the app release (ADR 0004 D19).
+   */
+  export interface ResourcesApi {
+      /**
+       * Reads a bundled file by its relative path (e.g. `firmware/firmware.bin`).
+       * Resolves `null` when the file was not bundled.
+       */
+      read(path: string): Promise<Uint8Array | null>;
+  }
   /** Platform-dependent capabilities. `null` = not available here. */
   export interface Platform {
       readonly kind: PlatformKind;
       readonly udp: UdpApi | null;
       readonly serial: SerialApi | null;
       readonly midi: MidiApi | null;
+      /** Native HTTP (desktop). Optional: hosts before API 1.3 omit it — treat absent as `null`. */
+      readonly http?: HttpApi | null;
+      /** Files bundled with the app (desktop). Optional: absent = `null` (API 1.3). */
+      readonly resources?: ResourcesApi | null;
   }
   /** Returns the platform of the running host (connectors, drivers, components). */
   export function getPlatform(): Platform;

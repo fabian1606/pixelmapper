@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import { buildOflBundle } from './scripts/tauri/ofl-bundle';
 
 /**
  * First-party extensions included as Nuxt layers: the distribution set
@@ -32,6 +33,32 @@ const NO_EXTENSIONS = process.env.PM_NO_EXTENSIONS === '1';
  */
 const IS_TAURI = !!process.env.TAURI_ENV_PLATFORM;
 const PLATFORM_DIR = IS_TAURI ? 'tauri' : 'web';
+
+/**
+ * Extra public dir of desktop builds (gitignored): the offline OFL library
+ * (ADR 0004 D18) is written here and served at `/ofl/`. Web builds never
+ * see it and keep using the Nitro route `/api/fixtures`.
+ */
+const TAURI_PUBLIC_DIR = fileURLToPath(new URL('./.tauri-public', import.meta.url));
+
+/** Inline module (Tauri only): builds the OFL bundle before Nitro starts. */
+async function bundleOflForTauri(): Promise<void> {
+  const src = fileURLToPath(new URL('./ofl-data/fixtures', import.meta.url));
+  const stats = await buildOflBundle(src, TAURI_PUBLIC_DIR);
+  if (!stats) console.warn('[ofl-bundle] ofl-data/fixtures missing — the desktop fixture library will be empty (run ./scripts/setup-ofl.sh)');
+  else console.info(`[ofl-bundle] ${stats.fixtures} fixtures bundled for the desktop app`);
+}
+
+/**
+ * Desktop builds (`useSsrCookies: false`) swap the `@nuxtjs/supabase` client
+ * plugin for `app/runtime/supabase-spa.client.ts`: the module's version awaits
+ * `auth.getSession()`, which blocks app start for a minute or more when the
+ * app starts offline with an expired token (ADR 0004 D10, wp-p0.md). The
+ * replacement keeps the plugin name `supabase`, `enforce: 'pre'` and the
+ * session/user state contract. Web builds keep the module plugin.
+ */
+const SUPABASE_MODULE_CLIENT_PLUGIN = /[\\/]@nuxtjs[\\/]supabase[\\/]dist[\\/]runtime[\\/]plugins[\\/]supabase\.client(\.m?js)?$/;
+const SUPABASE_SPA_CLIENT_PLUGIN = fileURLToPath(new URL('./app/runtime/supabase-spa.client.ts', import.meta.url));
 
 export default defineNuxtConfig({
   // The desktop app loads static files from disk: build it as an SPA
@@ -101,7 +128,24 @@ export default defineNuxtConfig({
     },
   },
 
-  modules: ['shadcn-nuxt', '@nuxtjs/color-mode', '@pinia/nuxt', '@nuxtjs/supabase'],
+  modules: [
+    'shadcn-nuxt',
+    '@nuxtjs/color-mode',
+    '@pinia/nuxt',
+    '@nuxtjs/supabase',
+    ...(IS_TAURI ? [bundleOflForTauri] : []),
+  ],
+
+  hooks: {
+    // See SUPABASE_MODULE_CLIENT_PLUGIN. Desktop only; fails loudly if the module plugin moved.
+    'app:resolve'(app) {
+      if (!IS_TAURI) return;
+      const plugin = app.plugins.find(p => SUPABASE_MODULE_CLIENT_PLUGIN.test(p.src));
+      if (!plugin) throw new Error('[supabase-spa] @nuxtjs/supabase client plugin not found — update nuxt.config.ts');
+      plugin.src = SUPABASE_SPA_CLIENT_PLUGIN;
+      plugin.mode = 'client';
+    },
+  },
 
   supabase: {
     // SSR cookies are `Secure`; WebKit (Tauri) drops Secure cookies on
@@ -109,6 +153,14 @@ export default defineNuxtConfig({
     // builds. The desktop app renders client-side only, so it keeps the
     // session in localStorage instead.
     useSsrCookies: !IS_TAURI,
+    // Desktop: the refresh ticker runs only while online (started/stopped by
+    // `app/runtime/supabase-spa.client.ts`); offline an expired-token tick
+    // holds the auth lock for ~30 s of retries (ADR 0004 D10).
+    ...(IS_TAURI ? { clientOptions: { auth: { autoRefreshToken: false } } } : {}),
+    // The desktop app boots without an account (ADR 0004 D3): the module's
+    // global login redirect is off there and `auth.global.ts` decides per
+    // route via `getAccountPolicy()`. The web app keeps mandatory login.
+    redirect: !IS_TAURI,
     redirectOptions: {
       login: '/auth/login',
       callback: '/auth/confirm',
@@ -125,6 +177,8 @@ export default defineNuxtConfig({
         baseName: 'ofl-fixtures',
         dir: '../ofl-data/fixtures'
       }
-    ]
+    ],
+    // Desktop only: static OFL bundle next to the SPA (see TAURI_PUBLIC_DIR).
+    ...(IS_TAURI ? { publicAssets: [{ dir: TAURI_PUBLIC_DIR }] } : {}),
   }
 })
