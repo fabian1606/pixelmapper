@@ -32,6 +32,8 @@ import { registerCommand } from '~/components/engine/commands/serializable-comma
 // range edits replay correctly on project load.
 import '~/components/engine/commands/set-channel-range-command';
 import '~/components/engine/commands/set-fixture-kind-config-command';
+// Composite (operations transactions) replay registration (ADR 0002 §4.3).
+import '~/components/engine/commands/composite-command';
 // Side-effect import — registers all live-op handlers (section.setActive,
 // preset-ops, etc.) so getLiveOpConfig() resolves during tail replay even
 // before any live-mode UI component has been mounted.

@@ -153,9 +153,12 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     if (page) Object.assign(page, changes);
   }
 
-  function addWidget(pageId: string, widget: LiveWidget) {
+  /** Adds a widget; `index` inserts it at that position (undo of a removal keeps the order). */
+  function addWidget(pageId: string, widget: LiveWidget, index?: number) {
     const page = pages.value.find(p => p.id === pageId);
-    if (page) page.widgets.push(widget);
+    if (!page) return;
+    if (index === undefined || index < 0 || index >= page.widgets.length) page.widgets.push(widget);
+    else page.widgets.splice(index, 0, widget);
   }
 
   function removeWidget(pageId: string, widgetId: string) {

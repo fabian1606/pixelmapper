@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { isSerializable, type SerializableCommand } from '../commands/serializable-command';
 import { newUuid } from '~/utils/ids';
+import { logEvent, type Actor } from '~/utils/observability/event-log';
 
 export interface Command {
   description: string;
@@ -10,6 +11,41 @@ export interface Command {
    *  When present, undo() pushes this inverse to the DB so the change persists
    *  across reloads and syncs to other clients. */
   inverse?(): Command | null;
+}
+
+/** Options of `useHistory().execute`. */
+export interface ExecuteOptions {
+  /** Who caused the change (event log attribution). Default: the command's own `actor`, else `user`. */
+  actor?: Actor;
+  /**
+   * The command's effect is already in the state (transaction runners that
+   * executed the children incrementally): only record, log and persist it.
+   */
+  applied?: boolean;
+}
+
+// ─── Event log ───────────────────────────────────────────────────────────────
+
+/** Actor of an executed command: explicit option, the command's own `actor` field, or `user`. */
+function actorOf(command: Command, explicit?: Actor): Actor {
+  return explicit ?? (command as { actor?: Actor }).actor ?? 'user';
+}
+
+/** Logs a history step (`command.execute` / `.undo` / `.redo`) to the event log. */
+function logCommand(step: 'execute' | 'undo' | 'redo' | 'remote', command: Command, actor: Actor) {
+  try {
+    const groupId = (command as { id?: unknown }).id;
+    logEvent({
+      actor,
+      kind: `command.${step}`,
+      code: isSerializable(command) ? command.commandType : 'local',
+      message: command.description,
+      undoGroupId: typeof groupId === 'string' ? groupId : undefined,
+    });
+  }
+  catch (err) {
+    console.warn('[history] event log failed:', err);
+  }
 }
 
 // ─── Module-level singleton state ────────────────────────────────────────────
@@ -106,8 +142,10 @@ export function useHistory() {
   const canRedo = computed(() => future.value.length > 0);
   const lastDescription = computed(() => past.value.at(-1)?.description ?? null);
 
-  function execute(command: Command) {
-    command.execute();
+  /** Executes (unless `opts.applied`) and records a command as one undo step. */
+  function execute(command: Command, opts: ExecuteOptions = {}) {
+    if (!opts.applied) command.execute();
+    logCommand('execute', command, actorOf(command, opts.actor));
     past.value.push(command);
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
@@ -119,8 +157,10 @@ export function useHistory() {
     }
   }
 
-  function executeRemote(command: Command) {
+  /** Applies a command that came from a collaborator (already persisted). */
+  function executeRemote(command: Command, opts: { actor?: Actor } = {}) {
     command.execute();
+    logCommand('remote', command, opts.actor ?? 'collaborator:remote');
     past.value.push(command);
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
@@ -128,10 +168,12 @@ export function useHistory() {
     // No persistence — command came from Realtime, already in DB
   }
 
-  function undo() {
+  /** Undoes the newest step; `opts.actor` = who undoes (default `user`). */
+  function undo(opts: { actor?: Actor } = {}) {
     const command = past.value.pop();
     if (!command) return;
     command.undo();
+    logCommand('undo', command, opts.actor ?? 'user');
     future.value.push(command);
     version.value++;
     persistenceHooks.markDirty?.();
@@ -148,10 +190,12 @@ export function useHistory() {
     }
   }
 
-  function redo() {
+  /** Redoes the newest undone step; `opts.actor` = who redoes (default `user`). */
+  function redo(opts: { actor?: Actor } = {}) {
     const command = future.value.pop();
     if (!command) return;
     command.execute();
+    logCommand('redo', command, opts.actor ?? 'user');
     past.value.push(command);
     version.value++;
     persistenceHooks.markDirty?.();
