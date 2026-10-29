@@ -15,6 +15,8 @@ Protocol contract: [`architecture/mcp-bridge-protocol.md`](../../architecture/mc
 
 ## Register with Claude Code
 
+Inside this repo, copy the project config: `cp .mcp.json.example .mcp.json`. From anywhere else:
+
 ```bash
 claude mcp add pixelmapper -- bun run /ABSOLUTE/PATH/TO/pixelmapper/packages/mcp-bridge/src/cli.ts
 ```
@@ -44,7 +46,7 @@ Claude Code and Claude Desktop can run at the same time. The first process owns 
    ```bash
    bun run mcp token        # from the repo root
    ```
-2. In Pixelmapper, open **Settings → External agents**, turn it on and paste the token.
+2. In Pixelmapper, open **Settings** (gear icon in the header) **→ External agents**, turn it on and paste the token. The status line shows *Connected* once the app is paired (*Waiting for pixelmapper-mcp* while no MCP client has started the CLI).
 3. In Claude, call the `pixelmapper_status` tool or simply ask it to inspect the project.
 
 Only one Pixelmapper window is connected at a time. The most recently enabled window wins.

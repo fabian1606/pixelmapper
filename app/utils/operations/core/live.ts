@@ -4,7 +4,8 @@
  *
  * They wrap the commands in `live-widget-commands.ts` so an agent can build
  * a performer control page for an effect (sliders bound to modifier params
- * via `effect-param` mappings, buttons for presets / global functions).
+ * via `effect-param` mappings, buttons for presets / global functions or
+ * bool / trigger params, xy pads for point params).
  *
  * Grid: a page is `columns` cells wide (default 60); cells are square, so
  * the visible height is `rows = floor(columns · aspectRatioH / aspectRatioW)`
@@ -63,12 +64,15 @@ const GRID_DOC = [
 /** Mapping explanation shared by the descriptions. */
 const MAPPING_DOC = [
   'Mappings (field `mapping`, discriminated by `type`):',
-  '- effect-param { modifierId, paramKey }: slider drives a modifier value. paramKey = "strength" | "speed" | "fanning" | a numeric/int/bool plugin param key of that modifier (e.g. "count"; see modifiers.list → params). Sliders only.',
+  '- effect-param { modifierId, paramKey, behavior? }: drive a modifier value (plugin param keys: see modifiers.list → params, e.g. "count").',
+  '  Sliders: "strength" | "speed" | "fanning" | a number/int/bool/trigger param (0–1 maps onto min–max; bools switch at 0.5).',
+  '  Buttons: a bool param (behavior "latch" = toggle per press, default; "hold" = true while held) or a trigger param (press/release).',
+  '  XY pads: a point param (pad x/y 0–1 → the point\'s x/y).',
   '- channel { fixtureId, channelOffset } or { groupId, channelType }: raw DMX channel. Buttons, sliders, xy (x = channelOffset, y = channelOffset + 1).',
   '- dimmer-group { groupId } or { fixtureId }: dim fixtures. Buttons, sliders.',
   '- preset { presetId }, page-switch { targetPageId }, global-function { function: strobe|blind|blackout|speed, config? }, position-recall { positionId }: buttons only.',
   '- none: no action (color, label, beat, fixture-preview widgets ignore mappings).',
-  'A mapping a widget type cannot drive is stored but reported as a warning.',
+  'A mapping (or effect-param param type) a widget type cannot drive is stored but reported as a warning (mapping-ignored-by-widget).',
 ].join('\n');
 
 /** Widget view returned by `live.listPages`. */
@@ -277,6 +281,8 @@ export const liveAddWidget = defineCoreOperation({
     { input: { pageId: 'page-1', type: 'slider', label: 'Speed', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'speed' } }, note: 'Auto-placed slider driving the speed of modifier mod-1.' },
     { input: { pageId: 'page-1', type: 'slider', label: 'Count', gridX: 2, gridY: 0, mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'count' } }, note: 'Slider driving the plugin param "count".' },
     { input: { pageId: 'page-1', type: 'button', label: 'Strobe', color: '#ffffff', mapping: { type: 'global-function', function: 'strobe' } } },
+    { input: { pageId: 'page-1', type: 'xy', label: 'Center', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'center' } }, note: 'XY pad driving the point param "center" (x/y 0–1).' },
+    { input: { pageId: 'page-1', type: 'button', label: 'Invert', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'invert', behavior: 'hold' } }, note: 'Button setting the bool param "invert" while held.' },
   ],
   run(ctx, input) {
     const page = findPage(ctx.read, input.pageId);

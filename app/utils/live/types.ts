@@ -53,9 +53,12 @@ export interface BlindConfig {
   dimmerCurve: boolean
 }
 
+/** Button behavior: 'latch' toggles on each press, 'hold' is active only while held (momentary). */
+export type ButtonBehavior = 'hold' | 'latch'
+
 export interface SpeedConfig {
   multiplier: number
-  behavior: 'hold' | 'latch'
+  behavior: ButtonBehavior
 }
 
 export type GlobalFunctionConfig = StrobeConfig | BlindConfig | SpeedConfig | Record<string, never>
@@ -83,6 +86,8 @@ export interface LiveMapping {
   // effect-param
   effectId?: string
   paramKey?: string
+  /** Buttons on a bool param: toggle per press ('latch', default) or on while held ('hold'). */
+  behavior?: ButtonBehavior
   // page-switch
   targetPageId?: string
   // global-function

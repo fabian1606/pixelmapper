@@ -7,6 +7,7 @@
  * MCP bridge reuse the same tools.
  */
 import { z } from 'zod';
+import type { Actor } from './actor';
 import type { ApplyRequest, ApplyResult } from './apply';
 import type { ObserveReport, ObserveRequest } from './observe';
 import type { OperationDescription, OperationQuery, OperationSummary } from './operation';
@@ -29,6 +30,8 @@ export interface InspectRequest {
   detail?: 'summary' | 'full';
   /** `'events'`: max entries (default 50). */
   limit?: number;
+  /** `'events'`: filter by kind prefix, actor or cursor (`sinceId`). */
+  filter?: { kind?: string; actor?: string; sinceId?: number };
 }
 
 /** Zod schema of the inspect request. */
@@ -41,7 +44,12 @@ export const InspectRequestSchema = z.object({
     z.array(z.string()),
   ]).describe('"project", "selection", "events", { op, input } for a query operation, or entity ids.'),
   detail: z.enum(['summary', 'full']).optional(),
-  limit: z.number().int().positive().optional(),
+  limit: z.number().int().positive().optional().describe('"events": max entries (newest N, default 50).'),
+  filter: z.object({
+    kind: z.string().optional().describe('Kind or kind prefix, e.g. "command", "operation", "engine".'),
+    actor: z.string().optional().describe('Exact actor, e.g. "user" or "agent:mcp:claude-code".'),
+    sinceId: z.number().int().nonnegative().optional().describe('Only events newer than this id (cursor).'),
+  }).optional().describe('"events": filter.'),
 });
 
 /** Result of `inspect`: JSON value plus optional compact text. */
@@ -67,12 +75,22 @@ export interface GuideProvider {
 
 // ── Host ────────────────────────────────────────
 
+/** Per-call context of host methods that change or capture state. */
+export interface HostCallContext {
+  /** Actor the change is attributed to (default `user`). */
+  actor?: Actor;
+  /** Aborted when the caller cancels. */
+  signal?: AbortSignal;
+}
+
 /** Everything the agent tools need from a host. */
 export interface AgentHost {
   listOperations(query?: OperationQuery): OperationSummary[];
   describeOperation(id: string): OperationDescription | null;
   inspect(request: InspectRequest): Promise<InspectResult>;
-  apply(request: ApplyRequest): Promise<ApplyResult>;
-  observe(request: ObserveRequest): Promise<ObserveReport>;
+  /** Runs a transaction attributed to `ctx.actor`. */
+  apply(request: ApplyRequest, ctx?: HostCallContext): Promise<ApplyResult>;
+  /** Observes output; rejects with a readable error when observation is unavailable. */
+  observe(request: ObserveRequest, ctx?: HostCallContext): Promise<ObserveReport>;
   guides: GuideProvider;
 }

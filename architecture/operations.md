@@ -45,7 +45,7 @@ All positions are in normalized world space 0–1. `x` runs left to right and `y
 | `extensionData` / `channels` | `extensionData.set` (m), `channels.set` (m: normalized values, channelType / index / `#rrggbb`) |
 | `modifiers` | `list` (q), `add`, `update`, `remove`, `reorder`, `applyRecipe` (m). They use the card vocabulary (ADR B3): plugin alias or hash, targets, params, recipe, spread `same` / `spatial` / `order` / `within`, strength, blend, speed. Each produces one `SetModifiers` |
 | `plugins` | `list`, `get` (q); `build`, `publish` (action) |
-| `live` | `listPages` (q), `addPage`, `addWidget`, `updateWidget`, `removeWidget` (m; `effect-param` mappings by modifier id + param key) |
+| `live` | `listPages` (q), `addPage`, `addWidget`, `updateWidget`, `removeWidget` (m; `effect-param` mappings by modifier id + param key: sliders → number/int/bool/trigger and the built-in keys, buttons → bool (latch/hold) and trigger, xy pads → point; other combinations warn `mapping-ignored-by-widget`) |
 
 ## Tests
 

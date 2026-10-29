@@ -12,6 +12,7 @@ import { createTauriUdp } from './udp';
 import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
+import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
 
 /**
  * Width reserved for the macOS traffic lights (positioned in tauri.conf.json):
@@ -77,3 +78,11 @@ export { createTauriAppShell as getAppShell } from './app-shell';
 
 /** OFL library bundled into the app, works offline (ADR 0004 D18). */
 export { createBundledFixtureLibrary as getFixtureLibrary } from './fixture-library';
+
+/**
+ * MCP bridge to `pixelmapper-mcp` (ADR 0002 B8). Until the in-process MCP
+ * server lands, the webview uses the same WebSocket bridge as the browser.
+ */
+export function getAgentBridge(): AgentBridge {
+  return getSharedAgentBridge('tauri');
+}
