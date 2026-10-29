@@ -11,6 +11,7 @@ import { createWebSerial } from './serial';
 import { createWebMidi } from './midi';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { WEB_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
+import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
 
 /** Creates the web platform for the current browser. */
 export function createWebPlatform(): Platform {
@@ -43,3 +44,8 @@ export { createWebAppShell as getAppShell } from './app-shell';
 
 /** OFL library from the Nitro routes `/api/fixtures` (ADR 0004 D18). */
 export { createWebFixtureLibrary as getFixtureLibrary } from './fixture-library';
+
+/** MCP bridge to `pixelmapper-mcp` (ADR 0002 B8); the hello reports platform `web`. */
+export function getAgentBridge(): AgentBridge {
+  return getSharedAgentBridge('web');
+}
