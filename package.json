@@ -48,6 +48,7 @@
   "dependencies": {
     "@nuxtjs/supabase": "^2.0.6",
     "@pinia/nuxt": "^0.11.3",
+    "@pixelmapper/agent-kit": "workspace:*",
     "@pixelmapper/extension-api": "workspace:*",
     "@pixelmapper/plugin-toolchain": "workspace:*",
     "@tanstack/vue-table": "^8.21.3",
