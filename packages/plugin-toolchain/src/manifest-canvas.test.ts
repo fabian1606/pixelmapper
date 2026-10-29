@@ -89,3 +89,41 @@ describe('param ui helpers', () => {
     expect(paramCanvasHint({ canvas: 'radius', anchor: 'c' })).toEqual({ canvas: 'radius', anchor: 'c' });
   });
 });
+
+describe('a hinted plugin end to end', () => {
+  it('builds and validates (four corner points + area size)', async () => {
+    const { buildPackage, validate } = await import('./index');
+    const corner = (key: string, x: number, y: number) =>
+      ({ key, type: 'point', default: { x, y }, label: `Corner ${key.toUpperCase()}`, ui: { canvas: 'point', label: key.toUpperCase() } });
+    const m = {
+      ...manifest([
+        corner('a', 0, 0), corner('b', 1, 0), corner('c', 1, 1), corner('d', 0, 1),
+        { key: 'size', type: 'number', min: 0.01, max: 1, default: 0.3, label: 'Area size', ui: { canvas: 'radius', anchor: 'a' } },
+      ]),
+      output: 'scale',
+    } as Parameters<typeof buildPackage>[0];
+    // Brightness falls off with the distance to the nearest corner (x-units; aspect 1 until ABI 1.3).
+    const source = `
+import { Modifier, Frame, Sample, Out, Params, register } from "@pixelmapper/plugin-sdk";
+class M extends Modifier {
+  px: StaticArray<f32> = new StaticArray<f32>(4);
+  py: StaticArray<f32> = new StaticArray<f32>(4);
+  size: f32 = 0.3;
+  prepare(p: Params): void {
+    for (let i = 0; i < 4; i++) { this.px[i] = p.get(i * 2); this.py[i] = p.get(i * 2 + 1); }
+    this.size = p.get(8);
+  }
+  render(ctx: Frame, s: Sample, out: Out): void {
+    let d: f32 = 10;
+    for (let i = 0; i < 4; i++) d = Mathf.min(d, Mathf.hypot(s.x - this.px[i], s.y - this.py[i]));
+    out.set(0, Mathf.max(0, 1 - d / this.size) * (0.5 + 0.5 * Mathf.sin(s.phase * 6.2831853)));
+  }
+}
+register(new M());
+`;
+    const { pkg, diagnostics } = await buildPackage(m, { 'modifier.ts': source });
+    expect(diagnostics.filter(d => d.severity === 'error')).toEqual([]);
+    const r = await validate({ manifest: m, wasm: pkg!.wasm }, { frames: 60, skipPerf: true });
+    expect(r.errors).toEqual([]);
+  }, 60_000);
+});
