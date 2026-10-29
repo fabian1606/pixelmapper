@@ -6,7 +6,7 @@
  * section.
  */
 import { useSlots } from 'vue';
-import { PARAM_DEFAULT_INPUT, type ParamDef, type ParamSchema, type ParamValue, type PmInputName } from '@pixelmapper/extension-api';
+import { PARAM_DEFAULT_INPUT, paramUiInput, type ParamDef, type ParamSchema, type ParamValue, type PmInputName } from '@pixelmapper/extension-api';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 import SegmentedControl from '~/components/engine/SegmentedControl.vue';
 import type { ParamGroup } from './param-form-layout';
@@ -32,13 +32,13 @@ const emit = defineEmits<{
 
 const slots = useSlots();
 
-/** The `pm.*` input of a param. */
+/** The `pm.*` input of a param (a canvas hint keeps the card input, plan M4). */
 function inputOf(p: ParamDef): PmInputName {
-  return p.ui ?? PARAM_DEFAULT_INPUT[p.type];
+  return paramUiInput(p.ui) ?? PARAM_DEFAULT_INPUT[p.type];
 }
 
 /** Segmented enums: up to three options and no explicit input. */
-const segmented = (p: ParamDef) => p.type === 'enum' && !p.ui && p.options.length <= 3;
+const segmented = (p: ParamDef) => p.type === 'enum' && !paramUiInput(p.ui) && p.options.length <= 3;
 
 /** Current value of a param (default when unset). */
 function valueOf(p: ParamDef): ParamValue {

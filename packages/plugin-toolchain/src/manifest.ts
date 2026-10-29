@@ -7,6 +7,7 @@ import type { ParamDef } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
 import { validateCurveParam } from './manifest-curve';
 import { validateManifestUx } from './manifest-ux';
+import { validateCanvasRefs, validateParamUi } from './manifest-canvas';
 import { checkGradient, checkSteps } from './param-structs';
 
 /** Plugin ABI/SDK version this toolchain produces. */
@@ -40,7 +41,8 @@ function validateParam(p: ParamDef, i: number, errors: string[], warnings: strin
     return;
   }
   if (typeof p.label !== 'string' || !p.label) errors.push(`${where}: label is required`);
-  if (p.ui !== undefined && !UI_INPUTS.includes(p.ui)) errors.push(`${where}: unknown ui "${p.ui}"`);
+  // `ui`: input name or object form with a canvas hint (manifest-canvas.ts).
+  validateParamUi(p, where, UI_INPUTS, errors);
 
   switch (p.type) {
     case 'number':
@@ -111,6 +113,7 @@ export function validateManifest(json: unknown): ManifestValidation {
       if (keys.has(p.key)) errors.push(`params[${i}]: duplicate key "${p.key}"`);
       keys.add(p.key);
     });
+    validateCanvasRefs(m.params, errors, warnings);
   }
 
   validateManifestUx(m, errors);
