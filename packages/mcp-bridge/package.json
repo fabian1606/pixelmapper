@@ -1,0 +1,24 @@
+{
+  "name": "@pixelmapper/mcp-bridge",
+  "version": "0.1.0",
+  "description": "pixelmapper-mcp: stdio MCP server that forwards tool calls to the running Pixelmapper app over a local WebSocket.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "pixelmapper-mcp": "./src/cli.ts"
+  },
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "token": "bun run src/cli.ts token",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}
