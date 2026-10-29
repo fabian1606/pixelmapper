@@ -84,9 +84,9 @@ Plugins are content-addressed packages (`sha256:` over manifest ‖ wasm ‖ ui)
 
 Safety (ADR §6.7): modules may only import `env.memory`, `env.abort`, `pm.budget`, `pm.log`; the toolchain instruments every loop and call with a budget counter (`pm.budget`), so an infinite loop traps instead of hanging; memory is capped at 256 pages. Traps, aborts and budget overruns post `plugin-error` to the main thread (toast) and disable that instance only. A worker that stops producing frames altogether is killed by the watchdog (above).
 
-## ABI v1 / v1.1 / v1.2
+## ABI v1 … v1.3
 
-Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
+Exports: `pm_abi_version() → 103` (v1.3; major × 100 + minor — the host loads only this version), `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
 
 | `FrameCtx` (f32 index) | | `Sample` (f32 index) | |
 |---|---|---|---|
@@ -102,8 +102,12 @@ Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(params
 | 10 | distGroupCount (v1.1) | 15 | distGroup (v1.1, −1 = none) |
 | 11 | spread (v1.2: 0 same, 1 spatial 2D, 2 fixture by fixture, 3 within) | | |
 | 12–15 | Spatial 2D handle origin x/y, end x/y (v1.2, normalized world) | | |
+| 16 | worldAspect (v1.3: room width / depth) | 16 | z (v1.3: height, world units) |
+| 17 | worldDepth (v1.3: room depth, world units) | 17, 18 | u, v (v1.3: 0–1 across the room) |
+| 18 | metersPerUnit (v1.3) | | |
+| 19 | reserved (0) | 19 | reserved (0) |
 
-v1.1 and v1.2 are additive: older plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
+v1.1 and v1.2 were additive; v1.3 grew both buffers from 16 to 20 slots (breaking: plugins must be rebuilt). The *room* is the bounding box of all layout channel positions (`rs-engine/core/src/room.rs`, layout packet v3 carries `z` and `metersPerUnit`). Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18, trigger 4 — `pressed, pressedAt, releasedAt, clicks` with engine-clock timestamps that the host stamps on press/release; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
 
 ## Main-thread previews
 

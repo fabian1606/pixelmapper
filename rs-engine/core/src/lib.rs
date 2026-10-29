@@ -11,6 +11,7 @@ pub mod phase;
 pub mod distribution;
 pub mod beat_clock;
 pub mod runtime;
+pub mod room;
 
 // Browser bindings (WasmEngine + JS plugin runtime).
 #[cfg(target_arch = "wasm32")]

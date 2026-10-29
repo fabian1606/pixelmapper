@@ -82,9 +82,9 @@ describe('neopixel-strip in the core', () => {
     const f = createKindFixture(def, { id: 's', config: { shapeType: 'line', ledCount: 2, ledsPerMeter: 2, groupSize: 1, chipType: 'WS2812B', clockwise: true, points: [] } as Json, position: { x: 0.5, y: 0.5 } });
     const packet = buildLayoutBin([f]);
     const view = new DataView(packet.buffer, packet.byteOffset + 5);
-    // header: u16 count; fixture: u16 group, u32 hash, u16 channels; channel: u16 dmx, u8 type, f32 x …
-    const x0 = view.getFloat32(2 + 8 + 3, true);
-    const x1 = view.getFloat32(2 + 8 + 3 * 20 + 3, true);
+    // header (v3): f32 metersPerUnit, u16 count; fixture: u16 group, u32 hash, u16 channels; channel (24 B): u16 dmx, u8 type, f32 x …
+    const x0 = view.getFloat32(6 + 8 + 3, true);
+    const x1 = view.getFloat32(6 + 8 + 3 * 24 + 3, true);
     // 1 m strip = 250 px, LEDs at 2.5 % and 97.5 % → ±118.75 px around 1500.
     expect(x0 * 3000).toBeCloseTo(1500 - 118.75, 1);
     expect(x1 * 3000).toBeCloseTo(1500 + 118.75, 1);

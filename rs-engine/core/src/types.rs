@@ -107,6 +107,9 @@ pub struct RenderTarget {
     pub world_x: f32,
     #[serde(rename = "worldY")]
     pub world_y: f32,
+    /// v1.3: height above the floor (normalized like x/y).
+    #[serde(rename = "worldZ", default)]
+    pub world_z: f32,
     #[serde(rename = "chaserConfig")]
     pub chaser_config: Option<ChaserConfig>,
     /// 0 = fine byte of another channel, 1–3 = coarse channel resolution.

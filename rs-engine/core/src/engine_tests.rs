@@ -56,11 +56,11 @@ impl W {
 /// (dmx, type, head, resolution, fine0) per channel; fixtures in order.
 fn layout(fixtures: &[Vec<(u16, u8, u16, u8, u16)>]) -> Vec<u8> {
     let mut w = W::default();
-    w.u16(fixtures.len() as u16);
+    w.f32(12.0).u16(fixtures.len() as u16); // v3: meters per world unit
     for (g, chs) in fixtures.iter().enumerate() {
         w.u16(g as u16).u32(1000 + g as u32).u16(chs.len() as u16);
         for &(dmx, ty, head, res, fine0) in chs {
-            w.u16(dmx).u8(ty).f32(g as f32 * 0.25).f32(0.5).u8(res).u16(fine0).u16(0xFFFF).u8(0).u8(255).u16(head);
+            w.u16(dmx).u8(ty).f32(g as f32 * 0.25).f32(0.5).f32(g as f32 * 0.1).u8(res).u16(fine0).u16(0xFFFF).u8(0).u8(255).u16(head);
         }
     }
     w.0
@@ -334,4 +334,25 @@ fn v1_packets_map_onto_a_linear_distribution() {
     let st = state.borrow();
     assert!((st.last_samples[1].0[sample::SPATIAL] - 0.25).abs() < 1e-6);
     assert!((st.last_samples[1].0[sample::PHASE] + 0.25).abs() < 1e-6);
+}
+
+#[test]
+fn abi_1_3_fills_z_room_coordinates_and_world_slots() {
+    let (mut e, state) = engine(vec![1.0]);
+    // Fixtures at x = 0, 0.25, 0.5 (one row at y 0.5), z = 0, 0.1, 0.2.
+    let three: Vec<_> = (0..3).map(|i| vec![(i as u16, DIMMER, 0, 1, 0xFFFF)]).collect();
+    e.dispatch_bin(0x14, &layout(&three));
+    e.dispatch_bin(0x16, &modifiers(&[inst(0, 0, 0, 1.0)]));
+    e.render(0.0, 16.0);
+    let st = state.borrow();
+    // One row: the depth borrows the width (0.5) → aspect 1, v centered.
+    assert_eq!(st.last_ctx.0[ctx::WORLD_ASPECT], 1.0);
+    assert!((st.last_ctx.0[ctx::WORLD_DEPTH] - 0.5).abs() < 1e-6);
+    assert_eq!(st.last_ctx.0[ctx::METERS_PER_UNIT], 12.0);
+    assert_eq!(st.last_ctx.0[ctx::RESERVED_19], 0.0);
+    let us: Vec<f32> = st.last_samples.iter().map(|s| s.0[sample::U]).collect();
+    assert_eq!(us, vec![0.0, 0.5, 1.0]);
+    assert!(st.last_samples.iter().all(|s| (s.0[sample::V] - 0.5).abs() < 1e-6));
+    assert!((st.last_samples[2].0[sample::Z] - 0.2).abs() < 1e-6);
+    assert_eq!(st.last_samples[0].0[sample::RESERVED_19], 0.0);
 }

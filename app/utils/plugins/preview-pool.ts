@@ -223,6 +223,9 @@ function render(
   ctx[CTX.handleOriginY] = m.distribution.origin.y;
   ctx[CTX.handleEndX] = m.distribution.end.x;
   ctx[CTX.handleEndY] = m.distribution.end.y;
+  // v1.3: previews place samples in a unit room (u, v = x, y; flat floor).
+  ctx[CTX.worldAspect] = 1;
+  ctx[CTX.worldDepth] = 1;
 
   const cseed = channelSeed(m.targetChannels[0] ?? 'DIMMER');
   const samples = new Float32Array(count * SAMPLE_FIELDS);
@@ -243,6 +246,8 @@ function render(
     samples[o + SAMPLE.channelSeedHi] = cseed >>> 16;
     samples[o + SAMPLE.x] = p.x;
     samples[o + SAMPLE.y] = p.y;
+    samples[o + SAMPLE.u] = p.x;
+    samples[o + SAMPLE.v] = p.y;
     samples[o + SAMPLE.phase] = tp - p.spatial;
     samples[o + SAMPLE.spatial] = p.spatial;
     samples[o + SAMPLE.rank] = p.rank;

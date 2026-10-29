@@ -84,7 +84,7 @@ export const TEMPLATE_MANIFEST: ContentPluginManifest = {
   alias: '@me/pulse-train',
   name: 'Pulse Train',
   version: '1.0.0',
-  apiVersion: '^1.1.0',
+  apiVersion: '^1.3.0',
   description: 'Short pulses that travel across fixtures along the distribution. Width sets the pulse length within a pass.',
   purpose: 'Short pulses run across your fixtures.',
   speedUnit: 'per pass',

@@ -107,6 +107,17 @@ Identity is the content hash `sha256:<hex>` over canonical(manifest) ‖ wasm �
 | `curve` | `{ shape, args }`, `{ points }` or a legacy point list (see Curves) | 128 (LUT) | `sampleLut(p.lut(i), x)` / `sampleSignedLut` | `pm.curve` |
 | `gradient` | `{ stops: [{ pos, color }] }`, 1–8 stops | 33 (`count, (pos, r, g, b) × 8`) | `sampleGradient(p.lut(i), u, transition, channel)` | `pm.gradient` |
 | `steps` | `{ groups, steps, cells[step][group] }` (1–8 × 1–16) | 18 (`groups, steps, mask[16]`) | `p.int(i)`, `p.int(i + 1)`, mask bits at `p.lut(i + 2)` | `pm.steps` |
+| `trigger` *(v1.3)* | momentary button state; manifest default `{ "pressed": false }` (+ optional `multiClickMs`, default 350) | 4 (`pressed, pressedAt, releasedAt, clicks`; engine-clock ms, −1e9 = never) | `triggerPressed(p, i)`, `triggerMsSincePress(p, i, ctx)`, `triggerMsSinceRelease(p, i, ctx)`, `triggerClicks(p, i)` | press-and-hold `pm.button` |
+
+**Trigger params (v1.3).** For momentary input such as "hold = blackout, release = shock wave, double-click = flash". The host records the press/release edges (card button, or a live `button` widget mapped to the param with `effect-param`) as engine-clock timestamps; nothing is saved to undo history. `render` stays pure: the SDK readers subtract the stamps from `ctx.timeMs`. `triggerClicks` counts presses in the current burst (a press within `multiClickMs` of the previous release continues it), so `clicks >= 2` while pressed or shortly after means double click. Combine with `envelope(ms, attackMs, decayMs)`:
+
+```ts
+// params: [0] trigger "hit" (4 slots), [4] number "decayMs"
+const held = triggerPressed(this.params, 0);
+if (held && triggerClicks(this.params, 0) >= 2) out.setScalar(1.0);            // double click: blinder
+else if (held) out.setScalar(0.0);                                               // hold: blackout
+else out.setScalar(envelope(triggerMsSinceRelease(this.params, 0, ctx) - dist2(s.u, s.v, 0, 0, ctx.worldAspect) * 400.0, 0.0, this.params.get(4))); // release: wave from a corner
+```
 
 Common fields:
 - `key` (camelCase, unique), `label`, `default`;
@@ -224,13 +235,16 @@ Rules:
 - `timeMs` (shared clock, identical on all clients), `beatTime` (beats since epoch, continuous across tempo changes), `bpm`;
 - `phaseSpeed` (cycles/s; 0 when frozen), `arity`, `seed` (instance), `strength` (informational — the host applies it);
 - v1.1: `timePhase` (speed phase in cycles, unwrapped: one pass/step per unit), `rankCount` (numbered fixtures of the instance, the largest head count for scope within, 0 without ranks), `distGroupCount` (groups set by a recipe, 0 = none).
+- v1.3: `worldAspect` (room width / room depth), `worldDepth` (room depth in world units), `metersPerUnit` (meters per world unit, 0 = unknown). See *Coordinates* below.
 - v1.2: `spread` — the user's Spread choice: `SPREAD_SAME` (every fixture the same, `spatial` 0), `SPREAD_SPATIAL` (Spatial 2D handle), `SPREAD_ORDER` (Fixture by fixture: `rank` = number − 1, all heads of a fixture share it), `SPREAD_WITHIN` (Within each fixture: `rank` = head). Use it to decide who shares a random value (Noise) or how groups form (Pattern: alternate along numbers, bands along the handle). Also v1.2: `handleOriginX/Y`, `handleEndX/Y` — the Spatial 2D handle in the same normalized coordinates as `Sample.x/y` (e.g. scale or move a texture with it, as Noise does). Declare `"apiVersion": "^1.2.0"` when you read them.
 
 `Sample` (per target):
 
 | Field | Meaning |
 |-------|---------|
-| `x`, `y` | normalized world position 0–1 |
+| `x`, `y` | normalized world position 0–1 (fraction of the stage; one unit on both axes) |
+| `z` *(v1.3)* | height above the floor, same unit as `x`/`y` (0 on the floor / when unset) |
+| `u`, `v` *(v1.3)* | room coordinates: 0–1 across the bounding box of all fixtures (each axis separately; 0.5 on a degenerate axis) |
 | `spatial` *(v1.1)* | position along the distribution: 0 at the handle origin / first number, 1 at the end / after the last number; `head/headCount` within each fixture |
 | `rank` *(v1.1)* | the sample's order number (0-based; head index for scope within), −1 without ranks |
 | `distGroup` *(v1.1)* | group set by a recipe's grouping, −1 without |
@@ -241,12 +255,20 @@ Rules:
 | `base0..2` | current values before this modifier, 0–1 (scalar: base0; rgb: r, g, b; panTilt: pan, tilt) |
 | `channelSeed` | 32-bit seed of the channel type (scalar), so e.g. RED and BLUE flicker differently |
 
+### Coordinates (v1.3)
+
+- **World** (`x`, `y`, `z`): one unit on every axis, so `dist3(s.x, s.y, s.z, px, py, pz, 1, 1)` is a true distance; × `metersPerUnit` gives meters. `point` params and the Spatial 2D handle use world x/y.
+- **Room** (`u`, `v`): the rig's bounding box stretched to 0–1 on each axis. Use it for "corners", "center", "edges of the room" independent of where the rig sits on the stage. Because the axes are stretched separately, scale u differences by `ctx.worldAspect`: `dist2(s.u, s.v, cu, cv, ctx.worldAspect)` is isotropic, in units of the room depth. Heights join that space as `s.z / ctx.worldDepth`, e.g. `dist3(s.u, s.v, s.z / ctx.worldDepth, cu, cv, 0, ctx.worldAspect, 1)`.
+- The room is computed by the host from the whole layout (not only the targeted fixtures), so all modifiers share it. Declare `"apiVersion": "^1.3.0"` when you read v1.3 fields.
+
 ### SDK helpers (`@pixelmapper/plugin-sdk`)
 
 - math: `TAU`, `PI`, `fract`, `clamp`, `lerp`, `seededRandom(seed)`, `hash01(seed, i)`, `fnv1aPos(x, y)`, `crossfade(prev, curr, elapsedMs, durMs, fade)`, `perlin2`, `noise1/2/3`
 - waves: `evaluateShape(shape, t, param)` with `WAVE_SINE`, `WAVE_SQUARE`, `WAVE_TRIANGLE`, `WAVE_SAWTOOTH`, `WAVE_BOUNCE`, `WAVE_RAMP`, `WAVE_SMOOTH` (returns −1…1)
 - color: `Vec3`, `rgbToHsl`, `hslToRgb`, `rgbToHsv`, `hsvToRgb` (write into an `out` Vec3)
 - curves: `sampleLut(ptr, x)` (cycle domain), `sampleSignedLut(ptr, x)` (signed domain, wraps), `wrapSigned(x)`, `CURVE_LUT_SIZE` (128)
+- patterns (v1.3): `dist2(x, y, px, py, aspect)`, `dist3(x, y, z, px, py, pz, aspect, zScale)`, `minDistToPoints(x, y, aspect, pts, count)` / `nearestPointIndex(...)` (`pts`: a `StaticArray<f32>` of up to 8 interleaved x/y pairs — allocate it once in `prepare`, never per sample), `pingPong(t)`, `mirror(x, axis)`, `pulse(d, center, width, softness)`, `ease(kind, t)` with `EASE_LINEAR`, `EASE_IN_QUAD`, `EASE_OUT_QUAD`, `EASE_IN_OUT_QUAD`, `EASE_IN_EXPO`, `EASE_OUT_EXPO`, `EASE_IN_OUT_SINE`, `EASE_SMOOTH`, `crossingTimeLine(a0, va, b0, vb)`, `crossingTimeLoop(a0, va, b0, vb, t)` (time since the last meeting of two runners on a loop of length 1), `crossingCount(a0, va, b0, vb, t)` (meetings so far; `& 1` alternates colors per collision), `envelope(msSince, attackMs, decayMs)`
+- triggers (v1.3): `triggerPressed`, `triggerMsSincePress`, `triggerMsSinceRelease`, `triggerClicks`, `TRIGGER_SLOTS` (4), `TRIGGER_NEVER` (1e9 ms)
 - gradients: `gradientCount(g)`, `gradientPos(g, i)`, `gradientStopChannel(g, i, c)`, `sampleGradient(g, u, transition, c)` with `g = p.lut(slot)` (periodic palette; transition 0 = each stop holds until the next, 1 = blend)
 
 Randomness that changes once per step: `hash01(s.seed, <u32>Mathf.floor(ctx.timePhase))`.
@@ -290,7 +312,7 @@ export function mount(el: HTMLElement, api: PanelApi): (() => void) | void {
 | `setParam(key, value)` | change one param; validated against the manifest schema (numbers are clamped, unknown keys and invalid values are dropped) |
 | `beginScrub()` / `endScrub()` | wrap continuous edits so they become **one** undo step; a `setParam` outside a scrub commits immediately |
 | `onFrame(cb)` | ~30 fps `{ timeMs, beatTime, bpm }` for animations (only sent while subscribed) |
-| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 16` f32 in the `Sample` layout, returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
+| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 20` f32 in the `Sample` layout (ABI 1.3), returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
 | `theme` | resolved CSS variables as full color values (`--background`, `--foreground`, `--primary`, `--muted`, `--border`, `--radius`, …); they are also set on `:root` inside the panel, so `var(--primary)` works in styles |
 
 Sandbox: the panel runs in `<iframe sandbox="allow-scripts">` with an opaque origin and a CSP without network access (`default-src 'none'`; inline scripts, styles, `data:` images and wasm only). It cannot reach the app, cookies, storage or the network; everything goes through `PanelApi` messages. The iframe resizes to its content height (24–600 px). Uncaught errors are shown under the panel.

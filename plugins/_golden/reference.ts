@@ -10,7 +10,11 @@ import { frameCounts, sampleDistribution, spreadKind } from '../../app/utils/eng
 import { analyzeSelection } from '../../app/utils/engine/distribution/selection-shape';
 import { selectionDistribution } from '../../app/utils/engine/distribution/selection-defaults';
 
-/** A sample of a reference rig with its distribution values. */
+/**
+ * A sample of a reference rig with its distribution values. ABI v1.3 room
+ * fields (`z`, `u`, `v`) are not used by the built-ins; the golden harness
+ * fills a unit room (z 0, u/v = x/y) when a case omits them.
+ */
 export interface RigSample {
   x: number; y: number; head: number; headCount: number; fixture: number;
   spatial: number; rank: number; distGroup: number;

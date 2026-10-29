@@ -1,5 +1,5 @@
 /**
- * ABI v1 exports (ADR §6.6). The toolchain's synthetic entry re-exports
+ * ABI exports (v1.3) (ADR §6.6). The toolchain's synthetic entry re-exports
  * these from the package root (one module identity with the plugin's import),
  * so plugin authors never write these functions.
  */
@@ -10,9 +10,13 @@ const FRAME = new Frame();
 const SAMPLE = new Sample();
 const OUT = new Out();
 
-/** ABI version implemented by this SDK. */
+/**
+ * ABI version implemented by this SDK: major × 100 + minor (103 = 1.3). The
+ * host only loads modules with exactly its version (buffer strides changed
+ * in 1.3, so older binaries must be rebuilt).
+ */
 export function pm_abi_version(): i32 {
-  return 1;
+  return 103;
 }
 
 /** Allocates `bytes` of unmanaged memory for host buffers. */

@@ -74,6 +74,8 @@ function paramVariants(schema: ParamSchema): { name: string; values: Record<stri
         case 'angle': out[p.key] = mode === 'min' ? 0 : mode === 'max' ? Math.PI * 2 : r() * Math.PI * 2; break;
         case 'point': out[p.key] = mode === 'rand' ? { x: r(), y: r() } : { x: mode === 'max' ? 1 : 0, y: mode === 'max' ? 1 : 0 }; break;
         case 'curve': out[p.key] = mode === 'rand' ? [{ x: 0, y: r() }, { x: 0.5, y: r() }, { x: 1, y: r() }] : p.default; break;
+        // Trigger (v1.3): idle, held since frame 0, released mid-run after a double click.
+        case 'trigger': out[p.key] = mode === 'min' ? { pressed: false } : mode === 'max' ? { pressed: true, pressedAt: 0, clicks: 1 } : { pressed: false, pressedAt: 1000, releasedAt: 1000 + r() * 1000, clicks: 2 }; break;
       }
     }
     return out;
@@ -86,20 +88,31 @@ function paramVariants(schema: ParamSchema): { name: string; values: Record<stri
   return variants;
 }
 
-/** Synthetic samples: 64 fixtures on an 8×8 grid with 1–8 heads each. */
-function syntheticSamples(): { samples: Float32Array; count: number } {
-  const heads: { x: number; y: number; g: number; h: number; hc: number }[] = [];
+/**
+ * Synthetic samples: 64 fixtures on an 8×8 grid with 1–8 heads each, at
+ * heights 0–0.25 (floor to ceiling, v1.3). The room is the grid's bounding
+ * box: `u`/`v` are 0–1 across it.
+ */
+function syntheticSamples(): { samples: Float32Array; count: number; worldAspect: number; worldDepth: number } {
+  const heads: { x: number; y: number; z: number; g: number; h: number; hc: number }[] = [];
   for (let g = 0; g < FIXTURES; g++) {
     const hc = 1 + (g % 8);
     for (let h = 0; h < hc; h++) {
-      heads.push({ x: ((g % 8) + 0.5 + (h - hc / 2) * 0.05) / 8, y: (Math.floor(g / 8) + 0.5) / 8, g, h, hc });
+      heads.push({ x: ((g % 8) + 0.5 + (h - hc / 2) * 0.05) / 8, y: (Math.floor(g / 8) + 0.5) / 8, z: (g % 3) * 0.125, g, h, hc });
     }
   }
+  const minX = Math.min(...heads.map(h => h.x));
+  const maxX = Math.max(...heads.map(h => h.x));
+  const minY = Math.min(...heads.map(h => h.y));
+  const maxY = Math.max(...heads.map(h => h.y));
   const samples = new Float32Array(heads.length * SAMPLE_FIELDS);
   heads.forEach((hd, i) => {
     const o = i * SAMPLE_FIELDS;
     samples[o + SAMPLE.x] = hd.x;
     samples[o + SAMPLE.y] = hd.y;
+    samples[o + SAMPLE.z] = hd.z;
+    samples[o + SAMPLE.u] = (hd.x - minX) / (maxX - minX);
+    samples[o + SAMPLE.v] = (hd.y - minY) / (maxY - minY);
     samples[o + SAMPLE.groupIndex] = hd.g;
     samples[o + SAMPLE.groupCount] = FIXTURES;
     samples[o + SAMPLE.headIndex] = hd.h;
@@ -111,11 +124,14 @@ function syntheticSamples(): { samples: Float32Array; count: number } {
     samples[o + SAMPLE.channelSeedLo] = (i * 7919) & 0xffff;
     samples[o + SAMPLE.channelSeedHi] = (i * 104729) & 0xffff;
   });
-  return { samples, count: heads.length };
+  return { samples, count: heads.length, worldAspect: (maxX - minX) / (maxY - minY), worldDepth: maxY - minY };
 }
 
+/** Room slots of the frame (v1.3). */
+interface RigRoom { worldAspect: number; worldDepth: number }
+
 /** Writes frame `f` into ctx and the phase column of the samples. */
-function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: number, arity: number): void {
+function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: number, arity: number, room: RigRoom): void {
   const t = (f * 1000) / 60;
   ctx.fill(0);
   ctx[CTX.timeMs] = t;
@@ -126,6 +142,9 @@ function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: nu
   ctx[CTX.seedLo] = 0x1234;
   ctx[CTX.seedHi] = 0x5678;
   ctx[CTX.strength] = 1;
+  ctx[CTX.worldAspect] = room.worldAspect;
+  ctx[CTX.worldDepth] = room.worldDepth;
+  ctx[CTX.metersPerUnit] = 12;
   for (let i = 0; i < count; i++) {
     const o = i * SAMPLE_FIELDS;
     samples[o + SAMPLE.phase] = t / 1000 - samples[o + SAMPLE.x]! * 0.5;
@@ -166,7 +185,7 @@ export async function validate(
   }
   if (errors.length > 0) return report();
 
-  const { samples, count } = syntheticSamples();
+  const { samples, count, ...room } = syntheticSamples();
   metrics.samples = count;
   const ctx = new Float32Array(CTX_FIELDS);
   const [lo, hi] = RANGE[manifest.output];
@@ -190,7 +209,7 @@ export async function validate(
       const out = new Float32Array(count * arity);
       let frame120: Float32Array | null = null;
       for (let f = 0; f < frames; f++) {
-        setFrame(ctx, samples, count, f, arity);
+        setFrame(ctx, samples, count, f, arity, room);
         const t0 = performance.now();
         try {
           inst.render(ctx, samples, count, out);
@@ -222,7 +241,7 @@ export async function validate(
         try {
           const fresh = await PluginInstance.create(module);
           fresh.prepare(encodeParams(manifest.params, variant.values));
-          setFrame(ctx, samples, count, Math.min(120, frames - 1), arity);
+          setFrame(ctx, samples, count, Math.min(120, frames - 1), arity, room);
           const again = fresh.render(ctx, samples, count);
           const a = new Uint32Array(frame120.buffer);
           const b = new Uint32Array(again.buffer);

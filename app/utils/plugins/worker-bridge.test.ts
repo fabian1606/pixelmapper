@@ -3,7 +3,7 @@
  * Plan P3.9/P3.10: worker plugin bridge and watchdog.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { buildPackage, type ContentPluginManifest } from '@pixelmapper/plugin-toolchain';
+import { buildPackage, CTX, CTX_FIELDS, SAMPLE, SAMPLE_FIELDS, type ContentPluginManifest } from '@pixelmapper/plugin-toolchain';
 import { WorkerPluginBridge, type BridgeEvent } from './worker-bridge';
 import { Watchdog } from './watchdog';
 
@@ -39,11 +39,11 @@ describe('worker plugin bridge', () => {
 
     bridge.load(pkg!.hash, pkg!.wasm);
     expect(bridge.prepare(1, 0, new Float32Array([0.5]))).toBe(true);
-    const ctx = new Float32Array(16);
-    ctx[4] = 1;
-    const samples = new Float32Array(32);
-    samples[8] = 0.8;
-    samples[16 + 8] = 0.4;
+    const ctx = new Float32Array(CTX_FIELDS);
+    ctx[CTX.arity] = 1;
+    const samples = new Float32Array(2 * SAMPLE_FIELDS);
+    samples[SAMPLE.base0] = 0.8;
+    samples[SAMPLE_FIELDS + SAMPLE.base0] = 0.4;
     const engineMemory = new Float32Array(8);
     const out = engineMemory.subarray(2, 4); // a view, as wasm-bindgen passes it
     expect(bridge.render(1, ctx, samples, 2, out)).toBe(true);
@@ -100,17 +100,48 @@ register(new Fields());
     bridge.setTable([pkg!.hash]);
     bridge.load(pkg!.hash, pkg!.wasm);
     expect(bridge.prepare(3, 0, new Float32Array(0))).toBe(true);
-    const ctx = new Float32Array(16);
-    ctx[4] = 1;
-    ctx[8] = 2; // timePhase
-    ctx[9] = 4; // rankCount
-    ctx[10] = 3; // distGroupCount
-    const samples = new Float32Array(16);
-    samples[13] = 0.5; // spatial
-    samples[14] = 2; // rank
-    samples[15] = 1; // distGroup
+    const ctx = new Float32Array(CTX_FIELDS);
+    ctx[CTX.arity] = 1;
+    ctx[CTX.timePhase] = 2;
+    ctx[CTX.rankCount] = 4;
+    ctx[CTX.distGroupCount] = 3;
+    const samples = new Float32Array(SAMPLE_FIELDS);
+    samples[SAMPLE.spatial] = 0.5;
+    samples[SAMPLE.rank] = 2;
+    samples[SAMPLE.distGroup] = 1;
     const out = new Float32Array(1);
     expect(bridge.render(3, ctx, samples, 1, out)).toBe(true);
     expect(out[0]).toBeCloseTo(0.5 + 20 + 100 + 2000 + 40000 + 300000, 0);
+  }, 60_000);
+
+  it('passes the ABI v1.3 room fields (z, u, v, worldAspect, worldDepth, metersPerUnit)', async () => {
+    const v13 = { ...manifest, alias: '@test/v13', apiVersion: '^1.3.0', params: [] };
+    const src = `
+import { Modifier, Frame, Sample, Out, register } from "@pixelmapper/plugin-sdk";
+class Room extends Modifier {
+  render(ctx: Frame, s: Sample, out: Out): void {
+    out.set(0, s.z + s.u * 10.0 + s.v * 100.0 + ctx.worldAspect * 1000.0 + ctx.worldDepth * 10000.0 + ctx.metersPerUnit * 100000.0);
+  }
+}
+register(new Room());
+`;
+    const { pkg, diagnostics } = await buildPackage(v13, { 'modifier.ts': src });
+    expect(diagnostics.filter(d => d.severity === 'error')).toEqual([]);
+    const bridge = new WorkerPluginBridge(() => {});
+    bridge.setTable([pkg!.hash]);
+    bridge.load(pkg!.hash, pkg!.wasm);
+    expect(bridge.prepare(4, 0, new Float32Array(0))).toBe(true);
+    const ctx = new Float32Array(CTX_FIELDS);
+    ctx[CTX.arity] = 1;
+    ctx[CTX.worldAspect] = 2;
+    ctx[CTX.worldDepth] = 0.5;
+    ctx[CTX.metersPerUnit] = 3;
+    const samples = new Float32Array(SAMPLE_FIELDS);
+    samples[SAMPLE.z] = 0.25;
+    samples[SAMPLE.u] = 0.5;
+    samples[SAMPLE.v] = 0.75;
+    const out = new Float32Array(1);
+    expect(bridge.render(4, ctx, samples, 1, out)).toBe(true);
+    expect(out[0]).toBeCloseTo(0.25 + 5 + 75 + 2000 + 5000 + 300000, 0);
   }, 60_000);
 });

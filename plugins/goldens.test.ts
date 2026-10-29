@@ -27,13 +27,17 @@ import {
 } from '@pixelmapper/plugin-toolchain';
 import { mapOutput } from '../app/utils/plugins/host-mapping';
 
-/** One golden case (ABI v1.1 fields optional). */
+/** One golden case (ABI v1.1+ fields optional; v1.3 room fields default to a unit room). */
 interface GoldenCase {
   params: Record<string, never>;
-  ctx: { timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; spread?: number; handle?: [number, number, number, number]; ticks?: number; seed?: number };
+  ctx: {
+    timeMs: number; beatTime: number; bpm: number; phaseSpeed: number; strength: number; timePhase?: number; rankCount?: number; distGroupCount?: number; spread?: number; handle?: [number, number, number, number]; ticks?: number; seed?: number;
+    worldAspect?: number; worldDepth?: number; metersPerUnit?: number;
+  };
   samples: {
     x: number; y: number; phase: number; groupIndex?: number; groupCount?: number; base: number[]; channelSeed?: number;
     spatial?: number; rank?: number; distGroup?: number; headIndex?: number; headCount?: number; seed?: number;
+    z?: number; u?: number; v?: number;
   }[];
   expected: number[][];
   /** `raw` plugin output, or `mapped` through the manifest's output mode. */
@@ -84,11 +88,17 @@ describe.each(PLUGINS)('built-in plugin %s', (name) => {
       if (c.ctx.handle) [ctx[CTX.handleOriginX], ctx[CTX.handleOriginY], ctx[CTX.handleEndX], ctx[CTX.handleEndY]] = c.ctx.handle;
       ctx[CTX.seedLo] = (c.ctx.seed ?? 0) & 0xffff;
       ctx[CTX.seedHi] = (c.ctx.seed ?? 0) >>> 16;
+      ctx[CTX.worldAspect] = c.ctx.worldAspect ?? 1;
+      ctx[CTX.worldDepth] = c.ctx.worldDepth ?? 1;
+      ctx[CTX.metersPerUnit] = c.ctx.metersPerUnit ?? 12;
       const samples = new Float32Array(c.samples.length * SAMPLE_FIELDS);
       c.samples.forEach((s, i) => {
         const o = i * SAMPLE_FIELDS;
         samples[o + SAMPLE.x] = s.x;
         samples[o + SAMPLE.y] = s.y;
+        samples[o + SAMPLE.z] = s.z ?? 0;
+        samples[o + SAMPLE.u] = s.u ?? s.x;
+        samples[o + SAMPLE.v] = s.v ?? s.y;
         samples[o + SAMPLE.phase] = s.phase;
         samples[o + SAMPLE.groupIndex] = s.groupIndex ?? 0;
         samples[o + SAMPLE.groupCount] = s.groupCount ?? 1;

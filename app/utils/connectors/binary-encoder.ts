@@ -3,7 +3,7 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import type { ContentPluginManifest } from '@pixelmapper/plugin-toolchain/types';
 import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
 import { modifierKey } from '~/utils/engine/modifiers';
-import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
+import { WORLD_WIDTH, WORLD_HEIGHT, STAGE_SIZE_METERS } from '~/utils/engine/constants';
 import { beamWorldPx } from '~/utils/kinds/kind-host';
 import { resolveDistribution, usesRanks } from '~/utils/engine/distribution/resolve';
 
@@ -79,12 +79,17 @@ export function fixtureIdHash(id: string | number): number {
   return h >>> 0;
 }
 
-// ── Layout packet (TYPE_LAYOUT_BIN 0x14) ─────────────────────────────────────
+// ── Layout packet (TYPE_LAYOUT_BIN 0x14, v3) ─────────────────────────────────
 // Replicates the beam transform from engine.ts syncTargets() so WASM and ESP32
-// see identical worldX/worldY per channel.
+// see identical worldX/worldY per channel. v3 (ABI 1.3) adds a header with
+// meters per normalized world unit and the height `z` of every channel.
+
+/** Meters per normalized world unit (x, y and z share the unit: fraction of WORLD_WIDTH). */
+export const METERS_PER_WORLD_UNIT = STAGE_SIZE_METERS;
 
 export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
   const w = new BufWriter();
+  w.f32(METERS_PER_WORLD_UNIT);
   w.u16(fixtures.length);
 
   for (let i = 0; i < fixtures.length; i++) {
@@ -113,6 +118,8 @@ export function buildLayoutBin(fixtures: Fixture[]): Uint8Array {
       w.u8(CHANNEL_TYPE_ID[ch.type] ?? 255);
       w.f32(worldX);
       w.f32(worldY);
+      // v3: height above the floor, normalized like x/y (fixture.ts `positionZ`).
+      w.f32(Number.isFinite(f.positionZ) ? f.positionZ : 0);
       
       // Send resolution and fine offsets for 16-bit / 24-bit packing
       const res = ch.isFine ? 0 : (ch.resolution ?? 1);

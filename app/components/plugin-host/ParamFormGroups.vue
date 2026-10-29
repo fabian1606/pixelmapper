@@ -3,12 +3,14 @@
  * Param groups of `ParamForm` (plan M5.3): each param with its `pm.*` input
  * (`PARAM_DEFAULT_INPUT`, or `ui`); enums with ≤ 3 options and no `ui`
  * render as a segmented control. Params with the same `group` share a titled
- * section.
+ * section. `trigger` params (ABI 1.3) render a press-and-hold `pm.button` and
+ * emit `trigger` edges instead of `set` (momentary input, no undo step).
  */
 import { useSlots } from 'vue';
 import { PARAM_DEFAULT_INPUT, paramUiInput, type ParamDef, type ParamSchema, type ParamValue, type PmInputName } from '@pixelmapper/extension-api';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 import SegmentedControl from '~/components/engine/SegmentedControl.vue';
+import type { TriggerValue } from '@pixelmapper/extension-api';
 import type { ParamGroup } from './param-form-layout';
 
 const props = defineProps<{
@@ -26,6 +28,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   set: [key: string, value: ParamValue];
+  /** Press (`true`) / release (`false`) of a `trigger` param. */
+  trigger: [key: string, pressed: boolean];
   scrubStart: [];
   scrubEnd: [];
 }>();
@@ -78,6 +82,11 @@ function inputProps(p: ParamDef): Record<string, unknown> {
   }
 }
 
+/** Whether a `trigger` param is currently held. */
+function triggerHeld(p: ParamDef): boolean {
+  return !!(valueOf(p) as TriggerValue | undefined)?.pressed;
+}
+
 /** Emits a value (ints rounded). */
 function set(p: ParamDef, value: ParamValue) {
   emit('set', p.key, p.type === 'int' ? Math.round(Number(value)) : value);
@@ -98,6 +107,18 @@ function set(p: ParamDef, value: ParamValue) {
           :options="p.options.map((o, i) => ({ value: o, label: p.optionLabels?.[i] ?? o }))"
           :model-value="String(valueOf(p))"
           @update:model-value="v => { emit('scrubStart'); set(p, v); emit('scrubEnd'); }"
+        />
+      </div>
+      <div v-else-if="p.type === 'trigger'" class="h-8" :data-param="p.key">
+        <Replaceable
+          :name="inputOf(p)"
+          :model-value="triggerHeld(p)"
+          :label="p.label"
+          :title="p.description"
+          :disabled="disabled"
+          mode="momentary"
+          @press="emit('trigger', p.key, true)"
+          @release="emit('trigger', p.key, false)"
         />
       </div>
       <Replaceable

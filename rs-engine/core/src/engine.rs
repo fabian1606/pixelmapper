@@ -12,6 +12,7 @@
 use crate::beat_clock::BeatClock;
 use crate::distribution::Distribution;
 use crate::phase::{phase_speed, speed_phase};
+use crate::room::Room;
 use crate::runtime::{ctx, sample, FrameCtx, ModifierRuntime, NullRuntime, PluginRef, Sample};
 use crate::signatures::{from_dmx16, remap_range, rgb_read, rgb_write, to_dmx16, ColorSystem, Signature};
 use crate::types::{BlendMode, ChaserConfig, OutputMode, RenderTarget, SpeedConfig, SpeedMode};
@@ -24,6 +25,8 @@ pub struct LayoutChannelEntry {
     pub channel_type_id: u8,
     pub world_x: f32,
     pub world_y: f32,
+    /// v1.3: height above the floor (normalized like x/y).
+    pub world_z: f32,
     pub resolution: u8,
     pub fine_offsets: [usize; 2],
     pub range_min: u8,
@@ -116,6 +119,8 @@ pub struct Head {
     pub head_count: usize,
     pub x: f32,
     pub y: f32,
+    /// v1.3: height above the floor.
+    pub z: f32,
     pub color: Option<HeadColor>,
     /// (coarse, optional fine) DMX indices.
     pub pan: Option<(usize, Option<usize>)>,
@@ -157,6 +162,7 @@ fn build_heads(targets: &[RenderTarget]) -> Vec<Head> {
                 head_count: *head_counts.get(&group).unwrap_or(&1),
                 x: first.world_x,
                 y: first.world_y,
+                z: first.world_z,
                 color,
                 pan: find(ct::PAN).map(|t| (t.dmx_index, fine(t))),
                 tilt: find(ct::TILT).map(|t| (t.dmx_index, fine(t))),
@@ -263,6 +269,10 @@ pub struct EffectEngine {
     /// Fixture id hashes by group index.
     pub fixture_hashes: Vec<u32>,
     pub instances: Vec<ModifierInstance>,
+    /// v1.3: bounding box of all channel positions (rebuilt on layout sync).
+    pub room: Room,
+    /// v1.3: meters per normalized world unit (layout packet header).
+    pub meters_per_unit: f32,
     runtime: Box<dyn ModifierRuntime>,
     // Scratch buffers reused every frame.
     refs: Vec<SampleRef>,
@@ -298,6 +308,8 @@ impl EffectEngine {
             heads: Vec::new(),
             fixture_hashes: Vec::new(),
             instances: Vec::new(),
+            room: Room::default(),
+            meters_per_unit: 0.0,
             runtime,
             refs: Vec::new(),
             samples: Vec::new(),
@@ -363,6 +375,7 @@ impl EffectEngine {
                     head_index: ch.head_index as usize,
                     world_x: ch.world_x,
                     world_y: ch.world_y,
+                    world_z: ch.world_z,
                     chaser_config: old.get(&ch.dmx_index).cloned(),
                     resolution: ch.resolution,
                     fine_offsets: ch.fine_offsets,
@@ -372,6 +385,7 @@ impl EffectEngine {
             }
         }
         self.heads = build_heads(&self.targets);
+        self.room = Room::from_points(self.targets.iter().map(|t| (t.world_x, t.world_y)), self.meters_per_unit);
         // Head count per fixture for scalar samples.
         let mut counts = vec![1usize; self.fixture_hashes.len()];
         for h in &self.heads {
@@ -643,14 +657,14 @@ impl EffectEngine {
         self.samples.clear();
         for &r in &self.refs {
             let mut s = Sample::default();
-            let (group, head, head_count, x, y) = match r {
+            let (group, head, head_count, x, y, z) = match r {
                 SampleRef::Channel(i) => {
                     let t = &self.targets[i];
                     let seed = channel_seed(t.channel_type_id);
                     s.0[sample::CHANNEL_SEED_LO] = (seed & 0xffff) as f32;
                     s.0[sample::CHANNEL_SEED_HI] = (seed >> 16) as f32;
                     s.0[sample::BASE0] = self.render_buffer[t.dmx_index] / 255.0;
-                    (t.group_index, t.head_index, self.target_head.get(i).copied().unwrap_or(1), t.world_x, t.world_y)
+                    (t.group_index, t.head_index, self.target_head.get(i).copied().unwrap_or(1), t.world_x, t.world_y, t.world_z)
                 }
                 SampleRef::Head(h) => {
                     let head = &self.heads[h];
@@ -661,13 +675,18 @@ impl EffectEngine {
                         s.0[sample::BASE0] = Self::read_pair(&self.render_buffer, pc, pf);
                         s.0[sample::BASE0 + 1] = Self::read_pair(&self.render_buffer, tc, tf);
                     }
-                    (head.group, head.head, head.head_count, head.x, head.y)
+                    (head.group, head.head, head.head_count, head.x, head.y, head.z)
                 }
             };
             let d = inst.distribution.sample(x, y, group, head, head_count, &mut self.perms);
             max_heads = max_heads.max(head_count);
             s.0[sample::X] = x;
             s.0[sample::Y] = y;
+            // v1.3: height and room coordinates.
+            let (u, v) = self.room.uv(x, y);
+            s.0[sample::Z] = z;
+            s.0[sample::U] = u;
+            s.0[sample::V] = v;
             // Legacy phase (ABI v1): speed phase minus the distribution position.
             s.0[sample::PHASE] = sp - d.spatial;
             s.0[sample::SPATIAL] = d.spatial;
@@ -689,6 +708,9 @@ impl EffectEngine {
         fctx.0[ctx::HANDLE_ORIGIN_Y] = inst.distribution.origin.1;
         fctx.0[ctx::HANDLE_END_X] = inst.distribution.end.0;
         fctx.0[ctx::HANDLE_END_Y] = inst.distribution.end.1;
+        fctx.0[ctx::WORLD_ASPECT] = self.room.aspect();
+        fctx.0[ctx::WORLD_DEPTH] = self.room.depth;
+        fctx.0[ctx::METERS_PER_UNIT] = self.room.meters_per_unit;
 
         self.out.clear();
         self.out.resize(self.samples.len() * arity, 0.0);
