@@ -675,6 +675,461 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
     }
   },
   {
+    "alias": "@pixelmapper/corner-wave",
+    "name": "Corner Wave",
+    "hash": "sha256:128d3eb6fe7e0ff5261bc527ddef39e6b7214c3c6aa6aab9616dad96e321dfc2",
+    "signatures": [
+      "rgb"
+    ],
+    "manifest": {
+      "schema": 1,
+      "kind": "modifier",
+      "alias": "@pixelmapper/corner-wave",
+      "name": "Corner Wave",
+      "version": "1.0.0",
+      "apiVersion": "^1.3.0",
+      "description": "Colored wave fronts radiate from up to four points you drag on the canvas (default: the corners). Each fixture lights when a front passes its distance to the nearest point. Spacing is the distance between fronts, Width how much of that distance is lit, Softness the edge falloff, Reach how far the waves travel from the points (drag the ring around point A). Every front carries the next color of the palette. Inward makes the fronts converge on the points. One speed cycle moves every front by one spacing.",
+      "purpose": "Waves radiate from draggable points across the room.",
+      "speedUnit": "per front",
+      "signatures": [
+        "rgb"
+      ],
+      "output": "absolute",
+      "distribution": {
+        "modes": [
+          "none"
+        ],
+        "scopes": [
+          "across"
+        ],
+        "default": {
+          "scope": "across",
+          "mode": "none"
+        }
+      },
+      "params": [
+        {
+          "key": "colors",
+          "type": "gradient",
+          "label": "Colors",
+          "tier": "primary",
+          "description": "Palette of the wave fronts: each front takes the next quarter of the palette.",
+          "default": {
+            "stops": [
+              {
+                "pos": 0,
+                "color": {
+                  "r": 0,
+                  "g": 0.8,
+                  "b": 1
+                }
+              },
+              {
+                "pos": 0.5,
+                "color": {
+                  "r": 1,
+                  "g": 0,
+                  "b": 0.6
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "spacing",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.25,
+          "label": "Spacing",
+          "tier": "primary",
+          "description": "Distance between two wave fronts (fraction of the stage width)."
+        },
+        {
+          "key": "width",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.4,
+          "label": "Width",
+          "tier": "primary",
+          "description": "Lit part of the spacing: thin lines (low) to broad bands (high)."
+        },
+        {
+          "key": "softness",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.7,
+          "label": "Softness",
+          "tier": "primary",
+          "description": "Hard edges (0) to soft fades (1)."
+        },
+        {
+          "key": "direction",
+          "type": "enum",
+          "options": [
+            "out",
+            "in"
+          ],
+          "optionLabels": [
+            "Outward",
+            "Inward"
+          ],
+          "default": "out",
+          "label": "Direction",
+          "tier": "primary",
+          "description": "Outward: fronts leave the points. Inward: fronts converge on them."
+        },
+        {
+          "key": "reach",
+          "type": "number",
+          "min": 0.05,
+          "max": 2,
+          "step": 0.01,
+          "default": 0.7,
+          "label": "Reach",
+          "tier": "primary",
+          "description": "How far the waves travel from the nearest point before they fade out (drag the ring around point A).",
+          "ui": {
+            "canvas": "radius",
+            "anchor": "a"
+          }
+        },
+        {
+          "key": "sources",
+          "type": "int",
+          "min": 1,
+          "max": 4,
+          "default": 4,
+          "label": "Points",
+          "tier": "advanced",
+          "description": "How many of the points A–D emit waves."
+        },
+        {
+          "key": "a",
+          "type": "point",
+          "default": {
+            "x": 0.2,
+            "y": 0.2
+          },
+          "label": "Point A",
+          "tier": "advanced",
+          "ui": {
+            "canvas": "point",
+            "label": "A"
+          }
+        },
+        {
+          "key": "b",
+          "type": "point",
+          "default": {
+            "x": 0.8,
+            "y": 0.2
+          },
+          "label": "Point B",
+          "tier": "advanced",
+          "when": {
+            "sources": [
+              2,
+              3,
+              4
+            ]
+          },
+          "ui": {
+            "canvas": "point",
+            "label": "B"
+          }
+        },
+        {
+          "key": "c",
+          "type": "point",
+          "default": {
+            "x": 0.8,
+            "y": 0.8
+          },
+          "label": "Point C",
+          "tier": "advanced",
+          "when": {
+            "sources": [
+              3,
+              4
+            ]
+          },
+          "ui": {
+            "canvas": "point",
+            "label": "C"
+          }
+        },
+        {
+          "key": "d",
+          "type": "point",
+          "default": {
+            "x": 0.2,
+            "y": 0.8
+          },
+          "label": "Point D",
+          "tier": "advanced",
+          "when": {
+            "sources": [
+              4
+            ]
+          },
+          "ui": {
+            "canvas": "point",
+            "label": "D"
+          }
+        }
+      ],
+      "presets": [
+        {
+          "id": "corners",
+          "label": "Corners",
+          "description": "Soft cyan and magenta waves roll in from all four corners.",
+          "default": true,
+          "params": {
+            "spacing": 0.25,
+            "width": 0.4,
+            "softness": 0.7,
+            "direction": "out",
+            "reach": 0.7,
+            "sources": 4
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        },
+        {
+          "id": "implode",
+          "label": "Implode",
+          "description": "Thin warm lines rush into the points on every beat.",
+          "params": {
+            "colors": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 1,
+                    "g": 1,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.5,
+                  "color": {
+                    "r": 1,
+                    "g": 0.45,
+                    "b": 0
+                  }
+                }
+              ]
+            },
+            "spacing": 0.3,
+            "width": 0.15,
+            "softness": 0.3,
+            "direction": "in",
+            "reach": 0.9,
+            "sources": 4
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        },
+        {
+          "id": "ripple",
+          "label": "Ripple",
+          "description": "Dense blue ripples spread from point A, like a stone in water.",
+          "params": {
+            "colors": {
+              "stops": [
+                {
+                  "pos": 0,
+                  "color": {
+                    "r": 0,
+                    "g": 0.3,
+                    "b": 1
+                  }
+                },
+                {
+                  "pos": 0.5,
+                  "color": {
+                    "r": 0,
+                    "g": 0.9,
+                    "b": 0.8
+                  }
+                }
+              ]
+            },
+            "spacing": 0.12,
+            "width": 0.5,
+            "softness": 1,
+            "direction": "out",
+            "reach": 0.6,
+            "sources": 1
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 2
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        }
+      ]
+    }
+  },
+  {
+    "alias": "@pixelmapper/mirror-runner",
+    "name": "Mirror Runner",
+    "hash": "sha256:b73ce304b6b8ee631596bc98f48c9437f388c6a6a72897d5627e582c9bf3750e",
+    "signatures": [
+      "scalar"
+    ],
+    "manifest": {
+      "schema": 1,
+      "kind": "modifier",
+      "alias": "@pixelmapper/mirror-runner",
+      "name": "Mirror Runner",
+      "version": "1.0.0",
+      "apiVersion": "^1.3.0",
+      "description": "A light runs along every LED tube or pixel bar and bounces back at the ends, dragging a fading tail. Mirror makes the two halves of the room move as mirror images (tubes on the far side of the room's center line run the other way). Tail is the length of the trail as a fraction of the tube, Reverse swaps the start end. One speed cycle is one trip there and back. Assumes the tubes are patched in the same direction (pixel 1 on the same side).",
+      "purpose": "Mirrored runners bounce along your LED tubes.",
+      "speedUnit": "per round trip",
+      "signatures": [
+        "scalar"
+      ],
+      "output": "scale",
+      "distribution": {
+        "modes": [
+          "none"
+        ],
+        "scopes": [
+          "across"
+        ],
+        "default": {
+          "scope": "across",
+          "mode": "none"
+        }
+      },
+      "params": [
+        {
+          "key": "tail",
+          "type": "number",
+          "min": 0.02,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.35,
+          "label": "Tail",
+          "tier": "primary",
+          "description": "Length of the fading trail behind the runner, as a fraction of the tube."
+        },
+        {
+          "key": "mirror",
+          "type": "enum",
+          "options": [
+            "leftRight",
+            "frontBack",
+            "off"
+          ],
+          "optionLabels": [
+            "Left/Right",
+            "Front/Back",
+            "Off"
+          ],
+          "default": "leftRight",
+          "label": "Mirror",
+          "tier": "primary",
+          "description": "Which halves of the room move as mirror images: left vs. right, front vs. back, or none."
+        },
+        {
+          "key": "reverse",
+          "type": "bool",
+          "default": false,
+          "label": "Reverse",
+          "tier": "primary",
+          "description": "Start at the other end of the tubes."
+        }
+      ],
+      "presets": [
+        {
+          "id": "runner",
+          "label": "Runner",
+          "description": "A bright runner with a medium tail, once per bar.",
+          "default": true,
+          "params": {
+            "tail": 0.35,
+            "mirror": "leftRight",
+            "reverse": false
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 4
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        },
+        {
+          "id": "comet",
+          "label": "Comet",
+          "description": "A slow comet with a long trail across two bars.",
+          "params": {
+            "tail": 0.8,
+            "mirror": "leftRight",
+            "reverse": false
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 8
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        },
+        {
+          "id": "spark",
+          "label": "Spark",
+          "description": "A short spark bouncing on every beat.",
+          "params": {
+            "tail": 0.08,
+            "mirror": "leftRight",
+            "reverse": false
+          },
+          "speed": {
+            "mode": "beat",
+            "beatValue": 1
+          },
+          "distribution": {
+            "scope": "across",
+            "mode": "none"
+          },
+          "strength": 1
+        }
+      ]
+    }
+  },
+  {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
     "hash": "sha256:2b905a76e7f8ea721e8c5e6a80782d6f589b66949aa3be717b18d802e034c74d",

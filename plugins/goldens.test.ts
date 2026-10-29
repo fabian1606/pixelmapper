@@ -45,7 +45,7 @@ interface GoldenCase {
 }
 
 const TOLERANCE = 1e-3;
-const PLUGINS = ['waveform', 'noise', 'sequencer', 'color-adjust'];
+const PLUGINS = ['waveform', 'noise', 'sequencer', 'color-adjust', 'corner-wave', 'mirror-runner'];
 
 /** Loads a plugin folder. */
 function load(name: string) {

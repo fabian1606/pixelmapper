@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-corner-wave",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (corner-wave). Built by scripts/build-plugins.ts.",
+  "private": true
+}

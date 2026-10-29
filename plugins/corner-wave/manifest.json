@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "kind": "modifier",
+  "alias": "@pixelmapper/corner-wave",
+  "name": "Corner Wave",
+  "version": "1.0.0",
+  "apiVersion": "^1.3.0",
+  "description": "Colored wave fronts radiate from up to four points you drag on the canvas (default: the corners). Each fixture lights when a front passes its distance to the nearest point. Spacing is the distance between fronts, Width how much of that distance is lit, Softness the edge falloff, Reach how far the waves travel from the points (drag the ring around point A). Every front carries the next color of the palette. Inward makes the fronts converge on the points. One speed cycle moves every front by one spacing.",
+  "purpose": "Waves radiate from draggable points across the room.",
+  "speedUnit": "per front",
+  "signatures": ["rgb"],
+  "output": "absolute",
+  "distribution": { "modes": ["none"], "scopes": ["across"], "default": { "scope": "across", "mode": "none" } },
+  "params": [
+    {
+      "key": "colors", "type": "gradient", "label": "Colors", "tier": "primary",
+      "description": "Palette of the wave fronts: each front takes the next quarter of the palette.",
+      "default": { "stops": [{ "pos": 0, "color": { "r": 0, "g": 0.8, "b": 1 } }, { "pos": 0.5, "color": { "r": 1, "g": 0, "b": 0.6 } }] }
+    },
+    {
+      "key": "spacing", "type": "number", "min": 0.05, "max": 1, "step": 0.01, "default": 0.25, "label": "Spacing", "tier": "primary",
+      "description": "Distance between two wave fronts (fraction of the stage width)."
+    },
+    {
+      "key": "width", "type": "number", "min": 0.05, "max": 1, "step": 0.01, "default": 0.4, "label": "Width", "tier": "primary",
+      "description": "Lit part of the spacing: thin lines (low) to broad bands (high)."
+    },
+    {
+      "key": "softness", "type": "number", "min": 0, "max": 1, "step": 0.01, "default": 0.7, "label": "Softness", "tier": "primary",
+      "description": "Hard edges (0) to soft fades (1)."
+    },
+    {
+      "key": "direction", "type": "enum", "options": ["out", "in"], "optionLabels": ["Outward", "Inward"], "default": "out", "label": "Direction", "tier": "primary",
+      "description": "Outward: fronts leave the points. Inward: fronts converge on them."
+    },
+    {
+      "key": "reach", "type": "number", "min": 0.05, "max": 2, "step": 0.01, "default": 0.7, "label": "Reach", "tier": "primary",
+      "description": "How far the waves travel from the nearest point before they fade out (drag the ring around point A).",
+      "ui": { "canvas": "radius", "anchor": "a" }
+    },
+    {
+      "key": "sources", "type": "int", "min": 1, "max": 4, "default": 4, "label": "Points", "tier": "advanced",
+      "description": "How many of the points A–D emit waves."
+    },
+    {
+      "key": "a", "type": "point", "default": { "x": 0.2, "y": 0.2 }, "label": "Point A", "tier": "advanced",
+      "ui": { "canvas": "point", "label": "A" }
+    },
+    {
+      "key": "b", "type": "point", "default": { "x": 0.8, "y": 0.2 }, "label": "Point B", "tier": "advanced", "when": { "sources": [2, 3, 4] },
+      "ui": { "canvas": "point", "label": "B" }
+    },
+    {
+      "key": "c", "type": "point", "default": { "x": 0.8, "y": 0.8 }, "label": "Point C", "tier": "advanced", "when": { "sources": [3, 4] },
+      "ui": { "canvas": "point", "label": "C" }
+    },
+    {
+      "key": "d", "type": "point", "default": { "x": 0.2, "y": 0.8 }, "label": "Point D", "tier": "advanced", "when": { "sources": [4] },
+      "ui": { "canvas": "point", "label": "D" }
+    }
+  ],
+  "presets": [
+    {
+      "id": "corners", "label": "Corners", "description": "Soft cyan and magenta waves roll in from all four corners.", "default": true,
+      "params": { "spacing": 0.25, "width": 0.4, "softness": 0.7, "direction": "out", "reach": 0.7, "sources": 4 },
+      "speed": { "mode": "beat", "beatValue": 4 }, "distribution": { "scope": "across", "mode": "none" }, "strength": 1
+    },
+    {
+      "id": "implode", "label": "Implode", "description": "Thin warm lines rush into the points on every beat.",
+      "params": {
+        "colors": { "stops": [{ "pos": 0, "color": { "r": 1, "g": 1, "b": 1 } }, { "pos": 0.5, "color": { "r": 1, "g": 0.45, "b": 0 } }] },
+        "spacing": 0.3, "width": 0.15, "softness": 0.3, "direction": "in", "reach": 0.9, "sources": 4
+      },
+      "speed": { "mode": "beat", "beatValue": 1 }, "distribution": { "scope": "across", "mode": "none" }, "strength": 1
+    },
+    {
+      "id": "ripple", "label": "Ripple", "description": "Dense blue ripples spread from point A, like a stone in water.",
+      "params": {
+        "colors": { "stops": [{ "pos": 0, "color": { "r": 0, "g": 0.3, "b": 1 } }, { "pos": 0.5, "color": { "r": 0, "g": 0.9, "b": 0.8 } }] },
+        "spacing": 0.12, "width": 0.5, "softness": 1, "direction": "out", "reach": 0.6, "sources": 1
+      },
+      "speed": { "mode": "beat", "beatValue": 2 }, "distribution": { "scope": "across", "mode": "none" }, "strength": 1
+    }
+  ]
+}
