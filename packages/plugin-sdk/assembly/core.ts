@@ -164,7 +164,8 @@ export class Out {
 /**
  * The params block: the f32 slots of all params in manifest order (ADR §6.2).
  * `number`/`int`/`angle` = 1 slot, `bool` = 1 (0/1), `enum` = 1 (index),
- * `color` = 3, `point` = 2, `curve` = 128 (LUT).
+ * `color` = 3, `point` = 2, `curve` = 128 (LUT), `gradient` = 33, `steps` = 18,
+ * `trigger` = 4 (read with `triggerPressed` / `triggerMsSincePress` / …).
  */
 export class Params {
   /** Address of the params block (set by the SDK). */

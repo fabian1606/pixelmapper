@@ -4,6 +4,8 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
+import { isTriggerParam } from '~/utils/plugins/trigger-param';
+import { setEffectTrigger } from './effect-trigger';
 
 /**
  * Shared runtime dispatcher for a {@link LiveMapping}. Used by canvas buttons,
@@ -41,6 +43,14 @@ export interface MappingContext {
   dimmerState?: DimmerState;
 }
 
+/** Key of the `trigger` param an `effect-param` mapping targets (ABI 1.3), else null. */
+export function triggerParamKey(mapping: LiveMapping): string | null {
+  if (mapping.type !== 'effect-param' || mapping.effectId == null || !mapping.paramKey?.startsWith('params.')) return null;
+  const effect = useEngineStore().modifiers.find((e: any) => e.id === mapping.effectId);
+  const key = mapping.paramKey.slice('params.'.length);
+  return effect && isTriggerParam(getManifest(effect.plugin), key) ? key : null;
+}
+
 /**
  * Whether a mapping should behave as momentary "flash" (held = active, release
  * = revert) — used for the ⚡ indicator and press/release semantics.
@@ -57,6 +67,8 @@ export function isFlashMapping(mapping: LiveMapping): boolean {
   }
   // Other global functions are hold-to-active (flash behavior).
   if (mapping.type === 'global-function') return true;
+  // Trigger params are momentary by definition (press / release edges).
+  if (triggerParamKey(mapping)) return true;
   return false;
 }
 
@@ -181,6 +193,9 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
     }
   } else if (mapping.type === 'dimmer-group') {
     applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, ctx);
+  } else if (mapping.type === 'effect-param' && triggerParamKey(mapping)) {
+    // Trigger param (ABI 1.3): buttons send press/release; sliders press above half.
+    setEffectTrigger(mapping.effectId!, triggerParamKey(mapping)!, value !== undefined ? value >= 0.5 : active);
   } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null && value !== undefined) {
     const effect = engineStore.modifiers.find((e: any) => e.id === mapping.effectId);
     if (effect) {

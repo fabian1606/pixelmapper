@@ -33,4 +33,5 @@ export * from "./gradient";
 export * from "./waves";
 export * from "./patterns";
 export * from "./patterns-time";
+export * from "./trigger";
 export * from "./abi";

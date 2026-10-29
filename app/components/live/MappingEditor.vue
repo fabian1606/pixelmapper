@@ -32,7 +32,8 @@ const engineStore = useEngineStore();
 const mappableParams = computed(() => {
   const m = engineStore.modifiers.find(e => e.id === props.mapping.effectId);
   const manifest = m ? getManifest(m.plugin) : undefined;
-  return (manifest?.params ?? []).filter(p => p.type === 'number' || p.type === 'int' || p.type === 'bool');
+  // Trigger params (ABI 1.3) take a button's press/release.
+  return (manifest?.params ?? []).filter(p => p.type === 'number' || p.type === 'int' || p.type === 'bool' || p.type === 'trigger');
 });
 const store = useLiveModeStore();
 

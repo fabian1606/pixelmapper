@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema } from '@pixelmapper/extension-api';
 import { encodeParams } from '@pixelmapper/plugin-toolchain/params';
+import { SAMPLE, SAMPLE_FIELDS } from '@pixelmapper/plugin-toolchain/runtime';
 import { BUILTIN_PLUGINS } from './builtin-index';
 import { buildPanelSrcdoc, coerceParam, envelope, parsePanelMessage, PANEL_PROTOCOL, stripExports } from './iframe-runtime';
 
@@ -59,8 +60,8 @@ describe('in-iframe runtime', () => {
 
   it.skipIf(!existsSync(wasmPath))('mounts the panel, renders with the plugin and sends validated messages', () => {
     const ui = `export function mount(el, api) {
-      const s = new Float32Array(16 * 4);
-      for (let i = 0; i < 4; i++) { s[i * 16 + 13] = i / 4; s[i * 16 + 8] = 1; }
+      const s = new Float32Array(${SAMPLE_FIELDS} * 4);
+      for (let i = 0; i < 4; i++) { s[i * ${SAMPLE_FIELDS} + ${SAMPLE.spatial}] = i / 4; s[i * ${SAMPLE_FIELDS} + ${SAMPLE.base0}] = 1; }
       const out = api.render(s, 4);
       el.result = Array.from(out);
       el.theme = api.theme['--primary'];

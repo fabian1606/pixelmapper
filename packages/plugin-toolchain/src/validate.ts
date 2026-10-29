@@ -74,6 +74,8 @@ function paramVariants(schema: ParamSchema): { name: string; values: Record<stri
         case 'angle': out[p.key] = mode === 'min' ? 0 : mode === 'max' ? Math.PI * 2 : r() * Math.PI * 2; break;
         case 'point': out[p.key] = mode === 'rand' ? { x: r(), y: r() } : { x: mode === 'max' ? 1 : 0, y: mode === 'max' ? 1 : 0 }; break;
         case 'curve': out[p.key] = mode === 'rand' ? [{ x: 0, y: r() }, { x: 0.5, y: r() }, { x: 1, y: r() }] : p.default; break;
+        // Trigger (v1.3): idle, held since frame 0, released mid-run after a double click.
+        case 'trigger': out[p.key] = mode === 'min' ? { pressed: false } : mode === 'max' ? { pressed: true, pressedAt: 0, clicks: 1 } : { pressed: false, pressedAt: 1000, releasedAt: 1000 + r() * 1000, clicks: 2 }; break;
       }
     }
     return out;

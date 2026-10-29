@@ -266,7 +266,7 @@ export function mount(el: HTMLElement, api: PanelApi): (() => void) | void {
 | `setParam(key, value)` | change one param; validated against the manifest schema (numbers are clamped, unknown keys and invalid values are dropped) |
 | `beginScrub()` / `endScrub()` | wrap continuous edits so they become **one** undo step; a `setParam` outside a scrub commits immediately |
 | `onFrame(cb)` | ~30 fps `{ timeMs, beatTime, bpm }` for animations (only sent while subscribed) |
-| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 16` f32 in the `Sample` layout, returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
+| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 20` f32 in the `Sample` layout (ABI 1.3), returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
 | `theme` | resolved CSS variables as full color values (`--background`, `--foreground`, `--primary`, `--muted`, `--border`, `--radius`, …); they are also set on `:root` inside the panel, so `var(--primary)` works in styles |
 
 Sandbox: the panel runs in `<iframe sandbox="allow-scripts">` with an opaque origin and a CSP without network access (`default-src 'none'`; inline scripts, styles, `data:` images and wasm only). It cannot reach the app, cookies, storage or the network; everything goes through `PanelApi` messages. The iframe resizes to its content height (24–600 px). Uncaught errors are shown under the panel.

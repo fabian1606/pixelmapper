@@ -47,6 +47,8 @@ const emit = defineEmits<{
   'update:modelValue': [values: Record<string, ParamValue>];
   /** One param changed (convenience for callers that patch single keys). */
   change: [key: string, value: ParamValue];
+  /** Press (`true`) / release (`false`) of a `trigger` param (ABI 1.3); not part of `modelValue` edits. */
+  trigger: [key: string, pressed: boolean];
   scrubStart: [];
   scrubEnd: [];
 }>();
@@ -113,7 +115,7 @@ const groupProps = computed(() => ({
     <ParamFormGroups
       v-if="layout.primary.length"
       v-bind="groupProps" :groups="layout.primary"
-      @set="set" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
+      @set="set" @trigger="(k: string, p: boolean) => emit('trigger', k, p)" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
     >
       <template v-for="(_, name) in $slots" #[name]="slotProps" :key="name"><slot :name="name" v-bind="slotProps ?? {}" /></template>
     </ParamFormGroups>
@@ -127,7 +129,7 @@ const groupProps = computed(() => ({
         <ParamFormGroups
           v-if="layout.advanced.length"
           v-bind="groupProps" :groups="layout.advanced"
-          @set="set" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
+          @set="set" @trigger="(k: string, p: boolean) => emit('trigger', k, p)" @scrub-start="emit('scrubStart')" @scrub-end="emit('scrubEnd')"
         />
         <slot name="more" />
       </div>
