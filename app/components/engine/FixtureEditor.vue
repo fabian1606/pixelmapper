@@ -6,6 +6,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
+import ModifierCanvasHandles from './canvas-hints/ModifierCanvasHandles.vue';
 import ModifierFieldOverlay from '~/components/plugin-host/ModifierFieldOverlay.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
@@ -618,6 +619,23 @@ function handleMouseUp(e?: MouseEvent) {
 
     <FixtureEditorSpatialControls
       v-if="activeModifier && !orderToolActive && activeModifier.distribution?.scope === 'across' && ['linear', 'radial', 'conical'].includes(activeModifier.distribution.mode)"
+      :viewport-el="viewportEl"
+      :editor-width="editorWidth"
+      :editor-height="editorHeight"
+      :camera="camera"
+      :active-modifier="activeModifier"
+      :world-width="WORLD_WIDTH"
+      :world-height="WORLD_HEIGHT"
+      :world-to-viewport="worldToViewport"
+      @dragStart="handleSpatialDragStart"
+      @modifierChange="handleModifierChange"
+      @modifierDragEnd="handleModifierDragEnd"
+      @redraw="() => { engineStore.flushEngineOutput?.(); fixtureCanvas?.draw(); }"
+    />
+
+    <!-- Canvas hints (plan M4): handles of the active modifier's hinted params, any distribution mode -->
+    <ModifierCanvasHandles
+      v-if="activeModifier && !orderToolActive"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"
