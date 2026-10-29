@@ -63,6 +63,11 @@ export interface ObserveRequest {
   modifierId?: string;
   /** Preview: a plugin (alias or hash) with params, rendered as a fresh instance. */
   plugin?: { ref: string; params?: Record<string, unknown>; signature?: string };
+  /**
+   * Points (normalized world x/y) for the `radial` feature: "does it radiate
+   * from here?". Preview adds the instance's canvas `point` params itself.
+   */
+  points?: Array<{ x: number; y: number }>;
   expect?: Expectation[];
 }
 
@@ -79,6 +84,7 @@ export const ObserveRequestSchema = z.object({
     params: z.record(z.string(), z.unknown()).optional(),
     signature: z.string().optional(),
   }).optional(),
+  points: z.array(z.object({ x: z.number(), y: z.number() })).max(16).optional(),
   expect: z.array(ExpectationSchema).optional(),
 });
 
