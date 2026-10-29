@@ -18,12 +18,18 @@ export {
 } from './command-limits';
 export { NodeDirectory } from './node-directory';
 export { WsBridgeBackend } from './ws-bridge-backend';
+export type { BridgeTransport, BridgeTransportFactory, BridgeTransportHandlers } from './bridge-transport';
+export { createWebSocketTransport } from './websocket-transport';
+export { createInProcessTransport, IN_PROCESS_BRIDGE_LABEL } from './in-process-transport';
 export {
   DEFAULT_BRIDGE_URL,
   PMNET_DOWNLOAD_URL,
   PMNET_SERVE_COMMAND,
   bridgeUnsupportedReason,
+  createArtNetBackend,
   getArtNetBackend,
+  platformArtNetBridge,
+  usesBuiltInBridge,
   getBridgeUrl,
   getNodeDirectory,
   installArtNetBackend,

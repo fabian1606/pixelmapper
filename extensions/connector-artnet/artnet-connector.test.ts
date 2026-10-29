@@ -8,7 +8,7 @@ import { ArtNetConnector, LEGACY_BRIDGE_URL, migrateLegacyBridgeUrl } from './ar
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(udp: UdpApi | null) {
-  const platform: Platform = { kind: udp ? 'tauri' : 'web', udp, serial: null, midi: null };
+  const platform: Platform = { kind: udp ? 'tauri' : 'web', udp, serial: null, midi: null, artnetBridge: null };
   globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { platform } as unknown as SharedGlobals['api'] };
 }
 

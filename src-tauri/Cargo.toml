@@ -20,3 +20,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
+# Built-in Art-Net 4 / RDM bridge (`src/artnet.rs`): the bridge core of `pmnet-bridge serve`, without its
+# WebSocket server (pixelmapper-hardware repo, AGPL-3.0).
+pmnet-bridge = { git = "https://github.com/fabian1606/pixelmapper-hardware", rev = "8bb49ddc9b2c579463dd37a79a1ed45bcf75ac57", default-features = false }
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+# Node simulator (`pmnet sim`) for the built-in bridge's test against the real backend; same rev as pmnet-bridge.
+pixelmapper-net = { git = "https://github.com/fabian1606/pixelmapper-hardware", rev = "8bb49ddc9b2c579463dd37a79a1ed45bcf75ac57" }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }

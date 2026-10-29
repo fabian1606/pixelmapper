@@ -2,10 +2,11 @@
  * `ArtNetBackend` — the seam between the plugin and whatever speaks Art-Net
  * for it.
  *
- * UI and connectors only use this interface. The first implementation is
- * `WsBridgeBackend` (WebSocket to `pmnet-bridge serve`); a future desktop backend
- * (embedded `pixelmapper-net` through Tauri) implements the same interface,
- * so platform details never leak into components or connectors. Commands
+ * UI and connectors only use this interface. The implementation is
+ * `WsBridgeBackend`, which speaks the bridge contract over a `BridgeTransport`:
+ * a WebSocket to `pmnet-bridge serve` (browser) or the bridge embedded in the
+ * desktop app (`Platform.artnetBridge`), so platform details never leak into
+ * components or connectors. Commands
  * and events mirror the WebSocket contract 1:1
  * (`architecture/artnet-bridge-ws-protocol.md`).
  */
@@ -40,8 +41,11 @@ export type BackendState =
   | { kind: 'unsupported'; reason: string }
   | { kind: 'connecting'; url: string }
   | { kind: 'connected'; url: string; info: BackendInfo }
-  /** Not reachable; retrying after `retryInMs`. */
-  | { kind: 'unreachable'; url: string; attempts: number; retryInMs: number }
+  /**
+   * Not reachable; retrying after `retryInMs`. `error` is the transport's
+   * reason when it gave one (e.g. why the built-in bridge could not start).
+   */
+  | { kind: 'unreachable'; url: string; attempts: number; retryInMs: number; error?: string }
   /** Reachable but speaks another protocol version (or none); retrying slowly. */
   | { kind: 'incompatible'; url: string; reason: IncompatibleReason; bridgeVersion: string | null; protocol: string | null };
 

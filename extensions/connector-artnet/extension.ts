@@ -3,7 +3,8 @@
  *
  * Two connector types:
  * - `artnet-node`: one connector per Art-Net 4 node found by the bridge
- *   `pmnet-bridge serve` (plan D6); outputs = the node's output ports.
+ *   (`pmnet-bridge serve` in the browser, built into the desktop app; plan D6);
+ *   outputs = the node's output ports.
  * - `artnet` (“ArtNet (manual target)”): the original connector — direct
  *   UDP in the desktop app, the old local bridge in the browser — kept
  *   unchanged for existing setups.
@@ -41,14 +42,14 @@ export default defineExtension({
   version: EXTENSION_VERSION,
   apiVersion: '^1.4.0',
   displayName: 'ArtNet output',
-  description: 'Sends DMX universes as Art-Net: to Art-Net 4 nodes found on the network through the local bridge pmnet-bridge, or to a manual target (direct UDP in the desktop app, local bridge in the browser).',
+  description: 'Sends DMX universes as Art-Net: to Art-Net 4 nodes found on the network through the Art-Net bridge (built into the desktop app, pmnet-bridge in the browser), or to a manual target (direct UDP in the desktop app, local bridge in the browser).',
   contributes: {
     connectors: [
       defineConnector({
         type: NODE_CONNECTOR_TYPE,
         label: 'Art-Net node',
         icon: 'network',
-        description: 'One Art-Net 4 node on the network (found by the local bridge pmnet-bridge); its output ports become outputs.',
+        description: 'One Art-Net 4 node on the network (found by the Art-Net bridge); its output ports become outputs.',
         direction: 'output',
         create: id => new ArtNetNodeConnector(id),
         fromConfig: (id, config) => ArtNetNodeConnector.fromConfig(id, config),

@@ -17,6 +17,8 @@ export function createWebPlatform(): Platform {
     udp: null,
     serial: createWebSerial(),
     midi: createWebMidi(),
+    // Browsers reach the Art-Net bridge over WebSocket (`pmnet-bridge serve`).
+    artnetBridge: null,
   };
 }
 

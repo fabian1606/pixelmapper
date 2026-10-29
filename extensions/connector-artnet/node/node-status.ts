@@ -6,7 +6,7 @@
 import type { ConnectorStatus } from '@pixelmapper/extension-api';
 import type { BackendState } from '../bridge/backend';
 import type { NodeState } from '../bridge/protocol-model';
-import { PMNET_SERVE_COMMAND } from '../bridge/shared';
+import { PMNET_SERVE_COMMAND, usesBuiltInBridge } from '../bridge/shared';
 
 /** Status + message shown on the connector card. */
 export interface NodeConnectorStatus {
@@ -14,8 +14,13 @@ export interface NodeConnectorStatus {
   message: string | null;
 }
 
-/** One-line text for a backend state that blocks Art-Net, or null when connected/idle. */
-export function backendProblem(state: BackendState): string | null {
+/**
+ * One-line text for a backend state that blocks Art-Net, or null when
+ * connected/idle. `builtIn`: the desktop app's own bridge is used, so there
+ * is nothing to start or install — only Pixelmapper itself can be updated.
+ */
+export function backendProblem(state: BackendState, builtIn: boolean = usesBuiltInBridge()): string | null {
+  if (builtIn) return builtInBridgeProblem(state);
   switch (state.kind) {
     case 'unsupported':
       return state.reason;
@@ -25,6 +30,22 @@ export function backendProblem(state: BackendState): string | null {
       if (state.reason === 'noHello') return `Another program answers on ${state.url} (old ArtNet bridge?) — start “${PMNET_SERVE_COMMAND}” instead`;
       if (state.reason === 'appTooOld') return `The Art-Net bridge is newer than this app (protocol ${state.protocol}) — reload Pixelmapper`;
       return `Bridge update needed (pmnet-bridge ${state.bridgeVersion ?? '?'} speaks protocol ${state.protocol ?? '?'})`;
+    default:
+      return null;
+  }
+}
+
+/** `backendProblem` for the bridge built into the desktop app. */
+function builtInBridgeProblem(state: BackendState): string | null {
+  switch (state.kind) {
+    case 'unsupported':
+      return state.reason;
+    case 'unreachable':
+      return `The built-in Art-Net bridge could not start${state.error ? `: ${state.error}` : ''} — retrying`;
+    case 'incompatible':
+      if (state.reason === 'noHello') return 'The built-in Art-Net bridge does not answer — restart Pixelmapper';
+      if (state.reason === 'appTooOld') return `The built-in Art-Net bridge (protocol ${state.protocol}) is newer than the Art-Net extension — update Pixelmapper`;
+      return `The built-in Art-Net bridge (${state.bridgeVersion ?? '?'}, protocol ${state.protocol ?? '?'}) is too old for the Art-Net extension — update Pixelmapper`;
     default:
       return null;
   }

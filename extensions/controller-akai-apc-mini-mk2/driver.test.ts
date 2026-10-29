@@ -8,7 +8,7 @@ import { APCMiniMk2Driver } from './driver';
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(midi: MidiApi | null) {
-  const platform: Platform = { kind: 'web', udp: null, serial: null, midi };
+  const platform: Platform = { kind: 'web', udp: null, serial: null, midi, artnetBridge: null };
   globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { platform } as unknown as SharedGlobals['api'] };
 }
 

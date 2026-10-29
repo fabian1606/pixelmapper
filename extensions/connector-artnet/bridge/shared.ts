@@ -2,15 +2,19 @@
  * The app-wide Art-Net backend and node directory (plan M5.1: one bridge
  * connection per app, not per connector) plus the bridge URL setting.
  *
- * The browser and the desktop app both use `WsBridgeBackend` for now; a
- * native backend can be installed with `installArtNetBackend` without
- * touching connectors or components.
+ * Both platforms use `WsBridgeBackend`; only its transport differs: the
+ * desktop app (whose platform provides `artnetBridge`) talks to the bridge
+ * built into the app, the browser to `pmnet-bridge serve` over a WebSocket
+ * at the configured URL. Tests can install another backend with
+ * `installArtNetBackend` without touching connectors or components.
  */
 import { shallowRef } from 'vue';
 import { getPlatform } from '@pixelmapper/extension-api';
+import type { ArtNetBridgeApi } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from './backend';
 import { NodeDirectory } from './node-directory';
 import { WsBridgeBackend } from './ws-bridge-backend';
+import { createInProcessTransport, IN_PROCESS_BRIDGE_LABEL } from './in-process-transport';
 import { EXTENSION_VERSION } from '../version';
 
 /** Default bridge address (`pmnet-bridge serve`). */
@@ -47,7 +51,37 @@ export function setBridgeUrl(url: string): void {
   catch (err) {
     console.warn('[artnet] cannot store the bridge URL:', err);
   }
-  if (backend instanceof WsBridgeBackend) backend.setUrl(getBridgeUrl);
+  // The built-in bridge has no URL; only a WebSocket backend reconnects.
+  if (backend instanceof WsBridgeBackend && !usesBuiltInBridge()) backend.setUrl(getBridgeUrl);
+}
+
+/** The bridge built into the app (desktop platform), or null (browser, tests without host). */
+export function platformArtNetBridge(): ArtNetBridgeApi | null {
+  try {
+    return getPlatform().artnetBridge ?? null;
+  }
+  catch {
+    return null;
+  }
+}
+
+/**
+ * True when Art-Net runs through the bridge built into the desktop app:
+ * no `pmnet-bridge serve`, no bridge URL, no browser restrictions.
+ */
+export function usesBuiltInBridge(): boolean {
+  return platformArtNetBridge() !== null;
+}
+
+/**
+ * Creates a backend for this platform: in-process transport when `bridge`
+ * is given (desktop), else a WebSocket to the bridge URL (browser).
+ */
+export function createArtNetBackend(bridge: ArtNetBridgeApi | null = platformArtNetBridge()): WsBridgeBackend {
+  if (bridge) {
+    return new WsBridgeBackend({ url: () => IN_PROCESS_BRIDGE_LABEL, clientVersion: EXTENSION_VERSION, transport: createInProcessTransport(bridge) });
+  }
+  return new WsBridgeBackend({ url: getBridgeUrl, clientVersion: EXTENSION_VERSION, unsupportedReason: bridgeUnsupportedReason });
 }
 
 /** True for Safari (not Chromium/Firefox on iOS or macOS). */
@@ -66,9 +100,9 @@ export function bridgeUnsupportedReason(): string | null {
   return isSafariUserAgent(navigator.userAgent) ? 'Art-Net discovery is not supported in Safari. Use Chrome, Firefox or the desktop app.' : null;
 }
 
-/** The shared backend (created on first use, not started). */
+/** The shared backend (created on first use for this platform, not started). */
 export function getArtNetBackend(): ArtNetBackend {
-  return backend ??= new WsBridgeBackend({ url: getBridgeUrl, clientVersion: EXTENSION_VERSION, unsupportedReason: bridgeUnsupportedReason });
+  return backend ??= createArtNetBackend();
 }
 
 /** The shared node directory of the shared backend. */

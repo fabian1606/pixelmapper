@@ -1,6 +1,9 @@
 /**
- * `ArtNetBackend` over the WebSocket contract to `pmnet-bridge serve`
- * (`architecture/artnet-bridge-ws-protocol.md`).
+ * `ArtNetBackend` over the bridge contract
+ * (`architecture/artnet-bridge-ws-protocol.md`): to `pmnet-bridge serve` over
+ * a WebSocket (browser) or to the bridge embedded in the desktop app. The
+ * byte pipe is a `BridgeTransport` created per connect attempt
+ * (`bridge-transport.ts`); everything protocol-related stays here.
  *
  * One instance per app (see `shared.ts`). Connects, checks the `hello`
  * version, reconnects with exponential backoff, correlates commands with
@@ -37,10 +40,14 @@ import { DmxRouter } from './dmx-router';
 import { encodeFrameSet } from './frame-set';
 import { commandArgsProblem, dmxTargetProblem, MAX_MESSAGE_BYTES, utf8ByteLength } from './command-limits';
 import type { NetInterface } from './protocol-model';
+import type { BridgeTransport, BridgeTransportFactory } from './bridge-transport';
+import { createWebSocketTransport, type WebSocketFactory } from './websocket-transport';
+
+export type { WebSocketFactory } from './websocket-transport';
 
 // ── Timing ─────────────────────────────────────
 
-/** Socket must open within this time. */
+/** Transport must open within this time. */
 const CONNECT_TIMEOUT_MS = 5000;
 /** `hello` must arrive within this time after open (contract §1). */
 const HELLO_TIMEOUT_MS = 3000;
@@ -60,11 +67,8 @@ const COMMAND_TIMEOUT_MS: Partial<Record<BridgeCommandType, number>> = {
   imageInfo: 10_000,
   flash: 30_000,
 };
-/** Frame sets are dropped while more than this is waiting in the socket. */
+/** Frame sets are dropped while more than this is waiting in the transport. */
 const MAX_BUFFERED_BYTES = 256 * 1024;
-
-/** WebSocket readyState OPEN. */
-const WS_OPEN = 1;
 
 /** Close codes of the contract (§1) with the text logged when the bridge uses one. */
 const CLOSE_REASONS: Readonly<Record<number, string>> = {
@@ -74,19 +78,21 @@ const CLOSE_REASONS: Readonly<Record<number, string>> = {
   1001: 'the bridge is shutting down',
 };
 
-/** Constructor of a WebSocket (injectable for tests). */
-export type WebSocketFactory = new (url: string) => WebSocket;
-
 /** Options of `WsBridgeBackend`. */
 export interface WsBridgeBackendOptions {
-  /** Bridge URL, read on every connect attempt. */
+  /**
+   * Bridge URL (WebSocket) or display label of the transport, read on every
+   * connect attempt; shown as `BackendState.url`.
+   */
   url: () => string;
   /** Version of this app (sent in the client `hello`). */
   clientVersion: string;
   /** Returns a reason when the platform cannot reach a bridge (Safari), else null. */
   unsupportedReason?: () => string | null;
-  /** WebSocket implementation; default `globalThis.WebSocket`. */
+  /** WebSocket implementation of the default transport; default `globalThis.WebSocket`. */
   WebSocketImpl?: WebSocketFactory;
+  /** Creates the transport per connect attempt; default a WebSocket to `url()`. */
+  transport?: BridgeTransportFactory;
 }
 
 /** An open command. */
@@ -100,7 +106,11 @@ export class WsBridgeBackend implements ArtNetBackend {
   readonly state: ShallowRef<BackendState> = shallowRef<BackendState>({ kind: 'idle' });
   readonly dmxError: ShallowRef<string | null> = shallowRef<string | null>(null);
 
-  private ws: WebSocket | null = null;
+  private transport: BridgeTransport | null = null;
+  /** Counts connect attempts; callbacks of older attempts are ignored. */
+  private session = 0;
+  /** Reason of the last close without a contract code (e.g. "bridge could not start"). */
+  private lastCloseReason = '';
   private started = false;
   /** True once the client `hello` was answered. */
   private handshaken = false;
@@ -198,39 +208,40 @@ export class WsBridgeBackend implements ArtNetBackend {
 
   // ── Socket ───────────────────────────────────
 
-  /** Opens a socket; `quiet` keeps the unreachable/incompatible state during retries. */
+  /** Opens a transport; `quiet` keeps the unreachable/incompatible state during retries. */
   private openSocket(quiet: boolean) {
     const url = this.options.url();
     if (!quiet) this.state.value = { kind: 'connecting', url };
-    const Impl = this.options.WebSocketImpl ?? (globalThis.WebSocket as WebSocketFactory | undefined);
-    let ws: WebSocket;
+    const session = ++this.session;
+    const current = () => this.session === session;
+    const factory = this.options.transport ?? createWebSocketTransport(this.options.WebSocketImpl);
     try {
-      if (!Impl) throw new Error('WebSocket not available');
-      ws = new Impl(url);
+      this.transport = factory(url, {
+        onOpen: () => {
+          if (!current()) return;
+          this.clearTimer('connectTimer');
+          this.helloTimer = setTimeout(() => this.onIncompatible('noHello', null, null), HELLO_TIMEOUT_MS);
+        },
+        onMessage: (text) => { if (current()) this.onMessage(text); },
+        onClose: (code, reason) => {
+          if (!current()) return;
+          const known = CLOSE_REASONS[code];
+          if (known) this.emitLog('warn', `The bridge closed the connection (${code}: ${known}); reconnecting`);
+          else if (reason) this.emitLog('warn', `Connection to the bridge ended: ${reason}`);
+          this.lastCloseReason = known ? '' : reason;
+          this.onSocketDown();
+        },
+      });
     }
-    catch {
+    catch (err) {
+      this.lastCloseReason = (err as Error)?.message ?? '';
       return this.onSocketDown();
     }
-    ws.binaryType = 'arraybuffer';
-    this.ws = ws;
-    this.connectTimer = setTimeout(() => { if (this.ws === ws) this.onSocketDown(); }, CONNECT_TIMEOUT_MS);
-    ws.addEventListener('open', () => {
-      if (this.ws !== ws) return;
-      this.clearTimer('connectTimer');
-      this.helloTimer = setTimeout(() => this.onIncompatible('noHello', null, null), HELLO_TIMEOUT_MS);
-    });
-    ws.addEventListener('message', (ev: MessageEvent) => { if (this.ws === ws) this.onMessage(ev.data); });
-    ws.addEventListener('close', (ev: CloseEvent) => {
-      if (this.ws !== ws) return;
-      const reason = CLOSE_REASONS[ev?.code];
-      if (reason) this.emitLog('warn', `The bridge closed the connection (${ev.code}: ${reason}); reconnecting`);
-      this.onSocketDown();
-    });
-    ws.addEventListener('error', () => { /* `close` follows */ });
+    this.connectTimer = setTimeout(() => { if (current()) this.onSocketDown(); }, CONNECT_TIMEOUT_MS);
   }
 
   /**
-   * Socket failed or closed: schedule the next attempt. (A version mismatch
+   * Transport failed or closed: schedule the next attempt. (A version mismatch
    * goes through `onIncompatible`; a refused socket means no bridge runs.)
    */
   private onSocketDown() {
@@ -239,7 +250,9 @@ export class WsBridgeBackend implements ArtNetBackend {
     if (!this.started) return;
     this.attempts = wasConnected ? 1 : this.attempts + 1;
     const delay = Math.min(BACKOFF_INITIAL_MS * 2 ** (this.attempts - 1), BACKOFF_MAX_MS);
-    this.state.value = { kind: 'unreachable', url: this.options.url(), attempts: this.attempts, retryInMs: delay };
+    const error = this.lastCloseReason;
+    this.lastCloseReason = '';
+    this.state.value = { kind: 'unreachable', url: this.options.url(), attempts: this.attempts, retryInMs: delay, ...(error ? { error } : {}) };
     this.scheduleReconnect(delay);
   }
 
@@ -251,17 +264,18 @@ export class WsBridgeBackend implements ArtNetBackend {
     this.scheduleReconnect(INCOMPATIBLE_RETRY_MS);
   }
 
-  /** Closes the socket and fails everything that depended on it. */
+  /** Closes the transport and fails everything that depended on it. */
   private dropSocket() {
     this.clearTimer('connectTimer');
     this.clearTimer('helloTimer');
-    const ws = this.ws;
-    this.ws = null;
+    const transport = this.transport;
+    this.transport = null;
+    this.session++;
     this.handshaken = false;
     this.router.clearPending();
     this.router.markDirty();
-    if (ws) {
-      try { ws.close(); }
+    if (transport) {
+      try { transport.close(); }
       catch { /* already closed */ }
     }
     for (const [id, p] of this.pending) {
@@ -283,8 +297,7 @@ export class WsBridgeBackend implements ArtNetBackend {
 
   // ── Incoming ─────────────────────────────────
 
-  private onMessage(data: unknown) {
-    if (typeof data !== 'string') return; // no bridge → app binary in protocol 1.0
+  private onMessage(data: string) {
     let msg: BridgeMessage;
     try {
       msg = JSON.parse(data) as BridgeMessage;
@@ -305,11 +318,11 @@ export class WsBridgeBackend implements ArtNetBackend {
     this.clearTimer('helloTimer');
     const verdict = checkProtocol(String(hello.protocol ?? ''));
     if (verdict !== 'ok') return this.onIncompatible(verdict, hello.bridge ?? null, hello.protocol ?? null);
-    const ws = this.ws;
+    const session = this.session;
     this.interfaces = hello.interfaces ?? [];
     this.send('hello', { client: 'pixelmapper', clientVersion: this.options.clientVersion, protocol: PROTOCOL_VERSION }, {}, true)
       .then(() => {
-        if (this.ws !== ws) return;
+        if (this.session !== session) return;
         this.handshaken = true;
         this.attempts = 0;
         this.dmxError.value = null;
@@ -322,7 +335,7 @@ export class WsBridgeBackend implements ArtNetBackend {
         };
       })
       .catch((e: BridgeCommandError) => {
-        if (this.ws !== ws) return;
+        if (this.session !== session) return;
         if (e.code !== 'incompatibleProtocol') return this.onSocketDown();
         // `details.protocol` carries the bridge's version (contract §1); it says who must update.
         const theirs = typeof e.details.protocol === 'string' ? e.details.protocol : hello.protocol;
@@ -366,8 +379,8 @@ export class WsBridgeBackend implements ArtNetBackend {
 
   /** Sends a command; `beforeHandshake` allows the client `hello`. */
   private send<C extends BridgeCommandType>(type: C, args: CommandArgs<C>, options: RequestOptions = {}, beforeHandshake = false): Promise<CommandResult<C>> {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WS_OPEN || (!this.handshaken && !beforeHandshake)) {
+    const transport = this.transport;
+    if (!transport || !transport.isOpen || (!this.handshaken && !beforeHandshake)) {
       return Promise.reject(new BridgeCommandError('notConnected', 'The Art-Net bridge is not connected'));
     }
     const id = this.nextId++;
@@ -384,7 +397,7 @@ export class WsBridgeBackend implements ArtNetBackend {
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
       try {
-        ws.send(text);
+        transport.sendText(text);
       }
       catch (err) {
         this.settle(id, p => p.reject(new BridgeCommandError('disconnected', (err as Error).message ?? 'send failed')));
@@ -402,13 +415,13 @@ export class WsBridgeBackend implements ArtNetBackend {
   /** Sends the queued universes of this task as one frame set. */
   private flush() {
     this.flushScheduled = false;
-    const ws = this.ws;
-    if (!ws || !this.handshaken) return this.router.clearPending();
+    const transport = this.transport;
+    if (!transport || !this.handshaken) return this.router.clearPending();
     const { routes, entries } = this.router.take();
     if (routes) this.sendRoutes(routes);
-    if (!entries.length || ws.bufferedAmount > MAX_BUFFERED_BYTES) return;
+    if (!entries.length || transport.bufferedAmount > MAX_BUFFERED_BYTES) return;
     try {
-      ws.send(encodeFrameSet(entries, true));
+      transport.sendBinary(encodeFrameSet(entries, true));
     }
     catch { /* the close handler takes over */ }
   }
@@ -439,7 +452,8 @@ export class WsBridgeBackend implements ArtNetBackend {
   // ── Helpers ──────────────────────────────────
 
   private unsupportedReason(): string | null {
-    if (!this.options.WebSocketImpl && typeof globalThis.WebSocket === 'undefined') return 'WebSocket is not available';
+    const usesGlobalWebSocket = !this.options.transport && !this.options.WebSocketImpl;
+    if (usesGlobalWebSocket && typeof globalThis.WebSocket === 'undefined') return 'WebSocket is not available';
     return this.options.unsupportedReason?.() ?? null;
   }
 

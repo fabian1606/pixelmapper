@@ -34,11 +34,12 @@ function fakeSerialPort(chunks: Uint8Array[], opts: { endsWithDrop: boolean }) {
 }
 
 describe('createWebPlatform', () => {
-  it('has no UDP and no serial/MIDI without browser support', () => {
+  it('has no UDP, no built-in Art-Net bridge and no serial/MIDI without browser support', () => {
     vi.stubGlobal('navigator', {});
     const p = createWebPlatform();
     expect(p.kind).toBe('web');
     expect(p.udp).toBeNull();
+    expect(p.artnetBridge).toBeNull();
     expect(p.serial).toBeNull();
     expect(p.midi).toBeNull();
   });
