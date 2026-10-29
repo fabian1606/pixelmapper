@@ -3,10 +3,14 @@
  * symmetry and soft pulses. All functions are pure and deterministic (f32).
  * Time-based helpers (easing, crossings, envelopes) live in `patterns-time.ts`.
  *
- * Coordinates: `Sample.x/y` are normalized world coordinates (0–1 on each
- * axis, so the room is squashed into a unit square). To get round shapes
- * instead of ellipses, scale the x difference by the room aspect
- * (room width / room depth) — every distance helper takes that `aspect`.
+ * Coordinates (ABI 1.3): `Sample.x/y` (and `point` params, canvas handles,
+ * the Spatial 2D handle) are *world* coordinates with one unit on both axes,
+ * so distances between them are already isotropic: pass `aspect` = 1
+ * (`dist2(s.x, s.y, px, py, 1.0)`). `Sample.u/v` are *room* coordinates (the
+ * rig's bounding box stretched to 0–1 per axis); for those pass
+ * `ctx.worldAspect` so circles stay circles (`dist2(s.u, s.v, cu, cv,
+ * ctx.worldAspect)`, in units of the room depth). Every distance helper
+ * takes that `aspect`.
  */
 import { fract, smoothstep } from "./math";
 
@@ -22,14 +26,17 @@ export const NO_DISTANCE: f32 = 1e9;
  * 2D Euclidean distance from (x, y) to (px, py) with the x difference
  * multiplied by `aspect`.
  *
- * With room-normalized coordinates and `aspect` = room width / room depth
- * the result is isotropic (circles stay circles), in units of the room
- * depth. With coordinates that are already isotropic pass `aspect` = 1.
+ * World coordinates (`Sample.x/y`, `point` params) are already isotropic:
+ * pass `aspect` = 1. Room coordinates (`Sample.u/v`) need `aspect` =
+ * `ctx.worldAspect` (room width / room depth); the result is then in units
+ * of the room depth.
  *
  * ```ts
- * // ring of radius 0.3 around the room center
- * const d = dist2(s.x, s.y, 0.5, 0.5, aspect);
+ * // ring of radius 0.3 around a point param (world space)
+ * const d = dist2(s.x, s.y, this.params.get(0), this.params.get(1), 1.0);
  * out.setScalar(pulse(d, 0.3, 0.1, 1.0));
+ * // ring around the room center, whatever the rig's proportions
+ * const r = dist2(s.u, s.v, 0.5, 0.5, ctx.worldAspect);
  * ```
  */
 export function dist2(x: f32, y: f32, px: f32, py: f32, aspect: f32): f32 {

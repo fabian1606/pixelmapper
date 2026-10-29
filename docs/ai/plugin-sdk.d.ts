@@ -402,14 +402,17 @@ declare module '@pixelmapper/plugin-sdk' {
    * 2D Euclidean distance from (x, y) to (px, py) with the x difference
    * multiplied by `aspect`.
    *
-   * With room-normalized coordinates and `aspect` = room width / room depth
-   * the result is isotropic (circles stay circles), in units of the room
-   * depth. With coordinates that are already isotropic pass `aspect` = 1.
+   * World coordinates (`Sample.x/y`, `point` params) are already isotropic:
+   * pass `aspect` = 1. Room coordinates (`Sample.u/v`) need `aspect` =
+   * `ctx.worldAspect` (room width / room depth); the result is then in units
+   * of the room depth.
    *
    * ```ts
-   * // ring of radius 0.3 around the room center
-   * const d = dist2(s.x, s.y, 0.5, 0.5, aspect);
+   * // ring of radius 0.3 around a point param (world space)
+   * const d = dist2(s.x, s.y, this.params.get(0), this.params.get(1), 1.0);
    * out.setScalar(pulse(d, 0.3, 0.1, 1.0));
+   * // ring around the room center, whatever the rig's proportions
+   * const r = dist2(s.u, s.v, 0.5, 0.5, ctx.worldAspect);
    * ```
    */
   export function dist2(x: f32, y: f32, px: f32, py: f32, aspect: f32): f32;

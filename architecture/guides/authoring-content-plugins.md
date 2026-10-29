@@ -19,7 +19,7 @@ A modifier changes light values over time and space. The engine calls it once pe
 | `rgb` | one head with a color system (RGB/RGBW/RGBA/CMY) | 3 values r, g, b |
 | `panTilt` | one head with pan + tilt | 2 values pan, tilt |
 
-The host owns everything generic: which channels/fixtures are targeted, speed, the **distribution** (how the instance spreads over fixtures: all the same, a direction on the canvas, the order numbers, or within each fixture), strength and blend mode. The plugin owns only what it computes from the **time phase**, the per-sample **distribution values** (`spatial`, `rank`, `distGroup`) and its **params**. Plugins never derive their spatial layout from `x`/`y` (position-based noise textures are the exception).
+The host owns everything generic: which channels/fixtures are targeted, speed, the **distribution** (how the instance spreads over fixtures: all the same, a direction on the canvas, the order numbers, or within each fixture), strength and blend mode. The plugin owns only what it computes from the **time phase**, the per-sample **distribution values** (`spatial`, `rank`, `distGroup`) and its **params**. Plugins never derive their spatial layout from `x`/`y` when the shared distribution can express it. Exceptions: position-based noise textures, and geometry the single distribution handle cannot express — several source points, mirror lines, room corners. Those use `point` params with canvas handles (world `x`/`y`) or the room coordinates `u`/`v` (see *Coordinates*).
 
 ## Package layout
 
@@ -184,7 +184,7 @@ Spatial params can declare a draggable handle on the 2D canvas, so an effect get
 - Optional `label` (≤ 24 characters, default: the param label) and `color` (CSS color, default: the theme primary).
 - `anchor` must name a `point` param; give that param `canvas: "point"` too, or the ring's center cannot be dragged (validation warns).
 - A radius needs `min ≥ 0`.
-- The ring is drawn as a true circle. To match it, measure distance as `hypot(dx, dy / worldAspect)` with `worldAspect = worldWidth / worldHeight` (x and y are normalized separately). Until the frame carries `worldAspect` (ABI 1.3), a plugin cannot know the aspect and the ring is exact only in square worlds.
+- **Coordinates:** handle values live in world x/y, the same space as `Sample.x/y` (the world is square, one unit on both axes). Measure distances to a handle point with `dist2(s.x, s.y, px, py, 1.0)`, which matches the drawn ring exactly. Do **not** use the room coordinates `Sample.u/v` for handle points: they are stretched per axis to the rig's bounding box (`ctx.worldAspect` is the *room* aspect for `u/v`, not a canvas correction). `u/v` are for room-relative layouts that need no handle, such as "the corners of the room" or a mirror line at the room center.
 - Handles show for the selected modifier whenever it has hinted params that the card would show (`tier` not `hidden`, `when` holds), in every distribution mode, next to the distribution handle.
 - Dragging updates the param live (and for collaborators); releasing commits one undo step. Points snap to the world edges, the center and the other points (hold Alt to drag freely).
 - There is no `line` hint; draw relations between points in the effect itself.
@@ -343,11 +343,17 @@ Built-ins to read:
 
 Each has a `goldens.gen.ts` reference and `goldens.json`.
 
+Effect-authoring references (spatial effects with canvas handles and room coordinates, ABI 1.3):
+- `plugins/corner-wave` (**Corner Wave**: four draggable `point` params, a `radius` ring, nearest-point distance, palette per wave front);
+- `plugins/mirror-runner` (**Mirror Runner**: ping-pong runner along each tube's heads with a time-based tail, mirrored at the room center via `u`/`v`).
+
+**AI skill.** The step-by-step workflow for building an effect *with its controls* (inspect the project → write → `plugins.build` → `modifiers.add` → `observe` → live page), pattern recipes, UI rules and verification live in [`docs/ai/skills/effect-authoring/`](../../docs/ai/skills/effect-authoring/SKILL.md). Claude Code loads it as the `pixelmapper-effects` skill; over MCP it is served as `describe` topics `guide:effect-authoring/<file>` and as the prompts `create-effect` / `add-controls`.
+
 ### Checklist
 
 - [ ] `description` explains behavior and every non-obvious param; labels name what the user sees.
 - [ ] Recipes cover the common looks; one is `default`; each sets params, speed, distribution and strength.
-- [ ] Spatial behavior comes from `spatial`/`rank` (the shared distribution), not from `x`/`y` or own origin params.
+- [ ] Spatial behavior comes from `spatial`/`rank` (the shared distribution) where it can; own points are `point` params with `ui.canvas: "point"` and distances to them use world `x`/`y` with aspect 1.
 - [ ] Param slot indices in `prepare` match manifest order and slot counts.
 - [ ] Output range fits the output mode; no NaN (guard divisions).
 - [ ] No per-frame state, no per-sample allocation.
