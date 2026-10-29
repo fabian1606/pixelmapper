@@ -229,12 +229,16 @@ export const liveAddPage = defineCoreOperation({
     aspectRatioW: z.number().int().min(1).optional().describe('Aspect ratio width (default 16).'),
     aspectRatioH: z.number().int().min(1).optional().describe('Aspect ratio height (default 9).'),
     backgroundColor: HexColor.optional().describe('Background color (default #0a0a0a).'),
+    id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'use 1–64 letters, digits, "-" or "_"').optional()
+      .describe('Choose the page id yourself (e.g. "ai-wave-page") so live.addWidget ops in the SAME apply batch can target it; the whole batch stays one undo step. Must not exist yet. Default: a generated id.'),
   }),
   output: z.object({ pageId: z.string() }),
   produces: ['live.addPage'],
   examples: [{ input: { name: 'Rainbow controls' }, note: 'Default 60-column 16:9 page.' }],
-  run(_ctx, input) {
+  run(ctx, input) {
+    if (input.id !== undefined && findPage(ctx.read, input.id)) throw new Error(`live page id "${input.id}" already exists; choose another id or omit it`);
     const overrides: Partial<LivePage> = { name: input.name };
+    if (input.id !== undefined) overrides.id = input.id;
     if (input.columns !== undefined) overrides.columns = input.columns;
     if (input.aspectRatioW !== undefined) overrides.aspectRatioW = input.aspectRatioW;
     if (input.aspectRatioH !== undefined) overrides.aspectRatioH = input.aspectRatioH;

@@ -27,7 +27,8 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
 3. Any error finding undoes every executed command in reverse. This covers an unknown op, invalid input, a throwing `run`, a failing command, and a `verify` error.
 4. On success, the commands are recorded once as a `CompositeCommand` labelled `AI: <label>` for agent actors. The runner calls `useHistory().execute(cmd, { actor, applied: true })`, so the batch is a single undo step.
 5. `dryRun` returns the same diff, findings and expectations, then restores the state.
-6. `expect` is evaluated against `{ state, diff, results }`:
+6. Ops in one batch cannot read each other's results. To reference a new entity later in the same batch (e.g. a live slider mapped to a new modifier), choose its id yourself: `modifiers.add` and `live.addPage` take an optional `id` (1–64 letters, digits, `-`, `_`; must not exist yet). Effect + control page then stay **one** undo step.
+7. `expect` is evaluated against `{ state, diff, results }`:
    - `state` holds `bpm`, `fixtures`, `groups`, `modifiers`, `livePages` and `selection`;
    - paths use dots, `*` fans out, and numeric segments index arrays.
 

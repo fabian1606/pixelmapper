@@ -12,6 +12,8 @@ import { getManifest } from '~/utils/plugins/plugin-store';
 import { applyOperations } from '../apply';
 import { readApi } from '../read-api';
 import { registryWith, resetOperationState, seedScene, stateFingerprint, stubOperationGlobals } from '../test-utils';
+import { useLiveModeStore } from '~/stores/live-mode-store';
+import { liveOperations } from './live';
 import { modifierOperations } from './modifiers';
 
 const WAVEFORM = builtinHash(BUILTIN_ALIASES.waveform);
@@ -46,6 +48,31 @@ function expectUndoRestores(before: string) {
 }
 
 describe('modifiers.add', () => {
+  it('takes a caller-chosen id that a live widget in the same batch maps to; one undo removes all', async () => {
+    useLiveModeStore().loadPages([]);
+    const before = stateFingerprint();
+    const res = await applyOperations({
+      label: 'Wave + controls',
+      ops: [
+        { op: 'modifiers.add', input: { plugin: 'waveform', id: 'ai-wave' } },
+        { op: 'live.addPage', input: { name: 'Wave', id: 'ai-wave-page' } },
+        { op: 'live.addWidget', input: { pageId: 'ai-wave-page', type: 'slider', label: 'Speed', mapping: { type: 'effect-param', modifierId: 'ai-wave', paramKey: 'speed' } } },
+      ],
+    }, { registry: registryWith(...modifierOperations, ...liveOperations), actor: 'agent:test' });
+    expect(res.findings.filter(f => f.level === 'error')).toEqual([]);
+    expect(res.results[0]!.value).toEqual({ modifierId: 'ai-wave' });
+    expect(readApi.modifier('ai-wave')?.plugin).toBe(WAVEFORM);
+    expect(readApi.livePages().find(p => p.id === 'ai-wave-page')?.widgets).toHaveLength(1);
+    expectUndoRestores(before);
+  });
+
+  it('rejects a chosen id that already exists', async () => {
+    await add({ plugin: 'waveform', id: 'dup' });
+    const res = await apply({ label: 'Dup', ops: [{ op: 'modifiers.add', input: { plugin: 'noise', id: 'dup' } }] });
+    expect(res.committed).toBe(false);
+    expect(res.findings[0]!.message).toMatch(/already exists/);
+  });
+
   it('adds a built-in by short alias with recipe, spread and speed; undo restores', async () => {
     const before = stateFingerprint();
     const res = await apply({
