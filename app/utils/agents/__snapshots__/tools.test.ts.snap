@@ -372,6 +372,25 @@ targets: "all", "selection", fixture/group ids, or a filter { ids, groupIds, kin
           ],
           "type": "object",
         },
+        "points": {
+          "items": {
+            "properties": {
+              "x": {
+                "type": "number",
+              },
+              "y": {
+                "type": "number",
+              },
+            },
+            "required": [
+              "x",
+              "y",
+            ],
+            "type": "object",
+          },
+          "maxItems": 16,
+          "type": "array",
+        },
         "targets": {
           "anyOf": [
             {
