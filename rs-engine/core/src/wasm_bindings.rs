@@ -61,6 +61,16 @@ impl WasmEngine {
         out
     }
 
+    /// Per-head signature tuples (observation): `requests` are flat
+    /// `(group index, head index, signature id, channel type id or 255)`
+    /// quads; returns 3 f32 per request (NaN = unavailable).
+    #[wasm_bindgen]
+    pub fn read_head_signatures(&self, requests: &[u32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(requests.len() / 4 * 3);
+        self.engine.read_head_signatures(requests, &mut out);
+        out
+    }
+
     /// Zero-copy view of the DMX buffer (re-fetch after any dispatch).
     #[wasm_bindgen]
     pub fn get_dmx_view(&self) -> js_sys::Uint8Array {
