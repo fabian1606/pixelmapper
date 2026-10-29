@@ -9,3 +9,5 @@ Context files for humans and AI agents writing extensions or content plugins (AD
 | `index.json` | Machine-readable index: contribution kinds, every `pm.*` input with its props, every scope with its fields, slot ids observed at runtime (with available scopes) plus documented patterns, param types (wire slots, default input), signatures, core commands |
 
 Pair them with the guides: [authoring-extensions.md](../../architecture/guides/authoring-extensions.md), [authoring-content-plugins.md](../../architecture/guides/authoring-content-plugins.md). The `/dev/slots` page lists slot ids rendered in a running dev session.
+
+**Skills** (hand-written, not generated): `skills/<skill>/` holds step-by-step AI workflows. [`skills/effect-authoring/`](skills/effect-authoring/SKILL.md) teaches building spatial lighting effects with their controls; Claude Code loads it as the `pixelmapper-effects` skill (`.claude/skills/pixelmapper-effects` symlink), the MCP bridge serves its `prompts/*.md` as MCP prompts and its Markdown files as `describe` topics `guide:effect-authoring/<file>`.

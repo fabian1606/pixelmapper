@@ -3,12 +3,14 @@
  * 2D canvas, and how a pointer position maps to param values.
  *
  * Coordinates are normalized world space: `x` over the world width, `y`
- * over the world height, both 0–1. A radius is in normalized world-x units
- * (1 = the world width), so a ring is a true circle on the canvas. Plugins
- * compare it against `hypot(dx, dy / worldAspect)` with
- * `worldAspect = worldWidth / worldHeight`.
- * TODO(ABI 1.3, WP-C): keep in sync with the `Frame.worldAspect` definition
- * and the SDK `dist2` helper once they land.
+ * over the world height, both 0–1 — the same space as plugin `Sample.x/y`.
+ * A radius is in normalized world-x units (1 = the world width), so a ring
+ * is a true circle on the canvas. The world is square (`WORLD_WIDTH ==
+ * WORLD_HEIGHT`), so plugins measure it with the SDK's
+ * `dist2(s.x, s.y, px, py, 1.0)`. Not to be confused with
+ * `Frame.worldAspect` (ABI 1.3), which is the aspect of the *room* (rig
+ * bounding box) for `Sample.u/v`. `radiusFromPointer` still takes the
+ * canvas aspect so a non-square world would stay correct.
  */
 import { paramCanvasHint, type ParamSchema, type ParamValue, type Vec2 } from '@pixelmapper/extension-api';
 import { matchWhen } from '~/components/plugin-host/param-form-layout';

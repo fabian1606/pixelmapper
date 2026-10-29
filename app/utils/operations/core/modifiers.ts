@@ -29,6 +29,9 @@ import { FixtureIdSchema, SignatureSchema } from './shared';
 
 // ── Helpers ─────────────────────────────────────
 
+/** A caller-chosen id (letters, digits, `-`, `_`). */
+export const ClientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'use 1–64 letters, digits, "-" or "_"');
+
 /** Modifier id input. */
 const ModifierIdSchema = z.string().min(1).describe('Modifier instance id (see modifiers.list).');
 
@@ -145,6 +148,7 @@ export const modifiersAdd = defineCoreOperation({
     plugin: PluginRefSchema,
     recipe: z.string().optional().describe('Recipe id or label of the plugin (e.g. "chase", "candle"); default = the card\'s pick for the targets.'),
     index: z.number().int().min(0).optional().describe('Stack position to insert at (0 = bottom); default = top.'),
+    id: ClientIdSchema.optional().describe('Choose the new modifier id yourself (e.g. "ai-corner-wave") so later ops in the SAME apply batch (live.addWidget effect-param mappings) can reference it; the whole batch stays one undo step. Must not exist yet. Default: a generated id.'),
   }),
   output: z.object({ modifierId: z.string() }),
   produces: ['SetModifiers'],
@@ -153,10 +157,13 @@ export const modifiersAdd = defineCoreOperation({
     { input: { plugin: 'colorAdjust', spread: { type: 'spatial', mode: 'linear', origin: { x: 0, y: 0.5 }, end: { x: 1, y: 0.5 } } }, note: 'Color Shift sweeping left→right over all color fixtures.' },
     { input: { plugin: 'noise', recipe: 'candle', targets: { fixtureIds: ['fx-1', 'fx-2'] }, params: { rangeMin: 0.3 }, strength: 0.8 } },
     { input: { plugin: 'waveform', spread: { type: 'order', fixtureOrder: ['fx-3', 'fx-1', 'fx-2'] } }, note: 'Chase in an explicit fixture order.' },
+    { input: { plugin: '@pixelmapper/corner-wave', id: 'ai-corner-wave', params: { a: { x: 0.3, y: 0.3 } } }, note: 'Own id, so a live.addWidget in the same batch can map a slider to it.' },
   ],
   async run(ctx, input) {
+    if (input.id !== undefined && ctx.read.modifier(input.id)) throw new Error(`modifier id "${input.id}" already exists; choose another id or omit it`);
     const plugin = await requirePlugin(input.plugin);
     const inst = buildInstance(ctx.read, plugin, input);
+    if (input.id !== undefined) inst.id = input.id;
     const after = cloneModifiers(useEngineStore().modifiers);
     after.splice(Math.min(input.index ?? after.length, after.length), 0, inst);
     return { kind: 'mutation', commands: [setModifiers(after, `Add ${plugin.manifest.name}`)], value: { modifierId: inst.id } };
