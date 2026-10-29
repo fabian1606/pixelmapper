@@ -133,6 +133,7 @@ pixelmapper/
 | **Profile / Motion** | Curves of Wave and Color Shift: what is lit over the distance / where it is during one pass. |
 | **Curve shape** | Programmatic curve generator with args (each arg is a handle in `pm.curve`); extensions can contribute more. |
 | **Composite editor** | One `pm.*` input bound to several params (e.g. the hue strip binds hue shift + range). |
+| **Canvas hint** | `ui: { canvas: 'point' \| 'radius' }` on a param: a draggable dot (point param) or ring (number param around an anchor point) on the 2D canvas for the selected modifier, in any distribution mode (`canvas-hints/ModifierCanvasHandles.vue`; guide: authoring-content-plugins.md "Canvas handles"). |
 | **Endless strip** | Animated preview of a modifier on "infinitely many pixels", independent of the fixture count. |
 
 

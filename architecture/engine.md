@@ -131,7 +131,7 @@ A light rAF loop forwards changed packets to the worker (`subarray(5)` strips th
 
 ### Distribution
 
-`Distribution` (`@pixelmapper/extension-api`): `scope` (across / within), `mode`, the gradient handle `origin`/`end`, `reverse`, `order` (explicit `ranks`, drawn `line`, `mirror`, `snap`), `grouping`, `withinOffset`. The UI shows one "Spread" dropdown (All the same · Spatial 2D · Fixture by fixture · Within each fixture); the handle is edited on the canvas, the order with one Reassign session (click fixtures or draw a line).
+`Distribution` (`@pixelmapper/extension-api`): `scope` (across / within), `mode`, the gradient handle `origin`/`end`, `reverse`, `order` (explicit `ranks`, drawn `line`, `mirror`, `snap`), `grouping`, `withinOffset`. The UI shows one "Spread" dropdown (All the same · Spatial 2D · Fixture by fixture · Within each fixture); the handle is edited on the canvas, the order with one Reassign session (click fixtures or draw a line). Params with a canvas hint (`ui.canvas`: `point` / `radius`) get their own handles next to it, independent of the mode (`app/components/engine/canvas-hints/`).
 
 | Mode | `spatial` per sample |
 |------|----------------------|
