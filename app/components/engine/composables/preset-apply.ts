@@ -80,29 +80,74 @@ function categoryNaturalRGBAtStep0(category: Preset['categories'][number]): RGB 
   return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
 }
 
+/** Below this HSV saturation a sample counts as achromatic (white/gray/black). */
+const ACHROMATIC_EPS = 0.001;
+
 /**
- * For one category, build rotated stepValues arrays for ALL its R/G/B channels.
+ * How a color override transforms every natural sample of a preset. Derived
+ * once from (primary natural pixel-0/step-0 color → override color).
+ */
+export interface ColorShift {
+  /** Hue delta in degrees added to every chromatic sample. */
+  hueDelta: number;
+  /** Factor applied to every chromatic sample's saturation (clamped to 1). */
+  satScale: number;
+  /**
+   * Set when the primary natural color is achromatic: achromatic samples are
+   * tinted to this hue/saturation (keeping their value), since a hue delta
+   * relative to a gray reference is meaningless.
+   */
+  tint: { h: number; s: number } | null;
+}
+
+/**
+ * Builds the shift that maps `primaryNatural` onto `override` in hue AND
+ * saturation. Pure hue rotation can't reach white/gray overrides (saturation
+ * stays as-is), so the saturation ratio override.s / primary.s is applied to
+ * every chromatic sample: picking white desaturates the whole composition
+ * while every step keeps its brightness.
+ */
+export function buildColorShift(primaryNatural: RGB, override: RGB): ColorShift {
+  const prim = rgbToHsv(primaryNatural.r, primaryNatural.g, primaryNatural.b);
+  const ov = rgbToHsv(override.r, override.g, override.b);
+  if (prim.s < ACHROMATIC_EPS) {
+    return { hueDelta: ov.h - prim.h, satScale: 1, tint: { h: ov.h, s: ov.s } };
+  }
+  return { hueDelta: ov.h - prim.h, satScale: ov.s / prim.s, tint: null };
+}
+
+/** Applies a `ColorShift` to one natural RGB sample, keeping its HSV value. */
+export function shiftSample(rgb: RGB, shift: ColorShift): RGB {
+  const { h, s, v } = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  if (s < ACHROMATIC_EPS) {
+    // Achromatic samples only change when the reference itself was achromatic.
+    return shift.tint ? hsvToRgb(shift.tint.h, shift.tint.s, v) : { ...rgb };
+  }
+  const hue = ((h + shift.hueDelta) % 360 + 360) % 360;
+  return hsvToRgb(hue, Math.min(1, s * shift.satScale), v);
+}
+
+/**
+ * For one category, build shifted stepValues arrays for ALL its R/G/B channels.
  *
  * Multi-pixel fixtures have multiple (RED, GREEN, BLUE) channel snapshots in
  * the same category snapshot — one triple per pixel, in channel-order. Each
  * pixel is rotated independently using its own natural hue.
  *
- * Hue delta = wheel.h − primary.pixel0.step0.h. Every step of every pixel of
- * every category gets rotated by this same delta, keeping each step's natural
- * saturation/value, so multi-step / multi-color / multi-pixel presets keep
- * their composition.
+ * Every step of every pixel of every category gets the same `ColorShift`
+ * (hue delta + saturation scale, see `buildColorShift`), keeping each step's
+ * natural value, so multi-step / multi-color / multi-pixel presets keep their
+ * composition — and white/gray overrides desaturate it instead of being ignored.
  *
  * Special case (isPrimary && pixel === 0 && step === 0): use the override RGB
  * verbatim, so the wheel's exact picked color appears at the focal point.
- *
- * Achromatic samples (s ≈ 0 — black/white) are NOT rotated.
  *
  * Returns Map<channelIndex, number[]> or null if the category has no RGB channels.
  */
 function rotateCategorySteps(
   category: Preset['categories'][number],
   override: RGB,
-  primaryNatural: RGB,
+  shift: ColorShift,
   isPrimary: boolean,
 ): Map<number, number[]> | null {
   type Snap = typeof category.channels[number];
@@ -117,10 +162,6 @@ function rotateCategorySteps(
   if (redSnaps.length === 0 && greenSnaps.length === 0 && blueSnaps.length === 0) return null;
 
   const pixelCount = Math.max(redSnaps.length, greenSnaps.length, blueSnaps.length);
-
-  const primH = rgbToHsv(primaryNatural.r, primaryNatural.g, primaryNatural.b).h;
-  const ovH = rgbToHsv(override.r, override.g, override.b).h;
-  const delta = ovH - primH;
 
   const result = new Map<number, number[]>();
 
@@ -145,17 +186,9 @@ function rotateCategorySteps(
       const g = greenSnap?.stepValues[i] ?? 0;
       const b = blueSnap?.stepValues[i] ?? 0;
 
-      let rotated: RGB;
-      if (isPrimary && p === 0 && i === 0) {
-        rotated = override;
-      } else {
-        const { h, s, v } = rgbToHsv(r, g, b);
-        if (s < 0.001) {
-          rotated = { r, g, b };
-        } else {
-          rotated = hsvToRgb(((h + delta) % 360 + 360) % 360, s, v);
-        }
-      }
+      const rotated: RGB = (isPrimary && p === 0 && i === 0)
+        ? override
+        : shiftSample({ r, g, b }, shift);
       redOut.push(rotated.r);
       greenOut.push(rotated.g);
       blueOut.push(rotated.b);
@@ -208,8 +241,8 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Mod
  * Mutates fixture R/G/B channel step values to apply (or revert) a color
  * override. The wheel's exact color is applied to the preset's primary RGB
  * category at step 0; every other step (in primary and in any other RGB
- * category) is hue-rotated by the same delta so multi-step / multi-color
- * presets keep their composition. Passing `rgb=null` writes the natural
+ * category) gets the same hue + saturation shift so multi-step / multi-color
+ * presets keep their composition (white overrides desaturate it). Passing `rgb=null` writes the natural
  * snapshot stepValues back — the fast-path "revert".
  *
  * No state is stored — the override is purely a fixture-state mutation. Any
@@ -222,13 +255,14 @@ export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB |
   const primaryNatural = (rgb && primaryIdx >= 0)
     ? categoryNaturalRGBAtStep0(preset.categories[primaryIdx]!)
     : null;
+  const shift = (rgb && primaryNatural) ? buildColorShift(primaryNatural, rgb) : null;
 
   for (let catIdx = 0; catIdx < preset.categories.length; catIdx++) {
     const category = preset.categories[catIdx];
     if (!category) continue;
     const isPrimary = catIdx === primaryIdx;
-    const rotated = (rgb && primaryNatural)
-      ? rotateCategorySteps(category, rgb, primaryNatural, isPrimary)
+    const rotated = (rgb && shift)
+      ? rotateCategorySteps(category, rgb, shift, isPrimary)
       : null;
 
     for (const fixtureId of category.fixtureIds) {
