@@ -72,6 +72,12 @@ export function requirementsOfCommand(
     if (k?.required) out.add(k.extensionId);
   };
   const p = payload as Record<string, unknown> | null;
+  // Composite (ADR 0002 §4.3): the children's requirements count (open gate A0.3).
+  if (commandType === 'Composite' && p && Array.isArray(p.children)) {
+    for (const child of p.children as { commandType: string; payload: unknown }[]) {
+      for (const id of requirementsOfCommand(child.commandType, child.payload, src, kindOfFixture)) out.add(id);
+    }
+  }
   if (commandType === 'SetFixtureKindConfig' && p) addKind(kindOfFixture(p.fixtureId as string | number));
   if (commandType === 'AddFixtures' && p && Array.isArray(p.nodes)) {
     const visit = (n: { _type?: string; kind?: { id?: string }; children?: unknown[] }) => {

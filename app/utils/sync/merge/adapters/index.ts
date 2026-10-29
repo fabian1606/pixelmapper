@@ -1,4 +1,5 @@
 import { registerChannelAdapters } from './channels';
+import { registerCompositeAdapters } from './composite';
 import { registerEngineAdapters } from './engine';
 import { registerFixtureAdapters } from './fixtures';
 import { registerLivePageAdapters } from './live-pages';
@@ -19,4 +20,5 @@ export function registerBuiltinRebaseAdapters(): void {
   registerChannelAdapters();
   registerLivePageAdapters();
   registerEngineAdapters();
+  registerCompositeAdapters();
 }
