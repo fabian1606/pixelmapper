@@ -96,6 +96,7 @@ pixelmapper/
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - **Decisions:** [ADR 0002 — Operations, Observation & Agent Layer](architecture/adr/0002-agent-and-operations-layer.md)
 - **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the ADR 0003 Tauri steps)
+- [Observability (observe-lite)](architecture/observability.md) — `observe(request)`: headless-core preview of one modifier, live capture, features (range/color/temporal/spatial/radial), text report, expectation JSON paths
 - **Contract:** [MCP bridge WebSocket protocol](architecture/mcp-bridge-protocol.md) — `pixelmapper-mcp` ⇄ app (hello/semver, token + Origin, dynamic tool list, `call`/`result`, relay mode)
 - **Decisions:** [ADR 0003 — Platform Layer: Web First, Native Where It Pays Off](architecture/adr/0003-native-platform-layer.md) (Tauri 2, `#platform`, `getPlatform()`, migration steps)
 - **Decisions:** [ADR 0004 — Offline-First Projects](architecture/adr/0004-offline-first.md) (local-first store, outbox, rebase + 3-way merge, optional account on desktop); package notes in [architecture/offline/](architecture/offline/) (`wp-p0`, `wp-merge`, `wp-store`, `wp-server`, `wp-tauri`, `wp-records`, `wp-sync`, `wp-account`)

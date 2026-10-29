@@ -545,6 +545,44 @@ impl EffectEngine {
         }
     }
 
+    /// Normalized signature tuple of head `head` of fixture `group` after the
+    /// last render (observation, ADR 0002 §6). Scalar reads the head's channel
+    /// of type `channel_type` (`None` = DIMMER, else the head's first channel).
+    pub fn head_signature_values(&self, group: usize, head: usize, signature: Signature, channel_type: Option<u8>) -> Option<[f32; 3]> {
+        match signature {
+            Signature::Scalar => {
+                let on_head = |t: &&RenderTarget| t.group_index == group && t.head_index == head && t.resolution > 0;
+                let wanted = channel_type.unwrap_or(ct::DIMMER);
+                let t = self.targets.iter().filter(on_head).find(|t| t.channel_type_id == wanted)
+                    .or_else(|| if channel_type.is_none() { self.targets.iter().find(on_head) } else { None })?;
+                let v = self.render_buffer.get(t.dmx_index).copied()? / 255.0;
+                Some([v, 0.0, 0.0])
+            }
+            Signature::Rgb => {
+                let c = self.heads.iter().find(|h| h.group == group && h.head == head && h.color.is_some())?.color.as_ref()?;
+                Some(Self::read_rgb(&self.render_buffer, c))
+            }
+            Signature::PanTilt => {
+                let h = self.heads.iter().find(|h| h.group == group && h.head == head && h.pan.is_some() && h.tilt.is_some())?;
+                let ((pc, pf), (tc, tf)) = (h.pan?, h.tilt?);
+                Some([Self::read_pair(&self.render_buffer, pc, pf), Self::read_pair(&self.render_buffer, tc, tf), 0.0])
+            }
+        }
+    }
+
+    /// Reads `(group, head, signature id, channel type id or 255)` quads into
+    /// `out` as 3 f32 each; unavailable tuples are NaN.
+    pub fn read_head_signatures(&self, requests: &[u32], out: &mut Vec<f32>) {
+        out.clear();
+        for q in requests.chunks_exact(4) {
+            let channel_type = if q[3] >= 255 { None } else { Some(q[3] as u8) };
+            let v = Signature::from_id(q[2] as u8)
+                .and_then(|sig| self.head_signature_values(q[0] as usize, q[1] as usize, sig, channel_type))
+                .unwrap_or([f32::NAN; 3]);
+            out.extend_from_slice(&v);
+        }
+    }
+
     /// Reads several `(group, signature id)` requests (flat pairs) into
     /// `out` as 3 f32 each; unavailable tuples are NaN.
     pub fn read_signatures(&self, requests: &[u32], out: &mut Vec<f32>) {

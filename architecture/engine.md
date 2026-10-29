@@ -66,6 +66,8 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 
 `read_signatures(requests)` returns the normalized tuple of each requested `(group index, signature)` after the last render — 3 f32 per request, NaN when the fixture lacks the channels. `scalar` reads the DIMMER channel (else the first channel), `rgb`/`panTilt` the first matching head. The worker attaches the tuples to frame messages only while extensions subscribe to `signature` live targets (see [extensions.md](extensions.md)).
 
+`read_head_signatures(requests)` is the per-head variant used by observation previews ([observability.md](observability.md)): flat `(group index, head index, signature id, channel type id or 255)` quads, 3 f32 each (NaN = unavailable); scalar reads the head's channel of the given type (255 = DIMMER, else the head's first channel).
+
 ### WASM bindings (`WasmEngine`)
 
 ```rust
