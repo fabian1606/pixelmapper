@@ -10,7 +10,7 @@ import { validateManifestUx } from './manifest-ux';
 import { checkGradient, checkSteps } from './param-structs';
 
 /** Plugin ABI/SDK version this toolchain produces. */
-export const PLUGIN_API_VERSION = '1.2.0';
+export const PLUGIN_API_VERSION = '1.3.0';
 
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];

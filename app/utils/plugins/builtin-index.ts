@@ -20,7 +20,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/color-adjust",
     "name": "Color Shift",
-    "hash": "sha256:456d51310d2fe975531ff76cc6e0fbae6bd9cf5fd47e5fea587e2f97ba82274b",
+    "hash": "sha256:2ae1580b1aba07a4f8ad6b2765917cb53aba2f8e128aa8ca06a4a9711fd6f669",
     "signatures": [
       "rgb"
     ],
@@ -677,7 +677,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/noise",
     "name": "Noise",
-    "hash": "sha256:244885290110355479c0836f48e35aaad906465b4ba5c4a385259bbd11acc219",
+    "hash": "sha256:2b905a76e7f8ea721e8c5e6a80782d6f589b66949aa3be717b18d802e034c74d",
     "signatures": [
       "scalar"
     ],
@@ -1025,7 +1025,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/sequencer",
     "name": "Pattern",
-    "hash": "sha256:7dd892a6a83e3ded51db840a42276768039673707f35c836fff0938231672046",
+    "hash": "sha256:38ca1115fb3f3b95d5ee1d6e8fe62089262160a13a130c62fb0c3320dc6b3d9d",
     "signatures": [
       "scalar"
     ],
@@ -1407,7 +1407,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/waveform",
     "name": "Wave",
-    "hash": "sha256:5906660f915f700bb4809d14bc40fa63028d4bb8743d1dbae3e2c59f16d5265e",
+    "hash": "sha256:3a99c67aef4238830aa1ee5f2b0bf8157699a8e6ff015307ffe97110c257c100",
     "signatures": [
       "scalar"
     ],
