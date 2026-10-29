@@ -194,6 +194,15 @@ async function main() {
       presetWhen: allMembers('PresetWhen', toolchainIfs),
       editor: allMembers('ManifestEditor', toolchainIfs),
       paramCommon: allMembers('ParamBase', ifs),
+      // Canvas hints (plan M4): object form of a param's `ui` with a draggable canvas handle.
+      paramUi: allMembers('ParamUiOptions', ifs),
+      canvasHints: {
+        kinds: [
+          { canvas: 'point', paramType: 'point', value: '{ x, y } normalized world space, clamped to 0–1' },
+          { canvas: 'radius', paramType: 'number', requires: 'anchor = key of a point param', value: 'radius in normalized world-x units (1 = world width), clamped to [min, max]; distance = hypot(dx, dy / worldAspect)' },
+        ],
+        guide: 'architecture/guides/authoring-content-plugins.md#canvas-handles-uicanvas',
+      },
       curveParam: allMembers('CurveParam', ifs),
       curveShapes: listShapes().map(s => ({ id: s.id, label: s.label, domain: s.domain, periodic: s.periodic, args: s.args.map(a => ({ key: a.key, label: a.label, min: a.min, max: a.max, default: a.default, handle: a.handle.kind })) })),
       outputs: ['scale', 'bipolar', 'absolute'],

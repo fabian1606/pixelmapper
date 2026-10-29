@@ -9,6 +9,7 @@ import type { PmInputName } from './replaceables';
 import type { RgbColor, Vec2 } from './model';
 import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
 import type { DistributionPatch } from './distribution';
+import type { ParamUi } from './canvas-hints';
 
 /** One control point of a curve param. Both axes are normalized 0–1. */
 export interface CurvePoint {
@@ -30,8 +31,12 @@ export interface ParamBase<T extends string, V> {
   default: V;
   /** Optional longer description (shown as tooltip; read by AI). */
   description?: string;
-  /** Override the default `pm.*` input used to render this param. */
-  ui?: PmInputName;
+  /**
+   * Override the default `pm.*` input used to render this param (string), or
+   * the object form `{ input?, canvas?, … }` that also declares a canvas
+   * handle (see `canvas-hints.ts`).
+   */
+  ui?: ParamUi;
   /** Visual group name; params with the same group share a section. */
   group?: string;
   /**

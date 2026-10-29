@@ -110,7 +110,7 @@ Identity is the content hash `sha256:<hex>` over canonical(manifest) ‖ wasm �
 
 Common fields:
 - `key` (camelCase, unique), `label`, `default`;
-- optional `description` (tooltip), `group` (section title), `ui` (override the input, e.g. `"pm.numberInput"`);
+- optional `description` (tooltip), `group` (section title), `ui` (override the input, e.g. `"pm.numberInput"`, or the object form `{ "input"?, "canvas", … }` with a canvas handle, see Canvas handles);
 - `tier`: `primary` (card body, default), `advanced` (under "More"), `hidden` (never rendered; recipes and editors set it);
 - `optionDistribution` (enum only): option → distribution patch applied when the user picks that option, e.g. `{ "alternate": { "mode": "order" } }` when the option only works fixture by fixture;
 - `when`: show only when the condition holds, e.g. `{ "mode": "palette" }` or `{ "distribution.mode": ["order", "linear"] }`.
@@ -153,6 +153,30 @@ Each recipe is a **complete look**:
 - optional `when: { kind?: ["single" | "row" | "ring" | "area"], multiHead?, hasColor? }` picks the recipe for a new instance on the current selection.
 
 Every card shows a Preset row (`Preset ▾ Name`); a plugin without presets gets one *Default* recipe (the schema defaults). Hovering a recipe in the list previews it on the fixtures without saving; clicking applies everything as one undo step. When the recipe changes the distribution mode, the distribution is placed on the selection (handle along its axis, radial from its centroid, order along the axis). Recipes never set a direction: the user turns the handle on the canvas, so do not ship variants that only differ in direction.
+
+### Canvas handles (`ui.canvas`)
+
+Spatial params can declare a draggable handle on the 2D canvas, so an effect gets spatial controls without UI code ("a wave from four draggable corner points", "adjust how big the areas are"). The hint sits in the param's `ui` in object form; `ui.input` still overrides the card input, and the card input (e.g. the X/Y faders of a `point`) stays available:
+
+```json
+{ "key": "center", "type": "point", "label": "Center", "default": { "x": 0.5, "y": 0.5 },
+  "ui": { "canvas": "point", "label": "C", "color": "#ff8800" } },
+{ "key": "size", "type": "number", "label": "Size", "min": 0.02, "max": 1, "default": 0.2,
+  "ui": { "canvas": "radius", "anchor": "center" } }
+```
+
+| `canvas` | Param type | Handle | Value |
+|----------|-----------|--------|-------|
+| `point` | `point` | one dot at the value | `{ x, y }` in normalized world space (x over the world width, y over the height), clamped to 0–1 |
+| `radius` | `number` | a ring around the `anchor` point (+ a knob) | radius in **normalized world-x units** (1 = world width), clamped to the param's `[min, max]` |
+
+- Optional `label` (≤ 24 characters, default: the param label) and `color` (CSS color, default: the theme primary).
+- `anchor` must name a `point` param; give that param `canvas: "point"` too, or the ring's center cannot be dragged (validation warns).
+- A radius needs `min ≥ 0`.
+- The ring is drawn as a true circle. To match it, measure distance as `hypot(dx, dy / worldAspect)` with `worldAspect = worldWidth / worldHeight` (x and y are normalized separately). Until the frame carries `worldAspect` (ABI 1.3), a plugin cannot know the aspect and the ring is exact only in square worlds.
+- Handles show for the selected modifier whenever it has hinted params that the card would show (`tier` not `hidden`, `when` holds), in every distribution mode, next to the distribution handle.
+- Dragging updates the param live (and for collaborators); releasing commits one undo step. Points snap to the world edges, the center and the other points (hold Alt to drag freely).
+- There is no `line` hint; draw relations between points in the effect itself.
 
 ### Composite editors (`editors`)
 
