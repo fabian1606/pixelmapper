@@ -32,13 +32,15 @@ export const LIVE_WIDGET_TYPES = ['button', 'slider', 'xy', 'color', 'label', 'b
 export const LiveWidgetTypeSchema = z.enum(LIVE_WIDGET_TYPES).describe([
   'Widget type: "button" (momentary/toggle pad; presets, global functions, page switch, channel, dimmer group),',
   '"slider" (vertical fader, value 0–1; channel, dimmer-group, effect-param),',
+  '"button" also drives effect-param on a plugin "trigger" param (press / release / multi-click),',
   '"xy" (2D pad; only a "channel" mapping: x drives channelOffset, y drives channelOffset + 1),',
   '"color" (color picker), "label" (text), "beat" (BPM/tap display), "fixture-preview" (live 2D view). The last four ignore mappings.',
 ].join(' '));
 
 /** Mapping types each widget type drives at runtime (others are stored but have no effect). */
 const SUPPORTED_MAPPINGS: Record<CoreLiveWidgetType, readonly LiveMapping['type'][]> = {
-  'button': ['none', 'preset', 'channel', 'dimmer-group', 'global-function', 'page-switch', 'position-recall'],
+  // effect-param on buttons only drives `trigger` params (checked in `effectParamFindings`).
+  'button': ['none', 'preset', 'channel', 'dimmer-group', 'global-function', 'page-switch', 'position-recall', 'effect-param'],
   'slider': ['none', 'channel', 'dimmer-group', 'effect-param'],
   'xy': ['none', 'channel'],
   'color': ['none'],
@@ -53,8 +55,8 @@ const SUPPORTED_MAPPINGS: Record<CoreLiveWidgetType, readonly LiveMapping['type'
 /** Modifier-level keys every modifier offers (0–1 control → strength / speed / spread). */
 export const BUILTIN_EFFECT_PARAMS = ['strength', 'speed', 'fanning'] as const;
 
-/** Plugin param types a 0–1 control can drive. */
-const MAPPABLE_PARAM_TYPES = new Set(['number', 'int', 'bool']);
+/** Plugin param types a control can drive (`trigger`: press / release from a button, ABI 1.3). */
+const MAPPABLE_PARAM_TYPES = new Set(['number', 'int', 'bool', 'trigger']);
 
 /**
  * Normalizes an agent param key to the stored form: built-in keys stay
@@ -83,8 +85,9 @@ export const LiveMappingInputSchema = z.discriminatedUnion('type', [
       '"fanning" (spread length, 0–1 of the world width), or a numeric/int/bool plugin param key of the modifier',
       '(e.g. "count" or "params.count"; the 0–1 control maps onto the param\'s min–max, bools switch at 0.5).',
       'Use "params.speed" for a plugin param literally named "speed".',
+      'A "trigger" param (momentary: hold / release / multi-click) is driven by a button widget: press and release go to the effect.',
     ].join(' ')),
-  }).describe('Drive a modifier parameter with a slider (value 0–1).'),
+  }).describe('Drive a modifier parameter: a slider for number/int/bool params (value 0–1), a button for a trigger param.'),
   z.object({
     type: z.literal('channel'),
     fixtureId: TargetId.optional().describe('Single fixture target (with channelOffset).'),
@@ -213,14 +216,24 @@ function mappingError(code: string, message: string, widgetId: string): Finding 
   return { level: 'error', code, message, entityIds: [`liveWidget:${widgetId}`] };
 }
 
-/** Checks an `effect-param` mapping: modifier exists, param key exists and is mappable. */
-function effectParamFindings(read: CoreReadApi, m: LiveMapping, widgetId: string): Finding[] {
+/**
+ * Checks an `effect-param` mapping: modifier exists, param key exists and is
+ * mappable. On a button only `trigger` params react (press / release), so
+ * any other target is a warning there.
+ */
+function effectParamFindings(read: CoreReadApi, m: LiveMapping, widgetId: string, widgetType: string): Finding[] {
   if (!m.effectId || !m.paramKey) return [mappingError('mapping-incomplete', 'effect-param mapping needs modifierId and paramKey', widgetId)];
   const modifier = read.modifier(m.effectId);
   if (!modifier) {
     return [mappingError('modifier-not-found', `modifier "${m.effectId}" not found (use modifiers.list to list ids)`, widgetId)];
   }
-  if ((BUILTIN_EFFECT_PARAMS as readonly string[]).includes(m.paramKey)) return [];
+  const buttonIgnores = (what: string): Finding[] => [{
+    level: 'warning',
+    code: 'mapping-ignored-by-widget',
+    message: `a button only drives effect-param mappings on trigger params; ${what} needs a slider`,
+    entityIds: [`liveWidget:${widgetId}`],
+  }];
+  if ((BUILTIN_EFFECT_PARAMS as readonly string[]).includes(m.paramKey)) return widgetType === 'button' ? buttonIgnores(`"${m.paramKey}"`) : [];
   const key = m.paramKey.slice(m.paramKey.indexOf('.') + 1);
   const manifestParam = getManifest(modifier.plugin)?.params.find(p => p.key === key);
   const available = [...BUILTIN_EFFECT_PARAMS, ...Object.keys(modifier.params)].join(', ');
@@ -228,8 +241,9 @@ function effectParamFindings(read: CoreReadApi, m: LiveMapping, widgetId: string
     return [mappingError('param-not-found', `modifier "${m.effectId}" has no param "${key}" (available: ${available})`, widgetId)];
   }
   if (manifestParam && !MAPPABLE_PARAM_TYPES.has(manifestParam.type)) {
-    return [mappingError('param-not-mappable', `param "${key}" is of type ${manifestParam.type}; only number, int and bool params can be driven by a control`, widgetId)];
+    return [mappingError('param-not-mappable', `param "${key}" is of type ${manifestParam.type}; only number, int, bool and trigger params can be driven by a control`, widgetId)];
   }
+  if (widgetType === 'button' && manifestParam?.type !== 'trigger') return buttonIgnores(`"${key}"`);
   if (!manifestParam && typeof modifier.params[key] !== 'number' && typeof modifier.params[key] !== 'boolean') {
     return [mappingError('param-not-mappable', `param "${key}" is not numeric or boolean; only number, int and bool params can be driven by a control`, widgetId)];
   }
@@ -266,7 +280,7 @@ function targetFindings(read: CoreReadApi, m: LiveMapping, widgetId: string): Fi
  */
 export function mappingFindings(read: CoreReadApi, widgetType: string, m: LiveMapping, widgetId: string): Finding[] {
   const out: Finding[] = [];
-  if (m.type === 'effect-param') out.push(...effectParamFindings(read, m, widgetId));
+  if (m.type === 'effect-param') out.push(...effectParamFindings(read, m, widgetId, widgetType));
   else if (m.type === 'channel' || m.type === 'dimmer-group') out.push(...targetFindings(read, m, widgetId));
   else if (m.type === 'page-switch' && !read.livePages().some(p => p.id === m.targetPageId)) {
     out.push(mappingError('page-not-found', `live page "${m.targetPageId ?? ''}" not found (use live.listPages)`, widgetId));

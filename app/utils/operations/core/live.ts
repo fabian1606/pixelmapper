@@ -63,7 +63,7 @@ const GRID_DOC = [
 /** Mapping explanation shared by the descriptions. */
 const MAPPING_DOC = [
   'Mappings (field `mapping`, discriminated by `type`):',
-  '- effect-param { modifierId, paramKey }: slider drives a modifier value. paramKey = "strength" | "speed" | "fanning" | a numeric/int/bool plugin param key of that modifier (e.g. "count"; see modifiers.list → params). Sliders only.',
+  '- effect-param { modifierId, paramKey }: slider drives a modifier value. paramKey = "strength" | "speed" | "fanning" | a numeric/int/bool plugin param key of that modifier (e.g. "count"; see modifiers.list → params) on a slider; a "trigger" plugin param on a button (press / release / multi-click reach the effect).',
   '- channel { fixtureId, channelOffset } or { groupId, channelType }: raw DMX channel. Buttons, sliders, xy (x = channelOffset, y = channelOffset + 1).',
   '- dimmer-group { groupId } or { fixtureId }: dim fixtures. Buttons, sliders.',
   '- preset { presetId }, page-switch { targetPageId }, global-function { function: strobe|blind|blackout|speed, config? }, position-recall { positionId }: buttons only.',

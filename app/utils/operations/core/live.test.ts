@@ -8,6 +8,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { defaultLivePage, defaultLiveWidget, type LivePage } from '~/utils/live/types';
+import { registerPackage } from '~/utils/plugins/plugin-store';
 import { applyOperations } from '../apply';
 import { readApi } from '../read-api';
 import { registryWith, resetOperationState, seedScene, stateFingerprint, stubOperationGlobals } from '../test-utils';
@@ -179,6 +180,35 @@ describe('live.addWidget', () => {
     }, { registry: registry() });
     expect(result.committed).toBe(true);
     expect(result.findings).toContainEqual(expect.objectContaining({ level: 'warning', code: 'mapping-ignored-by-widget' }));
+  });
+
+  it('maps a button to a trigger param without warnings, and warns for other params', async () => {
+    // A plugin with a momentary `trigger` param (ABI 1.3) and a number param.
+    registerPackage({
+      hash: 'sha256:trigger-test',
+      manifest: {
+        schema: 1, kind: 'modifier', alias: '@test/trigger', name: 'Trigger', version: '1.0.0', apiVersion: '^1.3.0',
+        description: 'Test plugin with a trigger param.', signatures: ['scalar'], output: 'scale',
+        params: [
+          { key: 'hit', type: 'trigger', label: 'Hit', default: { pressed: false } },
+          { key: 'decay', type: 'number', label: 'Decay', min: 0, max: 1, default: 0.5 },
+        ],
+      },
+      wasm: new Uint8Array(),
+      source: {},
+      toolchain: 'test',
+    });
+    useEngineStore().modifiers = [{ ...testModifier('mod-t'), plugin: 'sha256:trigger-test', params: { hit: { pressed: false }, decay: 0.5 } }];
+    const add = (type: string, paramKey: string) => applyOperations({
+      label: 'Trigger',
+      ops: [{ op: 'live.addWidget', input: { pageId: 'page-1', type, mapping: { type: 'effect-param', modifierId: 'mod-t', paramKey } } }],
+    }, { registry: registry() });
+    const button = await add('button', 'hit');
+    expect(button.committed).toBe(true);
+    expect(button.findings).toEqual([]);
+    const wrong = await add('button', 'decay');
+    expect(wrong.committed).toBe(true);
+    expect(wrong.findings).toContainEqual(expect.objectContaining({ level: 'warning', code: 'mapping-ignored-by-widget' }));
   });
 
   it('resolves channel and dimmer-group targets', async () => {
