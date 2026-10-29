@@ -10,3 +10,4 @@ export * from './apply';
 export * from './observe';
 export * from './host';
 export * from './json-schema';
+export * from './tools';
