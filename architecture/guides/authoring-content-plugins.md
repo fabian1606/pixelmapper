@@ -109,6 +109,8 @@ Identity is the content hash `sha256:<hex>` over canonical(manifest) ‖ wasm �
 | `steps` | `{ groups, steps, cells[step][group] }` (1–8 × 1–16) | 18 (`groups, steps, mask[16]`) | `p.int(i)`, `p.int(i + 1)`, mask bits at `p.lut(i + 2)` | `pm.steps` |
 | `trigger` *(v1.3)* | momentary button state; manifest default `{ "pressed": false }` (+ optional `multiClickMs`, default 350) | 4 (`pressed, pressedAt, releasedAt, clicks`; engine-clock ms, −1e9 = never) | `triggerPressed(p, i)`, `triggerMsSincePress(p, i, ctx)`, `triggerMsSinceRelease(p, i, ctx)`, `triggerClicks(p, i)` | press-and-hold `pm.button` |
 
+**Live controls.** Performers can bind live widgets to params with an `effect-param` mapping: sliders drive `number`, `int`, `bool` and `trigger`; buttons drive `bool` (toggle or hold) and `trigger`; XY pads drive `point`. Other param types cannot be mapped.
+
 **Trigger params (v1.3).** For momentary input such as "hold = blackout, release = shock wave, double-click = flash". The host records the press/release edges (card button, or a live `button` widget mapped to the param with `effect-param`) as engine-clock timestamps; nothing is saved to undo history. `render` stays pure: the SDK readers subtract the stamps from `ctx.timeMs`. `triggerClicks` counts presses in the current burst (a press within `multiClickMs` of the previous release continues it), so `clicks >= 2` while pressed or shortly after means double click. Combine with `envelope(ms, attackMs, decayMs)`:
 
 ```ts

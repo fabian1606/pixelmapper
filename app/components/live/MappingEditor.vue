@@ -6,6 +6,7 @@ import type { LiveMapping, GlobalFunctionType, SpeedConfig, StrobeConfig, BlindC
 import { defaultStrobeConfig, defaultBlindConfig, defaultSpeedConfig } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
+import { BUILTIN_PARAM_CONTROLS, CONTROL_PARAM_TYPES, DEFAULT_BUTTON_BEHAVIOR } from '~/utils/live/control-param-value';
 
 /**
  * Shared mapping editor used by both canvas widgets (buttons/sliders) and
@@ -18,8 +19,8 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
  */
 const props = defineProps<{
   mapping: LiveMapping;
-  /** Which mapping types to offer. Buttons get all; sliders/faders the fader subset. */
-  variant: 'button' | 'slider';
+  /** Which mapping types to offer. Buttons get all; sliders/faders the fader subset; xy pads channel + point params. */
+  variant: 'button' | 'slider' | 'xy';
 }>();
 
 const emit = defineEmits<{
@@ -28,13 +29,21 @@ const emit = defineEmits<{
 
 const engineStore = useEngineStore();
 
-/** Number/int/bool params of the mapped modifier's plugin (mappable to a 0–1 control). */
+/** Plugin params of the mapped modifier this control kind can drive (see CONTROL_PARAM_TYPES). */
 const mappableParams = computed(() => {
   const m = engineStore.modifiers.find(e => e.id === props.mapping.effectId);
   const manifest = m ? getManifest(m.plugin) : undefined;
-  // Trigger params (ABI 1.3) take a button's press/release.
-  return (manifest?.params ?? []).filter(p => p.type === 'number' || p.type === 'int' || p.type === 'bool' || p.type === 'trigger');
+  const types = CONTROL_PARAM_TYPES[props.variant];
+  return (manifest?.params ?? []).filter(p => types.includes(p.type));
 });
+
+/** Whether this control kind drives the built-in strength / speed / fanning keys. */
+const offersBuiltinParams = computed(() => BUILTIN_PARAM_CONTROLS.includes(props.variant));
+
+/** A button bound to a bool param: offer toggle vs. momentary. */
+const showsButtonBehavior = computed(() =>
+  props.variant === 'button'
+  && mappableParams.value.some(p => p.type === 'bool' && `params.${p.key}` === props.mapping.paramKey));
 const store = useLiveModeStore();
 
 function patch(mapping: LiveMapping) {
@@ -168,7 +177,7 @@ function setDimmerGroup(raw: string) {
     >
       <option value="none">None</option>
       <option value="channel">Channel (DMX)</option>
-      <option value="dimmer-group">Dimmer Group</option>
+      <option v-if="variant === 'slider'" value="dimmer-group">Dimmer Group</option>
       <option value="effect-param">Effect Parameter</option>
     </select>
 
@@ -415,11 +424,25 @@ function setDimmerGroup(raw: string) {
         @change="(e) => patch({ ...mapping, paramKey: (e.target as HTMLSelectElement).value })"
       >
         <option value="">— choose parameter —</option>
-        <option value="strength">Strength</option>
-        <option value="speed">Speed</option>
-        <option value="fanning">Fanning</option>
+        <template v-if="offersBuiltinParams">
+          <option value="strength">Strength</option>
+          <option value="speed">Speed</option>
+          <option value="fanning">Fanning</option>
+        </template>
         <option v-for="p in mappableParams" :key="p.key" :value="`params.${p.key}`">{{ p.label }}</option>
       </select>
+      <!-- Bool params on buttons: toggle per press or on while held -->
+      <template v-if="showsButtonBehavior">
+        <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60 pt-1">Behavior</span>
+        <select
+          class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+          :value="mapping.behavior ?? DEFAULT_BUTTON_BEHAVIOR"
+          @change="(e) => patch({ ...mapping, behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
+        >
+          <option value="latch">Latch (toggle state)</option>
+          <option value="hold">Hold (momentary)</option>
+        </select>
+      </template>
     </div>
   </div>
 </template>

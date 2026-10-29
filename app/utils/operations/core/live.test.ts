@@ -2,7 +2,7 @@
  * Live page operations: execute via `applyOperations`, undo to the exact
  * pre-state, dry run, verify rollback and diff.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
@@ -15,18 +15,39 @@ import { findFreeSpot, liveOperations } from './live';
 
 // ── Setup ───────────────────────────────────────
 
-/** A modifier instance with one numeric plugin param (`count`) and one string param (`mode`). */
-function testModifier(id: string): ModifierInstance {
+/** Manifest of the `sha256:typed` test plugin (param types resolved from the manifest). */
+const TYPED = vi.hoisted(() => ({
+  hash: 'sha256:typed',
+  manifest: {
+    params: [
+      { type: 'trigger', key: 'hit', label: 'Hit', default: { pressed: false } },
+      { type: 'color', key: 'tint', label: 'Tint', default: { r: 1, g: 1, b: 1 } },
+      { type: 'point', key: 'origin', label: 'Origin', default: { x: 0.5, y: 0.5 } },
+    ],
+  },
+}));
+
+// Known manifest for the typed plugin; everything else falls through to the real store.
+vi.mock('~/utils/plugins/plugin-store', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('~/utils/plugins/plugin-store')>();
+  return { ...orig, getManifest: (hash: string) => (hash === TYPED.hash ? TYPED.manifest : orig.getManifest(hash)) };
+});
+
+/**
+ * A modifier instance of an unknown plugin (param types inferred from the
+ * values): numeric `count`, string `mode`, point `center`, bool `invert`.
+ */
+function testModifier(id: string, plugin = 'sha256:test'): ModifierInstance {
   return {
     id,
-    plugin: 'sha256:test',
+    plugin,
     signature: 'rgb',
     targetChannels: [],
     blendMode: 'add',
     strength: 1,
     speed: { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
     distribution: {} as ModifierInstance['distribution'],
-    params: { count: 3, mode: 'wave' },
+    params: { count: 3, mode: 'wave', center: { x: 0.5, y: 0.5 }, invert: false },
   };
 }
 
@@ -43,7 +64,10 @@ beforeAll(stubOperationGlobals);
 beforeEach(() => {
   resetOperationState();
   seedScene([{ id: 'fx-a' }, { id: 'fx-b' }], [{ id: 'grp-1', name: 'All', fixtureIds: ['fx-a', 'fx-b'] }]);
-  useEngineStore().modifiers = [testModifier('mod-1')];
+  useEngineStore().modifiers = [
+    testModifier('mod-1'),
+    { ...testModifier('mod-2', TYPED.hash), params: { hit: { pressed: false }, tint: { r: 1, g: 1, b: 1 }, origin: { x: 0.5, y: 0.5 } } } as ModifierInstance,
+  ];
   seedPage();
 });
 
@@ -175,10 +199,56 @@ describe('live.addWidget', () => {
   it('warns when the widget type ignores the mapping', async () => {
     const result = await applyOperations({
       label: 'Warn',
-      ops: [{ op: 'live.addWidget', input: { pageId: 'page-1', type: 'button', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'strength' } } }],
+      ops: [{ op: 'live.addWidget', input: { pageId: 'page-1', type: 'xy', mapping: { type: 'preset', presetId: 'p-1' } } }],
     }, { registry: registry() });
     expect(result.committed).toBe(true);
     expect(result.findings).toContainEqual(expect.objectContaining({ level: 'warning', code: 'mapping-ignored-by-widget' }));
+  });
+
+  it('accepts xy → point and button → bool/trigger effect-param mappings without warnings', async () => {
+    const add = (type: string, mapping: Record<string, unknown>) => ({ op: 'live.addWidget', input: { pageId: 'page-1', type, mapping: { type: 'effect-param', ...mapping } } });
+    const result = await applyOperations({
+      label: 'Drivable',
+      ops: [
+        add('xy', { modifierId: 'mod-1', paramKey: 'center' }),
+        add('xy', { modifierId: 'mod-2', paramKey: 'origin' }),
+        add('button', { modifierId: 'mod-1', paramKey: 'invert', behavior: 'hold' }),
+        add('button', { modifierId: 'mod-2', paramKey: 'hit' }),
+        add('slider', { modifierId: 'mod-2', paramKey: 'hit' }),
+      ],
+    }, { registry: registry() });
+    expect(result.committed).toBe(true);
+    expect(result.findings).toEqual([]);
+    const buttonId = (result.results[2]!.value as { widgetId: string }).widgetId;
+    expect(widget('page-1', buttonId)?.mapping).toEqual({ type: 'effect-param', effectId: 'mod-1', paramKey: 'params.invert', behavior: 'hold' });
+  });
+
+  it('warns when the widget type cannot drive the mapped param type', async () => {
+    const cases: Array<[string, string, string, RegExp]> = [
+      ['button', 'mod-1', 'strength', /button widget cannot drive "strength"/],
+      ['button', 'mod-1', 'count', /button widget cannot drive number param "count"/],
+      ['xy', 'mod-1', 'count', /xy widget cannot drive number param "count"/],
+      ['xy', 'mod-1', 'invert', /xy widget cannot drive bool param "invert"/],
+      ['slider', 'mod-1', 'center', /slider widget cannot drive point param "center"/],
+      ['slider', 'mod-2', 'origin', /slider widget cannot drive point param "origin"/],
+    ];
+    for (const [type, modifierId, paramKey, message] of cases) {
+      const result = await applyOperations({
+        label: 'Warn',
+        ops: [{ op: 'live.addWidget', input: { pageId: 'page-1', type, mapping: { type: 'effect-param', modifierId, paramKey } } }],
+      }, { registry: registry() });
+      expect(result.committed).toBe(true);
+      expect(result.findings).toEqual([expect.objectContaining({ level: 'warning', code: 'mapping-ignored-by-widget', message: expect.stringMatching(message) })]);
+    }
+  });
+
+  it('rejects param types no control can drive (manifest type)', async () => {
+    const result = await applyOperations({
+      label: 'Bad',
+      ops: [{ op: 'live.addWidget', input: { pageId: 'page-1', type: 'button', mapping: { type: 'effect-param', modifierId: 'mod-2', paramKey: 'tint' } } }],
+    }, { registry: registry() });
+    expect(result.committed).toBe(false);
+    expect(result.findings).toContainEqual(expect.objectContaining({ level: 'error', code: 'param-not-mappable', message: expect.stringMatching(/type color/) }));
   });
 
   it('resolves channel and dimmer-group targets', async () => {

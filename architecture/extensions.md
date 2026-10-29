@@ -126,6 +126,16 @@ Call sites: property sidebar box fader (`pm.fader` `variant="box"`) and value fi
 
 Live widget types come from `app/utils/live/widget-registry.ts`: the core types (`button` → `pm.button`, `slider` → `pm.fader`, `xy` → `pm.xyInput`, `color` → `pm.colorInput`, `label`, `beat` → `pm.tapTempo`, `fixture-preview`, and the generic `controller-twin` for any registered controller) plus `contributes.liveWidgets` from extensions. Extension widget types are namespaced (`<extensionId>/<name>`), receive no props (read the `liveWidget` scope), keep their configuration in `widget.extensionData[extensionId]` (seeded from `defaultConfig()`), and render a "not installed" placeholder when the extension is missing — without creating a project dependency. Legacy type names `xy-pad`/`color-wheel` are mapped to `xy`/`color` on load.
 
+An `effect-param` mapping binds a core control to a modifier param; the shared dispatcher `app/composables/live-ops/apply-mapping.ts` writes it. Which param types each control drives is one table, `CONTROL_PARAM_TYPES` in `app/utils/live/control-param-value.ts` (also used by the mapping editor and the `live.*` operation verify):
+
+| Control | Drives |
+|---------|--------|
+| `slider` / twin fader | `strength`, `speed`, `fanning`, `number` / `int` (0–1 → min–max), `bool` (≥ 0.5), `trigger` (pressed above half) |
+| `button` / twin pad | `bool` (mapping `behavior`: `latch` = toggle per press, default; `hold` = true while held), `trigger` (press/release edges) |
+| `xy` | `point` (pad x/y 0–1 → the point's x/y) |
+
+Plugin-param writes are live input (no undo step) and reach collaborators via the `modifier.update` live op. A mapping a widget cannot drive is kept but reported by the `live.*` operations as `mapping-ignored-by-widget`.
+
 ## Reference example: `extensions/color-picker`
 
 The color picker is the smallest complete replacement extension and the template for new ones:
