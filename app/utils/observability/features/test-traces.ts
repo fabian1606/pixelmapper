@@ -39,7 +39,7 @@ export function makeTrace(opts: SyntheticTraceOptions): Trace {
   const fps = opts.fps ?? 30;
   const duration = opts.duration ?? 2;
   const frames = Math.round(duration * fps);
-  const specs = typeof opts.samples === 'number' ? Array.from({ length: opts.samples }, () => ({})) : opts.samples;
+  const specs: Array<Partial<TraceSample>> = typeof opts.samples === 'number' ? Array.from({ length: opts.samples }, () => ({})) : opts.samples;
   const n = specs.length;
   const samples: TraceSample[] = specs.map((s, i) => ({
     fixtureId: s.fixtureId ?? i + 1,
