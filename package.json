@@ -43,6 +43,7 @@
     "build:plugins": "bun run scripts/build-plugins.ts",
     "build:extensions": "bun run scripts/build-extensions.ts",
     "check:zero-extensions": "bun run scripts/check-zero-extensions.ts",
+    "check:optimize-deps": "bun run scripts/check-optimize-deps.ts && bun run scripts/check-optimize-deps.ts --tauri",
     "docs:ai": "bun run scripts/generate-ai-docs.ts",
     "build:wasm": "cd rs-engine/canvas && wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas && cd ../core && wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core"
   },

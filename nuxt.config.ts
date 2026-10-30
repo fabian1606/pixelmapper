@@ -41,6 +41,17 @@ const PLATFORM_DIR = IS_TAURI ? 'tauri' : 'web';
  */
 const TAURI_PUBLIC_DIR = fileURLToPath(new URL('./.tauri-public', import.meta.url));
 
+/**
+ * Vite dep-optimizer cache, one per config flavour. The desktop config
+ * (`IS_TAURI`) and the web config hash differently (other `#platform` alias
+ * and `optimizeDeps.include`), so two dev servers sharing one cache dir wipe
+ * and re-optimize each other's deps; the running app then gets
+ * "504 Outdated Optimize Dep" or two copies of Vue. `PM_VITE_CACHE_DIR`
+ * overrides it (fresh cache for `scripts/check-optimize-deps.ts`).
+ */
+const VITE_CACHE_DIR = process.env.PM_VITE_CACHE_DIR
+  || fileURLToPath(new URL(`./node_modules/.cache/vite-${PLATFORM_DIR}`, import.meta.url));
+
 /** Inline module (Tauri only): builds the OFL bundle before Nitro starts. */
 async function bundleOflForTauri(): Promise<void> {
   const src = fileURLToPath(new URL('./ofl-data/fixtures', import.meta.url));
@@ -95,6 +106,7 @@ export default defineNuxtConfig({
   },
 
   vite: {
+    cacheDir: VITE_CACHE_DIR,
     plugins: [
       wasm(),
       topLevelAwait(),
@@ -124,6 +136,11 @@ export default defineNuxtConfig({
         '@nuxtjs/supabase > cookie',
         '@supabase/supabase-js',
         'qrcode',
+        // 3D view: only reached through lazy route chunks (scripts/check-optimize-deps.ts).
+        'three',
+        'three/examples/jsm/controls/OrbitControls.js',
+        'three/examples/jsm/controls/TransformControls.js',
+        'three/examples/jsm/utils/BufferGeometryUtils.js',
         // Agent layer (agent-kit tools, loaded by the MCP bridge plugin at boot).
         'zod',
         // In-browser plugin toolchain (plugins.build, New modifier from code).
