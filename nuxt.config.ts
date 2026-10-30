@@ -110,9 +110,11 @@ export default defineNuxtConfig({
       // cold dev start re-optimizes mid-load and reloads; WKWebView (Tauri) can
       // end up with two Vue module graphs (`currentRenderingInstance.ce` error).
       include: [
+        '@supabase/supabase-js',
         '@vueuse/core',
         'class-variance-authority',
         'clsx',
+        'errx',
         'fflate',
         'lucide-vue-next',
         'reka-ui',
