@@ -29,11 +29,12 @@ import { fixtureInfo, fixtureSignatures, readApi, type CoreReadApi } from '~/uti
 import { darkTargetFindings } from '~/utils/operations/core/modifier-dark';
 import { pluginNotFound, resolvePlugin } from '~/utils/operations/core/plugin-ref';
 import { getManifest, loadWasm } from '~/utils/plugins/plugin-store';
-import { captureLive, type CaptureHub } from './capture';
+import { captureLiveSignatures, type CaptureHub } from './capture';
 import { analyzeTrace } from './features';
+import { layersOn, planLiveSignatures, primaryIndex, signatureFindings, stackClock } from './live-signature';
 import { renderPreview, type PreviewPlugins } from './preview';
 import { renderReport } from './report';
-import { headSamples, pickSignature, resolveTargets, type ResolvedTargets } from './targets';
+import { headSamples, resolveTargets, type ResolvedTargets } from './targets';
 import { parseTimeRef, type Trace } from './types';
 
 export type { Trace, TraceSample, TracePoint, TraceSource } from './types';
@@ -224,14 +225,34 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
         const hits = !m.targetFixtureIds || m.targetFixtureIds.some(id => observed.has(String(id)));
         if (hits) findings.push(...darkTargetFindings(read, m));
       }
-      const signature = pickSignature(resolved.fixtures, typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined);
+      // Signatures: requested, else those of the layers on the targets (a
+      // moving DIMMER layer on RGB fixtures must not read as constant RGB).
+      const layers = layersOn(read.modifiers(), resolved.fixtures);
+      const requested = typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined;
+      const plan = planLiveSignatures(resolved.fixtures, layers, requested);
       const wait = deps.wait ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
       if (fromS > 0) await wait(fromS * 1000); // live cannot look ahead: wait for the window start
-      trace = await captureLive(
-        { fixtures: resolved.fixtures, signature, durationS, fps, bpm, groupIds, wait, now: deps.now },
+      const traces = await captureLiveSignatures(
+        { fixtures: resolved.fixtures, signature: plan.signatures[0]!, durationS, fps, bpm, groupIds, wait, now: deps.now },
+        plan.signatures,
         deps.hub ?? liveHub,
       );
-      if (points) trace.points = points;
+      for (const [i, t] of traces.entries()) {
+        if (points) t.points = points;
+        const clock = stackClock(layers, plan.signatures[i]!);
+        if (clock) t.clock = clock;
+      }
+      // Several signatures: report the moving one, name the others.
+      if (traces.length > 1) {
+        const quick = traces.map(t => analyzeTrace(t, {}).json);
+        const primary = primaryIndex(quick);
+        findings.push(...signatureFindings(plan, layers, quick, primary));
+        trace = traces[primary]!;
+      }
+      else {
+        trace = traces[0]!;
+        findings.push(...signatureFindings(plan, layers, [], 0));
+      }
     }
   }
   catch (err) {

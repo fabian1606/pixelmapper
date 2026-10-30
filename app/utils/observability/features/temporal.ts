@@ -24,6 +24,17 @@ export interface TemporalContext {
   bpm: number;
   /** Frame times relative to the window start (s). */
   times: Float64Array;
+  /**
+   * Live capture: frame timing jitters, so own periods are compared to a
+   * joint lag with a wider tolerance (`HARMONIC_TOL_LIVE`).
+   */
+  jitter?: boolean;
+  /**
+   * Speed clock of the observed motion when known: `beat` (beat-mode
+   * speed, a beat lock is possible), `time` (ms-based speed: never a beat
+   * lock, only a coincidental match). Unknown = judge from the period.
+   */
+  clock?: 'beat' | 'time';
 }
 
 /** Autocorrelation peak threshold (lags ≤ N/2, beyond). */
@@ -41,6 +52,13 @@ const MAX_HARMONIC = 8;
 const MAX_COMMON_MULTIPLE = 4;
 /** Minimum share of signals with an own period for the common-period search. */
 const OWN_PERIOD_MIN_SHARE = 0.5;
+/** Relative tolerance of an own period against a common lag (preview / live). */
+const HARMONIC_TOL = 0.03;
+const HARMONIC_TOL_LIVE = 0.05;
+/** Maximum share of own periods that may misfit a joint lag (`periodsAgree`). */
+const MISFIT_SHARE = 0.2;
+/** Number of distinct longest own periods tried as common-period base. */
+const MAX_BASES = 3;
 
 // ── Autocorrelation ─────────────────────────────
 
@@ -115,19 +133,44 @@ function searchTolerance(lag: number): number {
  * on purpose: 1 Hz and 1.37 Hz nearly meet at ~2.95 s (3 vs 4.04 cycles)
  * and must not count as a common period.
  */
-function isHarmonicOf(lag: number, own: number): boolean {
+function isHarmonicOf(lag: number, own: number, rel = HARMONIC_TOL): boolean {
   const h = Math.round(lag / own);
-  return h >= 1 && h <= MAX_HARMONIC && Math.abs(lag - h * own) <= Math.max(0.75, 0.03 * own);
+  return h >= 1 && h <= MAX_HARMONIC && Math.abs(lag - h * own) <= Math.max(0.75, rel * own);
 }
 
 /** Own period lags (frames) of the signals that have one. */
 export function ownPeriodLags(acs: Float64Array[], frames: number): number[] {
-  const own: number[] = [];
-  for (const ac of acs) {
-    const p = findPeriodLag(ac, frames);
-    if (p) own.push(p.lag);
-  }
-  return own;
+  return ownPeriods(acs, frames).filter((l): l is number => l !== null);
+}
+
+/** Own period lag (frames) per signal, null when a signal has none. */
+function ownPeriods(acs: Float64Array[], frames: number): (number | null)[] {
+  return acs.map(ac => findPeriodLag(ac, frames)?.lag ?? null);
+}
+
+/**
+ * Whether the own periods agree with a joint lag: every own period is a
+ * harmonic of `lag`, or at most `MISFIT_SHARE` of them are not and each
+ * of those signals still repeats at the lag (own autocorrelation high).
+ *
+ * The exception absorbs single-signal estimation errors: an own period
+ * close to half the window is refined from few overlapping frames, and
+ * live captures add timing jitter, so one fixture of a runner may read
+ * 58 frames while the others read 60. Unrelated periods (1 Hz and 1.37 Hz
+ * on half the fixtures each) are still rejected: half the signals misfit.
+ */
+function periodsAgree(lag: number, own: readonly (number | null)[], acs: Float64Array[], frames: number, rel: number): boolean {
+  const misfits: number[] = [];
+  let withOwn = 0;
+  own.forEach((l, i) => {
+    if (l === null) return;
+    withOwn++;
+    if (!isHarmonicOf(lag, l, rel)) misfits.push(i);
+  });
+  if (misfits.length === 0) return true;
+  if (misfits.length > MISFIT_SHARE * withOwn) return false;
+  const min = lag <= frames / 2 ? PEAK_MIN : PEAK_MIN_LATE;
+  return misfits.every(i => acAt(acs[i]!, lag) >= min);
 }
 
 /**
@@ -163,20 +206,35 @@ function refineLagNear(ac: Float64Array, lag: number, tol: number): number {
  * common multiple and are rejected. Needs ≥ 2 signals, at least half of
  * them with an own period: a single signal is the joint analysis.
  */
-export function commonPeriodLag(acs: Float64Array[], own: number[], meanAc: Float64Array, frames: number): { lag: number; strength: number } | null {
-  if (acs.length < 2 || own.length === 0 || own.length < OWN_PERIOD_MIN_SHARE * acs.length) return null;
+export function commonPeriodLag(
+  acs: Float64Array[],
+  own: readonly (number | null)[],
+  meanAc: Float64Array,
+  frames: number,
+  rel = HARMONIC_TOL,
+): { lag: number; strength: number } | null {
+  const known = own.filter((l): l is number => l !== null);
+  if (acs.length < 2 || known.length === 0 || known.length < OWN_PERIOD_MIN_SHARE * acs.length) return null;
   const maxLag = meanAc.length - 1;
-  const longest = Math.max(...own);
-  for (let m = 1; m <= MAX_COMMON_MULTIPLE; m++) {
-    const candidate = longest * m;
-    if (candidate >= maxLag) break;
-    const lag = refineLagNear(meanAc, candidate, searchTolerance(candidate));
-    // Every own period must be a harmonic of the lag.
-    if (!own.every(l => isHarmonicOf(lag, l))) continue;
-    // Every signal (also those without an own period) repeats at the lag.
-    const min = lag <= frames / 2 ? PEAK_MIN : PEAK_MIN_LATE;
-    if (!acs.every(ac => acAt(ac, lag) >= min)) continue;
-    return { lag, strength: Math.max(0, Math.min(1, acAt(meanAc, lag))) };
+  // Base periods: the longest own periods (an over-estimated outlier must
+  // not hide the true longest period), distinct by more than a frame.
+  const bases: number[] = [];
+  for (const l of [...known].sort((a, b) => b - a)) {
+    if (bases.length >= MAX_BASES) break;
+    if (bases.every(b => Math.abs(b - l) > 1)) bases.push(l);
+  }
+  for (const longest of bases) {
+    for (let m = 1; m <= MAX_COMMON_MULTIPLE; m++) {
+      const candidate = longest * m;
+      if (candidate >= maxLag) break;
+      const lag = refineLagNear(meanAc, candidate, searchTolerance(candidate));
+      // The own periods must be harmonics of the lag (see `periodsAgree`).
+      if (!periodsAgree(lag, own, acs, frames, rel)) continue;
+      // Every signal (also those without an own period) repeats at the lag.
+      const min = lag <= frames / 2 ? PEAK_MIN : PEAK_MIN_LATE;
+      if (!acs.every(ac => acAt(ac, lag) >= min)) continue;
+      return { lag, strength: Math.max(0, Math.min(1, acAt(meanAc, lag))) };
+    }
   }
   return null;
 }
@@ -354,11 +412,21 @@ export function detectEvents(series: Float64Array, times: Float64Array): { on: n
 
 // ── Verdict ─────────────────────────────────────
 
-/** Builds the periodic verdict for a frequency. */
+/** Whether a period in beats sits on the beat grid (within 3 % of 1/8 … 16 beats). */
+export function onBeatGrid(beats: number): boolean {
+  return beats > 0 && BEAT_MULTIPLES.some(m => Math.abs(beats / m - 1) <= 0.03);
+}
+
+/**
+ * Builds the periodic verdict for a frequency. A beat lock needs a period
+ * on the beat grid and a clock that can lock: a time-mode speed whose
+ * period happens to equal 4 beats at the current BPM is not locked (it
+ * drifts when the BPM changes); `clock: 'time'` marks that case.
+ */
 function periodic(hz: number, strength: number, ctx: TemporalContext): Temporal {
   const period = 1 / hz;
   const beats = ctx.bpm > 0 ? (period * ctx.bpm) / 60 : 0;
-  const beatLock = beats > 0 && BEAT_MULTIPLES.some(m => Math.abs(beats / m - 1) <= 0.03);
+  const beatLock = ctx.clock !== 'time' && onBeatGrid(beats);
   return {
     kind: 'periodic',
     hz: round4(1 / period),
@@ -366,6 +434,7 @@ function periodic(hz: number, strength: number, ctx: TemporalContext): Temporal 
     beats: round4(beats),
     beatLock,
     strength: round4(strength),
+    ...(ctx.clock ? { clock: ctx.clock } : {}),
   };
 }
 
@@ -387,15 +456,16 @@ export function analyzeTemporal(signals: Signal[], ctx: TemporalContext): Tempor
     // Own periods of the signals (several signals only): the joint lag
     // must be a multiple of each, otherwise it is an accidental near-match
     // of unrelated periods or a harmonic shared by only some signals.
-    const own = active.length > 1 ? ownPeriodLags(acs, frames) : [];
+    const own = active.length > 1 ? ownPeriods(acs, frames) : [];
+    const rel = ctx.jitter ? HARMONIC_TOL_LIVE : HARMONIC_TOL;
     const peak = findPeriodLag(meanAc, frames);
-    if (peak && own.every(l => isHarmonicOf(peak.lag, l))) {
+    if (peak && periodsAgree(peak.lag, own, acs, frames, rel)) {
       let fold = 0;
       for (const s of active) fold += foldingRatio(s, peak.lag) / active.length;
       if (fold >= FOLD_MIN) return periodic(refineFrequency(active, ctx.fps / peak.lag, ctx.fps), peak.strength, ctx);
     }
     // Joint analysis failed: common period of the signals' own periods.
-    const common = commonPeriodLag(acs, own, meanAc, frames);
+    const common = commonPeriodLag(acs, own, meanAc, frames, rel);
     if (common) return periodic(refineFrequency(active, ctx.fps / common.lag, ctx.fps), common.strength, ctx);
   }
   // Events on the mean intensity.

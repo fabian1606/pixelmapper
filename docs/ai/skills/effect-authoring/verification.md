@@ -11,7 +11,7 @@
    - Very short segments (a flash of 50–100 ms, a window < 0.5 s): raise `fps` (60–120) so the segment has enough frames.
    - Other layers of the stack are not rendered in a preview.
 2. **Read the report once without `expect`** when unsure, then write expectations against the JSON paths below.
-3. **Then `live`** (`"mode": "live"`, a few seconds) to check what the app really outputs with the whole stack: overrides above the effect, blackout, presets. Live samples are per fixture (first head only) and carry no spread coordinate, so pixel-level and `spatial`/`radial` features are coarser than in a preview; the engine must be running.
+3. **Then `live`** (`"mode": "live"`, a few seconds) to check what the app really outputs with the whole stack: overrides above the effect, blackout, presets. Live samples are per fixture (first head only) and carry no spread coordinate, so pixel-level and `spatial`/`radial` features are coarser than in a preview; the engine must be running. Without `targets.signature`, live observes the signature(s) of the modifiers acting on the targets and reports the moving one: a DIMMER (scalar) layer on RGB fixtures is read as `scalar`, and `observe-other-signature` findings summarize the other signatures (pass `signature: "rgb"` etc. in the targets filter to choose).
 4. **Targets**: the group/fixtures the effect is on — observing `"all"` mixes in untouched fixtures and weakens spatial features. `targets: { "groupIds": ["g1"] }` also adds `groups.g1.*` (the same features per group). The filter takes the same keys as the modifier's targets (`fixtureIds`, `groupIds`, `signature`, `channelTypes`) plus `ids`, `kind`, `name`; unknown keys are an error. With several groups the text report starts with the combined block (`GROUP combined`), which is what `group.*` expectations test.
 5. `detail: "fixture"` lists every fixture in the text report; `fixtures.<id>.*` (with `heads[i]` per pixel) is always in the JSON. `detail: "raw"` adds per-frame values (`raw.times`, `raw.fixtures.<id>` = head mean, `raw.heads.<id>[head]`) for checks no feature covers — usually `group.order` and `fixtures.*.heads.*` are enough.
 6. Request extras: `points: [{ "x", "y" }]` (world) for `radial` — a preview adds the instance's `point` params with `ui.canvas: "point"` itself; `mirror: { "x": <world x>, "y": <world y> }` moves the mirror lines (default: the room center, the same line as `Sample.u/v = 0.5`).
@@ -32,7 +32,7 @@ Fixtures vs. pixels: `fixtures.<id>.range` pools every head — `max` = the brig
 | `group.range.{min,max,mean,sd}` | intensity 0–1 (rgb: HSV value) |
 | `group.color.hue.{min,max,mean}`, `group.color.sat.mean`, `group.color.value.{min,max,mean,sd}`, `group.color.name` | rgb only; hue in degrees (`min > max` when the arc wraps through 0°); name `red` `orange` `yellow` `green` `cyan` `blue` `purple` `magenta` `white` `black` `gray` `mixed` |
 | `group.temporal.kind` | `constant` · `periodic` · `aperiodic` · `events` |
-| `group.temporal.{hz,period,beats,beatLock,strength}` | periodic only; `beatLock` = beats within 3 % of 1/8…16 |
+| `group.temporal.{hz,period,beats,beatLock,strength,clock}` | periodic only; `beatLock` = beats within 3 % of 1/8…16 **and** a beat-mode speed (`clock: "beat"`); a time-mode speed whose period happens to equal N beats reports `beatLock: false`, `clock: "time"` ("matches N beats") |
 | `group.temporal.band` | aperiodic only: `[loHz, hiHz]` |
 | `group.temporal.on`, `.off` | events only: arrays of crossing times (s from the window start) of the group's mean intensity (≤ 12 crossings, mostly-on/off signal) |
 | `group.spatial.kind` | `uniform` · `chase` · `independent` · `gradient` · `constant` |
@@ -53,7 +53,7 @@ Fixtures vs. pixels: `fixtures.<id>.range` pools every head — `max` = the brig
 |---|---|---|
 | it moves at all | `group.temporal.kind` `ne: "constant"` | constant = params kill the output (width 0, reach too small, points outside the rig) |
 | periodic at the intended tempo | `group.temporal.kind` `eq: "periodic"`; `group.temporal.beats` `within: [3.8, 4.2]` (4-beat cycle) or `group.temporal.hz` `within: […]` | period = `speed.value` beats ÷ events per cycle (a ping-pong runner passes most pixels twice per cycle, so 2 or 4 beats can both be right) |
-| locked to the BPM | `group.temporal.beatLock` `eq: true` | only for `speed.mode: "beat"` |
+| locked to the BPM | `group.temporal.beatLock` `eq: true` | only true for `speed.mode: "beat"`; for time mode check `beats` instead |
 | radiates from the points | `group.radial.r` `gte: 0.7` (or `group.radial.kind` `eq: "outward"`) | room-corner/center effects without `point` params: pass `points` (world coordinates of the room corners / center) |
 | converges to the points | `group.radial.r` `lte: -0.7` (`kind` `inward`) | |
 | travels as a chase in a direction | `group.spatial.kind` `eq: "chase"`; `group.spatial.direction.0` `gt: 0.7` (left → right) | |

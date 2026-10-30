@@ -82,6 +82,12 @@ export interface Trace {
    * `observe` sets the room center or the request's `mirror`.
    */
   mirrorAxes?: { x?: number; y?: number };
+  /**
+   * Speed clock of the observed motion when known (preview: the instance's
+   * speed mode; live: shared by every modifier on the targets). `time`
+   * rules out a beat lock (see `features/temporal.ts`).
+   */
+  clock?: 'beat' | 'time';
   /** Capture-level notes (e.g. fallbacks used), copied into findings. */
   notes?: string[];
 }

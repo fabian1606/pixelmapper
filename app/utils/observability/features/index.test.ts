@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { temporalText } from '../report';
 import { analyzeTrace } from './index';
 import { makeTrace, seededRandom, sine01 } from './test-traces';
 
@@ -18,6 +19,26 @@ describe('temporal features', () => {
     expect(tmp.beatLock).toBe(true);
     expect(json.fixtures['1']?.temporal.kind).toBe('periodic');
     expect(json.group.components.value?.temporal.kind).toBe('periodic');
+  });
+
+  it('claims a beat lock only for a beat clock; a time clock "matches" the beats', () => {
+    // 0.5 Hz = 2 s = 4 beats at 120 bpm, over 6 s.
+    const trace = (clock?: 'beat' | 'time') => ({ ...makeTrace({ samples: 4, duration: 6, fn: (_, t) => [sine01(t, 0.5)] }), ...(clock ? { clock } : {}) });
+    const verdict = (clock?: 'beat' | 'time') => analyzeTrace(trace(clock)).json.group.temporal;
+    const time = verdict('time');
+    expect(time.kind).toBe('periodic');
+    if (time.kind !== 'periodic') return;
+    expect(time.beats).toBeCloseTo(4, 1);
+    expect(time.beatLock).toBe(false);
+    expect(time.clock).toBe('time');
+    expect(temporalText(time)).toContain('matches 4 beats (time speed, not locked)');
+    expect(temporalText(time)).not.toContain('beat lock');
+    const beat = verdict('beat');
+    expect(beat.kind === 'periodic' && beat.beatLock).toBe(true);
+    expect(temporalText(beat)).toContain('beat lock');
+    // Unknown clock (synthetic / mixed stacks): judged from the period alone.
+    const unknown = verdict();
+    expect(unknown.kind === 'periodic' && unknown.beatLock).toBe(true);
   });
 
   it.each([

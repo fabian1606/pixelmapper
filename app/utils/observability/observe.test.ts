@@ -257,6 +257,69 @@ describe('observe (live, fake hub)', () => {
   });
 });
 
+describe('observe (live, signature from the stack)', () => {
+  beforeAll(() => stubOperationGlobals());
+  beforeEach(() => resetOperationState());
+
+  /**
+   * Fake hub: scalar tuples run a 0.5 Hz sine (a moving DIMMER layer), rgb
+   * tuples stay at full white (a static colour base).
+   */
+  function stackHub(fixtures: { id: string | number }[]) {
+    const listeners = new Map<string, LiveListener>();
+    let frameCb: FrameCallback | null = null;
+    let clock = 0;
+    const hub = {
+      subscribe: (t: LiveTarget, l: LiveListener) => {
+        if (t.kind === 'signature') listeners.set(`${t.fixtureId}:${t.signature}`, l);
+        return () => {};
+      },
+      addFrameCallback: (cb: FrameCallback) => { frameCb = cb; return () => { frameCb = null; }; },
+    };
+    const wait = async (ms: number) => {
+      for (let t = 0; t <= ms; t += 1000 / 60) {
+        clock = t;
+        const v = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.5 * (t / 1000));
+        for (const f of fixtures) {
+          listeners.get(`${f.id}:scalar`)?.(new Float32Array([v]));
+          listeners.get(`${f.id}:rgb`)?.(new Float32Array([1, 1, 1]));
+        }
+        frameCb?.({ timeMs: 5000 + t, beat: { beatTime: 0, bpm: 120, phase: 0 }, dmx: new Uint8Array(512) } as LiveFrame);
+      }
+    };
+    return { hub, wait, now: () => clock };
+  }
+
+  it('observes a moving DIMMER layer as scalar on RGB fixtures and names the RGB layer', async () => {
+    const fixtures = scene(4);
+    const dimmer = createModifier(builtinHash(BUILTIN_ALIASES.waveform), { targetChannels: ['DIMMER'], speed: { mode: 'time', timeMs: 2000, beatValue: 1, beatOffset: 0 } });
+    const colour = createModifier(builtinHash(BUILTIN_ALIASES.waveform), { signature: 'rgb', targetChannels: ['RED', 'GREEN', 'BLUE'] });
+    useEngineStore().modifiers = [colour, dimmer];
+    const report = await observe({ targets: 'all', mode: 'live', window: { duration: '6s' } }, stackHub(fixtures));
+    expect(report.json.signature, report.text).toBe('scalar');
+    const tmp = (report.json.group as { temporal: { kind: string; hz?: number; beatLock?: boolean } }).temporal;
+    expect(tmp.kind, report.text).toBe('periodic');
+    expect(tmp.hz).toBeCloseTo(0.5, 1);
+    // Time-mode speed: 2 s = 4 beats at 120 bpm is a match, not a lock.
+    expect(tmp.beatLock).toBe(false);
+    expect(report.text).toContain('matches 4 beats');
+    const codes = report.findings?.map(f => f.code) ?? [];
+    expect(codes).toContain('observe-signature');
+    expect(codes).toContain('observe-other-signature');
+    const other = report.findings?.find(f => f.code === 'observe-other-signature');
+    expect(other?.message).toMatch(/rgb: constant/);
+    expect(other?.message).toContain('signature: \'rgb\'');
+  });
+
+  it('keeps a requested signature and adds no signature findings', async () => {
+    const fixtures = scene(2);
+    addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ });
+    const report = await observe({ targets: { ids: fixtures.map(f => f.id), signature: 'rgb' }, mode: 'live' }, stackHub(fixtures));
+    expect(report.json.signature).toBe('rgb');
+    expect(report.findings?.some(f => f.code.startsWith('observe-') && f.code.includes('signature'))).toBe(false);
+  });
+});
+
 describe('observe (live, failed engine)', () => {
   beforeAll(() => stubOperationGlobals());
   beforeEach(() => resetOperationState());

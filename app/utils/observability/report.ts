@@ -20,6 +20,7 @@
 import type { ExpectationResult, Finding } from '@pixelmapper/agent-kit';
 import type { Trace } from './types';
 import type { FixtureFeatures, GroupFeatures, ObservationJson, ObservationSource, Range, Spatial, Temporal } from './features/types';
+import { onBeatGrid } from './features/temporal';
 
 // ── Limits ──────────────────────────────────────
 
@@ -78,13 +79,24 @@ function rangeText(r: Range): string {
   return `${short(r.min)}–${short(r.max)} mean ${short(r.mean)} sd ${short(r.sd)}`;
 }
 
+/**
+ * Beat relation of a periodic verdict: `beat lock`, or for a time-mode
+ * speed whose period happens to sit on the beat grid `matches N beats
+ * (time speed, not locked)`, else `no beat lock`.
+ */
+function beatText(t: Extract<Temporal, { kind: 'periodic' }>): string {
+  if (t.beatLock) return 'beat lock';
+  if (t.clock === 'time' && onBeatGrid(t.beats)) return `matches ${trim(t.beats)} beat${t.beats === 1 ? '' : 's'} (time speed, not locked)`;
+  return 'no beat lock';
+}
+
 /** One-line temporal verdict. */
 export function temporalText(t: Temporal): string {
   switch (t.kind) {
     case 'constant':
       return 'constant';
     case 'periodic':
-      return `periodic ${t.hz.toFixed(2)} Hz · ${trim(t.beats)} beat${t.beats === 1 ? '' : 's'} · ${t.beatLock ? 'beat lock' : 'no beat lock'}`;
+      return `periodic ${t.hz.toFixed(2)} Hz · ${trim(t.beats)} beat${t.beats === 1 ? '' : 's'} · ${beatText(t)}`;
     case 'aperiodic':
       return `aperiodic · band ${trim(t.band[0], 1)}–${trim(t.band[1], 1)} Hz · no beat lock`;
     case 'events': {
