@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
+import { enginePackageAliases } from './scripts/engine-packages';
 
 /** Resolves a path relative to the repository root. */
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
@@ -25,6 +26,8 @@ export default defineConfig({
       '@': r('./app'),
       // Tests always run against the web platform (ADR 0003 D3).
       '#platform': r('./app/platform/web/index.ts'),
+      // Engine WASM packages from `rs-engine/*/pkg` (as in nuxt.config.ts).
+      ...enginePackageAliases(),
     },
   },
   test: {

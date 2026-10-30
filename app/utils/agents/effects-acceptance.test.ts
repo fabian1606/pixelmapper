@@ -21,6 +21,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { enginePkgDir } from '~~/scripts/engine-packages';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTools, findTool, type AgentHost, type ObserveRequest, type ToolOutput } from '@pixelmapper/agent-kit';
 import { useEngineStore } from '~/stores/engine-store';
@@ -39,7 +40,7 @@ import { getManifest, isBuiltin, loadWasm } from '~/utils/plugins/plugin-store';
 import { createAppAgentHost } from './host';
 
 const ROOT = join(__dirname, '../../..');
-const CORE = join(ROOT, 'node_modules/rs-engine-core');
+const CORE = enginePkgDir('rs-engine-core', ROOT);
 const ready = existsSync(join(CORE, 'rs_engine_core_bg.wasm')) && existsSync(join(ROOT, 'public/plugins'));
 
 /** The real fetch: the AssemblyScript compiler (plugins.build) loads its wasm through it. */

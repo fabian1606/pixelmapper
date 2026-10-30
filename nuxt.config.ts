@@ -3,6 +3,8 @@ import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { buildOflBundle } from './scripts/tauri/ofl-bundle';
+import { enginePackageAliases } from './scripts/engine-packages';
+import { projectNodeModulesGuard } from './scripts/vite-project-guard';
 
 /**
  * First-party extensions included as Nuxt layers: the distribution set
@@ -69,6 +71,9 @@ async function bundleOflForTauri(): Promise<void> {
  * session/user state contract. Web builds keep the module plugin.
  */
 const SUPABASE_MODULE_CLIENT_PLUGIN = /[\\/]@nuxtjs[\\/]supabase[\\/]dist[\\/]runtime[\\/]plugins[\\/]supabase\.client(\.m?js)?$/;
+/** Repository root (absolute, no trailing slash). */
+const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url)).replace(/\/$/, '');
+
 const SUPABASE_SPA_CLIENT_PLUGIN = fileURLToPath(new URL('./app/runtime/supabase-spa.client.ts', import.meta.url));
 
 export default defineNuxtConfig({
@@ -77,6 +82,10 @@ export default defineNuxtConfig({
   ssr: !IS_TAURI,
   alias: {
     '#platform': fileURLToPath(new URL(`./app/platform/${PLATFORM_DIR}/index.ts`, import.meta.url)),
+    // Engine WASM packages come from `rs-engine/*/pkg` (scripts/engine-packages.ts),
+    // never from node_modules: `bun install` wiped them there, and a nested
+    // checkout fell back to the parent checkout's stale build.
+    ...enginePackageAliases(ROOT_DIR),
   },
   // Separate build dir for QA builds next to a running dev server (`.nuxt` is shared otherwise).
   ...(process.env.PM_BUILD_DIR ? { buildDir: process.env.PM_BUILD_DIR } : {}),
@@ -112,7 +121,14 @@ export default defineNuxtConfig({
       topLevelAwait(),
       //@ts-ignore
       tailwindcss(),
+      // Fails loudly when a module resolves into a node_modules outside this
+      // checkout (worktrees nested in the main repo; scripts/vite-project-guard.ts).
+      projectNodeModulesGuard(ROOT_DIR),
     ],
+    resolve: {
+      // One copy of the framework, from this checkout.
+      dedupe: ['vue', 'vue-router', 'pinia'],
+    },
     build: {
       target: 'esnext', // required for top-level await support
     },
@@ -149,11 +165,6 @@ export default defineNuxtConfig({
         'binaryen',
         ...(IS_TAURI ? ['@tauri-apps/api/core', '@tauri-apps/api/event', '@tauri-apps/api/window'] : []),
       ],
-    },
-    server: {
-      watch: {
-        ignored: ['!**/node_modules/rs-engine-canvas/**', '!**/node_modules/rs-engine-core/**'],
-      },
     },
   },
 

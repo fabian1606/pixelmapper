@@ -5,11 +5,12 @@
  * a built-in modifier is added and the real core engine (WASM, in Node)
  * renders changing DMX output through the plugin runtime.
  *
- * Needs the build outputs `node_modules/rs-engine-core` and `public/plugins`
+ * Needs the build outputs `rs-engine/core/pkg` (`bun run build:wasm`) and `public/plugins`
  * (`bun run build:plugins`); skipped when they are absent.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { enginePkgDir } from '~~/scripts/engine-packages';
 import { describe, expect, it } from 'vitest';
 import { resetRegistry, getExtensions } from '~/utils/extensions/registry';
 import { Fixture } from '~/utils/engine/core/fixture';
@@ -20,7 +21,7 @@ import { getManifest } from '~/utils/plugins/plugin-store';
 import { WorkerPluginBridge } from '~/utils/plugins/worker-bridge';
 
 const ROOT = join(__dirname, '..');
-const CORE = join(ROOT, 'node_modules/rs-engine-core');
+const CORE = enginePkgDir('rs-engine-core', ROOT);
 const ready = existsSync(join(CORE, 'rs_engine_core_bg.wasm')) && existsSync(join(ROOT, 'public/plugins'));
 
 describe.skipIf(!ready)('zero extensions', () => {
