@@ -28,6 +28,12 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 
 `EffectEngine` (`app/utils/engine/engine.ts`) owns the worker: it caches every packet, plugin module and canvas message so a respawned worker is replayed to the same state, and bumps `generation` so `FixtureCanvas` re-transfers a fresh `OffscreenCanvas`.
 
+### Build location and handshake
+
+The WASM packages are built by `bun run build:wasm` (`scripts/build-wasm.ts`) into `rs-engine/core/pkg` and `rs-engine/canvas/pkg` and imported as `rs-engine-core` / `rs-engine-canvas` through an alias (`scripts/engine-packages.ts`, used by `nuxt.config.ts` and `vitest.config.ts`). They are **not** in `node_modules` and not in `package.json`: `bun install` deleted the builds there (black output after every install), and bare resolution in a worktree nested in the main checkout (`.claude/worktrees/*`) fell back to the parent's stale build. `dev`, `dev:nuxt` (and so `dev:tauri`), `build` and `generate` run `ensure:wasm` (`--if-stale`: rebuild when the output is missing or older than the crate sources). The Vite plugin `scripts/vite-project-guard.ts` refuses any module loaded from a `node_modules` outside the checkout.
+
+On start the worker checks the loaded modules (`app/utils/engine/engine-abi.ts`): `engine_abi_version()` must equal the host's `ENGINE_ABI_VERSION` (Rust: `rs-engine/core/src/lib.rs`; bump both on incompatible changes to the bindings or packet formats) and all `WasmEngine`/`WasmCanvas` methods the host calls must exist. Failures are posted as `engine-error` (`EngineFailure`: `load`, `abi` fatal; `render`, `dispatch` (packet returned -1) non-fatal, each reported once); a worker that fails to load at all surfaces through `worker.onerror`. `EffectEngine.failure` holds the fatal cause, the store shows a toast (`initEngine`), and live observations return `engine-unavailable` instead of measuring the all-zero buffer.
+
 ## rs-engine-core
 
 | Module | Role |
@@ -77,7 +83,9 @@ pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32)                 // tempo chan
 pub fn reset_clock(&mut self, bpm: f32)                            // new clock epoch
 pub fn retry_disabled(&mut self)                                   // after plugin loads
 pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32>
+pub fn read_head_signatures(&self, requests: &[u32]) -> Vec<f32>
 pub fn get_dmx_view(&self) -> js_sys::Uint8Array                   // zero-copy
+pub fn engine_abi_version() -> u32                                  // free function: host handshake
 ```
 
 ## Plugin runtime

@@ -4,6 +4,12 @@ use wasm_bindgen::prelude::*;
 use crate::engine::EffectEngine;
 use crate::runtime_js::JsModifierRuntime;
 
+/// Host ABI version of this build (see `crate::ENGINE_ABI_VERSION`).
+#[wasm_bindgen]
+pub fn engine_abi_version() -> u32 {
+    crate::ENGINE_ABI_VERSION
+}
+
 /// The engine as used by the browser worker.
 #[wasm_bindgen]
 pub struct WasmEngine {

@@ -73,8 +73,8 @@ pixelmapper/
 │   └── controller-designs/        # Design sources of controller layouts
 ├── evals/effects/                 # Effect acceptance scenarios (manual MCP runs)
 ├── rs-engine/
-│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
-│   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
+│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime (wasm-pack → core/pkg)
+│   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only, wasm-pack → canvas/pkg)
 ├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs), config, icons — ADR 0003
 ├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
 ├── tools/artnet-bridge/           # Local WebSocket → UDP ArtNet bridge
@@ -90,6 +90,8 @@ pixelmapper/
 - `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
 - `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
+- `bun run build:wasm` — builds `rs-engine-core`/`rs-engine-canvas` into `rs-engine/{core,canvas}/pkg` (aliased imports, not `node_modules`; `bun install` leaves them alone). `ensure:wasm` rebuilds only missing/stale outputs and runs before `dev`, `dev:nuxt`/`dev:tauri`, `build` and `generate`. The worker checks the engine's ABI version on start and reports a missing or mismatched build as a toast ([engine.md](architecture/engine.md#build-location-and-handshake)).
+- `bun run check:optimize-deps` — boots `nuxt dev` (web and desktop flavour) with a fresh Vite cache, crawls the client module graph and fails when a dependency is only discovered at runtime (add it to `vite.optimizeDeps.include`; otherwise WKWebView gets "504 Outdated Optimize Dep" or two copies of Vue). Web and desktop dev servers use separate Vite caches (`node_modules/.cache/vite-web` / `vite-tauri`).
 - `bun run check:zero-extensions` — builds without any extension (`PM_NO_EXTENSIONS=1`) and runs the zero-extension smoke test.
 - `bun run build:plugins` / `bun run build:extensions` — compile built-in content plugins / build catalog extension bundles into `public/extensions/`.
 - `bun run mcp` — `pixelmapper-mcp` stdio MCP server for Claude Code / Claude Desktop (`bun run mcp token` prints the pairing token); see [packages/mcp-bridge/README.md](packages/mcp-bridge/README.md).

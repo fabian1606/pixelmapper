@@ -15,7 +15,9 @@ Pixelmapper is a multi-runtime DMX lighting controller with three sub-projects:
 ```bash
 bun install              # Install deps (runs postinstall: nuxt prepare + setup-ofl.sh)
 bun run dev              # Full dev: builds WASM once, then Nuxt + WASM rebuilds on Rust changes
-bun run build:wasm       # Build rs-engine-canvas + rs-engine-core into node_modules
+bun run build:wasm       # Build rs-engine-canvas + rs-engine-core into rs-engine/{canvas,core}/pkg (aliased, not node_modules)
+bun run ensure:wasm      # Same, only when missing/stale (run by dev, dev:nuxt, build, generate)
+bun run check:optimize-deps  # Fails when Vite discovers a dep only at runtime (add it to optimizeDeps.include)
 bun run dev:nuxt         # Nuxt dev only (no WASM watch)
 bun run build            # Production build
 bun run generate         # Static site generation
@@ -26,8 +28,7 @@ bun run release          # Bump version, create git tag, push (triggers CI firmw
 ### Rust Engine
 ```bash
 # Build WASM packages
-wasm-pack build --target web --out-dir ../../node_modules/rs-engine-core   # from rs-engine/core
-wasm-pack build --target web --out-dir ../../node_modules/rs-engine-canvas # from rs-engine/canvas
+wasm-pack build --target web --out-dir pkg   # from rs-engine/core or rs-engine/canvas (= bun run build:wasm)
 
 # Native build + tests (core only; canvas is wasm-only)
 cargo build && cargo test  # from rs-engine/
@@ -103,7 +104,7 @@ No test framework is currently configured. Natural choices would be **Vitest** f
 2. **Composable Pattern**: Vue logic extracted into `useXxx.ts` composables
 3. **Pinia Store Pattern**: `defineStore('name', () => {...})` with `storeToRefs()` for reactive access
 4. **Binary Protocol**: Framed binary packets `[0xAA, 0x55, type, len_lo, len_hi, ...payload]` for ESP32 communication
-5. **WASM Integration**: `rs-engine-core` and `rs-engine-canvas` compiled via `wasm-pack`, imported as local npm packages
+5. **WASM Integration**: `rs-engine-core` and `rs-engine-canvas` compiled via `wasm-pack` into `rs-engine/*/pkg`, imported through an alias (`scripts/engine-packages.ts`); the worker checks `engine_abi_version()` against `ENGINE_ABI_VERSION` (bump both on incompatible changes)
 6. **Revision-based Caching**: Layout/channels/effects packets cached and only re-dispatched when revision counters change
 
 ## Relevant Files

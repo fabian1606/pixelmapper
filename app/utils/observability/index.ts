@@ -51,6 +51,18 @@ export interface ObserveDeps {
   /** Live capture timing (tests). */
   wait?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Fatal engine failure message, null while the engine renders (default: the engine store). */
+  engineFailure?: () => string | null;
+}
+
+/** The running engine's fatal failure, if any (no store → none). */
+function storeEngineFailure(): string | null {
+  try {
+    return useEngineStore().engine.failure.value?.message ?? null;
+  }
+  catch {
+    return null;
+  }
 }
 
 /** Default frame rate and window (ADR §6.1). */
@@ -199,6 +211,10 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
       );
     }
     else {
+      // A failed engine renders nothing: its all-zero output is not a measurement.
+      // (An injected hub is not the store engine: no default check then.)
+      const engineFailure = (deps.engineFailure ?? (deps.hub ? () => null : storeEngineFailure))();
+      if (engineFailure) return failed([...findings, errorFinding('engine-unavailable', engineFailure)]);
       const signature = pickSignature(resolved.fixtures, typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined);
       const wait = deps.wait ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
       if (fromS > 0) await wait(fromS * 1000); // live cannot look ahead: wait for the window start

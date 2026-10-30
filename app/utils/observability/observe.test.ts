@@ -4,11 +4,12 @@
  * `rs-engine-core` (headless, in Node) with built-in and toolchain-compiled
  * plugins on a seeded scene, plus a live capture over a fake hub.
  *
- * Needs `node_modules/rs-engine-core` and `public/plugins`
+ * Needs `rs-engine/core/pkg` (`bun run build:wasm`) and `public/plugins`
  * (`bun run build:wasm && bun run build:plugins`); skipped when absent.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { enginePkgDir } from '~~/scripts/engine-packages';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { LiveFrame, LiveTarget } from '@pixelmapper/extension-api';
 import { buildPackage, type ContentPluginManifest } from '@pixelmapper/plugin-toolchain';
@@ -24,7 +25,7 @@ import type { HeadlessCore } from './preview-core';
 import { observe, setPreviewCoreLoader } from './index';
 
 const ROOT = join(__dirname, '../../..');
-const CORE = join(ROOT, 'node_modules/rs-engine-core');
+const CORE = enginePkgDir('rs-engine-core', ROOT);
 const ready = existsSync(join(CORE, 'rs_engine_core_bg.wasm')) && existsSync(join(ROOT, 'public/plugins'));
 
 /** Built-ins from `public/plugins`, other plugins from the store. */
@@ -243,5 +244,20 @@ describe('observe (live, fake hub)', () => {
     }, { hub, wait, now: () => clock });
     expect(report.expectations.map(e => e.message), report.text).toEqual(report.expectations.filter(e => e.pass).map(e => e.message));
     expect(report.findings?.some(f => f.code === 'observe-note')).toBe(true);
+  });
+});
+
+describe('observe (live, failed engine)', () => {
+  beforeAll(() => stubOperationGlobals());
+  beforeEach(() => resetOperationState());
+
+  it('reports engine-unavailable instead of measuring an all-zero output', async () => {
+    scene(2);
+    const report = await observe(
+      { targets: 'all', mode: 'live' },
+      { engineFailure: () => 'Engine build does not match the app: rs-engine-core has no ABI version.' },
+    );
+    expect(report.findings?.map(f => f.code)).toContain('engine-unavailable');
+    expect(report.text).toContain('engine-unavailable');
   });
 });

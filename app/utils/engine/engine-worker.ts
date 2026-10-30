@@ -1,8 +1,11 @@
-import initWasm, { WasmEngine } from 'rs-engine-core';
+import initWasm, * as coreModule from 'rs-engine-core';
+import { WasmEngine } from 'rs-engine-core';
 import wasmUrl from 'rs-engine-core/rs_engine_core_bg.wasm?url';
-import initCanvasWasm, { WasmCanvas } from 'rs-engine-canvas';
+import initCanvasWasm, * as canvasModule from 'rs-engine-canvas';
+import { WasmCanvas } from 'rs-engine-canvas';
 import canvasWasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
 import { WorkerPluginBridge } from '~/utils/plugins/worker-bridge';
+import { checkEngineModules, ENGINE_REBUILD_HINT, type EngineFailure } from './engine-abi';
 
 // Modifier plugins run through this bridge (rs-engine-core's JS runtime).
 const bridge = new WorkerPluginBridge(event => (self as unknown as Worker).postMessage(event));
@@ -19,9 +22,32 @@ let renderHandle: ReturnType<typeof setInterval> | null = null;
 // Live-value signature requests: flat (group index, signature id) pairs.
 let signatureRequests: Uint32Array = new Uint32Array(0);
 let signatureGeneration = 0;
+/** Non-fatal failures already reported (each message once). */
+const reportedFailures = new Set<string>();
+
+/** Reports a failure to the main thread (fatal ones also stop the engine). */
+function reportFailure(failure: EngineFailure): void {
+  if (!failure.fatal) {
+    if (reportedFailures.has(failure.message)) return;
+    reportedFailures.add(failure.message);
+  }
+  console.error(`[worker] engine ${failure.kind} failure:`, failure.message);
+  (self as unknown as Worker).postMessage({ type: 'engine-error', failure });
+}
 
 function tick() {
   if (!engine) return;
+  try {
+    renderFrame(engine);
+  }
+  catch (e) {
+    // Reported once; the watchdog respawns the worker if no frames follow.
+    reportFailure({ kind: 'render', message: `Engine render failed: ${String(e)}`, fatal: false });
+  }
+}
+
+/** Renders one frame, draws the canvas and posts the DMX frame. */
+function renderFrame(engine: WasmEngine) {
   try { performance.mark('worker.tick.start'); } catch {}
   const now = Date.now();
   const elapsed = now - clockEpoch;
@@ -59,8 +85,21 @@ function tick() {
 }
 
 async function init() {
-  // Init both WASM modules in parallel.
-  await Promise.all([initWasm({ module_or_path: wasmUrl }), initCanvasWasm({ module_or_path: canvasWasmUrl })]);
+  try {
+    // Init both WASM modules in parallel.
+    await Promise.all([initWasm({ module_or_path: wasmUrl }), initCanvasWasm({ module_or_path: canvasWasmUrl })]);
+  }
+  catch (e) {
+    reportFailure({ kind: 'load', message: `Engine WASM failed to load: ${String(e)}. ${ENGINE_REBUILD_HINT}`, fatal: true });
+    return;
+  }
+  // Handshake: a stale or foreign build would parse newer packets as empty
+  // and render black without any error.
+  const mismatch = checkEngineModules(coreModule as unknown as Record<string, unknown>, canvasModule as unknown as Record<string, unknown>);
+  if (mismatch) {
+    reportFailure({ kind: 'abi', message: `${mismatch} ${ENGINE_REBUILD_HINT}`, fatal: true });
+    return;
+  }
   engine = new WasmEngine();
   engine.reset_clock(bpm);
   canvas = new WasmCanvas();
@@ -111,7 +150,9 @@ function handleMessage(e: MessageEvent) {
   switch (m.type) {
     case 'dispatch':
       if (engine && m.packetType !== undefined && m.data) {
-        engine.dispatch(m.packetType, new Uint8Array(m.data));
+        if (engine.dispatch(m.packetType, new Uint8Array(m.data)) < 0) {
+          reportFailure({ kind: 'dispatch', message: `Engine rejected packet 0x${m.packetType.toString(16)} (format mismatch?). ${ENGINE_REBUILD_HINT}`, fatal: false });
+        }
       }
       break;
     case 'bpm':
@@ -145,7 +186,9 @@ function handleMessage(e: MessageEvent) {
     case 'modifiers-sync':
       if (engine && m.packet) {
         bridge.setTable(m.plugins ?? []);
-        engine.dispatch(0x16, new Uint8Array(m.packet));
+        if (engine.dispatch(0x16, new Uint8Array(m.packet)) < 0) {
+          reportFailure({ kind: 'dispatch', message: `Engine rejected the modifiers packet (format mismatch?). ${ENGINE_REBUILD_HINT}`, fatal: false });
+        }
       }
       break;
     case 'signatures-request':

@@ -726,6 +726,18 @@ export const useEngineStore = defineStore('engine', () => {
 
   /** Body of `initEngine` (runs once). */
   async function startEngine(): Promise<void> {
+    // Engine failures (missing/stale WASM, ABI mismatch, rejected packets)
+    // must be visible: otherwise the output just stays black. A fatal one
+    // may already have happened before this ran.
+    engine.onFailure = (failure) => {
+      notify({
+        variant: failure.fatal ? 'error' : 'warning',
+        title: failure.fatal ? 'Render engine unavailable' : 'Render engine error',
+        description: failure.message,
+      }, failure.fatal ? 0 : 10000);
+    };
+    if (engine.failure.value) engine.onFailure(engine.failure.value);
+
     // Wait for WASM to be fully loaded before setting up watches and render loop
     await engine.ready;
 

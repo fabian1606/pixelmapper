@@ -10,6 +10,7 @@ import { reactive, ref, shallowRef, type Ref } from 'vue';
 import { Watchdog } from '~/utils/plugins/watchdog';
 import type { ModifierInstance } from './types';
 import type { SignatureFrame } from '~/utils/extensions/live-hub';
+import { ENGINE_REBUILD_HINT, type EngineFailure } from './engine-abi';
 
 /** Events reported by the worker's plugin bridge. */
 export type PluginEvent =
@@ -47,6 +48,16 @@ export class EffectEngine {
 
   /** Hashes suspended by the watchdog (cleared via `resumePlugins`). */
   public readonly suspendedPlugins = shallowRef<string[]>([]);
+
+  /**
+   * Fatal engine failure (WASM missing, failed to load, ABI mismatch): no
+   * frames are rendered while set. Live output readers must check it instead
+   * of reporting the (all-zero) DMX buffer as real output.
+   */
+  public readonly failure = shallowRef<EngineFailure | null>(null);
+
+  /** Called for every engine failure (fatal and non-fatal); the store shows a toast. */
+  public onFailure: ((failure: EngineFailure) => void) | null = null;
 
   private worker: Worker | null = null;
   private readyResolve!: () => void;
@@ -92,9 +103,29 @@ export class EffectEngine {
       else if (m.type === 'plugin-error' || m.type === 'plugin-log') {
         this.onPluginEvent?.(e.data as PluginEvent);
       }
+      else if (m.type === 'engine-error') {
+        this.fail((e.data as { failure: EngineFailure }).failure);
+      }
     };
-    worker.onerror = e => console.error('[engine-worker] error:', e);
+    // A worker that fails to load at all (module import/link error, e.g. a
+    // missing or outdated `rs-engine-*` package) only reports here.
+    worker.onerror = (e) => {
+      console.error('[engine-worker] error:', e);
+      const detail = e.message ? `: ${e.message}` : '';
+      this.fail({ kind: 'load', message: `Engine worker failed to start${detail}. ${ENGINE_REBUILD_HINT}`, fatal: true });
+    };
     this.worker = worker;
+  }
+
+  /** Records a failure; fatal ones stop the watchdog (nothing renders to watch). */
+  private fail(failure: EngineFailure): void {
+    if (failure.fatal) {
+      if (this.failure.value?.fatal) return; // report the first fatal cause only
+      this.failure.value = failure;
+      this.watchdog?.stop();
+    }
+    console.error(`[engine] ${failure.kind} failure: ${failure.message}`);
+    this.onFailure?.(failure);
   }
 
   /**
