@@ -2401,7 +2401,7 @@
       "id": "fixtures.get",
       "kind": "query",
       "namespace": "fixtures",
-      "summary": "Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), beams/heads (local offsets), kind config and extension data."
+      "summary": "Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), heads, beams, kind config and extension data."
     },
     {
       "id": "fixtures.move",

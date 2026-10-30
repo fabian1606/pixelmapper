@@ -42,8 +42,8 @@ inspect { "selector": { "op": "plugins.list", "input": {} } }
 
 Derive and write down:
 - **Targets**: which fixtures/groups (by kind, name, group). Color effects need `rgb`; dimmer-like effects `scalar`.
-- **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes add the head offsets from `fixtures.get` (`detail.beams`). Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
-- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` shows the head offsets and rotation. Single-head fixtures make a point cloud.
+- **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes take the head world positions from `fixtures.get` (`detail.heads[i].x/y`, same space as `Sample.x/y`, rotation already applied): room box = min/max over every head of every fixture. Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
+- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` lists `detail.heads` (head index = patch order, with world x/y) — compare the first and last head to see which way a tube is patched. `detail.beams` are local offsets in fixture footprints before rotation; you rarely need them. Single-head fixtures make a point cloud.
 - **Order / contour**: for loops around the room, the order of fixtures along the outline (see patterns.md *Path along ranks*).
 - **Existing stack**: an `override` layer on top hides what is below; place the effect accordingly (`index`).
 - **BPM**, for beat-synced speeds.

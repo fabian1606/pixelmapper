@@ -5,6 +5,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
+import { Beam } from '~/utils/engine/core/beam';
 import { applyOperations } from '../apply';
 import { readApi } from '../read-api';
 import { createOperationRegistry } from '../registry';
@@ -84,6 +85,30 @@ describe('queries', () => {
     const got = r.results[3]!.value as { fixtures: { detail: { channels: unknown[] } }[]; missing: string[] };
     expect(got.fixtures[0]!.detail.channels).toHaveLength(4);
     expect(got.missing).toEqual(['nope']);
+  });
+
+  it('fixtures.get lists each head with its world position (rotation applied)', async () => {
+    const f = useEngineStore().flatFixtures.find(x => x.id === 'fx-a')!;
+    // Three pixels along the fixture's local x axis, each owning one channel.
+    f.beams = [-1, 0, 1].map((dx, h) => new Beam(`px-${h}`, dx, 0));
+    f.channels.slice(0, 3).forEach((c, h) => { c.beamId = `px-${h}`; });
+    const get = async () => {
+      const r = await applyOperations({ label: 'q', ops: [{ op: 'fixtures.get', input: { ids: ['fx-a'] } }] }, { registry: registry() });
+      return (r.results[0]!.value as { fixtures: { x: number; y: number; detail: { heads: { head: number; beamId?: string; x: number; y: number }[] } }[] }).fixtures[0]!;
+    };
+    const flat = await get();
+    expect(flat.detail.heads.map(h => h.beamId)).toEqual(['px-0', 'px-1', 'px-2']);
+    // Unrotated: pixels spread along world x around the fixture, same y.
+    expect(flat.detail.heads[0]!.x).toBeLessThan(flat.x);
+    expect(flat.detail.heads[2]!.x).toBeGreaterThan(flat.x);
+    expect(flat.detail.heads[1]!.x).toBeCloseTo(flat.x, 3);
+    expect(flat.detail.heads[0]!.y).toBeCloseTo(flat.y, 3);
+    // Rotated 90° clockwise: the run goes top → bottom (+y), x stays.
+    f.rotation = 90;
+    const turned = await get();
+    expect(turned.detail.heads[0]!.y).toBeLessThan(turned.y);
+    expect(turned.detail.heads[2]!.y).toBeGreaterThan(turned.y);
+    expect(turned.detail.heads[0]!.x).toBeCloseTo(turned.x, 3);
   });
 
   it('groups.list and selection.get', async () => {

@@ -13,6 +13,7 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { MoveFixtureCommand, type FixturePositionSnapshot } from '~/components/engine/commands/move-fixture-command';
 import { RotateFixtureCommand } from '~/components/engine/commands/rotate-fixture-command';
 import { createCoreCommandFactory } from '~/utils/extensions/core-command-factory';
+import { headSamples } from '~/utils/observability/targets';
 import { defineCoreOperation } from '../define';
 import type { CoreReadApi, FixtureInfo } from '../read-api';
 import { FixtureIdSchema, FixtureInfoSchema, SignatureSchema, Unit, fixtureNotFound } from './shared';
@@ -77,13 +78,37 @@ export const fixturesFind = defineCoreOperation({
   run: (ctx, input) => ({ kind: 'query', value: { fixtures: findFixtures(ctx.read, input) } }),
 });
 
+/** World position of one engine head (normalized, as plugin `Sample.x/y`). */
+interface HeadPosition {
+  head: number;
+  /** Beam that owns the head's channels (absent for a fixture-level head). */
+  beamId?: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Engine heads of a fixture with their world positions exactly as the
+ * layout packet sends them (beam offset rotated by the fixture rotation,
+ * fixture-level heads at the fixture position).
+ */
+function headPositions(f: Fixture): HeadPosition[] {
+  return headSamples([f], [f], () => []).map((h) => {
+    const beam = f.beams[h.head];
+    const owns = !!beam && f.channels.some(c => c.beamId === beam.id);
+    return { head: h.head, ...(owns ? { beamId: beam.id } : {}), x: Number(h.x.toFixed(4)), y: Number(h.y.toFixed(4)) };
+  });
+}
+
 /** `fixtures.get`. */
 export const fixturesGet = defineCoreOperation({
   id: 'fixtures.get',
   kind: 'query',
   description: [
-    'Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), beams/heads (local offsets), kind config and extension data.',
+    'Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), heads, beams, kind config and extension data.',
     'Positions are normalized world 0–1 (x left→right, y top→bottom, z = height).',
+    'detail.heads: one entry per engine head/pixel in head order (= patch order, the head index observe uses) with its world x/y — the same space as plugin Sample.x/y; use these for room boxes and pixel order.',
+    'detail.beams: local beam offsets {x, y, z} in fixture-local units (1 = one fixture footprint, 36 px × fixture size, along the fixture\'s own unrotated axes; +x = towards the fixture\'s right before rotation). World = fixture position + offset rotated clockwise by `rotation`. Prefer detail.heads over computing this yourself.',
   ].join('\n'),
   input: z.object({ ids: z.array(FixtureIdSchema).min(1) }),
   output: z.object({ fixtures: z.array(z.unknown()), missing: z.array(FixtureIdSchema) }),
@@ -94,7 +119,8 @@ export const fixturesGet = defineCoreOperation({
     for (const raw of input.ids) {
       const id = resolveId(ctx.read, raw);
       const detail = id === null ? null : ctx.read.fixtureDetail(id);
-      if (detail && id !== null) fixtures.push({ ...ctx.read.fixture(id), detail });
+      const live = id === null ? undefined : liveFixture(id);
+      if (detail && id !== null) fixtures.push({ ...ctx.read.fixture(id), detail: { ...detail, heads: live ? headPositions(live) : [] } });
       else missing.push(raw);
     }
     return { kind: 'query', value: { fixtures, missing } };
