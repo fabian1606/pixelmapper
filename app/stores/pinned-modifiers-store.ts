@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { ModifierInstance } from '~/utils/engine/types';
-import { modifierName } from '~/utils/engine/modifiers';
+import { modifierName, newModifierId } from '~/utils/engine/modifiers';
 import { snapshotEffect } from '~/components/engine/composables/preset-helpers';
 import { reconstructEffect } from '~/components/engine/composables/preset-apply';
 
@@ -47,7 +47,8 @@ export const usePinnedModifiersStore = defineStore('pinned-modifiers', () => {
 
   function applyPinnedModifier(snapshot: ModifierInstance): ModifierInstance | null {
     const eff = reconstructEffect(snapshot);
-    if (eff) eff.id = newId();
+    // Always a fresh instance id: the pinned snapshot can be added many times.
+    if (eff) eff.id = newModifierId();
     return eff;
   }
 

@@ -8,7 +8,7 @@ import type { ModifierInstance } from './types'
 import type { PinnedModifier } from '~/stores/pinned-modifiers-store'
 import type { LivePage, MovingHeadPosition } from '~/utils/live/types'
 import { reactive } from 'vue'
-import { cloneModifiers } from './modifiers'
+import { cloneModifiers, dedupeModifierIds } from './modifiers'
 import { cloneJson, rebuildKindFixture } from '~/utils/kinds/kind-host'
 import type { ProjectRequirement } from '~/utils/extensions/requires'
 import { migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution'
@@ -344,13 +344,17 @@ export function deserializeProject(snapshot: ProjectSnapshot): {
   extensionData: Record<string, Record<string, unknown>> | undefined
 } {
   snapshot = migrateSnapshot(snapshot)
+  // Load-time repair: a live list where instances share an id (older preset
+  // applies reused snapshot ids) gets fresh ids for the later occurrences.
+  const modifiers = cloneModifiers(snapshot.modifiers ?? [])
+  dedupeModifierIds(modifiers)
   return {
     sceneNodes: snapshot.sceneNodes.map(n => deserializeNode(n, null)),
     savedPresets: JSON.parse(JSON.stringify(snapshot.savedPresets)),
     pinnedModifiers: JSON.parse(JSON.stringify(snapshot.pinnedModifiers)),
     // Dimmers always start off; ignore any persisted DIMMER base from older projects.
     globalBases: { ...snapshot.globalBases, DIMMER: 0 },
-    modifiers: cloneModifiers(snapshot.modifiers ?? []),
+    modifiers,
     livePages: JSON.parse(JSON.stringify(snapshot.livePages ?? [])),
     selectedPresetId: snapshot.selectedPresetId ?? null,
     globalBpm: snapshot.globalBpm ?? 120,
