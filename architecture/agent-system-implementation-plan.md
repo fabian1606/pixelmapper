@@ -1,6 +1,6 @@
 # Implementation Plan — Operations, Observation & Agent Layer
 
-Executes [ADR 0002](adr/0002-agent-and-operations-layer.md) including its amendments B1–B9 and B11. Read ADR 0001 (with amendments A1–A20), ADR 0002 and [ADR 0003](adr/0003-native-platform-layer.md) first; they are the spec. This plan is the order of work. Task ids use the prefix `A`.
+Executes [ADR 0002](adr/0002-agent-and-operations-layer.md) including its amendments B1–B9, B11 and B12. Read ADR 0001 (with amendments A1–A20), ADR 0002 and [ADR 0003](adr/0003-native-platform-layer.md) first; they are the spec. This plan is the order of work. Task ids use the prefix `A`.
 
 ## Starting point (2026-10-16)
 
@@ -15,13 +15,17 @@ Executes [ADR 0002](adr/0002-agent-and-operations-layer.md) including its amendm
   - the generated AI reference (`scripts/generate-ai-docs.ts` → `docs/ai/`),
   - CI `app-checks.yml`.
 
+## Status (2026-10-30): MCP-first slice
+
+ADR 0002 **B12** reordered the work: the tool layer was built first and exposed over MCP (Claude Code / Claude Desktop are the agent), the in-app runtime (A5) is deferred. Ticked tasks below were delivered by that slice; annotations name deviations and partial scope. Untouched tasks are open. Outside the A-tasks, the slice also delivered ABI 1.3 (`worldAspect`, `worldDepth`, `Sample.z`, room `u`/`v`), the `trigger` param type, canvas hints (`ui.canvas: 'point' | 'radius'`), SDK pattern helpers, the effect-authoring skill and the reference plugins `corner-wave` / `mirror-runner` (see B12). Docs: [operations.md](operations.md), [observability.md](observability.md), [mcp-bridge-protocol.md](mcp-bridge-protocol.md), the [effect-authoring skill](../docs/ai/skills/effect-authoring/SKILL.md), acceptance scenarios in [evals/effects/](../evals/effects/README.md).
+
 ## How to work through this plan
 
 - Phase by phase, task by task; the app (web **and** `bun run dev:tauri`) builds and is usable after every phase; tick checkboxes when *Done when* holds; commit per task, e.g. `feat(agent): A1.2 transaction runner`.
 - After each phase: `bun run typecheck`, `bun run test`, `cargo test` (in `rs-engine/` and, once it exists on master, `--manifest-path src-tauri/Cargo.toml`), `bun run build`; update `architecture.md` and the docs named in the phase.
 - **Platform rule (ADR 0003 D3):** platform-dependent code goes behind `#platform` (host) or `getPlatform()` (extensions). No `if (isTauri)` in agent code. Web is first-class: every feature works on the web or degrades visibly.
 - Follow `AGENTS.md`. Every new operation, agent and tool gets a `description` written for an AI reader. UI strings are English.
-- If code contradicts this plan, prefer the ADR's intent and add an amendment to ADR 0002 (B10 is reserved for A5.0; next free id B12).
+- If code contradicts this plan, prefer the ADR's intent and add an amendment to ADR 0002 (B10 is reserved for A5.0; next free id B13).
 - Respect the **Requires** line of each phase.
 
 Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done when** = acceptance criteria.
@@ -34,11 +38,14 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 - [ ] **A0.1 Headless harness.** + `packages/headless` (`@pixelmapper/headless`): extract the engine boot from `app/zero-extensions.smoke.test.ts` into `createHeadlessApp({ project?, extensions?, platform? })`: Pinia + `engine-store` + history + core WASM + `WorkerPluginBridge` with built-in plugins, no canvas/Three.js/connectors. `platform` defaults to `createTestPlatform()` (+ `app/platform/test/`: all capabilities `null`, injectable fakes). Exposes `history`, `store`, `tick(ms)`, `dmx()`, `signature(fixtureId, sig)`. Runs in the Vitest `node` environment (as the smoke test does); `bun test` support is not required. The smoke test is rewritten on top of the harness.
   *Done when:* the smoke test passes on the harness; a new test loads 4 OFL fixtures, sets a channel via a command, ticks, and reads the expected DMX byte.
-- [ ] **A0.2 Event log.** + `app/utils/observability/event-log.ts` (ring buffer, ADR 0002 §6.5) + `Actor` type. ~ `use-history.ts`: log execute/undo with `commandType` and actor (default `user`). ~ engine worker: forward engine warnings and plugin traps as events. ~ `ConnectorBase` logs (A17) are mirrored as `connector` events.
+- [x] **A0.2 Event log.** + `app/utils/observability/event-log.ts` (ring buffer, ADR 0002 §6.5) + `Actor` type. ~ `use-history.ts`: log execute/undo with `commandType` and actor (default `user`). ~ engine worker: forward engine warnings and plugin traps as events. ~ `ConnectorBase` logs (A17) are mirrored as `connector` events.
   *Done when:* Vitest: commands produce events; ring buffer evicts oldest; actor is recorded.
-- [ ] **A0.3 Composite command.** + `app/components/engine/commands/composite-command.ts` (ordered execute, reverse undo, `Composite` serialization with child payloads, `label`, `actor`). ~ replay in live collaboration and WAL (`app/utils/persistence/wal.ts`); ~ open gate (A19): namespaced child command types inside a `Composite` count as requirements.
+  *Done via MCP-first slice (B12):* ring buffer (5000) + `Actor`, `useHistory` logs execute/undo/redo/remote, `applyOperations` logs op events (`event-log.test.ts`). **Open:** engine warnings / plugin traps and `ConnectorBase` logs are not forwarded yet.
+- [x] **A0.3 Composite command.** + `app/components/engine/commands/composite-command.ts` (ordered execute, reverse undo, `Composite` serialization with child payloads, `label`, `actor`). ~ replay in live collaboration and WAL (`app/utils/persistence/wal.ts`); ~ open gate (A19): namespaced child command types inside a `Composite` count as requirements.
   *Done when:* Vitest: undo restores state exactly; replay from payload produces identical state; a composite with an extension child command adds the extension to `requires`; two-browser manual test shows one undo step on both.
-- [ ] **A0.4 Docs.** + `architecture/observability.md` (event log, actors, composite).
+  *Done via MCP-first slice (B12):* `composite-command.test.ts` covers order, atomicity, payload replay, inverse, requires gate and rebase (sync merge adapter `app/utils/sync/merge/adapters/composite.ts`). The two-browser manual test is not recorded.
+- [x] **A0.4 Docs.** + `architecture/observability.md` (event log, actors, composite).
+  *Done via MCP-first slice (B12):* event log and composite are documented in [operations.md](operations.md); `observability.md` documents observe-lite.
 
 ---
 
@@ -46,16 +53,21 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 **Requires:** A0.
 
-- [ ] **A1.1 `@pixelmapper/agent-kit` types.** + `packages/agent-kit/src/{operation,finding,expectation,actor,tool,agent}.ts` per ADR 0002 §4.1, §7.1; re-export the operation/agent types from `@pixelmapper/extension-api` (API **1.2.0**, additive). Full TSDoc.
-- [ ] **A1.2 Registry + transaction runner.** + `app/utils/operations/{registry,run,apply}.ts`: register/validate (unique ids, namespacing for extensions), Zod input validation, `apply` (batch → `CompositeCommand`, `dryRun`, `verify` collection, error → rollback), semantic diff builder.
+- [x] **A1.1 `@pixelmapper/agent-kit` types.** + `packages/agent-kit/src/{operation,finding,expectation,actor,tool,agent}.ts` per ADR 0002 §4.1, §7.1; re-export the operation/agent types from `@pixelmapper/extension-api` (API **1.2.0**, additive). Full TSDoc.
+  *Done via MCP-first slice (B12):* `operation` (incl. the new `action` kind), `finding`, `expectation` (+ evaluator), `actor`, `apply`, `observe`, `host` (`AgentHost`), `json-schema`, `tools/`. **Deviation:** no `agent.ts` (comes with A5) and no re-export from `@pixelmapper/extension-api` yet (comes with A1.5).
+- [x] **A1.2 Registry + transaction runner.** + `app/utils/operations/{registry,run,apply}.ts`: register/validate (unique ids, namespacing for extensions), Zod input validation, `apply` (batch → `CompositeCommand`, `dryRun`, `verify` collection, error → rollback), semantic diff builder.
   *Done when:* Vitest covers dry run leaves state untouched, verify error rolls back, diff lists changed fields.
-- [ ] **A1.3 `CoreReadApi`.** + `app/utils/operations/read-api.ts`: readonly, typed access to fixtures, groups, modifiers, presets, live pages, selection, BPM. Reuses the scope view projections (`app/utils/extensions/scope-views.ts`) and `getFixture`; independent of Vue component scopes.
+  *Done via MCP-first slice (B12):* `registry.ts`, `apply.ts`, `diff.ts` (no separate `run.ts`); actions run outside history and are skipped on `dryRun` (`apply.test.ts`).
+- [x] **A1.3 `CoreReadApi`.** + `app/utils/operations/read-api.ts`: readonly, typed access to fixtures, groups, modifiers, presets, live pages, selection, BPM. Reuses the scope view projections (`app/utils/extensions/scope-views.ts`) and `getFixture`; independent of Vue component scopes.
+  *Done via MCP-first slice (B12)*, except presets (not exposed yet).
 - [ ] **A1.4 Core operations v1.** + `app/utils/operations/core/<namespace>.ts` for the catalog in ADR 0002 §4.2 (amended by B3). Order:
   1. Wrap every `CoreCommandFactory` method as an operation (`fixtures.move`, `fixtures.rotate`, `nodes.rename`, `channels.set`, `channels.setRange(s)`, `fixtures.add`, `fixtures.setKindConfig`, `extensionData.set`).
   2. Add the rest of the catalog. `fixtures.arrange` implements circle, arc, line, grid, distribute, align with `verify` (positions on shape ±ε, no overlaps).
   3. `modifiers.*` speak the **UI vocabulary** of the modifier cards (B3): plugin alias, recipe (`presets`), primary params, spread (`same` / `spatial` with handle / `order` with ranks / `within`), strength, blend, speed. Inputs are translated to `ModifierInstance.distribution` by the same helpers the cards use.
 
   *Done when:* each operation has a headless Vitest test incl. undo.
+
+  *Partial (B12):* MVP catalog done with execute + undo tests: `project.digest/setBpm`, `fixtures.find/get/move/rotate/setKindConfig`, `nodes.rename`, `groups.list`, `selection.get`, `channels.set`, `extensionData.set`, `modifiers.list/add/update/remove/reorder/applyRecipe` (B3 vocabulary, caller-chosen `id`), `plugins.list/get` + actions `plugins.build/publish`, `live.listPages/addPage/addWidget/updateWidget/removeWidget` (`effect-param` mappings incl. `trigger` and `point`). **Open:** `channels.setRange(s)`, `fixtures.add`, `fixtures.arrange` and the rest of §4.2. Tests use Pinia stubs, not the A0.1 harness.
 - [ ] **A1.5 `ctx.commands` as a view.** ~ `app/utils/extensions/` context: `CoreCommandFactory` methods delegate to the operations (same signatures, no breaking change for existing extensions). + `HostApi.operations` (`call`, `list`, `describe`) and `contributes.operations` in the manifest (ADR 0002 D12).
   *Done when:* all first-party extension tests pass unchanged; a test extension contributes an operation that appears in `operations.list()`.
 - [ ] **A1.6 Coverage test.** + `app/utils/operations/coverage.test.ts`: every `registerCommand` type (core and first-party extensions) is produced by ≥ 1 operation (operations declare `produces: string[]`).
@@ -63,6 +75,7 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
   *Done when:* grep shows no `new <X>Command(` outside `app/utils/operations/` and command files (exceptions documented inline).
 - [ ] **A1.8 Command palette (optional, cheap proof).** Palette lists operations with `description`, runs them with a generated `ParamForm`-style form. Validates that descriptions and schemas are usable.
 - [ ] **A1.9 Docs.** + `architecture/operations.md`; ~ `architecture/extensions.md` and `architecture/guides/authoring-extensions.md` (contributing operations); ~ `scripts/generate-ai-docs.ts` emits the operation catalog into `docs/ai/index.json`.
+  *Partial (B12):* `operations.md` and the operation catalog in `docs/ai/index.json` are done; the extension guides wait for A1.5.
 
 ---
 
@@ -84,12 +97,16 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
   *Done when:* round-trip tests (`cargo test` + Vitest) for RGB, RGBW, CMY, color wheel, pan/tilt 16-bit, channel ranges.
 - [ ] **A3.2 Intent trace in Rust.** ~ `rs-engine/core/src/engine.rs`: optional trace mode for a target set recording, per sample, base value, the value after each modifier instance, and `spatial` / `rank` / `distGroup` (A20) into a flat `Float32Array`; zero cost when disabled. `cargo test` for contribution accounting.
 - [ ] **A3.3 Observation engine contract.** + `ObservationEngine` interface in `app/utils/observability/engine-contract.ts`: `simulate(snapshot, window, targets, fps) → Trace` and `capture(window, targets) → Trace`. Web implementation: a second WASM worker (`observe-sim.worker.ts`) seeded with snapshot + clock + overrides, never connected to connectors. Resolved via `#platform` (B5) so the native engine (T5) can provide its own implementation later.
-- [ ] **A3.4 Feature extraction.** + `app/utils/observability/features/{range,color,temporal,spatial,sources,issues}.ts` per ADR 0002 §6.3:
+- [x] **A3.4 Feature extraction.** + `app/utils/observability/features/{range,color,temporal,spatial,sources,issues}.ts` per ADR 0002 §6.3:
   - *temporal:* autocorrelation/FFT for period and band, beat-lock detection;
   - *spatial:* reported along the instance's **spread**: chase direction over the Spatial 2D handle axis, order over ranks, `within` per fixture, plus mean pairwise correlation;
   - *sources:* modifier alias + recipe name rather than only the hash.
-- [ ] **A3.5 Report + expectations.** + `report.ts` (text format §6.4 + JSON), + `packages/agent-kit/src/expectation.ts` evaluator (predicates over features and state).
-- [ ] **A3.6 Live mode.** `observe({ mode: 'live' })` captures real frames via the live hub (ADR 0001 §5.5, `signature` targets from A14) for the window.
+
+  *Done via MCP-first slice (B12, observe-lite):* `features/{range,color,temporal,spatial,radial,mirror}.ts` + `analyzeTrace`. **Deviations:** `radial` (lag vs. distance to points) and `mirror` (left↔right / front↔back) are new; sources and issues are part of `analyzeTrace`/`index.ts` instead of separate modules; spread-following spatial features need the preview's distribution coordinate (live samples have none).
+- [x] **A3.5 Report + expectations.** + `report.ts` (text format §6.4 + JSON), + `packages/agent-kit/src/expectation.ts` evaluator (predicates over features and state).
+  *Done via MCP-first slice (B12).*
+- [x] **A3.6 Live mode.** `observe({ mode: 'live' })` captures real frames via the live hub (ADR 0001 §5.5, `signature` targets from A14) for the window.
+  *Done via MCP-first slice (B12):* `capture.ts`, per fixture (first head), DMX-byte fallback. Instead of `sim`, B12 adds `mode: 'preview'`: one modifier instance rendered through the real `rs-engine-core` WASM in a private headless engine (`preview.ts`, `preview-core.ts`). `sim` is not implemented.
 - [ ] **A3.7 Observation goldens.** + `app/utils/observability/observe.golden.test.ts` on the headless harness using the **current built-ins**:
   - Wave 1 Hz → `periodic 1.00 Hz ±0.02`;
   - Wave with Fixture-by-fixture spread over 8 fixtures → order chase, step 1/8;
@@ -102,6 +119,7 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
   *Done when:* all goldens pass; observing 64 fixtures × 2 s @ 30 fps completes in < 300 ms in the harness.
 - [ ] **A3.8 Dev panel.** Observability panel (event log + last reports) for humans, built from layout primitives.
 - [ ] **A3.9 Docs.** `architecture/observability.md`: taps, features, report format, engine contract, how to add a feature.
+  *Partial (B12):* `observability.md` documents modes, features, JSON paths, findings and the report; taps and the engine contract wait for A3.2/A3.3.
 
 ---
 
@@ -109,9 +127,12 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 **Requires:** A1, A3.
 
-- [ ] **A4.1 Tool implementations.** + `packages/agent-kit/src/tools/{inspect,operations,describe,apply,observe,delegate,ask-user}.ts` (host-agnostic; take an `AgentHost` interface), JSON schemas via `z.toJSONSchema`.
-- [ ] **A4.2 Host adapter.** + `app/utils/agents/host.ts` implementing `AgentHost` on the registry, read API, observation and event log.
-- [ ] **A4.3 Tool tests.** Snapshot of generated schemas; scripted tool sequences in the headless harness (find front → arrange → observe → expectations pass).
+- [x] **A4.1 Tool implementations.** + `packages/agent-kit/src/tools/{inspect,operations,describe,apply,observe,delegate,ask-user}.ts` (host-agnostic; take an `AgentHost` interface), JSON schemas via `z.toJSONSchema`.
+  *Done via MCP-first slice (B12)* for `inspect`, `operations`, `describe` (also guide topics), `apply`, `observe`. `delegate` and `ask-user` are omitted over MCP and come with A5.
+- [x] **A4.2 Host adapter.** + `app/utils/agents/host.ts` implementing `AgentHost` on the registry, read API, observation and event log.
+  *Done via MCP-first slice (B12):* `createAppAgentHost()`; observation is loaded lazily; guides from `guides.ts`.
+- [x] **A4.3 Tool tests.** Snapshot of generated schemas; scripted tool sequences in the headless harness (find front → arrange → observe → expectations pass).
+  *Done via MCP-first slice (B12), adapted:* schema snapshot and tool tests (`app/utils/agents/tools.test.ts`), MCP end-to-end over stdio (`mcp-e2e.test.ts`), effect loop in `effects-acceptance.test.ts`. No `arrange` op and no A0.1 harness yet, so the original sequence is not scripted.
 
 ---
 
@@ -179,11 +200,14 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 **Requires:** A4; A8.3 also T2 (Tauri shell on master).
 
-- [ ] **A8.1 Bridge transport (host-only).** + `app/platform/{web,tauri}/agent-bridge.ts` exported from `#platform` (host-only, not part of the extension `Platform` contract): delivers incoming tool calls to `AgentHost` with actor `agent:mcp:<client>`. "Allow external agents" toggle + pairing token in the UI.
-- [ ] **A8.2 Web: `pixelmapper-mcp` CLI.** + `packages/mcp-bridge` (Bun, stdio MCP server exposing the seven tools, forwarding over `ws://127.0.0.1:<port>` to the open tab).
+- [x] **A8.1 Bridge transport (host-only).** + `app/platform/{web,tauri}/agent-bridge.ts` exported from `#platform` (host-only, not part of the extension `Platform` contract): delivers incoming tool calls to `AgentHost` with actor `agent:mcp:<client>`. "Allow external agents" toggle + pairing token in the UI.
+  *Done via MCP-first slice (B12):* one shared WebSocket client (`app/utils/agents/agent-bridge.ts`, `bridge-client.ts`) exported as `getAgentBridge()` from both `#platform` entries instead of per-platform files; Settings → External agents (toggle, token, status).
+- [x] **A8.2 Web: `pixelmapper-mcp` CLI.** + `packages/mcp-bridge` (Bun, stdio MCP server exposing the seven tools, forwarding over `ws://127.0.0.1:<port>` to the open tab).
+  *Done via MCP-first slice (B12):* five tools (+ local `pixelmapper_status`), port 7778, token + Origin check, relay mode for a second instance, skill prompts. Serves the Tauri webview too until A8.3. Contract: [mcp-bridge-protocol.md](mcp-bridge-protocol.md).
 - [ ] **A8.3 Tauri: in-process MCP server.** ~ `src-tauri/`: streamable-HTTP MCP server on `127.0.0.1` (Rust), forwarding tool calls to the webview over a Tauri `Channel`/event and back. No CLI needed for desktop users.
   *Done when:* Claude Code and Codex can arrange fixtures and observe results against both the web app (via CLI) and the desktop app (direct); results identical to the in-app tools (tool-surface test).
-- [ ] **A8.4 Docs.** README section "Use Pixelmapper from Claude Code / Codex" (web and desktop).
+- [x] **A8.4 Docs.** README section "Use Pixelmapper from Claude Code / Codex" (web and desktop).
+  *Done via MCP-first slice (B12)* as "Use Pixelmapper from Claude Code / Claude Desktop" (`README.md`, `packages/mcp-bridge/README.md`, `.mcp.json.example`); Codex is not covered.
 
 ---
 
@@ -211,6 +235,7 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 - [ ] **A10.1** Update `architecture.md` (overview, layout, documentation map), mark the ADR 0002 implementation status, update ADR 0003 status for A5.1/A8.3.
 - [ ] **A10.2** Extend `scripts/generate-ai-docs.ts`: operation catalog, tool schemas, agent list in `docs/ai/`.
+  *Partial (B12):* the operation catalog is emitted; tool schemas and the agent list are open.
 - [ ] **A10.3** Add operation, observation-golden and tool-surface suites to `app-checks.yml` (evals stay manual).
 
 ---
