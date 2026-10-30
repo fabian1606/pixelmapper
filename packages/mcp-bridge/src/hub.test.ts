@@ -229,4 +229,24 @@ describe('relay mode', () => {
     const afterTakeover = await second.call({ tool: 'observe', input: {}, client: 'claude-desktop' });
     expect(afterTakeover.content[0]).toMatchObject({ text: 'ran observe for claude-desktop' });
   });
+
+  it('a first call waits for the app instead of failing with no_app', async () => {
+    // Regression: a freshly spawned process answered its first call with
+    // no_app while the relay handshake / app reconnect was still running.
+    const port = await freePort();
+    const coordinator = new BridgeCoordinator(testConfig({ port, appWaitMs: 3_000 }), TEST_TOKEN, () => ({ name: 'claude-code' }));
+    cleanup.push(() => coordinator.close());
+    const pending = coordinator.call({ tool: 'inspect', input: {}, client: 'claude-code' });
+    await coordinator.start();
+    await connectApp(port);
+    await expect(pending).resolves.toMatchObject({ content: [{ text: 'ran inspect for claude-code' }] });
+  });
+
+  it('still fails with no_app once the grace period is over', async () => {
+    const port = await freePort();
+    const coordinator = new BridgeCoordinator(testConfig({ port, appWaitMs: 200 }), TEST_TOKEN, () => ({ name: 'claude-code' }));
+    cleanup.push(() => coordinator.close());
+    await coordinator.start();
+    await expect(coordinator.call({ tool: 'inspect', input: {}, client: 'claude-code' })).rejects.toMatchObject({ code: 'no_app' });
+  });
 });

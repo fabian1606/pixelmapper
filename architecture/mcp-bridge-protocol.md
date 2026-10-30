@@ -120,6 +120,7 @@ The CLI always adds one local tool, `pixelmapper_status` (connection state, app 
 |---|---|---|
 | client `hello` after open | 5 s | – |
 | tool call (hub waits for `result`/`error`) | 60 s (`observe` may take seconds) | env `PIXELMAPPER_MCP_CALL_TIMEOUT_MS` |
+| wait for a connected app before a call fails with `no_app` (process start-up, relay handshake, app reconnect backoff) | 8 s | env `PIXELMAPPER_MCP_APP_WAIT_MS` |
 | relay waits for the hub | call timeout + 5 s | – |
 
 On timeout the hub sends `cancel` to the app and returns error `timeout` to the caller.

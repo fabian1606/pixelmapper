@@ -68,6 +68,7 @@ bun run mcp help
 | `PIXELMAPPER_MCP_TOKEN_FILE` | `~/.pixelmapper/mcp-token` | Pairing token file |
 | `PIXELMAPPER_MCP_TOOL_CACHE` | `~/.pixelmapper/mcp-tools.json` | Last-known tool list (served while the app is closed) |
 | `PIXELMAPPER_MCP_CALL_TIMEOUT_MS` | `60000` | Per-call timeout |
+| `PIXELMAPPER_MCP_APP_WAIT_MS` | `8000` | How long a call waits for a connected app (start-up, relay handshake, app reconnect) before failing with `no_app` |
 | `PIXELMAPPER_SKILLS_DIR` | `<repo>/docs/ai/skills` | Root scanned for MCP prompts (`**/prompts/*.md`) |
 
 To set them for Claude Code, use `claude mcp add -e NAME=value …`. For Claude Desktop, use an `"env": { … }` object next to `"args"`.

@@ -6,6 +6,7 @@
 
 import { ChangeEmitter } from './backend';
 import type { BackendState, CallRequest, ToolBackend } from './backend';
+import { DEFAULT_APP_WAIT_MS } from './config';
 import type { BridgeConfig } from './config';
 import { Hub } from './hub';
 import { logInfo, logWarn } from './log';
@@ -48,8 +49,12 @@ export class BridgeCoordinator implements ToolBackend {
     return this.current?.getState() ?? { mode: 'connecting', appConnected: false, tools: [] };
   }
 
-  call(request: CallRequest): Promise<ToolCallOutcome> {
-    if (!this.current) return Promise.reject(new BridgeError('no_app', NO_APP_MESSAGE));
+  async call(request: CallRequest): Promise<ToolCallOutcome> {
+    // A freshly spawned process may still be electing hub/relay, and a new hub
+    // waits for the app's reconnect; give both a moment instead of failing
+    // the client's first call with `no_app`.
+    await this.waitForApp(this.config.appWaitMs ?? DEFAULT_APP_WAIT_MS, request.signal);
+    if (!this.current) throw new BridgeError('no_app', NO_APP_MESSAGE);
     return this.current.call(request);
   }
 
@@ -64,6 +69,23 @@ export class BridgeCoordinator implements ToolBackend {
     const current = this.current;
     this.current = null;
     await current?.close();
+  }
+
+  /** Resolves once a backend reports a connected app, or after `ms` / abort. */
+  private waitForApp(ms: number, signal?: AbortSignal): Promise<void> {
+    const ready = () => this.current?.getState().appConnected === true;
+    if (ready() || ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        off();
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      const off = this.emitter.on(() => { if (ready()) done(); });
+      signal?.addEventListener('abort', done);
+    });
   }
 
   // ── Role election ───────────────────────────────────────

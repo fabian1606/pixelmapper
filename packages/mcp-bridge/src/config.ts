@@ -13,6 +13,9 @@ export const DEFAULT_PORT = 7778;
 /** Default call timeout; `observe` may take several seconds. */
 export const DEFAULT_CALL_TIMEOUT_MS = 60_000;
 
+/** Default grace period a call waits for the app (see `BridgeConfig.appWaitMs`). */
+export const DEFAULT_APP_WAIT_MS = 8_000;
+
 /** Origins allowed to connect as `app` by default (Nuxt dev + Tauri). */
 export const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:3000',
@@ -37,6 +40,12 @@ export interface BridgeConfig {
   callTimeoutMs: number;
   /** How long a client may take to send its `hello`. */
   helloTimeoutMs: number;
+  /**
+   * How long a tool call waits for a backend with a connected app before it
+   * fails with `no_app` (covers process start-up, relay handshake and the
+   * app's reconnect backoff). Default {@link DEFAULT_APP_WAIT_MS}.
+   */
+  appWaitMs?: number;
   /** Root directory scanned for `**\/prompts/*.md`. */
   skillsDir: string;
 }
@@ -73,6 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     toolCacheFile: env.PIXELMAPPER_MCP_TOOL_CACHE || join(pixelmapperHome(), 'mcp-tools.json'),
     callTimeoutMs: intFromEnv(env.PIXELMAPPER_MCP_CALL_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS),
     helloTimeoutMs: 5_000,
+    appWaitMs: intFromEnv(env.PIXELMAPPER_MCP_APP_WAIT_MS, DEFAULT_APP_WAIT_MS),
     skillsDir: env.PIXELMAPPER_SKILLS_DIR || defaultSkillsDir(),
   };
 }
