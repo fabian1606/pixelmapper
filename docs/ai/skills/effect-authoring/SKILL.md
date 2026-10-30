@@ -35,7 +35,7 @@ You build an effect as a **modifier plugin** (AssemblyScript `modifier.ts` + `ma
 ### 1. Inspect the project
 
 ```json
-inspect { "selector": "project" }                       // = project.digest: bpm, fixtures (id, name, kind, x/y/z, heads, signatures, groupIds), groups, modifiers, live pages
+inspect { "selector": "project" }                       // = project.digest: bpm, fixtures (id, name, kind, x/y/z, rotation, orientation, heads, signatures, groupIds), groups, modifiers, live pages
 inspect { "selector": { "op": "fixtures.find", "input": { "signature": "rgb" } } }
 inspect { "selector": { "op": "plugins.list", "input": {} } }
 ```
@@ -43,7 +43,9 @@ inspect { "selector": { "op": "plugins.list", "input": {} } }
 Derive and write down:
 - **Targets**: which fixtures/groups (by kind, name, group). Color effects need `rgb`; dimmer-like effects `scalar`.
 - **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes take the head world positions from `fixtures.get` (`detail.heads[i].x/y`, same space as `Sample.x/y`, rotation already applied): room box = min/max over every head of every fixture. Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
-- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` lists `detail.heads` (head index = patch order, with world x/y) — compare the first and last head to see which way a tube is patched. `detail.beams` are local offsets in fixture footprints before rotation; you rarely need them. Single-head fixtures make a point cloud.
+- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` lists `detail.heads` (head index = patch order, with world x/y). `detail.beams` are local offsets in fixture footprints before rotation; you rarely need them. Single-head fixtures make a point cloud.
+- **Orientation**: every multi-head fixture in the digest / `fixtures.find` / `fixtures.get` carries `orientation { runs, axis { dx, dy }, firstHead, lastHead }`, measured from the real head positions — `runs: "top→bottom"` means head 0 is at the top. `rotation` is clockwise degrees on the canvas (y down): a bar with heads along its own x axis runs left→right at 0°, top→bottom at 90°, right→left at 180°, bottom→top at 270°. Don't guess from `rotation`; read `orientation.runs`. To line bars up with an edge use `fixtures.rotate` with `alignTo: "x"` (horizontal edge) or `"y"` (vertical edge), `direction: "reverse"` to flip head 0.
+- **Look at it**: if the `screenshot` tool is available, call it (default `view: "layout"`) to see the stage — footprints, head dots with head 0 ringed and an arrow toward the last head, current colors. Use it after layout/rotation changes and when the user asks how something looks; never draw ASCII maps. It does not replace `observe` for animation.
 - **Order / contour**: for loops around the room, the order of fixtures along the outline (see patterns.md *Path along ranks*).
 - **Existing stack**: an `override` layer on top hides what is below; place the effect accordingly (`index`).
 - **BPM**, for beat-synced speeds.

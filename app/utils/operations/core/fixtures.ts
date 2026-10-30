@@ -17,6 +17,7 @@ import { headSamples } from '~/utils/observability/targets';
 import { defineCoreOperation } from '../define';
 import type { CoreReadApi, FixtureInfo } from '../read-api';
 import { FixtureIdSchema, FixtureInfoSchema, SignatureSchema, Unit, fixtureNotFound } from './shared';
+import { OrientationSchema, ROTATION_CONVENTION, fixtureOrientation, orientationField, rotationToAlign } from './orientation';
 
 // ── Filter ──────────────────────────────────────
 
@@ -67,15 +68,17 @@ export const fixturesFind = defineCoreOperation({
   kind: 'query',
   description: [
     'Find fixtures by ids, kind, signature, channel type, group, name or bounding box (all filters AND-combined; empty filter = all).',
-    'Returns compact fixture views: id, name, kind, x/y/z (normalized world 0–1; x left→right, y top→bottom as on the 2D canvas, same space as plugin Sample.x/y; z = height), rotation (degrees), heads (pixel/beam count), signatures, channelTypes, groupIds, universe, address.',
+    'Returns compact fixture views: id, name, kind, x/y/z (normalized world 0–1; x left→right, y top→bottom as on the 2D canvas, same space as plugin Sample.x/y; z = height), rotation (degrees), heads (pixel/beam count), signatures, channelTypes, groupIds, universe, address,',
+    'and for multi-head fixtures orientation { runs: "left→right" | "top→bottom" | …, axis: { dx, dy } (unit vector head 0 → last head), firstHead, lastHead (world x/y) }.',
+    ROTATION_CONVENTION,
   ].join('\n'),
   input: FixtureFilterSchema,
-  output: z.object({ fixtures: z.array(FixtureInfoSchema) }),
+  output: z.object({ fixtures: z.array(FixtureInfoSchema.extend({ orientation: OrientationSchema.optional() })) }),
   examples: [
     { input: { signature: 'rgb' }, note: 'All color-capable fixtures.' },
     { input: { bbox: { minX: 0, minY: 0, maxX: 0.5, maxY: 1 } }, note: 'Fixtures on the left half of the stage.' },
   ],
-  run: (ctx, input) => ({ kind: 'query', value: { fixtures: findFixtures(ctx.read, input) } }),
+  run: (ctx, input) => ({ kind: 'query', value: { fixtures: findFixtures(ctx.read, input).map(f => ({ ...f, ...orientationField(f.id) })) } }),
 });
 
 /** World position of one engine head (normalized, as plugin `Sample.x/y`). */
@@ -106,7 +109,8 @@ export const fixturesGet = defineCoreOperation({
   kind: 'query',
   description: [
     'Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), heads, beams, kind config and extension data.',
-    'Positions are normalized world 0–1 (x left→right, y top→bottom, z = height).',
+    'Positions are normalized world 0–1 (x left→right, y top→bottom, z = height). orientation (multi-head fixtures): runs, axis { dx, dy }, firstHead, lastHead — the measured direction head 0 → last head.',
+    ROTATION_CONVENTION,
     'detail.heads: one entry per engine head/pixel in head order (= patch order, the head index observe uses) with its world x/y — the same space as plugin Sample.x/y; use these for room boxes and pixel order.',
     'detail.beams: local beam offsets {x, y, z} in fixture-local units (1 = one fixture footprint, 36 px × fixture size, along the fixture\'s own unrotated axes; +x = towards the fixture\'s right before rotation). World = fixture position + offset rotated clockwise by `rotation`. Prefer detail.heads over computing this yourself.',
   ].join('\n'),
@@ -120,7 +124,7 @@ export const fixturesGet = defineCoreOperation({
       const id = resolveId(ctx.read, raw);
       const detail = id === null ? null : ctx.read.fixtureDetail(id);
       const live = id === null ? undefined : liveFixture(id);
-      if (detail && id !== null) fixtures.push({ ...ctx.read.fixture(id), detail: { ...detail, heads: live ? headPositions(live) : [] } });
+      if (detail && id !== null) fixtures.push({ ...ctx.read.fixture(id), ...orientationField(id), detail: { ...detail, heads: live ? headPositions(live) : [] } });
       else missing.push(raw);
     }
     return { kind: 'query', value: { fixtures, missing } };
@@ -170,17 +174,36 @@ export const fixturesMove = defineCoreOperation({
   },
 });
 
+/** One entry of `fixtures.rotate`: an absolute rotation or an alignment target. */
+const RotationEntrySchema = z.object({
+  fixtureId: FixtureIdSchema,
+  rotation: z.number().optional().describe('Degrees, clockwise on the 2D canvas; normalized into 0–360.'),
+  alignTo: z.union([z.enum(['x', 'y']), z.object({ dx: z.number(), dy: z.number() })]).optional()
+    .describe('Instead of rotation: turn the fixture so its heads (head 0 → last head) run along "x" (left→right), "y" (top→bottom) or a direction vector { dx, dy } (x right, y down). Uses the measured head positions, so it works for any pixel layout.'),
+  direction: z.enum(['forward', 'reverse']).optional()
+    .describe('With alignTo: "forward" (default) = head 0 at the start (left / top / vector tail), "reverse" = head 0 at the end.'),
+}).refine(r => (r.rotation === undefined) !== (r.alignTo === undefined), { message: 'pass exactly one of rotation or alignTo' });
+
 /** `fixtures.rotate`. */
 export const fixturesRotate = defineCoreOperation({
   id: 'fixtures.rotate',
   kind: 'mutation',
-  description: 'Set the yaw rotation of fixtures in degrees (0–360, clockwise on the 2D canvas). One RotateFixture command for all fixtures.',
-  input: z.object({
-    rotations: z.array(z.object({ fixtureId: FixtureIdSchema, rotation: z.number().describe('Degrees; normalized into 0–360.') })).min(1),
+  description: [
+    'Set the yaw rotation of fixtures, either as `rotation` in degrees (0–360, clockwise on the 2D canvas) or with `alignTo` so the heads run along an axis. One RotateFixture command for all fixtures.',
+    ROTATION_CONVENTION,
+    'Aligning bars with the edges of a room/stage: along a horizontal edge (front/back, top/bottom of the canvas) the heads must run along x → alignTo "x"; along a vertical edge (left/right side) they must run along y → alignTo "y". Add direction "reverse" to flip the patch direction (e.g. to continue a chase around the perimeter clockwise: top edge "x", right edge "y", bottom edge "x" reverse, left edge "y" reverse).',
+    'The result reports the applied rotation per fixture and an info finding with the new head direction ("heads run top→bottom"); check it (or call `screenshot`) instead of asking the user.',
+  ].join('\n'),
+  input: z.object({ rotations: z.array(RotationEntrySchema).min(1) }),
+  output: z.object({
+    rotated: z.array(FixtureIdSchema),
+    results: z.array(z.object({ fixtureId: FixtureIdSchema, rotation: z.number() })).describe('Applied rotation per fixture (alignTo resolved to degrees).'),
   }),
-  output: z.object({ rotated: z.array(FixtureIdSchema) }),
   produces: ['RotateFixture'],
-  examples: [{ input: { rotations: [{ fixtureId: 'fx-1', rotation: 90 }] } }],
+  examples: [
+    { input: { rotations: [{ fixtureId: 'fx-1', rotation: 90 }] }, note: 'Absolute: 90° clockwise (a bar with heads along its x axis now runs top→bottom).' },
+    { input: { rotations: [{ fixtureId: 'bar-front', alignTo: 'x' }, { fixtureId: 'bar-left', alignTo: 'y', direction: 'reverse' }] }, note: 'Front bar along the horizontal edge (left→right); left-side bar along the vertical edge, head 0 at the bottom (bottom→top).' },
+  ],
   run(_ctx, input) {
     const fixtures: Fixture[] = [];
     const before: { id: string | number; rotation: number }[] = [];
@@ -188,11 +211,27 @@ export const fixturesRotate = defineCoreOperation({
     for (const r of input.rotations) {
       const f = liveFixture(r.fixtureId);
       if (!f) throw new Error(fixtureNotFound(r.fixtureId));
+      let rotation = r.rotation;
+      if (r.alignTo !== undefined) {
+        const aligned = rotationToAlign(f, r.alignTo, r.direction === 'reverse');
+        if (aligned === null) throw new Error(`fixture ${String(r.fixtureId)} has a single head (or all heads at one point); alignTo needs a head direction — pass rotation instead`);
+        rotation = aligned;
+      }
       fixtures.push(f);
       before.push({ id: f.id, rotation: f.rotation });
-      after.push({ id: f.id, rotation: ((r.rotation % 360) + 360) % 360 });
+      after.push({ id: f.id, rotation: (((rotation ?? 0) % 360) + 360) % 360 });
     }
-    return { kind: 'mutation', commands: [new RotateFixtureCommand(fixtures, before, after)], value: { rotated: fixtures.map(f => f.id) } };
+    const results = after.map(a => ({ fixtureId: a.id, rotation: a.rotation }));
+    return { kind: 'mutation', commands: [new RotateFixtureCommand(fixtures, before, after)], value: { rotated: fixtures.map(f => f.id), results } };
+  },
+  verify(ctx, input) {
+    // Report the measured direction after the change (informational).
+    return input.rotations.flatMap((r) => {
+      const f = liveFixture(r.fixtureId);
+      const o = f ? fixtureOrientation(f) : null;
+      if (!f || !o) return [];
+      return [{ level: 'info' as const, code: 'orientation', message: `fixture ${String(r.fixtureId)}: rotation ${Number(f.rotation.toFixed(3))}°, heads run ${o.runs}`, entityIds: [`fixture:${String(r.fixtureId)}`] }];
+    });
   },
 });
 

@@ -7,6 +7,7 @@ import { modifierName } from '~/utils/engine/modifiers';
 import { defineCoreOperation } from '../define';
 import { FixtureIdSchema, SignatureSchema } from './shared';
 import { findPlugin } from './plugin-ref';
+import { OrientationSchema, ROTATION_CONVENTION, orientationField } from './orientation';
 
 // ── Digest ──────────────────────────────────────
 
@@ -18,6 +19,8 @@ const DigestFixtureSchema = z.object({
   x: z.number(),
   y: z.number(),
   z: z.number(),
+  rotation: z.number().describe('Yaw in degrees, clockwise on the 2D canvas.'),
+  orientation: OrientationSchema.optional(),
   heads: z.number(),
   signatures: z.array(SignatureSchema),
   groupIds: z.array(FixtureIdSchema),
@@ -32,7 +35,9 @@ export const projectDigest = defineCoreOperation({
   kind: 'query',
   description: [
     'Compact overview of the project: BPM, fixtures, groups, the modifier stack and live pages. Start every task with it.',
-    'Fixtures: id, name, kind (generated fixture kind, if any), x/y/z in normalized world space 0–1 (x left→right, y top→bottom on the 2D canvas, same space as plugin Sample.x/y; z = height above the floor normalized like x/y; rounded to 3 decimals), heads (pixel/beam count), signatures (rgb = color, panTilt = moving head, scalar = any channel), groupIds.',
+    'Fixtures: id, name, kind (generated fixture kind, if any), x/y/z in normalized world space 0–1 (x left→right, y top→bottom on the 2D canvas, same space as plugin Sample.x/y; z = height above the floor normalized like x/y; rounded to 3 decimals), rotation (degrees), orientation (multi-head fixtures: runs "left→right" | "top→bottom" | …, axis { dx, dy }, firstHead / lastHead world x/y), heads (pixel/beam count), signatures (rgb = color, panTilt = moving head, scalar = any channel), groupIds.',
+    ROTATION_CONVENTION,
+    'To see the layout instead of reading coordinates, call the `screenshot` tool (if available).',
     'Modifiers: id, plugin alias/name, signature, number of targeted fixtures (null = all), strength, blend. Use modifiers.list / fixtures.get / live.listPages for details.',
   ].join('\n'),
   input: z.object({}),
@@ -56,6 +61,7 @@ export const projectDigest = defineCoreOperation({
   run(ctx) {
     const fixtures = ctx.read.fixtures().map(f => ({
       id: f.id, name: f.name, kind: f.kind, x: r3(f.x), y: r3(f.y), z: r3(f.z),
+      rotation: r3(f.rotation), ...orientationField(f.id),
       heads: f.heads, signatures: f.signatures, groupIds: f.groupIds,
     }));
     const modifiers = ctx.read.modifiers().map((m) => {
