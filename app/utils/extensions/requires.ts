@@ -54,6 +54,18 @@ export function commandOwner(commandType: string, src: RequiresSources): string 
 }
 
 /**
+ * Command types inside a persisted change, `Composite` children expanded
+ * (batches, plan M4.4), for the requirement checks of the open gate: a
+ * namespaced command inside a composite counts like a top-level one.
+ */
+export function flattenCommandTypes(commandType: string, payload: unknown): string[] {
+  if (commandType !== 'Composite') return [commandType];
+  const children = (payload as { children?: { commandType: string; payload: unknown }[] } | null)?.children;
+  if (!Array.isArray(children)) return [commandType];
+  return [commandType, ...children.flatMap(c => flattenCommandTypes(c.commandType, c.payload))];
+}
+
+/**
  * Extensions a just-executed command makes the project depend on.
  * `kindOfFixture` resolves the kind id of an existing fixture.
  */

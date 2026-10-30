@@ -1,4 +1,4 @@
-import { Fixture, type FixtureKindInstance } from './core/fixture'
+import { Fixture, type FixtureKindInstance, type FixtureSource } from './core/fixture'
 import { FixtureGroup, type SceneNode } from './core/group'
 import type { Channel, ChannelRenderInfo } from './core/channel'
 import type { MotionRange } from './core/motion-range'
@@ -79,6 +79,8 @@ export interface SerializedFixture {
   manufacturer: string
   fixtureType: string
   oflKey?: string
+  /** Definition key + mode index (plan M4.3); absent for kinds and legacy fixtures. */
+  source?: FixtureSource
   channels: SerializedChannel[]
   beams: SerializedBeam[]
   /** Fixture-kind state (config + compiled cache), ADR §5.6. */
@@ -129,7 +131,7 @@ export interface ProjectSnapshot {
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
-function serializeChannel(ch: Channel): SerializedChannel {
+export function serializeChannel(ch: Channel): SerializedChannel {
   return {
     type: ch.type,
     addressOffset: ch.addressOffset,
@@ -148,7 +150,7 @@ function serializeChannel(ch: Channel): SerializedChannel {
   }
 }
 
-function serializeBeam(b: Beam): SerializedBeam {
+export function serializeBeam(b: Beam): SerializedBeam {
   return { id: b.id, localX: b.localX, localY: b.localY, localZ: b.localZ }
 }
 
@@ -170,6 +172,7 @@ export function serializeFixture(f: Fixture): SerializedFixture {
     manufacturer: f.manufacturer,
     fixtureType: f.fixtureType,
     oflKey: f.oflKey,
+    source: f.source ? { ...f.source } : undefined,
     channels: f.channels.map(serializeChannel),
     beams: f.beams.map(serializeBeam),
     kind: f.kind ? cloneJson(f.kind) : undefined,
@@ -250,7 +253,7 @@ function migrateLegacyChannel(data: SerializedChannel): { role: Channel['role'];
   return { role: data.role }
 }
 
-function deserializeChannel(data: SerializedChannel): Channel {
+export function deserializeChannel(data: SerializedChannel): Channel {
   const migrated = migrateLegacyChannel(data)
   return {
     type: data.type,
@@ -285,6 +288,7 @@ export function deserializeFixture(data: SerializedFixture): Fixture {
   f.manufacturer = data.manufacturer
   f.fixtureType = data.fixtureType
   f.oflKey = data.oflKey
+  if (data.source) f.source = { ...data.source }
   f.channels = data.channels.map(deserializeChannel)
   f.beams = data.beams.map(b => new Beam(b.id, b.localX, b.localY, b.localZ ?? 0))
 

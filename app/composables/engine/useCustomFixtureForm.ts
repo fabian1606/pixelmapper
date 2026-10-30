@@ -2,6 +2,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import {
   FIXTURE_CATEGORIES,
   WHEEL_CAPABILITY_TYPES,
+  EMPTY_RDM_STATE,
   type OflCategory,
   type CustomFixtureFormState,
   type ChannelDraft,
@@ -25,6 +26,8 @@ export function useCustomFixtureForm() {
     colorTemperature: 0,
     beamAngleMin: 0,
     beamAngleMax: 0,
+    // RDM identification (plan M4.7) — unset until entered or imported.
+    ...EMPTY_RDM_STATE,
   });
 
   const channels = ref<ChannelDraft[]>([]);

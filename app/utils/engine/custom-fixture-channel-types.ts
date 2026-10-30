@@ -143,6 +143,9 @@ export const ModeDraftSchema = z.object({
   id:      z.string(),
   name:    z.string().min(1).describe('Mode name (e.g. "3-channel", "Full 16ch")'),
   entries: z.array(ModeEntrySchema).describe('Ordered channel entries for this mode'),
+  /** RDM personality (OFL `modes[i].rdmPersonalityIndex`, plan M4.7); set in the editor or by import. */
+  rdmPersonalityIndex: z.number().int().min(1).optional()
+    .describe('RDM personality number (1-based) the device reports for this mode; omitted when unknown'),
 });
 export type ModeDraft = z.infer<typeof ModeDraftSchema>;
 

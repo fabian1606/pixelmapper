@@ -133,7 +133,12 @@ export function channelView(fixture: Fixture, index: number): ChannelView {
 /** Light fixture list for the project scope. */
 export function fixtureSummaries(fixtures: readonly Fixture[]): FixtureSummary[] {
   void modelTick.value;
-  return fixtures.map(f => ({ id: f.id, name: f.name, startAddress: f.startAddress, channelCount: f.channels.length, kindId: f.kind?.id }));
+  return fixtures.map((f) => {
+    const summary: FixtureSummary = { id: f.id, name: f.name, startAddress: f.startAddress, channelCount: f.channels.length, kindId: f.kind?.id };
+    // Copied (views are frozen in dev), only when present (API 1.4).
+    if (f.extensionData) summary.extensionData = jsonClone(f.extensionData) as Record<string, Record<string, Json>>;
+    return summary;
+  });
 }
 
 /** Projects one fixture (channels, beams, kind/extension data). */
@@ -153,6 +158,7 @@ export function fixtureView(fixture: Fixture): FixtureView {
     manufacturer: fixture.manufacturer,
     fixtureType: fixture.fixtureType,
     oflKey: fixture.oflKey,
+    source: fixture.source ? { key: fixture.source.key, modeIndex: fixture.source.modeIndex } : undefined,
     channels: fixture.channels.map((_, i) => channelView(fixture, i)),
     beams,
     kind: fixture.kind ? { id: fixture.kind.id, version: fixture.kind.version, config: jsonClone(fixture.kind.config) as Json } : undefined,

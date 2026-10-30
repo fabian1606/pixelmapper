@@ -86,6 +86,11 @@ import {
 } from '~/utils/extensions/requires';
 import semver from 'semver';
 import '~/components/engine/commands/set-extension-data-command';
+// Side-effect imports — register the patch commands (plan M4) for tail replay.
+import '~/components/engine/commands/add-fixture-command';
+import '~/components/engine/commands/update-dmx-command';
+import '~/components/engine/commands/set-fixture-mode-command';
+import { rebaseFixturePatchObservation, reportExternalFixturePatchChanges } from '~/utils/extensions/fixture-patch-observer';
 import { bumpModelTick } from '~/utils/extensions/model-tick';
 import { notify } from '~/composables/use-notifications';
 import { isBuiltinHash } from '~/utils/plugins/builtin-index';
@@ -1286,6 +1291,9 @@ export const useEngineStore = defineStore('engine', () => {
     // Dirty marks from before the apply (load, replay) describe no user edit.
     engineDirty = false;
 
+    // The load replaced the scene outside the history: patch observers
+    // (plan M4.6) take the loaded state as their new baseline.
+    rebaseFixturePatchObservation();
     triggerRef(sceneNodes);
     flushEngineOutput();
     connectProjectControllers();
@@ -1299,7 +1307,14 @@ export const useEngineStore = defineStore('engine', () => {
       opened: result.project,
       hasQueuedEntries: () => getPersistQueueSnapshot().length > 0,
       // Remote changes are part of the working copy: persist them too.
-      onLiveChanged: () => { triggerRef(sceneNodes); flushEngineOutput(); session?.writer.schedule(); },
+      onLiveChanged: () => {
+        triggerRef(sceneNodes);
+        flushEngineOutput();
+        // Collaborators' changes applied by the sync engine (outside the
+        // history) reach patch observers as `remote` (plan M4.6).
+        reportExternalFixturePatchChanges('remote');
+        session?.writer.schedule();
+      },
       onRebased: clearHistory,
       onSequence: (seq) => { if (seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq; },
       discardSession: () => closeSession(true),

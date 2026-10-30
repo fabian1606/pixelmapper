@@ -20,6 +20,16 @@ import { onFrame } from '~/composables/extensions/on-frame';
 import { registerExtension as hostRegisterExtension, ExtensionValidationError } from './registry';
 import { installActivation } from './activation';
 import { createPlatform } from '#platform';
+import { useEngineStore } from '~/stores/engine-store';
+import { findFreeAddressSpan } from '~/utils/engine/free-address';
+import { findFixtureDefinitionByRdm } from '~/utils/fixture-definitions/rdm-lookup';
+import { saveCustomFixtureDefinition } from './custom-definition-api';
+import { createHostConnectorSet, getUserKey } from './connector-api';
+import { fixtureSummaries } from './scope-views';
+import { registerFixtureChangeGuard } from './fixture-change-guard';
+import { subscribeFixturePatchChanges } from './fixture-patch-observer';
+import type { SceneNode } from '~/utils/engine/core/group';
+import { collectFixtures } from '~/utils/engine/scene-tree';
 
 /** Optional host implementation overrides (tests). */
 type HostOverrides = Partial<Pick<HostApi, 'useLiveValue' | 'onFrame' | 'useReplaceable' | 'platform'>>;
@@ -53,6 +63,17 @@ export function installSharedGlobals(overrides: HostOverrides = {}): void {
     registerExtension: safeRegister,
     // Web or Tauri implementation, chosen at build time (ADR 0003 D3).
     platform: overrides.platform ?? createPlatform(),
+    // Fixture patching (API 1.3, plan M4).
+    findFreeAddressSpan,
+    listFixtures: () => fixtureSummaries(collectFixtures(useEngineStore().sceneNodes as SceneNode[])),
+    onBeforeFixtureChange: registerFixtureChangeGuard,
+    onFixturePatchChange: subscribeFixturePatchChanges,
+    findFixtureDefinitionByRdm,
+    // Generated definitions as custom fixtures (API 1.4).
+    saveCustomFixtureDefinition,
+    // The user's connector instances and the user key (API 1.4).
+    connectors: createHostConnectorSet(),
+    getUserKey,
   };
 
   globalThis.__PIXELMAPPER_SHARED__ = {

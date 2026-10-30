@@ -2,6 +2,8 @@ import type { ExtensionDataOwner, Json } from '@pixelmapper/extension-api';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { cloneJson } from '~/utils/kinds/kind-host';
+import { findFixtureInTree } from '~/utils/engine/scene-tree';
+import type { SceneNode } from '~/utils/engine/core/group';
 import { type SerializableCommand, registerCommand } from './serializable-command';
 
 /** Payload of `SetExtensionData`. */
@@ -26,7 +28,11 @@ type DataHolder = { extensionData?: Record<string, Record<string, unknown>> };
 function holderOf(owner: ExtensionDataOwner, ownerId: string | number | undefined): DataHolder | null {
   const engineStore = useEngineStore();
   if (owner === 'project') return engineStore.projectExtension;
-  if (owner === 'fixture') return (engineStore.flatFixtures.find(f => f.id === ownerId) as DataHolder | undefined) ?? null;
+  // Walk the live tree (not the cached `flatFixtures`): in a batch the fixture
+  // may have been added by an earlier command of the same step (plan M4.4).
+  if (owner === 'fixture') {
+    return ownerId === undefined ? null : (findFixtureInTree(engineStore.sceneNodes as SceneNode[], ownerId) as DataHolder | undefined) ?? null;
+  }
   for (const page of useLiveModeStore().pages) {
     const w = page.widgets.find(x => x.id === ownerId);
     if (w) return w;

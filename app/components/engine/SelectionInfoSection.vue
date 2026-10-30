@@ -10,6 +10,12 @@ import { UpdateDmxCommand } from './commands/update-dmx-command';
 import SelectionPositionInfo, { type PositionAxis } from './SelectionPositionInfo.vue';
 import SelectionDmxInfo from './SelectionDmxInfo.vue';
 import KindConfigSection from './KindConfigSection.vue';
+import FixtureModeSelect from './FixtureModeSelect.vue';
+import PmPanelSection from '~/components/primitives/PmPanelSection.vue';
+import { requestFixtureChanges } from '~/utils/extensions/fixture-change-guard';
+import { patchStateAt, patchStateOf } from '~/utils/extensions/fixture-patch-state';
+import { provideScope } from '~/composables/extensions/provide-scope';
+import { fixtureView } from '~/utils/extensions/scope-views';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 
@@ -27,6 +33,11 @@ const { layoutRevision } = storeToRefs(engineStore);
 const isSingle = computed(() => props.selectedFixtures.length === 1);
 const hasSelection = computed(() => props.selectedFixtures.length > 0);
 const firstFixture = computed(() => props.selectedFixtures[0] || null);
+
+// Extension scope: the selection inspector exposes `fixture` for a single
+// selected fixture (slot `selection:after`, rendered for single selections
+// only). `fixtureView` reads the model tick, so the view follows changes.
+provideScope('fixture', () => (isSingle.value && firstFixture.value ? fixtureView(firstFixture.value) : undefined));
 
 // ─── Position Logic ───────────────────────────────────────────────────────────
 //
@@ -193,7 +204,14 @@ watch(firstFixture, (fix) => {
   }
 }, { immediate: true });
 
-function updateDmx() {
+/** Resets the address fields to the fixture's current address. */
+function resetDmxFields() {
+  if (!firstFixture.value) return;
+  localAddress.value = firstFixture.value.localAddress;
+  universe.value = firstFixture.value.universe;
+}
+
+async function updateDmx() {
   if (!firstFixture.value) return;
 
   const newGlobalAddress = ((universe.value - 1) * 512) + localAddress.value;
@@ -209,9 +227,21 @@ function updateDmx() {
     if (localStart + firstFixture.value.channels.length - 1 > 512) return;
   }
 
+  // Fixture change guards (plan M4.5) may confirm or deny the change.
+  const fixture = firstFixture.value;
+  const allowed = await requestFixtureChanges([{
+    fixtureId: fixture.id,
+    before: patchStateOf(fixture),
+    after: patchStateAt(newGlobalAddress, fixture.channels.length, fixture.source?.modeIndex),
+  }]);
+  if (!allowed || fixture.startAddress === newGlobalAddress) {
+    resetDmxFields();
+    return;
+  }
+
   history.execute(new UpdateDmxCommand(
-    firstFixture.value,
-    firstFixture.value.startAddress,
+    fixture,
+    fixture.startAddress,
     newGlobalAddress,
   ));
 }
@@ -219,12 +249,16 @@ function updateDmx() {
 </script>
 
 <template>
-  <div 
-    class="border-t border-border bg-sidebar/50 flex flex-col transition-opacity duration-200"
+  <!--
+    At most 60 % of the sidebar, so extension sections below the fixture
+    fields cannot push the scene list away; the content scrolls instead.
+  -->
+  <div
+    class="border-t border-border bg-sidebar/50 flex flex-col min-h-0 max-h-[60%] transition-opacity duration-200"
     :class="{ 'opacity-40 grayscale pointer-events-none select-none': !hasSelection }"
   >
     <!-- Header -->
-    <div class="h-12 flex items-center px-4 border-b border-border/50 bg-background/20 overflow-hidden">
+    <div class="h-12 shrink-0 flex items-center px-4 border-b border-border/50 bg-background/20 overflow-hidden">
       <span class="font-semibold text-xs tracking-wider uppercase text-muted-foreground">
         <template v-if="isSingle && firstFixture">
           {{ firstFixture.manufacturer || 'Generic' }} - {{ firstFixture.fixtureType }}
@@ -238,9 +272,17 @@ function updateDmx() {
       </span>
     </div>
 
-    <!-- Content -->
-    <div class="px-3 py-5 space-y-6">
-      
+    <!--
+      Content = section `selection` (extension slot selection:after). Only
+      `after` is rendered, placed manually below the single fixture's fields.
+    -->
+    <PmPanelSection
+      id="selection"
+      :manual="['before', 'after', 'actions', 'items']"
+      class="min-h-0 overflow-y-auto px-3 py-5 space-y-6"
+      v-slot="{ After }"
+    >
+
       <!-- Position Section -->
       <SelectionPositionInfo
         :avg-x="avgX"
@@ -264,11 +306,23 @@ function updateDmx() {
             @change-address="updateDmx"
           />
         </div>
+        <!-- Definition mode (fixtures created from OFL / custom definitions) -->
+        <div v-if="firstFixture.source" class="pt-2 border-t border-border/30">
+          <FixtureModeSelect :fixture="firstFixture" />
+        </div>
         <!-- Fixture-kind config (e.g. strip LEDs, chip, shape) -->
         <div v-if="firstFixture.kind" class="pt-2 border-t border-border/30">
           <KindConfigSection :fixture="firstFixture" />
         </div>
+        <!--
+          Extension sections of the single fixture (slot selection:after,
+          scope `fixture`), below its own fields; hidden while empty.
+          Multi-selections render no slot.
+        -->
+        <div class="pt-2 border-t border-border/30 space-y-6 empty:hidden" data-selection-after>
+          <component :is="After" />
+        </div>
       </template>
-    </div>
+    </PmPanelSection>
   </div>
 </template>

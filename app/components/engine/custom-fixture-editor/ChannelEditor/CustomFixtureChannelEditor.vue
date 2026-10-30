@@ -10,6 +10,7 @@ import CapabilityRangeList from './CapabilityRanges/CapabilityRangeList.vue';
 import WheelEditorOverlay from './Wheels/WheelEditorOverlay.vue';
 import ModeTabs from './ModeManager/ModeTabs.vue';
 import ModeDmxAddressList from './ModeManager/ModeDmxAddressList.vue';
+import ModeRdmPersonality from './ModeManager/ModeRdmPersonality.vue';
 
 import { useChannelManagement } from './useChannelManagement';
 import { useCapabilityRanges } from './useCapabilityRanges';
@@ -42,7 +43,7 @@ const wheelOverlayOpen = ref(false);
 
 const { addChannel, deleteChannel, patchChannel, changeChannelType } = useChannelManagement(channelsArr, modesArr, selectedId);
 const { addCapabilityRange, removeCapabilityRange, patchRange, onRangeMaxChange } = useCapabilityRanges(channelsArr, (id, p) => patchChannel(id, p));
-const { addMode, addSingleToMode, removeEntry, patchEntry, entryStartAddress, addrOf } = useModeManagement(modesArr, activeModeIdx, channelsArr, computed(() => props.headCount));
+const { updateMode, addMode, addSingleToMode, removeEntry, patchEntry, entryStartAddress, addrOf } = useModeManagement(modesArr, activeModeIdx, channelsArr, computed(() => props.headCount));
 
 const selectedChannel = computed(() => props.channels.find(c => c.id === props.selectedChannelId) ?? null);
 const isSingleFullRange = computed(() => {
@@ -94,6 +95,14 @@ function isChannelInMode(channelId: string) {
     <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-muted/5 relative">
       <div class="border-b-2 border-border/80 bg-muted/30 shrink-0 px-4 py-3"><p class="text-[11px] uppercase tracking-wider font-extrabold text-foreground/70">3. Mode Mapping</p></div>
       <ModeTabs :modes="modes" :active-mode-idx="activeModeIdx" @update:active-mode-idx="activeModeIdx = $event" @add="addMode" @rename="(idx, name) => modesArr[idx]!.name = name" />
+
+      <!-- RDM personality index of the active mode (plan M4.7) -->
+      <ModeRdmPersonality
+        v-if="modes[activeModeIdx]"
+        :key="modes[activeModeIdx]!.id"
+        :model-value="modes[activeModeIdx]!.rdmPersonalityIndex"
+        @update:model-value="updateMode({ rdmPersonalityIndex: $event })"
+      />
       
       <!-- Box for available channels (Tag-based assignment UI) -->
       <div class="border-b border-border/50 bg-background flex flex-col shrink-0 max-h-48">

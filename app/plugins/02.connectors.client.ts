@@ -5,6 +5,7 @@
  */
 import { watch } from 'vue';
 import { useConnectionsStore } from '~/stores/connections-store';
+import { setCurrentUserId } from '~/utils/extensions/connector-api';
 
 export default defineNuxtPlugin({
   name: 'pm:connectors',
@@ -19,10 +20,15 @@ export default defineNuxtPlugin({
       }
       const store = useConnectionsStore();
       if (!user) {
+        setCurrentUserId(null);
         void store.load(null);
         return;
       }
-      watch(() => user!.value?.id ?? null, id => { void store.load(id); }, { immediate: true });
+      // The user key of extensions (`getUserKey`, API 1.4) follows the same user.
+      watch(() => user!.value?.id ?? null, (id) => {
+        setCurrentUserId(id);
+        void store.load(id);
+      }, { immediate: true });
     });
   },
 });

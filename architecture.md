@@ -7,7 +7,7 @@ Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript fron
 - **Rendering runs in the browser** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`). Modifiers are sandboxed content plugins (AssemblyScript → WASM) executed by the worker's plugin bridge.
 - **Everything specific is an extension** — controls (color picker, pan/tilt), fixture kinds (NeoPixel strip), outputs (ArtNet, ESP nodes) and hardware controllers (AKAI APC Mini mk2) are extensions. The core runs with zero extensions (`PM_NO_EXTENSIONS=1`, checked in CI).
 - **Outputs are rendered frames** — connectors receive rendered universes/pixels; ESP32 devices are pure output devices. (This replaces the former principle "browser and ESP32 run the same engine".)
-- **Web first, native where it pays off** ([ADR 0003](architecture/adr/0003-native-platform-layer.md)) — the web app stays a first-class target. Platform-dependent I/O (UDP, serial, MIDI; later raw touch and the engine) goes through the `Platform` contract: host code imports `#platform` (resolved to `app/platform/web` or `app/platform/tauri` at build time), extensions call `getPlatform()`. Missing capabilities are `null` and degrade visibly (Art-Net falls back to the local bridge). Host-only shell features (window chrome, the native menu bar with File/View commands and Open Recent, project file dialogs) come from `getWindowChrome()` / `getAppShell()` of the same `#platform` entry; the commands live in `app/composables/app-menu`.
+- **Web first, native where it pays off** ([ADR 0003](architecture/adr/0003-native-platform-layer.md)) — the web app stays a first-class target. Platform-dependent I/O (serial, MIDI, the built-in Art-Net bridge, native HTTP and bundled resources; later raw touch and the engine) goes through the `Platform` contract: host code imports `#platform` (resolved to `app/platform/web` or `app/platform/tauri` at build time), extensions call `getPlatform()`. Missing capabilities are `null` and degrade visibly (Art-Net falls back to `pmnet-bridge serve` over WebSocket). Host-only shell features (window chrome, the native menu bar with File/View commands and Open Recent, project file dialogs) come from `getWindowChrome()` / `getAppShell()` of the same `#platform` entry; the commands live in `app/composables/app-menu`.
 - **Offline-first projects** ([ADR 0004](architecture/adr/0004-offline-first.md)) — a local `ProjectStore` (IndexedDB, `app/utils/persistence/project-store`) is the primary store; Supabase is a sync and collaboration layer. Every persisted change (history commands and persistent live-ops) goes through a local outbox with a client `changeId`; the sync engine (`app/utils/sync`) pulls remote changes, rebases pending local changes with a field-level 3-way merge (`app/utils/sync/merge`) and pushes them. The desktop app works fully offline (account optional, bundled OFL library and firmware); the web app keeps mandatory login and only guarantees that a dropped connection loses no data. Retries go through `app/utils/sync/connectivity.ts` (backoff, reconnect).
 - **Planned targets:** a **Tauri 2** desktop app (native Rust engine, `wasmtime` modifier runtime, direct ArtNet; migration steps in ADR 0003 §4) and a backend render engine for generated visuals.
 
@@ -54,6 +54,7 @@ pixelmapper/
 │       ├── persistence/           # Snapshots, change log, `.pmproject` archives
 │       ├── connectors/            # Connector registry + engine packet encoders
 │       ├── controllers/           # Registry-driven controller catalog
+│       ├── fixture-definitions/   # Definition keys, custom fixture accessor, definition resolution, mode changes, RDM lookup
 │       └── ofl/                   # Open Fixture Library import
 ├── extensions/                    # First-party extensions (Nuxt layers; Bun workspace)
 │   ├── color-picker/ pan-tilt/ connector-artnet/   # distribution set (layered into every build)
@@ -75,18 +76,20 @@ pixelmapper/
 ├── rs-engine/
 │   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime (wasm-pack → core/pkg)
 │   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only, wasm-pack → canvas/pkg)
-├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs), config, icons — ADR 0003
-├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
-├── tools/artnet-bridge/           # Local WebSocket → UDP ArtNet bridge
+├── src-tauri/                     # Desktop app (Tauri 2): native commands (built-in Art-Net bridge artnet.rs, net.rs HTTP/resources, menu, files, mcp), config, icons — ADR 0003
+├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs, build-wasm, start-pmnet-bridge
 ├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)
 └── pio*/                          # ESP32 firmware (out of scope; must implement frames 0x21/0x22)
 ```
 
 ## Tooling
 
+- `bun run dev` also starts the Art-Net bridge `pmnet-bridge serve` on :7777 (`scripts/start-pmnet-bridge.ts`: `PATH`, else `$PIXELMAPPER_HARDWARE_DIR/target/{release,debug}`; without a binary it prints how to build it and the rest keeps running). Standalone: `bun run pmnet-bridge [--mock]` ([connectors.md](architecture/connectors.md#bridge-in-development-plan-m34)). The desktop app has the bridge built in.
 - `bun run dev:tauri` / `bun run build:tauri` — desktop app (Tauri 2, `src-tauri/`; SPA build with the native `#platform`, ADR 0003). `cargo test --manifest-path src-tauri/Cargo.toml` tests the native commands.
 - `bun run test` — Vitest (`vitest.config.ts` mirrors the Nuxt aliases `~`/`@`; `happy-dom` environment). Tests live next to the code as `*.test.ts`.
+- `bun run test:e2e:artnet` — opt-in end-to-end test of the Art-Net plugin against the real `pmnet-bridge` + `pmnet sim` (`vitest.e2e.config.ts`, `*.e2e.test.ts`, needs the hardware repo; see [connectors.md](architecture/connectors.md#end-to-end-test-against-the-real-bridge-wp8)).
 - `bun run typecheck` — `nuxt typecheck` (vue-tsc).
+- `bun run typecheck:extensions` — vue-tsc over `extensions/**` and `packages/extension-api` (`tsconfig.extensions.json`; `nuxt typecheck` does not cover them). It also reports the app files the extensions' tests import, so judge it by the `extensions/` lines.
 - `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
 - `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
@@ -114,7 +117,7 @@ pixelmapper/
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
-- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes, tube firmware updates; bridge contract draft: [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
+- **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes (v1 = M6: device list, add, addressing, sync, status badge — [connectors.md › RDM devices](architecture/connectors.md#rdm-devices-plan-m6-v1)); M7: node configuration in the node card, tube firmware updates (batch per node, per tube), RDM section in the fixture inspector — [connectors.md › Node configuration](architecture/connectors.md#node-configuration-plan-m73-d8), [› Tube firmware update](architecture/connectors.md#tube-firmware-update-plan-m74-d17), [› Inspector RDM section](architecture/connectors.md#inspector-rdm-section-plan-m72-d18); bridge `pmnet-bridge serve` in the browser and built into the desktop app (same Rust core, Tauri IPC instead of WebSocket), started on demand only; bridge contract (1.0.0 candidate, authoritative in `pixelmapper-hardware` `protocol/bridge-ws.md`, mirrored here and in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
 - [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
 - [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.3 (room coordinates, z, trigger params), distribution, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN` v2 (distribution block)

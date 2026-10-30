@@ -184,8 +184,32 @@ export const CustomFixtureFormSchema = z.object({
 });
 
 
-/** All editable state for the custom fixture general-info form. Derived from the Zod schema. */
-export type CustomFixtureFormState = z.infer<typeof CustomFixtureFormSchema>;
+/**
+ * RDM identification of a custom fixture (plan M4.7). Kept OUT of
+ * `CustomFixtureFormSchema` on purpose: that schema doubles as the AI PDF
+ * extraction schema, and RDM IDs are rarely in manuals (an LLM would guess).
+ *
+ * OFL mapping: `rdmManufacturerId` ↔ `pixelmapper.rdmManufacturerId`,
+ * `rdmModelId` ↔ `rdm.modelId`, `rdmSoftwareVersion` ↔ `rdm.softwareVersion`.
+ */
+export interface CustomFixtureRdmState {
+  /** RDM (ESTA) manufacturer ID, 0..0xFFFF; `null` = not set (key omitted on save). */
+  rdmManufacturerId: number | null;
+  /** RDM device model ID, 0..0xFFFF; `null` = not set (`rdm` omitted on save). */
+  rdmModelId: number | null;
+  /** `rdm.softwareVersion` of a loaded definition, preserved as-is; '' = none. */
+  rdmSoftwareVersion: string;
+}
+
+/** All editable state for the custom fixture general-info form: Zod schema fields + RDM IDs. */
+export type CustomFixtureFormState = z.infer<typeof CustomFixtureFormSchema> & CustomFixtureRdmState;
+
+/** Empty RDM state — the defaults for a new fixture. */
+export const EMPTY_RDM_STATE: Readonly<CustomFixtureRdmState> = {
+  rdmManufacturerId: null,
+  rdmModelId: null,
+  rdmSoftwareVersion: '',
+};
 
 
 /**
@@ -280,3 +304,4 @@ export const CATEGORY_OPTIONS: OflCategory[] = [
 // ─── Re-exports from split modules ───────────────────────────────────────────
 export * from './custom-fixture-channel-types';
 export * from './custom-fixture-capability-schemas';
+

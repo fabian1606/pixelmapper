@@ -43,12 +43,12 @@ interface OperationEntry { id: string; kind: string; namespace: string; summary:
 
 /** Slot patterns of surfaces not mounted by the collector (architecture/extensions.md). */
 const DOCUMENTED_SLOT_PATTERNS = [
-  'scene:header|before|after', 'scene/fixture:badges|actions', 'scene/group:badges|actions',
+  'scene:header|before|after', 'scene/fixture:badges|actions', 'scene/group:badges|actions', 'selection:after',
   'properties:header|before|after', 'properties/<category>:actions|before|after|items', 'properties/<category>/channel:badges|actions',
   'modifiers:header|before|after', 'modifiers/modifier:badges|actions', 'modifiers/add:items',
   'presets:header|before|after', 'presets/preset:badges|actions',
   'library:header|before|after', 'library/categories:items', 'library/<manufacturer>:items', 'add-fixture/sources:items',
-  'header:start|end', 'live:start|end', 'context-menu/<fixture|group|channel|preset>:items',
+  'header:start|end', 'live:start|end', 'connections/outputs:before', 'context-menu/<fixture|group|channel|preset>:items',
 ];
 
 // ── Declarations ─────────────────────────────────

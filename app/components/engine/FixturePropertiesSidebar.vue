@@ -318,16 +318,29 @@ defineExpose({ openTab });
     <!-- Floating Overlay Panel (extension slots: properties:*) -->
     <PmPanel
       id="properties"
-      class="pointer-events-auto absolute right-14 top-4 bottom-4 w-72 bg-background border border-border shadow-2xl rounded-2xl z-10 overflow-hidden transition-all duration-200 ease-out"
+      :manual="['header', 'before', 'after']"
+      class="pointer-events-auto absolute right-14 top-4 bottom-4 w-72 flex flex-col bg-background border border-border shadow-2xl rounded-2xl z-10 overflow-hidden transition-all duration-200 ease-out"
       :class="[activeTab ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-0 scale-95 pointer-events-none']"
+      v-slot="{ Header: PanelHeader, Before: PanelBefore, After: PanelAfter }"
     >
+      <!--
+        Panel-level slots (properties:header|before|after) render only while the
+        panel is open, so contributions are not mounted behind the hidden panel.
+        Header/before sit above the section, after below it with its own scroll
+        area; the section takes the rest (it used to be h-full, which pushed
+        properties:after out of the clipped panel).
+      -->
+      <div v-if="activeTab" class="shrink-0 empty:hidden">
+        <component :is="PanelHeader" />
+        <component :is="PanelBefore" />
+      </div>
       <!-- Active category = section (extension slots: properties/<category>:*) -->
       <PmPanelSection
         v-if="activeTab"
         :id="activeTab"
         :key="activeTab"
         :manual="['actions', 'before', 'after', 'items']"
-        class="flex flex-col h-full"
+        class="flex flex-col flex-1 min-h-0"
         v-slot="{ Actions, Before, After, Items }"
       >
         <!-- Overlay Header -->
@@ -375,6 +388,10 @@ defineExpose({ openTab });
           </ScrollArea>
         </div>
       </PmPanelSection>
+      <!-- properties:after: below the category, scrolls on its own (at most ~half the panel) -->
+      <div v-if="activeTab" class="shrink-0 max-h-[50%] overflow-y-auto border-t border-border p-4 empty:hidden" data-properties-after>
+        <component :is="PanelAfter" />
+      </div>
     </PmPanel>
 
     <!-- Main Right Icon Bar -->

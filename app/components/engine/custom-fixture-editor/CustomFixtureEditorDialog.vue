@@ -20,6 +20,7 @@ import { buildOflFixture, initFromOflFixture } from '~/utils/engine/custom-fixtu
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import { computeHeadElementCentroids } from '~/utils/engine/svg-element-positions';
 import { applyEnrichmentProposals } from '~/utils/engine/enrichment-apply';
+import { parseOflFixtureJson } from '~/utils/fixture-definitions/ofl-import';
 import type { OflFixture } from '~/utils/ofl/types';
 
 const props = defineProps<{ 
@@ -68,6 +69,51 @@ const { isEnriching, enrichStatus, enrichError, proposals, enrichFromManual } = 
 const reviewDialogOpen = ref(false);
 const enrichFileInput = ref<HTMLInputElement | null>(null);
 
+/**
+ * Loads an OFL fixture definition into the form state. Shared by every flow
+ * that fills the editor from OFL: edit, AI PDF extraction, AI enrichment and
+ * the OFL JSON import.
+ */
+function applyOflToForm(ofl: OflFixture) {
+  const init = initFromOflFixture(ofl);
+  Object.assign(formState, init.state);
+  channels.value = init.channels;
+  modes.value = init.modes;
+  wheels.value = init.wheels;
+  fixtureCategory.value = init.category;
+  pixelColumns.value = init.pixelCols;
+  pixelRows.value = init.pixelRows;
+  headCountManual.value = init.headCount;
+  useCustomSvg.value = init.useCustomSvg;
+  customSvgData.value = init.customSvgData;
+  headToElementMap.value = init.headToElementMap;
+}
+
+// OFL JSON import (plan M4.7): readable error shown under the header.
+const importError = ref('');
+
+/** Reads, validates and loads an OFL fixture `.json` file into the form. */
+async function handleOflJsonImport(file: File) {
+  importError.value = '';
+  try {
+    const result = parseOflFixtureJson(await file.text());
+    if (!result.ok) {
+      importError.value = `Could not import "${file.name}": ${result.error}`;
+      return;
+    }
+    applyOflToForm(result.fixture);
+    // Leave a pending AI upload screen and start at the first step.
+    aiUploadPending.value = false;
+    extractError.value = '';
+    selectedChannelId.value = null;
+    currentStepIdx.value = 0;
+  } catch (err) {
+    console.error('[custom-fixture-editor] OFL JSON import failed:', err);
+    const detail = err instanceof Error ? err.message : String(err);
+    importError.value = `Could not import "${file.name}": ${detail}`;
+  }
+}
+
 function currentDraftAsOfl(): OflFixture {
   const headPositions =
     useCustomSvg.value && customSvgData.value && Object.keys(headToElementMap.value).length > 0
@@ -95,18 +141,7 @@ async function handleEnrichPdfUpload(file: File) {
 function applyProposals(accepted: EnrichmentProposal[]) {
   if (accepted.length === 0) return;
   const patched = applyEnrichmentProposals(currentDraftAsOfl(), accepted);
-  const init = initFromOflFixture(patched);
-  Object.assign(formState, init.state);
-  channels.value = init.channels;
-  modes.value = init.modes;
-  wheels.value = init.wheels;
-  fixtureCategory.value = init.category;
-  pixelColumns.value = init.pixelCols;
-  pixelRows.value = init.pixelRows;
-  headCountManual.value = init.headCount;
-  useCustomSvg.value = init.useCustomSvg;
-  customSvgData.value = init.customSvgData;
-  headToElementMap.value = init.headToElementMap;
+  applyOflToForm(patched);
 }
 
 async function handleAIPdfUpload(file: File) {
@@ -159,18 +194,7 @@ async function handleAIPdfUpload(file: File) {
             if (json.status) {
               extractStatus.value = json.status;
             } else if (json.success && json.data) {
-              const init = initFromOflFixture(json.data);
-              Object.assign(formState, init.state);
-              channels.value = init.channels;
-              modes.value = init.modes;
-              wheels.value = init.wheels;
-              fixtureCategory.value = init.category;
-              pixelColumns.value = init.pixelCols;
-              pixelRows.value = init.pixelRows;
-              headCountManual.value = init.headCount;
-              useCustomSvg.value = init.useCustomSvg;
-              customSvgData.value = init.customSvgData;
-              headToElementMap.value = init.headToElementMap;
+              applyOflToForm(json.data);
               currentStepIdx.value = 0;
             } else if (json.error) {
               extractError.value = json.error;
@@ -197,6 +221,7 @@ watch(() => props.open, (isOpen) => {
     void probeAi();
     aiUploadPending.value = false;
     extractError.value = '';
+    importError.value = '';
     isExtracting.value = false;
     if (props.startWithAiUpload) {
       // Clear data first
@@ -210,18 +235,7 @@ watch(() => props.open, (isOpen) => {
       aiUploadPending.value = true;
     } else if (props.fixtureToEdit) {
       try {
-        const init = initFromOflFixture(props.fixtureToEdit);
-        Object.assign(formState, init.state);
-        channels.value = init.channels;
-        modes.value = init.modes;
-        wheels.value = init.wheels;
-        fixtureCategory.value = init.category;
-        pixelColumns.value = init.pixelCols;
-        pixelRows.value = init.pixelRows;
-        headCountManual.value = init.headCount;
-        useCustomSvg.value = init.useCustomSvg;
-        customSvgData.value = init.customSvgData;
-        headToElementMap.value = init.headToElementMap;
+        applyOflToForm(props.fixtureToEdit);
         currentStepIdx.value = 0;
       } catch (err: any) {
         console.error('Failed to init from OFL Fixture:', err);
@@ -275,8 +289,22 @@ function handleSave() {
       <CustomFixtureHeader
         :steps="STEPS"
         :current-step-idx="currentStepIdx"
+        :can-import="!isExtracting"
         @update:current-step-idx="i => currentStepIdx = i"
+        @import-ofl-json="handleOflJsonImport"
       />
+
+      <!-- OFL JSON import error (plan M4.7) -->
+      <div
+        v-if="importError"
+        role="alert"
+        class="flex items-start gap-3 border-b border-destructive/30 bg-destructive/10 px-6 py-2 text-xs text-destructive"
+      >
+        <span class="flex-1">{{ importError }}</span>
+        <button class="shrink-0 underline underline-offset-4 hover:opacity-80" @click="importError = ''">
+          Dismiss
+        </button>
+      </div>
 
       <div
         v-if="props.fixtureToEdit && !aiUploadPending && !isExtracting"
