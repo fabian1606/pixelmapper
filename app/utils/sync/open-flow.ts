@@ -1,5 +1,6 @@
 import { IncompatibleProjectError, serializeProject, type ProjectSnapshot } from '~/utils/engine/serialize';
 import { flattenCommandTypes, type ProjectRequirement } from '~/utils/extensions/requires';
+import { defaultLivePage } from '~/utils/live/types';
 import type { LocalProjectMeta, OutboxEntry, ProjectStore } from '~/utils/persistence/project-store';
 import type { RemoteClient } from '~/utils/sync/remote-api';
 import type { ProjectStatePort } from '~/utils/sync/project-state-port';
@@ -63,9 +64,16 @@ function applySnapshot(port: ProjectStatePort, snapshot: ProjectSnapshot): OpenF
   }
 }
 
-/** State of a new, empty project (no fixtures, presets, modifiers or pages). */
+/**
+ * Id of the empty live page a new project starts with. Fixed rather than random
+ * so every client opening a project without a snapshot yet sees the same page
+ * and replayed `live.*` commands keep pointing at it.
+ */
+export const DEFAULT_LIVE_PAGE_ID = 'default-page';
+
+/** State of a new project: no fixtures, presets or modifiers; one empty live page. */
 export function emptyProjectSnapshot(): ProjectSnapshot {
-  return serializeProject([], [], [], { RED: 0, GREEN: 0, BLUE: 0, DIMMER: 0 }, []);
+  return serializeProject([], [], [], { RED: 0, GREEN: 0, BLUE: 0, DIMMER: 0 }, [], [defaultLivePage({ id: DEFAULT_LIVE_PAGE_ID })]);
 }
 
 /** Replay outbox rows onto the live state (logged, never throws). */
