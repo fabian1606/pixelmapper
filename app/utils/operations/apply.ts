@@ -178,6 +178,8 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
 
   const before = captureState(read);
   let failed = false;
+  /** Ops with end-of-batch postconditions (`verifyAfterBatch`), in batch order. */
+  const deferred: { index: number; op: string; input: unknown; value: unknown }[] = [];
 
   for (let i = 0; i < ops.length; i++) {
     const { op, input } = ops[i]!;
@@ -203,6 +205,7 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
         findings.push(...verified);
         if (verified.some(f => f.level === 'error')) throw new AbortBatch([]);
       }
+      if (def?.verifyAfterBatch) deferred.push({ index: i, op, input: parsedInput, value: result.value });
       results.push({ op, kind: result.kind, value: result.value });
       logEvent({ actor, kind: 'operation', code: op, message: `${op} (${label})${dryRun ? ' [dry run]' : ''}` });
     }
@@ -211,6 +214,22 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
       findings.push(...extra);
       failed = true;
       break;
+    }
+  }
+
+  // End-of-batch postconditions: later ops may have fixed what an earlier op left.
+  if (!failed) {
+    for (const d of deferred) {
+      const def = registry.get(d.op);
+      try {
+        const verified = (await def!.verifyAfterBatch!(ctx, d.input, d.value)).map(f => ({ ...f, opIndex: d.index }));
+        findings.push(...verified);
+        if (verified.some(f => f.level === 'error')) failed = true;
+      }
+      catch (err) {
+        findings.push({ level: 'error', code: 'operation-failed', message: `${d.op}: ${messageOf(err)}`, opIndex: d.index });
+        failed = true;
+      }
     }
   }
 

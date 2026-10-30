@@ -123,6 +123,16 @@ describe.skipIf(!ready)('observe (preview, real engine)', () => {
     expect(await level({ expect: [{ path: 'group.range.min', lt: 0.5 }] })).toBe('warning');
   });
 
+  it('dark base → dark-base warning naming the fix (preview and live)', async () => {
+    // seedScene leaves the DIMMER base at 0: a scale chase stays dark.
+    seedScene([{ id: 'd0', x: 0.2, y: 0.5 }, { id: 'd1', x: 0.8, y: 0.5 }]);
+    const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ });
+    const report = await observe({ targets: 'all', modifierId: m.id }, { plugins });
+    const finding = report.findings?.find(f => f.code === 'dark-base');
+    expect(finding?.level).toBe('warning');
+    expect(finding?.message).toMatch(/channels\.set/);
+  });
+
   it('zero targets → finding, no crash', async () => {
     scene(4);
     const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ });

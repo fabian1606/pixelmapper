@@ -97,6 +97,13 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
    * `error` findings roll back the transaction.
    */
   verify?(ctx: OperationContext<R>, input: z.output<I>, value: z.output<O>): Finding[] | Promise<Finding[]>;
+  /**
+   * Postconditions checked once after the WHOLE batch (state = end of the
+   * batch), for problems a later op of the same batch may still fix — e.g. a
+   * modifier added before the `channels.set` that lights its base. Same
+   * semantics as `verify` (`error` findings roll back).
+   */
+  verifyAfterBatch?(ctx: OperationContext<R>, input: z.output<I>, value: z.output<O>): Finding[] | Promise<Finding[]>;
 }
 
 /** Erased definition type for registries. */

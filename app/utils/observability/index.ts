@@ -26,6 +26,7 @@ import type { ModifierInstance, Signature } from '~/utils/engine/types';
 import { roomFromPoints } from '~/utils/engine/room';
 import { liveHub } from '~/utils/extensions/live-hub';
 import { fixtureInfo, fixtureSignatures, readApi, type CoreReadApi } from '~/utils/operations/read-api';
+import { darkTargetFindings } from '~/utils/operations/core/modifier-dark';
 import { pluginNotFound, resolvePlugin } from '~/utils/operations/core/plugin-ref';
 import { getManifest, loadWasm } from '~/utils/plugins/plugin-store';
 import { captureLive, type CaptureHub } from './capture';
@@ -203,6 +204,8 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
     if (mode === 'preview') {
       const modifier = await previewInstance(req, read, resolved.fixtures, findings);
       if (!modifier) return failed(findings);
+      // Name the cause of a dark preview (zero DIMMER / black base) with the fix.
+      findings.push(...darkTargetFindings(read, modifier));
       const plugins = deps.plugins ?? { getManifest, loadWasm };
       triggerKeys = (plugins.getManifest(modifier.plugin)?.params ?? []).filter(p => p.type === 'trigger').map(p => p.key);
       trace = await renderPreview(
@@ -215,6 +218,12 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
       // (An injected hub is not the store engine: no default check then.)
       const engineFailure = (deps.engineFailure ?? (deps.hub ? () => null : storeEngineFailure))();
       if (engineFailure) return failed([...findings, errorFinding('engine-unavailable', engineFailure)]);
+      // Stack layers on the observed fixtures that stay dark on a zero base.
+      const observed = new Set(resolved.fixtures.map(f => String(f.id)));
+      for (const m of read.modifiers()) {
+        const hits = !m.targetFixtureIds || m.targetFixtureIds.some(id => observed.has(String(id)));
+        if (hits) findings.push(...darkTargetFindings(read, m));
+      }
       const signature = pickSignature(resolved.fixtures, typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined);
       const wait = deps.wait ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
       if (fromS > 0) await wait(fromS * 1000); // live cannot look ahead: wait for the window start
