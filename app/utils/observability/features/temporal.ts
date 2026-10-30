@@ -5,6 +5,10 @@
  * - periodic: mean normalized autocorrelation over the signals (phase
  *   offsets between fixtures do not cancel), first strong peak after the
  *   first zero crossing, refined parabolically, validated by phase folding;
+ *   the joint lag must be a multiple of every signal's own period; when
+ *   the joint analysis fails, the common period of the own periods (a
+ *   multiple of all of them, so harmonics such as 4 vs 8 beats are
+ *   covered) is verified on every signal's autocorrelation;
  * - events: binary-ish intensity with few threshold crossings;
  * - aperiodic: band holding the central 80 % of the spectral energy.
  */
@@ -31,6 +35,12 @@ const FOLD_MIN = 0.5;
 const BEAT_MULTIPLES = [1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16];
 /** Maximum number of crossings of an `events` signal. */
 const MAX_EVENTS = 12;
+/** Highest harmonic number relating a signal's own period to the common period. */
+const MAX_HARMONIC = 8;
+/** Multiples of the longest own period tried as common period. */
+const MAX_COMMON_MULTIPLE = 4;
+/** Minimum share of signals with an own period for the common-period search. */
+const OWN_PERIOD_MIN_SHARE = 0.5;
 
 // ── Autocorrelation ─────────────────────────────
 
@@ -81,6 +91,94 @@ export function findPeriodLag(ac: Float64Array, frames: number): { lag: number; 
   const delta = denom < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / denom)) : 0;
   const strength = y1 - 0.25 * (y0 - y2) * delta;
   return { lag: k + delta, strength: Math.max(0, Math.min(1, strength)) };
+}
+
+// ── Common period ───────────────────────────────
+
+/** Autocorrelation at a fractional lag (linear interpolation, 0 outside). */
+function acAt(ac: Float64Array, lag: number): number {
+  const k = Math.floor(lag);
+  if (k < 0 || k >= ac.length) return 0;
+  if (k + 1 >= ac.length) return ac[k]!;
+  const u = lag - k;
+  return ac[k]! * (1 - u) + ac[k + 1]! * u;
+}
+
+/** Search half-width (frames) around a candidate common lag. */
+function searchTolerance(lag: number): number {
+  return Math.max(1.5, 0.02 * lag);
+}
+
+/**
+ * Whether `lag` is a whole multiple (1…`MAX_HARMONIC`) of a signal's own
+ * period `own`, within 3 % of one own period (at least 0.75 frames). Tight
+ * on purpose: 1 Hz and 1.37 Hz nearly meet at ~2.95 s (3 vs 4.04 cycles)
+ * and must not count as a common period.
+ */
+function isHarmonicOf(lag: number, own: number): boolean {
+  const h = Math.round(lag / own);
+  return h >= 1 && h <= MAX_HARMONIC && Math.abs(lag - h * own) <= Math.max(0.75, 0.03 * own);
+}
+
+/** Own period lags (frames) of the signals that have one. */
+export function ownPeriodLags(acs: Float64Array[], frames: number): number[] {
+  const own: number[] = [];
+  for (const ac of acs) {
+    const p = findPeriodLag(ac, frames);
+    if (p) own.push(p.lag);
+  }
+  return own;
+}
+
+/**
+ * Lag of the strongest mean-autocorrelation sample within `±tol` of
+ * `lag`, refined parabolically; `lag` itself when the maximum sits on
+ * the border of the search range (no local peak there).
+ */
+function refineLagNear(ac: Float64Array, lag: number, tol: number): number {
+  const lo = Math.max(1, Math.ceil(lag - tol));
+  const hi = Math.min(ac.length - 2, Math.floor(lag + tol));
+  if (hi < lo) return lag;
+  let k = lo;
+  for (let i = lo + 1; i <= hi; i++) if (ac[i]! > ac[k]!) k = i;
+  // Not a local maximum: keep the candidate.
+  if (ac[k]! < ac[k - 1]! || ac[k]! < ac[k + 1]!) return lag;
+  const y0 = ac[k - 1]!;
+  const y1 = ac[k]!;
+  const y2 = ac[k + 1]!;
+  const denom = y0 - 2 * y1 + y2;
+  const delta = denom < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / denom)) : 0;
+  return k + delta;
+}
+
+/**
+ * Common period (frames) of several signals whose joint autocorrelation
+ * found none, e.g. phase-shifted narrow pulses where some signals also
+ * carry a harmonic (own period 4 beats, common period 8 beats).
+ *
+ * Candidates are small multiples of the longest own period, refined on
+ * the mean autocorrelation. A candidate is accepted when every own period
+ * divides it (`isHarmonicOf`) and every signal's autocorrelation at the
+ * lag is high. Unrelated periods (e.g. 1 Hz and 1.37 Hz) have no exact
+ * common multiple and are rejected. Needs ≥ 2 signals, at least half of
+ * them with an own period: a single signal is the joint analysis.
+ */
+export function commonPeriodLag(acs: Float64Array[], own: number[], meanAc: Float64Array, frames: number): { lag: number; strength: number } | null {
+  if (acs.length < 2 || own.length === 0 || own.length < OWN_PERIOD_MIN_SHARE * acs.length) return null;
+  const maxLag = meanAc.length - 1;
+  const longest = Math.max(...own);
+  for (let m = 1; m <= MAX_COMMON_MULTIPLE; m++) {
+    const candidate = longest * m;
+    if (candidate >= maxLag) break;
+    const lag = refineLagNear(meanAc, candidate, searchTolerance(candidate));
+    // Every own period must be a harmonic of the lag.
+    if (!own.every(l => isHarmonicOf(lag, l))) continue;
+    // Every signal (also those without an own period) repeats at the lag.
+    const min = lag <= frames / 2 ? PEAK_MIN : PEAK_MIN_LATE;
+    if (!acs.every(ac => acAt(ac, lag) >= min)) continue;
+    return { lag, strength: Math.max(0, Math.min(1, acAt(meanAc, lag))) };
+  }
+  return null;
 }
 
 /** Share of variance explained by the mean profile folded at `lag` frames. */
@@ -283,17 +381,22 @@ export function analyzeTemporal(signals: Signal[], ctx: TemporalContext): Tempor
   // Periodicity on the mean autocorrelation.
   if (frames >= 8) {
     const maxLag = Math.floor(0.75 * frames);
+    const acs = active.map(s => autocorrelation(s, maxLag));
     const meanAc = new Float64Array(maxLag + 1);
-    for (const s of active) {
-      const ac = autocorrelation(s, maxLag);
-      for (let k = 0; k <= maxLag; k++) meanAc[k]! += ac[k]! / active.length;
-    }
+    for (const ac of acs) for (let k = 0; k <= maxLag; k++) meanAc[k]! += ac[k]! / active.length;
+    // Own periods of the signals (several signals only): the joint lag
+    // must be a multiple of each, otherwise it is an accidental near-match
+    // of unrelated periods or a harmonic shared by only some signals.
+    const own = active.length > 1 ? ownPeriodLags(acs, frames) : [];
     const peak = findPeriodLag(meanAc, frames);
-    if (peak) {
+    if (peak && own.every(l => isHarmonicOf(peak.lag, l))) {
       let fold = 0;
       for (const s of active) fold += foldingRatio(s, peak.lag) / active.length;
       if (fold >= FOLD_MIN) return periodic(refineFrequency(active, ctx.fps / peak.lag, ctx.fps), peak.strength, ctx);
     }
+    // Joint analysis failed: common period of the signals' own periods.
+    const common = commonPeriodLag(acs, own, meanAc, frames);
+    if (common) return periodic(refineFrequency(active, ctx.fps / common.lag, ctx.fps), common.strength, ctx);
   }
   // Events on the mean intensity.
   const meanIntensity = new Float64Array(frames);
