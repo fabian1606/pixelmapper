@@ -38,22 +38,31 @@ Overall, 16 beats (two pattern periods):
 }
 ```
 
-Overtake flash — window inside the flash, every tube lit:
+**Windows from the computed positions.** Don't use fixed times: derive every window from the point positions. With cycle length `T` (s), loop position of point P `p_P(t) = start_P + speed_P · t / T` (laps, mod 1), `N` tubes in loop order (`fixtureOrder`) and `L = N · heads` pixels in the loop:
+
+- overtake `k` at `t_k` = the k-th solution of `p_A(t) − p_B(t) ∈ ℤ` (`crossingTimeLoop`); with the defaults `t_k = 2, 6, 10 s`;
+- flash window: `from = t_k`, `duration` = the flash length (≥ 2 frames: `fps: 60`, `duration ≥ 0.05 s`);
+- between overtakes: `from = (t_k + t_{k+1}) / 2` (4 s with the defaults), `duration` ≤ ¼ of the gap;
+- point P inside a tube: the tube is `fixtureOrder[floor(p_P(t) · N)]`, its pixel `floor(p_P(t) · L) mod heads`. For a color check pick `t` where P is mid-tube (`frac(p_P(t) · N) ≈ 0.5`) and B is on another tube, with `duration` < the time P needs per pixel (`T / (speed_P · L)`) or use `fixtures.<tube>.heads.<pixel>` directly.
+
+Overtake flash — window inside the flash, every tube (and pixel) lit:
 
 ```json
 {
   "mode": "preview", "modifierId": "ai-chase-duo", "targets": { "groupIds": ["g-tubes"] },
-  "window": { "from": "2s", "duration": "0.1s" }, "fps": 60,
+  "window": { "from": "<t_k>s", "duration": "0.1s" }, "fps": 60,
   "expect": [
-    { "path": "fixtures.*.range.max", "gte": 0.8 },
+    { "path": "fixtures.*.heads.*.range.max", "gte": 0.8 },
     { "path": "group.color.sat.mean", "lte": 0.3 }
   ]
 }
 ```
 
-Between overtakes (`"from": "4s"`, `"duration": "0.3s"`): `{ "path": "fixtures.*.range.max", "quantifier": "any", "lte": 0.05 }` (only the two points are lit).
+A 0.1 s window is a snapshot, so a constant flash is not a warning. Optional whole-room check: a window starting just **before** the flash (`from = t_k − 0.05`) → `group.order.direction` `eq: "simultaneous"` (onsets need a rising edge inside the window).
 
-Color swap: in a window right before the overtake (`"from": "1.5s"`, `"duration": "0.1s"`) and right after the flash (`"from": "2.5s"`, `"duration": "0.1s"`), the tube that holds the faster point shows color A before and color B after (`fixtures.<id>.color.hue.mean`; pick the tube from the computed positions, or use `detail: "raw"`). This is the weakest check: if the agent cannot locate the points, it must say the swap was only verified visually.
+Between overtakes (`"from": "<(t_k + t_{k+1}) / 2>s"`, `"duration": "0.3s"`): `{ "path": "fixtures.*.range.max", "quantifier": "any", "lte": 0.05 }` (only the two points are lit).
+
+Color swap: pick `t_before` (before `t_k`, after the previous flash) and `t_after` (after the flash of `t_k`) where the faster point A is mid-tube (see above), and observe each with `duration` ≈ 0.1 s, `fps: 60`: the tube that holds A shows color A before and color B after (`fixtures.<tube>.color.hue.mean`, or the pixel via `fixtures.<tube>.heads.<pixel>` with `detail: "raw"` for its color). The agent must give `t_before`, `t_after`, the tube and the formula. If it cannot locate the points, it must say the swap was only verified visually.
 
 Speed change: `modifiers.update { "params": { "<speedB key>": 0.75 } }` → overtakes every 4 cycles (16 beats); the pattern period grows accordingly (`group.temporal.beats` ≈ 16 over a 32-beat window, or `group.temporal.kind` `ne: "constant"` if the window is too short — say so).
 

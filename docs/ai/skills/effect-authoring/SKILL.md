@@ -102,7 +102,7 @@ apply {
 
 - `spread`: `same` | `spatial` (linear/radial/conical handle) | `order` (fixture by fixture, `ranks` or `fixtureOrder`) | `within` (over the pixels of each fixture). Offer only what the plugin's `distribution.modes` declares; plugins with their own geometry (points, room coordinates) declare `"modes": ["none"]`.
 - `speed`: `{ "mode": "beat", "value": beats per cycle }` or `{ "mode": "time", "value": seconds per cycle }`. Choose musically: 1 = every beat, 4 = one bar.
-- `blend`: `absolute` plugins default to `override`; modulators (`scale`/`bipolar`) to `add`.
+- `blend`: `absolute` plugins default to `override`; modulators (`scale`/`bipolar`) to `add`. A `scale` runner over other layers usually wants `multiply` (Mask); trigger blinders want `absolute` output with `s.base0..2` pass-through (ui-rules *Output and blend*).
 - Use `dryRun: true` first when the batch is large; it returns the same diff and findings and changes nothing.
 - Live page rules (which widgets, layout): [ui-rules.md](ui-rules.md) *Live page*. Skip the page when the user only wants the card.
 
