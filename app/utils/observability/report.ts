@@ -2,7 +2,7 @@
  * Compact text report of an observation (ADR 0002 §6.4).
  *
  * ```
- * observe front · 0.0–2.0s · 30 fps · preview · bpm 120
+ * observe front · 0.0–2.0s · 30 fps · preview (this layer on the programmed base) · bpm 120
  * GROUP 8 fixtures · scalar · sources: waveform@sha256:3fa…(absolute, add, 1.0)
  *   range    0–1.00 mean .50 sd .35
  *   temporal periodic 1.00 Hz · 2 beats · beat lock
@@ -55,6 +55,15 @@ export function windowDigits(from: number, to: number): number {
   const exact = (x: number, d: number) => Math.abs(Number(x.toFixed(d)) - x) < 1e-6;
   while (digits < 3 && !(exact(from, digits) && exact(to, digits))) digits++;
   return digits;
+}
+
+/**
+ * Mode label. A preview renders one layer over the **programmed** base
+ * values (channel chasers), without other layers, live overrides, presets
+ * or blackout — the header says so.
+ */
+function modeText(mode: 'live' | 'preview'): string {
+  return mode === 'preview' ? 'preview (this layer on the programmed base)' : 'live (full stack)';
 }
 
 /** Padded line label (`  range    `). */
@@ -215,7 +224,7 @@ export function renderReport(
   const to = w.from + w.duration;
   const digits = windowDigits(w.from, to);
   const lines = [
-    `observe${opts.title ? ` ${opts.title}` : ''} · ${w.from.toFixed(digits)}–${to.toFixed(digits)}s · ${w.fps} fps · ${trace.mode} · bpm ${trim(w.bpm, 1)}`,
+    `observe${opts.title ? ` ${opts.title}` : ''} · ${w.from.toFixed(digits)}–${to.toFixed(digits)}s · ${w.fps} fps · ${modeText(trace.mode)} · bpm ${trim(w.bpm, 1)}`,
   ];
   const groups = json.groups ? Object.values(json.groups) : [];
   // The aggregate block first whenever it differs from the single named group.

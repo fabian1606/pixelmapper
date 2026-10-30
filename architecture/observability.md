@@ -82,6 +82,11 @@ not a TypeScript twin of the render loop:
 - Each sample carries the instance's distribution coordinate (`spatial`,
   `rank`, from the TS distribution code) so spatial features can follow the
   spread (ADR B6).
+- **Base values:** the programmed values of the channels (their chasers,
+  as stored in the project — `fixtures.get` shows them), not what is on
+  stage right now: no other layers, live overrides, presets or blackout.
+  The report header says `preview (this layer on the programmed base)`;
+  live says `live (full stack)`.
 - Other modifiers of the stack are **not** rendered (isolation); `live`
   shows the full stack. A fresh instance blends `add` like a newly added
   modifier, so on a full base it may saturate — the report then says
@@ -208,7 +213,7 @@ The `issues` in the JSON and on the report's issues line are unchanged;
 ## Report text
 
 ```
-observe all · 0.0–2.0s · 30 fps · preview · bpm 120
+observe all · 0.0–2.0s · 30 fps · preview (this layer on the programmed base) · bpm 120
 GROUP 8 fixtures · scalar · sources: @pixelmapper/waveform@sha256:3a9…(scale, add, 1.0)
   range    0–1.00 mean .11 sd .30
   temporal periodic 1.00 Hz · 2 beats · beat lock

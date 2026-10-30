@@ -37,7 +37,7 @@ describe('renderReport', () => {
     ]);
     const text = renderReport(trace, json, expectations, findings, { title: 'front' });
     const lines = text.split('\n');
-    expect(lines[0]).toBe('observe front · 0.0–2.0s · 30 fps · preview · bpm 120');
+    expect(lines[0]).toBe('observe front · 0.0–2.0s · 30 fps · preview (this layer on the programmed base) · bpm 120');
     expect(lines[1]).toBe('GROUP 8 fixtures · scalar · sources: waveform@sha256:3fa…(absolute, add, 1.0)');
     expect(text).toContain('temporal periodic 1.00 Hz · 2 beats · beat lock');
     expect(text).toContain('spatial  chase +x · step .125');
