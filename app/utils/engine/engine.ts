@@ -27,6 +27,8 @@ export class EffectEngine {
 
   /** Latest DMX frame received from the worker. */
   public dmxBuffer: Uint8Array = new Uint8Array(512);
+  /** Wall-clock time (ms) of the latest frame; 0 before the first one. */
+  public lastFrameAt = 0;
 
   /** Resolves when the (first) worker WASM engine is ready. */
   public readonly ready: Promise<void>;
@@ -98,7 +100,11 @@ export class EffectEngine {
       else if (m.type === 'frame' && m.dmx && m.elapsedMs !== undefined) {
         this.watchdog?.beat();
         this.dmxBuffer = m.dmx;
+        this.lastFrameAt = Date.now();
         this.onFrame?.(m.dmx, m.elapsedMs, m.signatures);
+      }
+      else if (m.type === 'canvas.captured') {
+        this.settleCapture(e.data as { requestId: number; png?: ArrayBuffer; error?: string });
       }
       else if (m.type === 'plugin-error' || m.type === 'plugin-log') {
         this.onPluginEvent?.(e.data as PluginEvent);
@@ -288,6 +294,40 @@ export class EffectEngine {
 
   public setCanvasRemoteSelections(json: string): void {
     this.canvasPost('canvas.set_remote_selections', { json });
+  }
+
+  /** Pending editor-canvas captures by request id. */
+  private captures = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>();
+  private captureSeq = 0;
+
+  /**
+   * Captures the editor canvas (drawn in the worker) as a PNG blob — used by
+   * the agent `screenshot` tool. Rejects after `timeoutMs` or when the
+   * worker has no canvas.
+   */
+  public captureCanvas(timeoutMs = 3_000): Promise<Blob> {
+    if (!this.worker) return Promise.reject(new Error('engine worker is not running'));
+    const requestId = ++this.captureSeq;
+    return new Promise<Blob>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.captures.delete(requestId);
+        reject(new Error('editor canvas capture timed out'));
+      }, timeoutMs);
+      this.captures.set(requestId, {
+        resolve: (b) => { clearTimeout(timer); resolve(b); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      this.worker!.postMessage({ type: 'canvas.capture', requestId });
+    });
+  }
+
+  /** Resolves a capture answered by the worker. */
+  private settleCapture(m: { requestId: number; png?: ArrayBuffer; error?: string }): void {
+    const pending = this.captures.get(m.requestId);
+    if (!pending) return;
+    this.captures.delete(m.requestId);
+    if (m.png) pending.resolve(new Blob([m.png], { type: 'image/png' }));
+    else pending.reject(new Error(m.error ?? 'editor canvas capture failed'));
   }
 
   // ── Modifier list ─────────────────────────────

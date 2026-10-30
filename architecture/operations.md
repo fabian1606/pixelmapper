@@ -42,12 +42,14 @@ Live widgets are stored as `{ type: 'effect-param', effectId, paramKey: 'params.
 
 All positions are in normalized world space 0–1. `x` runs left to right and `y` top to bottom on the 2D canvas, the same space as plugin `Sample.x/y`. `z` is the height above the floor, normalized like `x`/`y`. Every operation description states this.
 
+**Rotation and orientation** (`core/orientation.ts`). `rotation` is a clockwise yaw in degrees on the 2D canvas (y down): a local offset (px, py) lands at (px·cos − py·sin, px·sin + py·cos), the same formula in `beamWorldPx`, `kindToWorld` and rs-engine-canvas (`canvas.rotate`). A bar whose heads run along its own +x axis therefore runs left→right at 0°, top→bottom at 90°, right→left at 180° and bottom→top at 270°. Because not every fixture lays its pixels out along local x (OFL matrices, drawn LED strips), `project.digest`, `fixtures.find` and `fixtures.get` report the *measured* direction for every multi-head fixture: `orientation { runs: "left→right" | "top→bottom" | … (8 compass words), axis { dx, dy } (unit vector head 0 → last head), firstHead, lastHead }` from the layout-packet head positions. `fixtures.rotate` accepts per entry either `rotation` or `alignTo: "x" | "y" | { dx, dy }` (+ `direction: "forward" | "reverse"`), which resolves to the rotation that makes head 0 → last head point that way, and reports the new direction as an `orientation` info finding. The agent `screenshot` tool (see `architecture/mcp-bridge-protocol.md`) draws the same geometry.
+
 ## Catalog
 
 | Namespace | Operations |
 |---|---|
 | `project` | `digest` (q), `setBpm` (m, through the `engine.bpm` live-op) |
-| `fixtures` | `find` (q: ids, kind, signature, channelType, groupId, name, bbox), `get` (q), `move` (m, with z), `rotate` (m), `setKindConfig` (m) |
+| `fixtures` | `find` (q: ids, kind, signature, channelType, groupId, name, bbox), `get` (q), `move` (m, with z), `rotate` (m: `rotation` or `alignTo` + `direction`), `setKindConfig` (m); views carry `rotation` + measured `orientation` |
 | `nodes` / `groups` / `selection` | `nodes.rename` (m), `groups.list` (q), `selection.get` (q) |
 | `extensionData` / `channels` | `extensionData.set` (m), `channels.set` (m: normalized values, channelType / index / `#rrggbb`) |
 | `modifiers` | `list` (q), `add`, `update`, `remove`, `reorder`, `applyRecipe` (m), `trigger` (action). The mutations use the card vocabulary (ADR B3): plugin alias or hash, targets, params, recipe, spread `same` / `spatial` / `order` / `within`, strength, blend, speed; each produces one `SetModifiers`. `trigger { modifierId, paramKey, action: press \| release \| click, clicks? }` (`core/modifier-trigger.ts`) presses a `trigger` param through `setEffectTrigger` (same path as the card button / live button): no undo step, validates that the param is a trigger, returns `engineTimeMs` (the plugin's `ctx.timeMs` clock) and `wallTimeMs` for a following live `observe`; a click burst uses one timestamp for all edges |

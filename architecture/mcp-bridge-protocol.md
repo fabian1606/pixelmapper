@@ -101,6 +101,8 @@ The hub drops (and logs) invalid definitions instead of failing the hello.
 { "type": "image", "data": "<base64>", "mimeType": "image/png" } // optional, e.g. a screenshot tool
 ```
 
+`image` items are forwarded to MCP unchanged as the SDK `CallToolResult` image block (`{ type: "image", data, mimeType }`, accepted by Claude Code and Claude Desktop). They do not count toward the CLI's text output budget (`PIXELMAPPER_MCP_MAX_OUTPUT_CHARS`) and are never cut; the frame limit (32 MiB) still applies, so producers cap their size (the `screenshot` tool renders at most 2048 px on the longer side, a few hundred KB of base64).
+
 ### Single active app
 
 Only one `app` connection is active. A new authenticated `app` hello **wins**: the hub sends `superseded` to the previous app, closes it with `4003`, fails its in-flight calls with `app_disconnected`, and switches to the new tool list.

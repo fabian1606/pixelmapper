@@ -9,6 +9,7 @@ import { vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { ref } from 'vue';
 import { useEngineStore } from '~/stores/engine-store';
+import { Beam } from '~/utils/engine/core/beam';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { clearHistory } from '~/components/engine/composables/use-history';
@@ -84,4 +85,21 @@ export function registryWith(...defs: CoreOperation[]): OperationRegistry {
   const registry = createOperationRegistry();
   for (const d of defs) registry.register(d);
   return registry;
+}
+
+/**
+ * A pixel bar (RGB per pixel) whose heads run along its local +x axis:
+ * head 0 on the left at rotation 0. Channels start at address 1.
+ */
+export function makeBarFixture(id: string, x: number, y: number, rotation = 0, pixels = 4): Fixture {
+  const f = new Fixture(id, [], 1);
+  f.name = id;
+  f.fixturePosition = { x, y };
+  f.fixtureSize = { x: pixels, y: 1 };
+  f.rotation = rotation;
+  f.beams = Array.from({ length: pixels }, (_, i) => new Beam(`b${i}`, (i + 0.5) / pixels - 0.5, 0));
+  f.channels = f.beams.flatMap((b, i) => (['RED', 'GREEN', 'BLUE'] as const).map((type, c) => ({
+    type, addressOffset: i * 3 + c, role: 'COLOR' as const, colorValue: '#ffffff', defaultValue: 0, beamId: b.id,
+  }))) as Fixture['channels'];
+  return f;
 }

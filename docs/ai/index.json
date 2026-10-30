@@ -2413,7 +2413,7 @@
       "id": "fixtures.rotate",
       "kind": "mutation",
       "namespace": "fixtures",
-      "summary": "Set the yaw rotation of fixtures in degrees (0–360, clockwise on the 2D canvas). One RotateFixture command for all fixtures."
+      "summary": "Set the yaw rotation of fixtures, either as `rotation` in degrees (0–360, clockwise on the 2D canvas) or with `alignTo` so the heads run along an axis. One RotateFixture command for all fixtures."
     },
     {
       "id": "fixtures.setKindConfig",
