@@ -142,7 +142,7 @@ describe('observe triggers (live)', () => {
     ['not a trigger param', { paramKey: 'level' }, /not a trigger/],
   ])('fails before capturing: %s', async (_, patch, message) => {
     const { deps, edges } = fakeEngine();
-    const { mode, modifierId, window, at, paramKey } = patch as Record<string, never>;
+    const { mode, modifierId, window, at, paramKey } = patch as { mode?: 'preview'; modifierId?: string; window?: { duration: string }; at?: string; paramKey?: string };
     const report = await observe({
       targets: 'all',
       ...(mode ? { mode } : {}),
