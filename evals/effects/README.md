@@ -64,6 +64,8 @@ All scenarios assume the same project; build it once and save it as `evals-room`
 
 ## Results
 
+Recorded runs: [2026-10-30 live MCP run (headless app, agents as client)](results/2026-10-30-live-mcp-run.md).
+
 | Scenario | Client | Date | Build ok (attempts) | Expectations | Controls | One undo | Notes |
 |---|---|---|---|---|---|---|---|
 | 0 corner wave | Claude Code | | | | | | |
