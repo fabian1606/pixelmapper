@@ -3,7 +3,7 @@
  * line splitting across chunks, writes, drops and the no-serial message.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Platform, SerialApi, SerialEvents, SharedGlobals } from '@pixelmapper/extension-api';
+import type { Platform, SerialApi, SerialEvents, SerialPortHandle, SharedGlobals } from '@pixelmapper/extension-api';
 import { SerialPortConnector } from './serial-base';
 
 /** Minimal concrete connector recording received lines. */
@@ -18,7 +18,7 @@ class TestSerialConnector extends SerialPortConnector {
 
 /** Installs a host stub that only provides `platform`. */
 function stubPlatform(serial: SerialApi | null) {
-  const platform: Platform = { kind: 'web', udp: null, serial, midi: null };
+  const platform: Platform = { kind: 'web', serial, midi: null, artnetBridge: null };
   globalThis.__PIXELMAPPER_SHARED__ = { vue: {}, pinia: {}, api: { platform } as unknown as SharedGlobals['api'] };
 }
 
@@ -28,7 +28,8 @@ function fakeSerial(boot: string) {
   const written: number[][] = [];
   const close = vi.fn(async () => {});
   const api: SerialApi = {
-    requestPort: vi.fn(async () => ({
+    // Explicit return type: `vi.fn` drops the contextual typing of `open`'s parameters.
+    requestPort: vi.fn(async (): Promise<SerialPortHandle> => ({
       open: async (_opts, ev) => {
         events = ev;
         // Like real hardware, data arrives in a later task (after connect() armed the boot wait).

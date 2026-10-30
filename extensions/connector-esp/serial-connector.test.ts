@@ -11,7 +11,7 @@ const META = new TextEncoder().encode(JSON.stringify({ version: '0.1.0' }));
 /** Installs a desktop-like host with a bundled firmware. */
 function stubDesktop() {
   const platform: Platform = {
-    kind: 'tauri', udp: null, serial: null, midi: null,
+    kind: 'tauri', artnetBridge: null, serial: null, midi: null,
     http: { getBytes: async () => new Uint8Array([1]) },
     resources: { read: async path => (path.endsWith('meta.json') ? META : new Uint8Array([1])) },
   };

@@ -33,7 +33,7 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
 8. `expect` is evaluated against `{ state, diff, results }`:
    - `state` holds `bpm`, `fixtures`, `groups`, `modifiers`, `livePages` and `selection`;
    - paths use dots, `*` fans out, and numeric segments index arrays;
-   - `state.livePages` is the stored form (`mapping.effectId`, `paramKey: "params.<key>"`), unlike the views below.
+   - `state.livePages` is the stored form (`mapping.effectId`, `paramKey: "params.<key>"`; buttons: `actions.N.action.effectId`), unlike the views below.
    - `state.modifiers` are `modifiers.list` views (`blend`, `spread`, `speed.value`, `targets.fixtureIds`), not the stored instance (WP-L: `state.modifiers.N.blendMode` / `.distribution.*` / `.speed.timeMs` became `.blend` / `.spread.*` / `.speed.value`).
    - `results.N` is op N's output value; `results.N.value.<key>` (the outcome shape the output shows) is accepted as `results.N.<key>` when that value has no own `value` key (`resultValuePath`).
    - A failed expectation flags the tool call as an error but does not roll back.
@@ -57,6 +57,25 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
 
 Live widgets are stored as `{ type: 'effect-param', effectId, paramKey: 'params.<key>' }` but every agent-facing view speaks the input vocabulary of `live.addWidget`: `{ modifierId, paramKey: '<key>' }` (built-in keys `strength` / `speed` / `fanning` stay; a plugin param named like a built-in keeps `params.`). Mapping happens at the presentation boundary only (`fromLiveMapping` / `presentParamKey` in `core/live-mapping.ts`, `liveWidgetView` / `livePageView` in `core/live.ts`): `live.listPages`, inspect `livePage:<id>` / `liveWidget:<id>` (`app/utils/agents/host-inspect.ts`) and the `liveWidget:*` entries of the apply diff.
 
+## Live buttons (button actions)
+
+Buttons store `actions: ButtonAction[]` (trigger → action → duration; `utils/live/types.ts`). They are played by `composables/live-ops/button-runtime.ts`, which reuses `applyMapping`, the flash stack and the overwrites. `LiveWidget.mapping` stays `{ type: 'none' }` on buttons. `core/live-button-actions.ts` adapts the `live.*` ops:
+
+- **Input.** `live.addWidget` / `live.updateWidget` take `actions` (validated: trigger enum, duration / hold, at least one action), `appearance` and `inputs` (keyboard code, MIDI note/CC; `null` clears them on update). These fields are for buttons only; on other widget types the op fails. Passing `mapping` and `actions` together also fails. Explicit actions get `triggerTouched: true`, so the sidebar's smart default never overrides them.
+- **`mapping` on a button** becomes one action (`mappingToButtonAction`). It starts from `withMapping` / `defaultTriggerFor`, the same smart default as the sidebar, which needs the presets' types (`CoreReadApi.presets()`). It then overrides the trigger where the runtime needs both edges:
+  - a `trigger` param → `hold`. The runtime starts the action on press (`setEffectTrigger` press edge) and stops it on release (release edge). A forever `press` would never release.
+  - a bool param → `toggle` (behavior `latch`, the default) or `hold` (behavior `hold`). The stored behavior becomes `hold` either way, so the param follows the action (true while it runs). On a toggle trigger, `latch` would flip on start and ignore the stop.
+  - speed with `config.behavior: "hold"` → `hold`.
+  
+  An action whose trigger differs from the smart default is marked `triggerTouched`.
+- **Findings** (`buttonActionFindings`). Each action's mapping goes through `mappingFindings` as a `button`, with the message prefixed `action N (<trigger>)`. On top of that:
+  - error `preset-not-found`;
+  - warning `trigger-never-released`: a trigger param on a forever `press` / `double` / `long` / `release` action;
+  - warning `bool-latch-not-released`: a latch bool on `hold` / `toggle`;
+  - warning `duration-ignored`: a duration the action does not honour (`durationModesFor`).
+- **Views.** `live.listPages` and inspect `liveWidget:<id>` show buttons as `actions` in the agent vocabulary (`fromButtonAction`: `modifierId`, bare param key, no `triggerTouched`), plus `appearance` / `inputs` and a `mappingSummary` like `hold → effect-param: modifier m1 → hit`. They have no `mapping` field. The apply diff covers `actions.N.trigger` / `actions.N.action.paramKey` etc. in the same vocabulary.
+- `global-function` accepts `stop-all` (buttons; default trigger `long`).
+
 ## Coordinates
 
 All positions are in normalized world space 0–1. `x` runs left to right and `y` top to bottom on the 2D canvas, the same space as plugin `Sample.x/y`. `z` is the height above the floor, normalized like `x`/`y`. Every operation description states this.
@@ -73,7 +92,7 @@ All positions are in normalized world space 0–1. `x` runs left to right and `y
 | `extensionData` / `channels` | `extensionData.set` (m), `channels.set` (m: normalized values, channelType / index / `#rrggbb`) |
 | `modifiers` | `list` (q), `add`, `update`, `remove`, `reorder`, `applyRecipe` (m), `trigger` (action). The mutations use the card vocabulary (ADR B3): plugin alias or hash, targets, params, recipe, spread `same` / `spatial` / `order` / `within`, strength, blend, speed; each produces one `SetModifiers`. `speed` is a partial patch (`applySpeed`, `core/modifier-spread.ts`): any subset of `mode` / `value` / `beatOffset` merges onto the current speed (`value` applies to the resulting mode; a `value` in `infinite` mode is an error). `trigger { modifierId, paramKey, action: press \| release \| click, clicks? }` (`core/modifier-trigger.ts`) presses a `trigger` param through `setEffectTrigger` (same path as the card button / live button): no undo step, validates that the param is a trigger, returns `engineTimeMs` (the plugin's `ctx.timeMs` clock) and `wallTimeMs` for a following live `observe`; a click burst uses one timestamp for all edges. Ops addressing an instance resolve it through `requireModifier` (`core/shared.ts`): unknown ids fail with `modifierNotFound`, an id several instances share fails as ambiguous (`modifierAmbiguous`); `reorder` refuses a stack with shared ids, `live.*` effect-param mappings onto one get the error finding `modifier-ambiguous`, and `list` then adds `duplicateIds: [{ id, count }]` and readable `warnings` |
 | `plugins` | `list`, `get` (q); `build`, `publish` (action) |
-| `live` | `listPages` (q), `addPage`, `addWidget`, `updateWidget`, `removeWidget` (m; `effect-param` mappings by modifier id + param key: sliders → number/int/bool/trigger and the built-in keys, buttons → bool (latch/hold) and trigger, xy pads → point; other combinations warn `mapping-ignored-by-widget`) |
+| `live` | `listPages` (q), `addPage`, `addWidget`, `updateWidget`, `removeWidget` (m; `effect-param` mappings by modifier id + param key: sliders → number/int/bool/trigger and the built-in keys, buttons → bool (latch/hold) and trigger, xy pads → point; other combinations warn `mapping-ignored-by-widget`). Buttons store a script of `actions` (plus `appearance`, `inputs`) instead of a mapping, see *Live buttons* below |
 
 ## Tests
 

@@ -14,12 +14,15 @@ import KindAddForm from './KindAddForm.vue';
 import { listKinds } from '~/utils/kinds/kind-host';
 import { iconByName } from '~/utils/extensions/icons';
 import type { FixtureSummary, OflFixture } from '~/utils/ofl/types';
-import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
 import { useFixtureLibrary } from '~/composables/use-fixture-library';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { useEngineStore } from '~/stores/engine-store';
+import { findFreeAddressSpan } from '~/utils/engine/free-address';
+import { createFixtureFromDefinition } from '~/utils/fixture-definitions/resolve-definition';
+import { customFixtureKey } from '~/utils/fixture-definitions/custom-fixtures';
 import { useCustomFixtureLibrary } from '~/composables/use-custom-fixture-library';
 import type { CustomFixtureEntry } from '~/composables/use-custom-fixture-library';
+import { newUuid } from '~/utils/ids';
 import PmPanel from '~/components/primitives/PmPanel.vue';
 import PmMenuGroup from '~/components/primitives/PmMenuGroup.vue';
 
@@ -103,6 +106,7 @@ function saveCustomFixture(ofl: OflFixture, id: string | null = null) {
     .catch(err => console.error('Failed to save custom fixture:', err));
 }
 
+/** Deletes a custom fixture definition and refreshes the list. */
 function removeCustomFixture(id: string) {
   customLibrary.removeCustomFixture(id)
     .catch(err => console.error('Failed to delete custom fixture:', err));
@@ -142,7 +146,13 @@ function editStoredCustomFixture(stored: CustomFixtureEntry) {
 
 function handleAddCustomFixtures(fixtures: Fixture[]) {
   const def = fixtures[0]?.definition;
-  if (def) saveCustomFixture(def);
+  if (def) {
+    // New library entry; its key is the fixtures' source so the mode can
+    // change later (plan M4.3). The id is chosen up front, the save is async.
+    const id = newUuid();
+    saveCustomFixture(def, id);
+    for (const f of fixtures) f.source = { key: customFixtureKey({ id }), modeIndex: 0 };
+  }
   emit('add', fixtures);
   isCustomFixtureEditorOpen.value = false;
   customFixtureToEdit.value = null;
@@ -174,18 +184,10 @@ function getSelectedFootprint(): number {
   return selectedMode ? selectedMode.channels.length : 1;
 }
 
+/** Suggests the first free address span for the selected mode and amount (shared helper, plan M4.2). */
 function autoAssignFreeAddress() {
-  const footprint = getSelectedFootprint();
-  const requiredSpan = footprint * config.value.amount;
-  const occupiedRanges = engineStore.flatFixtures.map(f => ({
-    start: f.startAddress, end: f.startAddress + f.channels.length - 1,
-  })).sort((a, b) => a.start - b.start);
-
-  let searchStart = 1;
-  for (const range of occupiedRanges) {
-    if (searchStart + requiredSpan - 1 < range.start) break;
-    searchStart = Math.max(searchStart, range.end + 1);
-  }
+  const occupants = engineStore.flatFixtures.map(f => ({ id: f.id, startAddress: f.startAddress, channelCount: f.channels.length }));
+  const searchStart = findFreeAddressSpan(occupants, getSelectedFootprint(), config.value.amount) ?? 1;
   config.value.universe = Math.floor((searchStart - 1) / 512) + 1;
   config.value.address = ((searchStart - 1) % 512) + 1;
 }
@@ -218,7 +220,7 @@ async function selectRecentFixture(recent: RecentFixture) {
 }
 
 function customKey(stored: CustomFixtureEntry): string {
-  return `custom/${stored.id}`;
+  return customFixtureKey(stored);
 }
 
 function selectCustomFixture(stored: CustomFixtureEntry) {
@@ -251,12 +253,12 @@ function handleAdd() {
       currentUniverse++;
       currentLocalAddress = 1;
     }
-    const fixture = createFixtureFromOfl(
-      fullFixtureData.value,
-      modeIdx,
-      undefined,
-      selectedSummary.value?.manufacturer,
-    );
+    // Shared builder: also records the definition key + mode (plan M4.3).
+    const fixture = createFixtureFromDefinition({
+      key: selectedSummary.value.key,
+      definition: fullFixtureData.value,
+      manufacturer: selectedSummary.value.manufacturer ?? '',
+    }, modeIdx);
     fixture.startAddress = (currentUniverse - 1) * 512 + currentLocalAddress;
     (fixture as any).dmxConfig = { universe: currentUniverse, address: currentLocalAddress };
     if (count > 1) fixture.name = `${fixture.name} ${i + 1}`;

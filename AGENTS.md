@@ -23,6 +23,7 @@ bun run build            # Production build
 bun run generate         # Static site generation
 bun run preview          # Preview production build
 bun run release          # Bump version, create git tag, push (triggers CI firmware build)
+bun run typecheck:extensions  # vue-tsc over extensions/** and the extension API (not covered by nuxt typecheck)
 ```
 
 ### Rust Engine

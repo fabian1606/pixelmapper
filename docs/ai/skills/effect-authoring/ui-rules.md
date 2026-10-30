@@ -97,19 +97,33 @@ Build a page when the user will **perform** the effect (a show, "controls", "but
 
 | Control | Widget | Mapping |
 |---|---|---|
-| momentary action (`trigger` param) | `button` | `effect-param` → the trigger key (press / release / multi-click reach the effect) |
+| momentary action (`trigger` param) | `button` | `effect-param` → the trigger key; stored as one "While pressing" (`hold`) action, so press / release / multi-click reach the effect |
 | amount (`number`/`int`) | `slider` | `effect-param` → the param key (`"spacing"` or `"params.spacing"`; 0–1 maps onto min–max) |
-| on/off (`bool`) | `button` | `effect-param` → the key, `behavior: "latch"` (toggle, default) or `"hold"` (on while held) |
+| on/off (`bool`) | `button` | `effect-param` → the key, `behavior: "latch"` (default → a `toggle` action: press on, press off) or `"hold"` (a `hold` action: on while held) |
 | a position (`point` param) | `xy` pad | `effect-param` → the point key (pad x/y 0–1 → the point's x/y); keep the canvas handle too |
 | overall level | `slider` | `effect-param` → `strength` |
 | tempo | `slider` for time-mode effects; for beat-synced effects the project BPM (a `beat` widget shows / taps it) | slider: `effect-param` → `speed` (sets the time-mode cycle ≈ 0.1–5 s; no effect on a beat-mode instance). `beat`: no mapping |
-| global blackout / strobe / blinder | `button` | `{ "type": "global-function", "function": "blackout" }` (`strobe`, `blind`; optional `config`) |
+| global blackout / strobe / blinder | `button` | `{ "type": "global-function", "function": "blackout" }` (`strobe`, `blind`; optional `config`; while held) |
 | context | `label`, `fixture-preview` | none (`color`, `label`, `beat`, `fixture-preview` ignore mappings) |
 
 - **What no live control drives:** `effect-param` cannot drive `color`, `gradient`, `enum` or `curve` params. Colors/palettes and enums live on the card and in recipes. Points are dragged on the canvas; add an `xy` pad only when a performer needs to move a point live. If a performer must switch looks live, use recipes on the card or two instances with sliders on `strength`.
 - Layout: let `live.addWidget` auto-place (omit `gridX`/`gridY`); add widgets in reading order — triggers first (big buttons: `gridW`/`gridH` 6×6), then sliders, then labels. Give every widget a `label` (English, 1–2 words) and buttons a `color` hinting the effect.
 - Add the page in the **same `apply` batch** as the modifier, with your own ids (`modifiers.add` `id`, `live.addPage` `id`), so one undo removes everything. A widget: `live.addWidget { "pageId", "type", "label", "color": "#rrggbb", "gridW", "gridH", "mapping": { "type": "effect-param", "modifierId", "paramKey", "behavior"? } }`.
 - `live.addWidget` warns (`mapping-ignored-by-widget`) when the widget cannot drive the mapping — treat that warning as an error and fix the widget type.
+
+### Buttons are scripts of actions
+
+A button stores `actions: [{ trigger, action, duration?, hold? }]`, not a `mapping`; `action` has the mapping shape above.
+
+- **Triggers:** `press`, `double` (second press within 300 ms), `long` (after `hold`, default 1 s), `hold` (runs while held), `release`, `toggle` (press on, next press off).
+- **Duration** (`press` / `double` / `long` / `release` only): `forever` (default), `{ "mode": "beats", "beats": 4 }`, `{ "mode": "time", "ms": 500 }`, or `once` (one pass of a preset).
+- **`mapping` is the shortcut for one action.** `live.addWidget` / `live.updateWidget` choose the trigger: a trigger param → `hold` (press and release edges), bool `latch` → `toggle`, bool `hold` → `hold`. Everything else gets the UI default: flash / overwrite presets, strobe / blind / blackout, channel and dimmer-group → `hold`, `stop-all` → `long`, all others → `press`.
+- **Use `actions`** for more than one step, e.g. press = preset and long press = `stop-all`. Don't pass `mapping` and `actions` together.
+- Optional, buttons only: `appearance { active: full|blink|pulse, inactive: dim|off|full }` and `inputs { key: "Space", midi: { type: "note", channel: 1, number: 36 } }`. Bind a key only when the user asks.
+- `live.listPages` and inspect `liveWidget:<id>` show buttons as `actions` in this vocabulary. Treat these warnings as errors and fix the script:
+  - `trigger-never-released`: a trigger param on a `press` action with no duration;
+  - `bool-latch-not-released`: a latch bool on `hold` / `toggle`;
+  - `duration-ignored`.
 
 ## Custom panel (`ui.ts`) — last resort
 

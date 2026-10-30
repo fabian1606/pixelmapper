@@ -2,7 +2,8 @@
 /**
  * One output connector on the connections page (generic, plan P6.1):
  * status, label, connect/disconnect/remove, the type's settings component
- * (rendered in its extension's context), universe output mapping and logs.
+ * (rendered in its extension's context), universe output mapping (unless
+ * the type sets `ownsOutputMapping`) and logs.
  */
 import { computed, ref } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -19,6 +20,8 @@ const store = useConnectionsStore();
 const { usedUniverses, totalUniverses } = storeToRefs(useEngineStore());
 
 const registered = computed(() => getConnectorType(props.connector.meta.type));
+/** Generic output mapping, unless the type's settings component renders its own (API 1.4). */
+const showOutputs = computed(() => props.connector.outputCount > 0 && !registered.value?.def.ownsOutputMapping);
 const outputsOpen = ref(false);
 const logsOpen = ref(false);
 
@@ -108,8 +111,8 @@ function setOutput(index: number, universe: number) {
     />
     <p v-else-if="!registered" class="text-xs text-muted-foreground">The extension providing “{{ connector.meta.type }}” is not installed.</p>
 
-    <!-- Universe outputs -->
-    <template v-if="connector.outputCount > 0">
+    <!-- Universe outputs (hidden when the settings component maps them itself) -->
+    <template v-if="showOutputs">
       <button class="flex items-center gap-2 px-1 py-1 rounded hover:bg-accent/50 transition-colors w-full text-left" @click="outputsOpen = !outputsOpen">
         <component :is="outputsOpen ? ChevronDown : ChevronRight" :size="14" class="text-muted-foreground" />
         <span class="text-xs font-medium text-muted-foreground">Outputs</span>

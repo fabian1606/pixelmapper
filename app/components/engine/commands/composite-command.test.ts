@@ -1,9 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { CompositeCommand } from './composite-command';
+import { CompositeCommand, createBatchCommand } from './composite-command';
 import { RenameNodeCommand } from './rename-command';
-import { commandFromPayload, type ReplayContext } from './serializable-command';
-import { requirementsOfCommand } from '~/utils/extensions/requires';
+import { commandFromPayload, registerCommand, type ReplayContext, type SerializableCommand } from './serializable-command';
+import { flattenCommandTypes, requirementsOfCommand, requirementsToOpen } from '~/utils/extensions/requires';
+import type { SceneNode } from '~/utils/engine/core/group';
+import { serializeNode } from '~/utils/engine/serialize';
+// Registers the 'AddFixtures' replay factory.
+import './add-fixture-command';
 import { rebaseChange } from '~/utils/sync/merge/adapters/registry';
 import { registerCompositeAdapters } from '~/utils/sync/merge/adapters/composite';
 import { Fixture } from '~/utils/engine/core/fixture';
@@ -96,5 +100,57 @@ describe('CompositeCommand', () => {
     const r = rebaseChange({ type: 'Composite', payload }, {} as never);
     expect(r.skipped).toBeUndefined();
     expect(r.payload).toEqual(payload);
+  });
+});
+
+// ── Batches (extension API `commands.batch`, plan M4.4) ──
+
+describe('createBatchCommand', () => {
+  it('is one composite: order, reverse undo, serialized children', () => {
+    const { a, b } = scene();
+    const batch = createBatchCommand([new RenameNodeCommand(a, 'A2'), new RenameNodeCommand(b, 'B2')], 'Both');
+    expect(batch).toBeInstanceOf(CompositeCommand);
+    batch.execute();
+    expect([a.name, b.name]).toEqual(['A2', 'B2']);
+    batch.undo();
+    expect([a.name, b.name]).toEqual(['A', 'B']);
+    expect(batch.toPayload()).toMatchObject({ label: 'Both', actor: 'user', children: [{ commandType: 'RenameNode' }, { commandType: 'RenameNode' }] });
+  });
+
+  it('replays children lazily, so later children see fixtures added by earlier ones', () => {
+    // A test command that renames a fixture found in the replay context at construction time.
+    registerCommand('TestRename', (payload, ctx) => {
+      const fixture = ctx.flatFixtures.find(f => f.id === payload.id);
+      return { description: 'rename', execute() { if (fixture) fixture.name = payload.name; }, undo() {} };
+    });
+    const added = Fixture.createRGBFixture('new-1');
+    const nodes: SceneNode[] = [];
+    const ctx = { sceneNodes: nodes, flatFixtures: [] } as unknown as ReplayContext;
+    const payload = {
+      id: 'g1',
+      label: 'Add + rename',
+      actor: 'user',
+      children: [
+        { commandType: 'AddFixtures', payload: { nodes: [JSON.parse(JSON.stringify(serializeNode(added)))] } },
+        { commandType: 'TestRename', payload: { id: 'new-1', name: 'Renamed' } },
+      ],
+    };
+    const replayed = commandFromPayload('Composite', payload, ctx)!;
+    replayed.execute();
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.name).toBe('Renamed');
+    replayed.undo();
+    expect(nodes).toHaveLength(0);
+    expect((replayed as SerializableCommand).toPayload()).toEqual(payload);
+  });
+
+  it('expands composites for the open gate', () => {
+    const payload = { children: [
+      { commandType: 'SetExtensionData', payload: {} },
+      { commandType: 'Composite', payload: { children: [{ commandType: 'notes/set', payload: {} }] } },
+    ] };
+    expect(flattenCommandTypes('Composite', payload)).toEqual(['Composite', 'SetExtensionData', 'Composite', 'notes/set']);
+    expect(flattenCommandTypes('MoveFixture', {})).toEqual(['MoveFixture']);
+    expect(requirementsToOpen([], flattenCommandTypes('Composite', payload))).toEqual([{ id: 'notes', version: '*' }]);
   });
 });

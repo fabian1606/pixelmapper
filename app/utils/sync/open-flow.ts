@@ -1,5 +1,5 @@
 import { IncompatibleProjectError, serializeProject, type ProjectSnapshot } from '~/utils/engine/serialize';
-import type { ProjectRequirement } from '~/utils/extensions/requires';
+import { flattenCommandTypes, type ProjectRequirement } from '~/utils/extensions/requires';
 import type { LocalProjectMeta, OutboxEntry, ProjectStore } from '~/utils/persistence/project-store';
 import type { RemoteClient } from '~/utils/sync/remote-api';
 import type { ProjectStatePort } from '~/utils/sync/project-state-port';
@@ -88,7 +88,7 @@ function replayRows(port: ProjectStatePort, rows: OutboxEntry[]): void {
  */
 export async function openFromLocal(host: OpenFlowHost, local: LocalOpenData | null, meta: LocalProjectMeta | null): Promise<OpenResult> {
   const requires = local?.snapshot.requires ?? [];
-  if (!host.gate(requires, (local?.replay ?? []).map(r => r.type))) return { ok: false, error: 'missing-extensions' };
+  if (!host.gate(requires, (local?.replay ?? []).flatMap(r => flattenCommandTypes(r.type, r.payload)))) return { ok: false, error: 'missing-extensions' };
   await host.reset();
   // Meta-only local project (just created): the empty default state.
   const failed = applySnapshot(host.port, local?.snapshot ?? emptyProjectSnapshot());
@@ -128,7 +128,7 @@ export async function openFromServer(host: OpenFlowHost, input: ServerOpenInput)
   const res = await downloadProject(client, projectId);
   if (!res.ok) return { ok: false, error: classifyDownloadError(res.error) };
   const data = res.data;
-  if (!host.gate(data.snapshot?.requires ?? [], data.tail.map(c => c.commandType))) return { ok: false, error: 'missing-extensions' };
+  if (!host.gate(data.snapshot?.requires ?? [], data.tail.flatMap(c => flattenCommandTypes(c.commandType, c.payload)))) return { ok: false, error: 'missing-extensions' };
 
   await host.reset();
   // No server snapshot yet: start from the empty state, not the previous project.

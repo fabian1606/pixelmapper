@@ -1,4 +1,4 @@
-//! Native HTTP and bundled resources (ADR 0004 D19, platform API 1.3).
+//! Native HTTP and bundled resources (ADR 0004 D19, platform API 1.7).
 //!
 //! `http_get_bytes` downloads firmware releases without the browser's CORS
 //! restrictions (replaces the web app's `/api/firmware-proxy`). It only

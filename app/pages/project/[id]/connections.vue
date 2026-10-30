@@ -6,6 +6,7 @@
 import { CircleDot, Plus, Trash2, Network, Gamepad2, PlugZap } from 'lucide-vue-next';
 import { ref, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import type { Connector } from '@pixelmapper/extension-api';
 import { useConnectionsStore } from '~/stores/connections-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { useControllerStore } from '~/stores/controller-store';
@@ -16,6 +17,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { listConnectorTypes } from '~/utils/connectors/connector-registry';
 import ConnectorCard from '~/components/connectors/ConnectorCard.vue';
+import ExtensionSlot from '~/components/extension-host/ExtensionSlot.vue';
 
 // Same layout as Design/Live: keeps the header and the loaded project across tab switches.
 definePageMeta({ layout: 'project' });
@@ -260,10 +262,13 @@ function isUniverseUsed(u: number): boolean {
     </div>
 
     <template v-if="connectionsTab === 'outputs'">
+      <!-- Extension slot above the output connectors (e.g. devices found on the network) -->
+      <ExtensionSlot id="connections/outputs:before" />
       <p v-if="!store.connectors.length" class="text-sm text-muted-foreground py-6">
         No connectors added yet. Connector setups are stored for your account on this device.
       </p>
-      <ConnectorCard v-for="connector in store.connectors" :key="connector.id" :connector="connector" />
+      <!-- Pinia unwraps the connectors' refs in its types; the instances are the raw connectors. -->
+      <ConnectorCard v-for="connector in (store.connectors as unknown as Connector[])" :key="connector.id" :connector="connector" />
     </template><!-- end outputs tab -->
   </div>
   </div>

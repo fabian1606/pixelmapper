@@ -13,13 +13,13 @@ const BIN = new Uint8Array([1, 2, 3]);
 /** Desktop-like platform with bundled files and native HTTP. */
 function desktop(files: Record<string, Uint8Array>, getBytes = vi.fn(async () => BIN)): Platform {
   return {
-    kind: 'tauri', udp: null, serial: null, midi: null,
+    kind: 'tauri', artnetBridge: null, serial: null, midi: null,
     http: { getBytes },
     resources: { read: async path => files[path] ?? null },
   };
 }
 
-const WEB: Platform = { kind: 'web', udp: null, serial: null, midi: null };
+const WEB: Platform = { kind: 'web', artnetBridge: null, serial: null, midi: null };
 
 /** A release feed answer. */
 const release = (tag: string) => new Response(JSON.stringify({

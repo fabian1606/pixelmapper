@@ -1,5 +1,5 @@
 /**
- * Native HTTP and bundled resources for the Tauri platform (API 1.3,
+ * Native HTTP and bundled resources for the Tauri platform (API 1.7,
  * ADR 0004 D19). Calls `http_get_bytes` / `resource_read` of
  * `src-tauri/src/net.rs`; bytes come back as raw IPC bodies.
  */

@@ -9,6 +9,7 @@
  */
 import type { FixtureId, Json, SceneNodeId, Vec2 } from './model';
 import type { FixtureView } from './scopes';
+import type { FixtureDefinitionKey } from './patch';
 
 /** An undoable operation. Mirrors the core `Command` interface. */
 export interface Command {
@@ -83,6 +84,40 @@ export interface ChannelRangeWrite {
 }
 
 /**
+ * One fixture to add with `commands.addFixtures` (plan M4.1). Give exactly
+ * one of `definition` or `kind`.
+ */
+export interface AddFixtureItem {
+  /**
+   * Definition to build the fixture from: an OFL key `'<manufacturer>/<fixture>'`
+   * or a custom fixture `'custom/<id>'` (e.g. `RdmDefinitionMatch.key`).
+   */
+  definition?: FixtureDefinitionKey;
+  /** A fixture kind instead of a definition. */
+  kind?: { id: string; config?: Json };
+  /** 0-based mode of `definition` (default 0; ignored for kinds). */
+  modeIndex?: number;
+  /**
+   * Absolute 1-based DMX start address (universe = ⌊(startAddress − 1) / 512⌋ + 1).
+   * Omitted: appended after the highest used address, like the add dialog.
+   * Overlaps are allowed (the caller decides how to flag them).
+   */
+  startAddress?: number;
+  /** Display name (default: the definition's / kind's name). */
+  name?: string;
+}
+
+/**
+ * Command returned by `commands.addFixtures`. The ids of the new fixtures are
+ * known before the command runs, so further commands for them can be
+ * composed into the same undo step with `commands.batch`.
+ */
+export interface AddFixturesCommand extends SerializableCommand {
+  /** Ids of the fixtures this command adds, in item order. */
+  readonly fixtureIds: readonly FixtureId[];
+}
+
+/**
  * Typed constructors of core commands available to extensions. The list is
  * part of the versioned API. Each call returns a `Command` that is executed
  * with `ctx.run(command)`.
@@ -98,6 +133,47 @@ export interface CoreCommandFactory {
   setFixtureKindConfig(args: { fixtureId: FixtureId; config: Json }): Command;
   /** Add a fixture from a kind or an OFL key at a normalized position. Available from plan P5. */
   addFixture(args: { kind?: { id: string; config?: Json }; ofl?: string; position: Vec2 }): Command;
+  /**
+   * Add fixtures from definitions (OFL / custom) or kinds — the same add path
+   * as the add-fixture dialog: placed at the centre with a diagonal cascade,
+   * one undo step, and added to the selection when the command first runs.
+   * Async because OFL definitions are loaded on demand; rejects when a
+   * definition or mode does not exist, a kind is not installed or an address
+   * is invalid. Available from API 1.3.
+   *
+   * To store extension data on the new fixtures in the same undo step,
+   * batch it (`setExtensionData` resolves its fixture when it runs):
+   *
+   * @example
+   * const add = await ctx.commands.addFixtures([
+   *   { definition: match.key, modeIndex: match.modeByPersonality[personality], startAddress: 1 },
+   * ]);
+   * ctx.run(ctx.commands.batch([
+   *   add,
+   *   ...add.fixtureIds.map(id => ctx.commands.setExtensionData({ owner: 'fixture', ownerId: id, key: 'link', value: { uid } })),
+   * ], 'Add devices'));
+   */
+  addFixtures(items: readonly AddFixtureItem[]): Promise<AddFixturesCommand>;
+  /**
+   * Set a fixture's absolute 1-based DMX start address (this also sets its
+   * universe). Not guarded by `onBeforeFixtureChange`. Available from API 1.3.
+   */
+  setStartAddress(args: { fixtureId: FixtureId; startAddress: number }): Command;
+  /**
+   * Switch a fixture created from a definition (`FixtureView.source`) to
+   * another mode of that definition. Rebuilds channels and heads; id, name,
+   * position, address, group and extension data stay. Async because the
+   * definition may have to be loaded; rejects for fixtures without a source
+   * or unknown modes. Available from API 1.3.
+   */
+  setFixtureMode(args: { fixtureId: FixtureId; modeIndex: number }): Promise<Command>;
+  /**
+   * Combine commands into ONE undo step, executed in order and undone in
+   * reverse; if one fails the earlier ones are rolled back. Persisted and
+   * synced as one change when every command is serializable (all core
+   * commands and registered extension commands are). Available from API 1.3.
+   */
+  batch(commands: readonly Command[], description?: string): Command;
   /** Write namespaced extension data. */
   setExtensionData(args: SetExtensionDataArgs): Command;
   /** Rename a scene node. */

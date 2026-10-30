@@ -13,6 +13,7 @@ This guide is self-contained: hand it (together with `packages/extension-api/src
 | Support a hardware controller (MIDI grid …) | `controllers` | [Add a controller](#add-a-controller) |
 | Add a live-mode widget | `liveWidgets` | [Add a live widget](#add-a-live-widget) |
 | Persist own state / own undoable operations | `setExtensionData`, `commands` | [State and commands](#state-and-commands) |
+| Add fixtures from definitions, change address/mode, guard or observe patch changes | `ctx.commands`, `onBeforeFixtureChange`, `onFixturePatchChange`, `saveCustomFixtureDefinition` | [Patch fixtures](#patch-fixtures-api-13) |
 
 ## Rules (enforced)
 
@@ -145,17 +146,19 @@ Layout primitives generate **slots**: slot id = the `/`-joined ids of the enclos
 
 | Slot ids | Where |
 |---|---|
-| `properties:header\|before\|after`, `properties/<category>:actions\|before\|after\|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges\|actions` | fixture properties sidebar |
+| `properties:header\|before\|after`, `properties/<category>:actions\|before\|after\|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges\|actions` | fixture properties sidebar (panel-level slots only while a category is open; `after` below it, scrolling) |
 | `scene:header`, `scene/fixture:badges\|actions`, `scene/group:badges\|actions` | scene list |
+| `selection:after` | selection inspector below the scene list: below the fields (address, mode, kind config) of a single selected fixture, with `fixture`; not rendered for multi-selections — for per-fixture sections such as device settings |
 | `modifiers:*`, `modifiers/modifier:badges\|actions`, `modifiers/add:items` | modifier stack |
 | `presets:header\|before\|after`, `presets/preset:badges\|actions` | presets |
 | `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items` | fixture library / add dialog |
 | `header:start\|end`, `live:start\|end` | app header, live toolbar |
+| `connections/outputs:before` | Connectors page, Outputs tab, above the output connectors |
 | `context-menu/<fixture\|group\|channel\|preset>:items` | context menus |
 
 Globs: `*` = one path segment, `**` = any number (`'properties/*:actions'`, `'**:badges'`). Contributions are ordered by `priority` (desc), then extension id; `when(scopes)` decides visibility reactively.
 
-**Scopes** available to a contribution are those of its location: `project` (id, bpm, `requires`, `fixtures` list), `selection` (`fixtureIds`, `nodeIds`), `viewport` everywhere; `fixture` in fixture rows and single-selection properties; `channel` + `signature` in channel controls; `modifier` in modifier cards; `preset` in preset rows; `liveWidget`/`livePage` in live mode. Types: `packages/extension-api/src/scopes.ts`.
+**Scopes** available to a contribution are those of its location: `project` (id, bpm, `requires`, `fixtures` list), `selection` (`fixtureIds`, `nodeIds`), `viewport` everywhere; `fixture` in fixture rows, single-selection properties and `selection:after`; `channel` + `signature` in channel controls; `modifier` in modifier cards; `preset` in preset rows; `liveWidget`/`livePage` in live mode. Types: `packages/extension-api/src/scopes.ts`.
 
 Example — a "Full" button in the intensity section that sets every selected dimmer to 255 in one undo step:
 
@@ -217,11 +220,74 @@ Menu entries need no component — use `menuItem` in an `:items` slot:
 | `setChannelValues({ fixtureId, values: [{ channelIndex, value }], description? })` | programmed static values |
 | `setChannelRange({ fixtureId, channelIndex, min, max })`, `setChannelRanges({ changes })` | output range limits |
 | `setFixtureKindConfig({ fixtureId, config })` | replace a kind fixture's config (rebuilds) |
-| `addFixture({ kind: { id, config? }, position })` | add a kind fixture (OFL fixtures go through the library) |
+| `addFixture({ kind: { id, config? }, position })` | add one kind fixture at a position |
+| `addFixtures(items)` → `Promise<AddFixturesCommand>` | add fixtures from definitions (OFL / custom) or kinds, like the add dialog; `fixtureIds` known up front (API 1.3) |
+| `setStartAddress({ fixtureId, startAddress })` | absolute DMX start address (sets the universe too) (API 1.3) |
+| `setFixtureMode({ fixtureId, modeIndex })` → `Promise<Command>` | switch a definition fixture to another mode (API 1.3) |
+| `batch(commands, description?)` | several commands as ONE undo step (API 1.3) |
 | `setExtensionData({ owner, ownerId?, key, value })` | namespaced JSON state (see below) |
 | `rename({ nodeId, name })`, `move({ moves })`, `rotate({ fixtureId, rotation })` | scene edits |
 
 Run every command with `ctx.run(command)`: that gives undo/redo, persistence and live collaboration.
+
+## Patch fixtures (API 1.3)
+
+For connectors and tools that manage the DMX patch (e.g. devices discovered on the network). Requires `apiVersion: '^1.3.0'`.
+
+**Definitions.** A definition key is `'<manufacturer>/<fixture>'` (Open Fixture Library) or `'custom/<id>'` (the user's custom fixtures). Fixtures built from a definition expose `fixture.source = { key, modeIndex }` in their view. Find the definition of a device by its RDM IDs — custom fixtures first, then the library:
+
+```ts
+import { findFixtureDefinitionByRdm } from '@pixelmapper/extension-api';
+
+const match = await findFixtureDefinitionByRdm(0x7ff0, 1);
+// { key: 'custom/custom-…', source: 'custom', name, manufacturer, modes: [{ index, name, channelCount, rdmPersonalityIndex? }],
+//   modeByPersonality: { 1: 0, 2: 1, … } }   — null when nothing matches
+```
+
+No definition? Generate one (OFL JSON) and store it as a **new custom fixture** the user can edit (API 1.4; never replaces an existing one, a taken name gets " (2)"); set the RDM IDs and `rdmPersonalityIndex` so the next lookup finds it:
+
+```ts
+import { saveCustomFixtureDefinition } from '@pixelmapper/extension-api';
+
+const key = await saveCustomFixtureDefinition({
+  name: 'Acme Bar', categories: ['Pixel Bar'], rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
+  availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
+  modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
+}); // 'custom/custom-…'; throws for invalid definitions
+```
+
+**Add fixtures + your data as one undo step.** `addFixtures` is async (library definitions load on demand) and returns a command that already knows the new ids; `batch` combines it with `setExtensionData`:
+
+```ts
+const add = await ctx.commands.addFixtures(devices.map(d => ({
+  definition: match.key,
+  modeIndex: match.modeByPersonality[d.personality] ?? 0,
+  startAddress: d.address,             // absolute, 1-based; omit to append like the add dialog
+  name: d.label,
+})));
+ctx.run(ctx.commands.batch([
+  add,
+  ...add.fixtureIds.map((id, i) => ctx.commands.setExtensionData({ owner: 'fixture', ownerId: id, key: 'device', value: { uid: devices[i]!.uid } })),
+], 'Add all devices'));
+```
+
+New fixtures are placed at the centre with a small diagonal cascade and selected, exactly like the add dialog. Overlapping addresses are allowed — flag them yourself.
+
+**Addresses and modes.** `ctx.commands.setStartAddress({ fixtureId, startAddress })`, `await ctx.commands.setFixtureMode({ fixtureId, modeIndex })` (keeps id, name, position, address and extension data). Free addresses:
+
+```ts
+import { findFreeAddressSpan, listFixtures } from '@pixelmapper/extension-api';
+
+const start = findFreeAddressSpan(listFixtures(), footprint, 1, { universe: 2, ignore: [fixtureId] }); // null = no room in universe 2
+```
+
+`listFixtures()` entries carry `extensionData` when a fixture has some (API 1.4), so finding "my" fixtures needs no full fixture views: `listFixtures().filter(f => f.extensionData?.['my-extension']?.link)`.
+
+**Guard user changes.** `onBeforeFixtureChange(change => …)` runs before the core UI (inspector address fields, address grid drag, Mode select) changes a fixture's address, universe or mode. Return nothing / `{ action: 'allow' }`, `{ action: 'confirm', message, confirmLabel? }` (core dialog; default button "Change anyway") or `{ action: 'deny', message? }`. `change.before` / `change.after` are `FixturePatchState`s (`startAddress`, `universe`, `localAddress`, `channelCount`, `modeIndex`). Guards never block `ctx.run`, undo/redo or collaborators — derive state such as "unlinked" from the fixture (e.g. its universe) instead of from the guard answer.
+
+**Observe patch changes.** `onFixturePatchChange(changes => …, { fixtureIds })` reports every change of start address, universe, channel count or mode — local commands (`origin: 'local'`, `initiator` = extension id when run through `ctx.run`), `undo`, `redo` and collaborators (`remote`); `before`/`after` is `null` when a fixture appears/disappears. Callbacks run a microtask after the history step, so they may run commands; opening a project is not reported. Typical use: push the new address/mode to a device for local changes, and ignore changes your own extension initiated in response to the device.
+
+Both hooks return an unsubscribe function; register them in `activate` (return a disposer) or in a component's setup.
 
 ## Add a fixture kind
 
@@ -260,8 +326,10 @@ connectors: [defineConnector({
 
 - `outputCount > 0`: the host calls `sendFrame(512 bytes, universe)` per mapped output per frame. `outputCount = 0`: implement `onEngineState({ bpm, elapsedMs, beatTime, dmxBuffer })`.
 - Keep config in fields; `getConfig()`/`applyConfig(patch)` (call `super`) round-trip it. The host persists it **per user and device** (never in the project).
-- A `settings` component (prop `connector`, emits `change(patch)`) renders type-specific fields; label, connect/disconnect, output mapping and logs are rendered by the host.
+- A `settings` component (prop `connector`, emits `change(patch)`) renders type-specific fields; label, connect/disconnect, output mapping and logs are rendered by the host. Set `ownsOutputMapping: true` on the definition when your settings component renders the output → universe mapping itself (e.g. a port table): the host then hides its generic Outputs section (API 1.4).
 - `canAutoConnect()` → `true` when connecting needs no user gesture.
+- **The user's connector set** (API 1.4, needs `apiVersion: '^1.4.0'`): `connectors.list(type?)` (reactive), `connectors.add(connector)` (e.g. *Connect* on a device you discovered; always-connected instances connect at once), `connectors.remove(id)`, and `connectors.persist(id)` — call it when a connector changed its own config outside the settings component (learned a device id, followed a new IP), so it survives a reload without the card being open.
+- **Per-user state** outside the project (dismissed suggestions …): namespace storage keys with `getUserKey()` (signed-in user id, else `'local'`; reactive).
 - Fixture data from a connector: `getFixture(id)` (re-read occasionally, not per frame).
 - Details and the ESP protocol: [connectors.md](../connectors.md).
 
@@ -321,7 +389,7 @@ The host registers it for replay from the change log and for collaborators; exec
 
 ## Testing and shipping
 
-- Tests next to the code (`<id>.test.ts`, Vitest + happy-dom); tests may import core modules (`~/…`) to mount hosts, e.g. `registerExtension(manifest)` + `installSharedGlobals()`.
+- Tests next to the code (`<id>.test.ts`, Vitest + happy-dom); tests may import core modules (`~/…`) to mount hosts, e.g. `registerExtension(manifest)` + `installSharedGlobals()`. Shared test helpers that import core go into `*.test-support.ts` files (exempt from the import rule like tests; never import them from extension code).
 - `bun run lint && bun run check:extensions && bun run test`.
 - Catalog bundle: `bun run build:extensions` → `public/extensions/<id>/<version>/{index.js, style.css, extension.json}`. Users install it from the Extensions page; projects that use it list it in `requires` and ask for it when opened elsewhere.
 

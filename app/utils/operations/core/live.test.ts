@@ -106,14 +106,18 @@ describe('live.listPages', () => {
       ],
     }, { registry: registry() });
     const { widgetId } = res.results[0]!.value as { widgetId: string };
-    // Stored form is unchanged …
-    expect(widget('page-1', widgetId)?.mapping).toEqual({ type: 'effect-param', effectId: 'mod-2', paramKey: 'params.hit' });
+    // Stored form: a button script with one "hold" action on the stored key …
+    expect(widget('page-1', widgetId)?.actions).toEqual([
+      { id: expect.any(String), trigger: 'hold', action: { type: 'effect-param', effectId: 'mod-2', paramKey: 'params.hit' }, triggerTouched: true },
+    ]);
     // … but every agent-facing view speaks the input vocabulary.
     const { pages } = res.results[1]!.value as { pages: Array<{ widgets: Array<Record<string, unknown>> }> };
-    expect(pages[0]!.widgets.find(w => w.id === widgetId)).toMatchObject({
-      mapping: { type: 'effect-param', modifierId: 'mod-2', paramKey: 'hit' },
-      mappingSummary: 'effect-param: modifier mod-2 → hit',
+    const view = pages[0]!.widgets.find(w => w.id === widgetId)!;
+    expect(view).toMatchObject({
+      actions: [{ trigger: 'hold', action: { type: 'effect-param', modifierId: 'mod-2', paramKey: 'hit' } }],
+      mappingSummary: 'hold → effect-param: modifier mod-2 → hit',
     });
+    expect(view.mapping).toBeUndefined();
     const added = res.diff.find(c => c.entity === `liveWidget:${widgetId}` && c.field === 'added');
     expect(JSON.stringify(res.diff)).not.toContain('effectId');
     expect(added).toBeDefined();
@@ -248,7 +252,9 @@ describe('live.addWidget', () => {
     expect(result.committed).toBe(true);
     expect(result.findings).toEqual([]);
     const buttonId = (result.results[2]!.value as { widgetId: string }).widgetId;
-    expect(widget('page-1', buttonId)?.mapping).toEqual({ type: 'effect-param', effectId: 'mod-1', paramKey: 'params.invert', behavior: 'hold' });
+    expect(widget('page-1', buttonId)?.actions).toMatchObject([
+      { trigger: 'hold', action: { type: 'effect-param', effectId: 'mod-1', paramKey: 'params.invert', behavior: 'hold' } },
+    ]);
   });
 
   it('warns when the widget type cannot drive the mapped param type', async () => {

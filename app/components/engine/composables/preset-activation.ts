@@ -167,6 +167,30 @@ export function releaseFlashPreset(key: string): void {
   });
 }
 
+/**
+ * "Stop all": overwrites (blackout / strobe / blind), flashes and the active
+ * preset end together and only one frame is output. Ending the overwrites
+ * first on their own would briefly show the restored look before the preset
+ * stops — a visible flash right after a held blackout.
+ * Persists "no active preset"; broadcasting is up to the caller.
+ */
+export function stopEverything(opts: { fromRemote?: boolean } = {}): void {
+  const engineStore = useEngineStore();
+  const ctx = engineActivationContext();
+  // Back to the look under the overwrites, without output yet.
+  engineStore.clearOverwriteStack({ flush: false });
+  const ids = new Set([engineStore.flashStack.at(-1)?.presetId ?? null, engineStore.selectedPresetId]);
+  engineStore.flashStack = [];
+  for (const id of ids) {
+    const preset = id ? ctx.savedPresets.find(p => p.id === id) : undefined;
+    if (preset) _stopPreset(resolvePreset(preset, ctx.savedPresets), ctx.flatFixtures, ctx.modifiers);
+  }
+  ctx.setSelectedPresetId(null);
+  // The single frame: everything stopped.
+  ctx.triggerCanvasSync();
+  if (!opts.fromRemote) queueMicrotask(() => persistChange('SetActivePreset', { presetId: null }));
+}
+
 /** Clear entire flash stack and restore the base preset (e.g. on page switch). */
 export function clearFlashStack(): void {
   const engineStore = useEngineStore();

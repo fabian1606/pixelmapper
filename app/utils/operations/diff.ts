@@ -5,13 +5,15 @@
  * fixtures, groups, modifiers, live pages and widgets) keyed by entity id
  * (`fixture:12`), and diffs two snapshots field by field. Modifiers use the
  * agent view (`blend`, `spread`, `speed.value`, …; `core/modifier-view.ts`),
- * live widgets the `live.addWidget` mapping vocabulary.
+ * live widgets the `live.addWidget` mapping vocabulary (buttons: their
+ * `actions` script, e.g. `actions.0.trigger`, `actions.0.action.paramKey`).
  *
  * Whole added / removed entities are reported by a one-line summary (not the
  * full view) to keep apply results small; `affectedEntities` adds full views
  * only on request (`detail: "full"`).
  */
 import type { EntityView, SemanticChange } from '@pixelmapper/agent-kit';
+import { fromButtonAction } from './core/live-button-actions';
 import { fromLiveMapping } from './core/live-mapping';
 import { modifierSummary, modifierView } from './core/modifier-view';
 import type { CoreReadApi } from './read-api';
@@ -63,11 +65,15 @@ export function captureState(read: CoreReadApi): StateSnapshot {
     out.set(`livePage:${page.id}`, { ...pageRest, widgetIds: widgets.map(w => w.id) } as Record<string, unknown>);
     summaries.set(`livePage:${page.id}`, `live page "${page.name}" · ${widgets.length} widgets`);
     for (const w of widgets) {
-      // Mapping in the agent vocabulary (`modifierId`, bare param key) like live.listPages.
+      // Mapping / button actions in the agent vocabulary (`modifierId`, bare param key) like live.listPages.
       const mapping = fromLiveMapping(w.mapping) as Record<string, unknown> | undefined;
-      out.set(`liveWidget:${w.id}`, { ...w, mapping, pageId: page.id } as Record<string, unknown>);
+      const actions = w.actions?.map(fromButtonAction);
+      out.set(`liveWidget:${w.id}`, { ...w, mapping, ...(actions ? { actions } : {}), pageId: page.id } as Record<string, unknown>);
       const label = (w as { label?: string }).label;
-      const target = mapping && 'modifierId' in mapping ? ` → ${String(mapping.modifierId)}.${String(mapping.paramKey)}` : '';
+      // Summary target: the mapping, or a button's first effect-param action.
+      const firstAction = actions?.map(a => a.action as Record<string, unknown>).find(a => 'modifierId' in a);
+      const shown = w.type === 'button' ? firstAction : mapping;
+      const target = shown && 'modifierId' in shown ? ` → ${String(shown.modifierId)}.${String(shown.paramKey)}` : '';
       summaries.set(`liveWidget:${w.id}`, `${w.type}${label ? ` "${label}"` : ''} on ${page.id}${target}`);
     }
   }

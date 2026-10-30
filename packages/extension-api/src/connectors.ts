@@ -3,8 +3,11 @@
  *
  * All outputs (including ArtNet) and all hardware controllers are extensions.
  * Connector configuration is per user/device, never project state.
+ * Extensions manage the user's connector instances through `connectors`
+ * (API 1.4).
  */
 import type { Component, Ref } from 'vue';
+import { getHostApi } from './host';
 
 // ── Connectors ──────────────────────────────────
 
@@ -94,12 +97,66 @@ export interface ConnectorDefinition {
    * and logs are rendered by the host.
    */
   settings?: Component;
+  /**
+   * True when the `settings` component renders the output → universe
+   * mapping itself (e.g. a port table); the host then hides its generic
+   * Outputs section on the connector card. Optional (API 1.4); absent = false.
+   */
+  ownsOutputMapping?: boolean;
 }
 
 /** Identity helper for typing a connector definition. */
 export function defineConnector(def: ConnectorDefinition): ConnectorDefinition {
   return def;
 }
+
+// ── Connector set (API 1.4) ─────────────────────
+
+/**
+ * The current user's connector instances on this device (the set shown on
+ * the Connectors page). Setups are per user and device, never project state
+ * (ADR D18); the host persists them.
+ */
+export interface ConnectorSet {
+  /**
+   * The instances, optionally only those of one connector `type`. Reactive
+   * when read inside a `computed`/template; do not mutate the array.
+   */
+  list(type?: string): readonly Connector[];
+  /**
+   * Adds an instance (e.g. created with your definition's `create` or
+   * `fromConfig`) and persists it. Instances whose `alwaysConnected()` is
+   * true are connected right away; others wait for the user (or connect on
+   * the next start when `canAutoConnect()`).
+   */
+  add(connector: Connector): void;
+  /** Disconnects and removes the instance with this id, and persists. No-op for unknown ids. */
+  remove(id: string): void;
+  /**
+   * Persists the current `getConfig()` of the instance with this id. Call it
+   * when a connector changed its own config outside the settings component
+   * (e.g. it learned a device id or a new IP), so the change survives a
+   * reload even when the card was never opened. No-op for unknown ids.
+   */
+  persist(id: string): void;
+}
+
+/**
+ * The user's connector set (API 1.4). Works outside components (connectors,
+ * plain modules); throws outside the app (no host).
+ *
+ * @example
+ * // Add a connector for a device found on the network.
+ * connectors.add(MyConnector.fromConfig(crypto.randomUUID(), { host: '2.0.0.5' }));
+ * // A connector that learned something about its device saves it.
+ * this.deviceId = id; connectors.persist(this.id);
+ */
+export const connectors: ConnectorSet = {
+  list: type => getHostApi().connectors.list(type),
+  add: connector => getHostApi().connectors.add(connector),
+  remove: id => getHostApi().connectors.remove(id),
+  persist: id => getHostApi().connectors.persist(id),
+};
 
 // ── Controllers ─────────────────────────────────
 

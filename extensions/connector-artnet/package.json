@@ -1,7 +1,7 @@
 {
   "name": "@pixelmapper/ext-connector-artnet",
-  "version": "1.1.0",
-  "description": "ArtNet output through a local bridge.",
+  "version": "2.1.0",
+  "description": "Art-Net output through the Art-Net bridge: devices found by ArtPoll, or a device IP as a manual target.",
   "private": true,
   "type": "module",
   "main": "./nuxt.config.ts"

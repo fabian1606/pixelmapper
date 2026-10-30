@@ -67,7 +67,7 @@ Scopes (`ScopeMap` in `packages/extension-api/src/scopes.ts`) are readonly views
 | Scope | Provided by |
 |---|---|
 | `project`, `selection`, `viewport` | `app.vue` via `provideRootScopes()` (`viewport` mirrors the project page's 2D/3D/raw switch and the live route) |
-| `fixture` | scene rows (`FixtureSidebarNode`), properties sidebar (single selection) |
+| `fixture` | scene rows (`FixtureSidebarNode`), properties sidebar and selection inspector (`SelectionInfoSection`; single selection) |
 | `channel`, `signature` | channel controls (`FixturePropertyControl`) |
 | `modifier` | modifier cards (`ChaserModifiersList`) |
 | `preset` | preset rows (`PresetsSidebar`) |
@@ -97,11 +97,13 @@ Callers with custom markup list positions in `manual` and render the outlets the
 Current slot ids (run `PM_DEBUG_SLOTS=1 bun run dev:nuxt` to see them labelled in the UI, open `/dev/slots` in dev for the catalog of slots rendered in the session with their scopes and contributors, or read `docs/ai/index.json`):
 
 - `scene:header`, `scene/fixture:badges|actions`, `scene/group:badges|actions`
-- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions`
+- `selection:after` — the selection inspector at the bottom of the scene sidebar (`SelectionInfoSection`): below the fields of a **single** selected fixture (DMX address, mode, kind config), with `fixture`; multi-selections render no slot. For per-fixture sections that belong next to address/mode, e.g. the RDM section of `connector-artnet`. The inspector is capped at 60 % of the sidebar and scrolls, so contributions should stay compact (sidebar width ≈ 230 px).
+- `properties:header|before|after`, `properties/<category>:actions|before|after|items` (`intensity`, `color`, `position`, `beam`, `shaping`, `effects`, `control`), `properties/<category>/channel:badges|actions` — the panel-level `properties:*` slots render only while a category is open: header/before above the category, `after` below it in its own scroll area (at most half the panel); `fixture` is provided for a single selection only
 - `modifiers:*`, `modifiers/modifier:badges|actions`, `modifiers/add:items`
 - `presets:header|before|after`, `presets/preset:badges|actions`
 - `library:*`, `library/categories:items`, `library/<manufacturer>:items`, `add-fixture/sources:items`
 - `header:start|end` (app header), `live:start|end` (live mode toolbar)
+- `connections/outputs:before` (Connectors page, Outputs tab, above the output connectors — e.g. devices found on the network)
 - `context-menu/<id>:items` with `id` ∈ `fixture`, `group`, `channel`, `preset`
 
 `ExtensionSlot` resolves contributions through a memoized index (`slot-matching.ts`; `*` = one segment, `**` = any number), orders them by `priority` (desc) then extension id, evaluates `when` against the scope snapshot, renders each component inside `ExtensionContributionHost` (provides the owning extension id + slot id, isolates render errors) and renders nothing when empty.
@@ -274,3 +276,34 @@ The kind appears as a card in **Add Fixture** and in the library under its categ
 Extensions persist small JSON state with `ctx.run(ctx.commands.setExtensionData({ owner: 'fixture' | 'project' | 'liveWidget', ownerId, key, value }))`; it is stored at `owner.extensionData[extensionId][key]` and undone like any command.
 
 Using extension data or kinds keeps the extension in the project's `requires` (see “Project requirements and the open gate” above).
+
+## Fixture patching (API 1.3)
+
+Added for the Art-Net/RDM work (plan M4) but generic: nothing here knows a protocol. API: `packages/extension-api/src/patch.ts` (helpers, guard, observation, lookup) and `commands.ts` (commands).
+
+**Definitions and sources.** A fixture definition is identified by a key: `'<manufacturer>/<fixture>'` for the Open Fixture Library, `'custom/<id>'` for the user's custom fixtures (`app/utils/fixture-definitions/definition-keys.ts`). Fixtures built from a definition store `source: { key, modeIndex }` (`Fixture.source`, persisted in snapshots and `AddFixtures` payloads, exposed as `FixtureView.source`); library fixtures also get `oflKey`. `resolveFixtureDefinition(key)` loads custom definitions through the accessor and OFL definitions from the platform fixture library (`useFixtureLibrary`: `/api/fixtures/<mf>/<fixture>` on the web, the bundled copy in the desktop app; cached); `createFixtureFromDefinition(resolved, modeIndex)` builds the fixture and records the source. Custom fixtures are read and written only through `app/utils/fixture-definitions/custom-fixtures.ts` (`getCustomFixtures`, `saveCustomFixture`, `addCustomFixture`, …). Storage is the synced `custom-fixture` user record collection (ADR 0004 D21, UUID ids; the legacy localStorage list is migrated once); reads are synchronous on the loaded list (`customFixturesReady()`), writes are async. `useCustomFixtureLibrary` is the components' reactive view on it.
+
+**Commands** (core command factory, `app/utils/extensions/core-command-factory.ts`):
+
+| Command | Core implementation |
+|---|---|
+| `addFixtures(items) → Promise<AddFixturesCommand>` (`fixtureIds` known before it runs) | `buildFixtures` → `placeNewFixtures` (`app/utils/engine/add-fixtures.ts`, shared with the add dialog: ids, explicit or appended addresses, centre + 0.02 cascade) → `AddFixturesCommand`; selects the new fixtures on its first local run |
+| `setStartAddress({ fixtureId, startAddress })` | `UpdateDmxCommand` |
+| `setFixtureMode({ fixtureId, modeIndex }) → Promise<Command>` | `buildSetFixtureModeCommand` (`app/utils/fixture-definitions/fixture-mode.ts`) → `SetFixtureModeCommand`: swaps channels, beams, source, definition and lens of the fixture **in place** (identity, id, name, position, size, address, group and extension data stay; programmed values carry over per head and channel type); serializable (`SetFixtureMode`, payload holds both mode states) |
+| `batch(commands, description?)` | `createBatchCommand` (`commands/composite-command.ts`): a `CompositeCommand` (ADR 0002 §4.3, the same command as the operations transaction runner) — one history entry, children in order, undo in reverse, all-or-nothing on execute errors; persisted as one `Composite` change with its serializable children. Replay builds each child right before it runs, so a child may refer to fixtures added by an earlier one (`SetExtensionData` resolves its fixture through the live tree). `requires` bookkeeping and the open gate look inside composites (`flattenCommandTypes` in `requires.ts`). |
+
+The inspector shows a **Mode** select (`FixtureModeSelect.vue`) for fixtures with a source.
+
+**Free addresses.** `findFreeAddressSpan(fixtures, footprint, count, { ignore?, universe? })` (`app/utils/engine/free-address.ts`) is the add dialog's search; `universe` keeps the span inside one universe (else `null`). `listFixtures()` gives `FixtureSummary[]` outside components (with `extensionData` when present, API 1.4).
+
+**Change guard** (`onBeforeFixtureChange`, host: `app/utils/extensions/fixture-change-guard.ts`). Core UI paths that change a fixture's start address, universe or mode — the inspector's U/A fields (`SelectionInfoSection.vue`), the address grid drag (`AddressGrid.vue`) and the Mode select — call `requestFixtureChanges([{ fixtureId, before, after }])` before running their command. All guards are asked; any `deny` wins (message as a warning toast), otherwise all `confirm` messages appear in one core confirm dialog (`requestConfirm()` in `app/composables/use-confirm-dialog.ts`, rendered by `ConfirmDialogHost.vue` in `app.vue`). Commands never consult guards, so `ctx.run`, undo/redo, collaborator changes and replays are never blocked.
+
+**Change observation** (`onFixturePatchChange`, host: `app/utils/extensions/fixture-patch-observer.ts`). While subscribed, the host keeps a baseline of every fixture's patch state (`FixturePatchState`: start address, universe, local address, channel count, mode index) and diffs it after each history step (`onHistoryApplied` in `use-history.ts`: `local`, `undo`, `redo`, `remote` for `executeRemote`; changes the sync engine applies outside the history are reported as `remote` from the engine store's `onLiveChanged` via `reportExternalFixturePatchChanges`). Changes (including fixtures that appear/disappear) are delivered per step in a microtask, filtered by `fixtureIds` (list or getter); `initiator` is the extension whose `ctx.run`/`api.run` ran the step. Project loads replace the state outside the history; `loadProject` calls `rebaseFixturePatchObservation()`, so a load is never reported.
+
+**Lookup by RDM IDs** (`findFixtureDefinitionByRdm(manufacturerId, modelId)`, `app/utils/fixture-definitions/rdm-lookup.ts`): custom fixtures first (`ofl.pixelmapper.rdmManufacturerId` + `ofl.rdm.modelId`), then OFL through `GET /api/fixtures/rdm?manufacturerId=&modelId=` (`server/api/fixtures/rdm.get.ts`: manufacturers' `rdmId`, fixtures' `rdm.modelId`). Returns the key, all modes with channel counts and `modeByPersonality` from the modes' `rdmPersonalityIndex`. The custom fixture editor imports OFL JSON files and edits these RDM fields (manufacturer ID, model ID, personality per mode).
+
+**Generated definitions** (`saveCustomFixtureDefinition(definition)`, API 1.4, host: `app/utils/extensions/custom-definition-api.ts`): validates the OFL JSON like the editor's import (`parseOflFixtureJson`), builds every mode once, and adds it through the accessor's `addCustomFixture` — always a new entry, a taken name gets a numeric suffix — resolving `'custom/<id>'` (async since API 1.7).
+
+## Connector set and user key (API 1.4)
+
+`connectors` (`packages/extension-api/src/connectors.ts`, host: `app/utils/extensions/connector-api.ts`) is a facade over the connections store: `list(type?)` (the store's reactive array, filtered), `add(connector)` (persisted; `alwaysConnected` instances connect at once), `remove(id)`, `persist(id)` (writes the current `getConfig()` of every instance; for connectors that learned config without their card being open). `getUserKey()` returns the signed-in user's id (set by `app/plugins/02.connectors.client.ts` together with loading that user's connectors) or `'local'`, reactively. `ConnectorDefinition.ownsOutputMapping` hides the generic Outputs section of `ConnectorCard.vue` for types whose settings component maps outputs itself.

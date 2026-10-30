@@ -7,6 +7,7 @@ import LiveAddSidebar from '~/components/live/LiveAddSidebar.vue';
 import LiveEditSidebar from '~/components/live/LiveEditSidebar.vue';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveShortcuts } from '~/composables/use-live-shortcuts';
+import { useButtonInputTriggers } from '~/composables/use-button-input-triggers';
 import PmToolbar from '~/components/primitives/PmToolbar.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { livePageView } from '~/utils/extensions/scope-views';
@@ -15,6 +16,8 @@ definePageMeta({ layout: 'project' });
 
 const store = useLiveModeStore();
 useLiveShortcuts();
+// Keyboard keys and MIDI messages fire their mapped button actions (play mode).
+useButtonInputTriggers();
 
 // Extension scope: the active live page.
 provideScope('livePage', () => (store.activePage ? livePageView(store.activePage) : undefined));

@@ -105,6 +105,19 @@ describe('P1.6 debug-slots labels', () => {
     w.unmount();
   });
 
+  it('selection inspector: single-fixture slot after the fixture fields', async () => {
+    const SelectionInfoSection = (await import('~/components/engine/SelectionInfoSection.vue')).default;
+    const fixture = makeFixture('c');
+    const w = mount(SelectionInfoSection, {
+      props: { selectedFixtures: [fixture], allFixtures: [fixture] },
+      global,
+    });
+    await flushPromises();
+    // No label (the debug extension labels actions/start/header only), but recorded for the catalog.
+    expect(renderedSlots.get('selection:after')).toContain('fixture');
+    w.unmount();
+  });
+
   it('modifier list: modifier rows', async () => {
     const ChaserModifiersList = (await import('~/components/engine/ChaserModifiersList.vue')).default;
     const effect = createModifier(builtinHash(BUILTIN_ALIASES.waveform), { targetChannels: ['DIMMER'] });

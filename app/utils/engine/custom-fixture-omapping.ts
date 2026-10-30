@@ -22,6 +22,21 @@
  *
  * Consecutive perHead:true ModeEntries are grouped back into a single
  * OflMatrixChannelInsert when building the OFL output.
+ *
+ * A run of plain strings naming template instances ("Red 1", "Green 1", …,
+ * "Blue 4") that covers every pixel in a regular order is folded into a
+ * per-head group on load as well (custom-fixture-template-runs.ts), so
+ * imported definitions keep their templateChannels/matrix structure on save.
+ *
+ * # RDM identification (plan M4.7)
+ *
+ * | OFL field                       | Form field                          |
+ * |---------------------------------|-------------------------------------|
+ * | pixelmapper.rdmManufacturerId   | state.rdmManufacturerId             |
+ * | rdm.modelId / rdm.softwareVersion | state.rdmModelId / rdmSoftwareVersion |
+ * | modes[i].rdmPersonalityIndex    | ModeDraft.rdmPersonalityIndex       |
+ *
+ * Unset fields are omitted from the OFL output (no `undefined` keys).
  */
 
 import type {
@@ -43,6 +58,12 @@ import type {
 import { resolveOflChannel } from '~/utils/ofl/capability-map';
 import type { ChannelType } from '~/utils/engine/types';
 import { CHANNEL_CAPABILITY_TYPES } from '~/utils/engine/custom-fixture-channel-types';
+import {
+  collectPixelKeysRowMajor,
+  foldTemplateRun,
+  resolveTemplateRef,
+  type TemplateRef,
+} from '~/utils/engine/custom-fixture-template-runs';
 
 // Set of all editor ChannelType enum values — used for idempotency guard in oflCapToEditorType
 const EDITOR_TYPE_SET = new Set<string>(CHANNEL_CAPABILITY_TYPES);
@@ -214,6 +235,16 @@ function parseOflCapabilities(ch: OflChannel): CapabilityRange[] {
   });
 }
 
+/** True for a valid RDM manufacturer / model ID (16-bit unsigned integer). */
+function isRdmId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff;
+}
+
+/** True for a valid RDM personality index (1-based positive integer). */
+function isRdmPersonalityIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
 /**
  * Clamps OFL's `dmxValueResolution` to the subset the editor supports.
  * '24bit' is degraded to '16bit' — this is a display/editing limitation only.
@@ -222,6 +253,168 @@ function clampResolution(res: string | undefined): '8bit' | '16bit' {
   if (res === '24bit') return '16bit';
   if (res === '16bit') return '16bit';
   return '8bit';
+}
+
+// ─── Fine channels (16/24-bit, `fineChannelAliases`) ─────────────────────────
+//
+// OFL gives a 16/24-bit channel its extra DMX slots by naming them in
+// `fineChannelAliases`; modes list those aliases like channels. The editor
+// models a '16bit' ChannelDraft as coarse + fine byte in two adjacent
+// addresses (see `modeAddressCount`). A loaded channel is therefore either
+//  - packed: exactly one alias, and every mode lists it directly after the
+//    channel → one '16bit' draft; save writes the alias behind every
+//    reference again, or
+//  - unpacked: any other layout (fine byte apart from its coarse channel, a
+//    mode with the coarse channel only, 24-bit) → one 8-bit draft per DMX slot;
+//    the coarse draft remembers its fine drafts, so save restores
+//    `fineChannelAliases` without moving any address.
+
+/**
+ * Fine-byte bookkeeping the mapping keeps on a ChannelDraft. Not part of the
+ * editor schema; the editor's `{ ...channel, ...patch }` updates carry it along.
+ */
+type FineChannelDraft = ChannelDraft & {
+  /** Packed channel: OFL alias of its fine byte and the channel name it was loaded with. */
+  fineAliasSource?: { coarseName: string; alias: string };
+  /** Unpacked channel: ids of the drafts that are its fine bytes, in byte order. */
+  fineChannelIds?: string[];
+};
+
+/** Fine alias → key of the (first) channel that declares it. */
+function collectFineAliasOwners(defs: Record<string, OflChannel> | undefined): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const [key, ch] of Object.entries(defs ?? {})) {
+    for (const alias of ch.fineChannelAliases ?? []) {
+      if (!owners.has(alias)) owners.set(alias, key);
+    }
+  }
+  return owners;
+}
+
+/**
+ * Packed channels (coarse key → fine alias): channels with exactly one alias
+ * where, in every sequence, the alias directly follows the channel and the
+ * channel is directly followed by its alias. `sequences` hold DMX-ordered
+ * channel references without gaps (`null` does not take a DMX slot).
+ */
+function findPackedChannels(
+  defs: Record<string, OflChannel> | undefined,
+  owners: ReadonlyMap<string, string>,
+  sequences: readonly (readonly unknown[])[],
+): Map<string, string> {
+  const packed = new Map<string, string>();
+  for (const [key, ch] of Object.entries(defs ?? {})) {
+    const alias = ch.fineChannelAliases?.length === 1 ? ch.fineChannelAliases[0]! : undefined;
+    if (alias !== undefined && alias !== key && owners.get(alias) === key) packed.set(key, alias);
+  }
+  for (const seq of sequences) {
+    seq.forEach((ref, i) => {
+      if (typeof ref !== 'string') return;
+      // Coarse reference without its fine byte right behind it.
+      const alias = packed.get(ref);
+      if (alias !== undefined && seq[i + 1] !== alias) packed.delete(ref);
+      // Fine byte that does not directly follow its coarse channel.
+      const owner = owners.get(ref);
+      if (owner !== undefined && packed.get(owner) === ref && seq[i - 1] !== owner) packed.delete(owner);
+    });
+  }
+  return packed;
+}
+
+/** DMX-ordered references of every mode; matrix inserts stay in as non-matching items. */
+function modeSequences(ofl: OflFixture): unknown[][] {
+  return (ofl.modes ?? []).map(m => (m.channels ?? []).filter(item => item != null));
+}
+
+/** DMX-ordered template references of every matrix insert. */
+function insertSequences(ofl: OflFixture): string[][] {
+  return (ofl.modes ?? []).flatMap(m => (m.channels ?? [])
+    .filter((item): item is OflMatrixChannelInsert =>
+      typeof item === 'object' && item !== null && item.insert === 'matrixChannels')
+    .map(insert => (insert.templateChannels ?? []).filter((key): key is string => key != null)));
+}
+
+/**
+ * Editor resolution of a loaded channel. With fine aliases only a packed
+ * channel is '16bit' (otherwise its fine bytes are drafts of their own);
+ * without aliases the declared resolution is kept.
+ */
+function draftResolution(def: OflChannel, packed: boolean): '8bit' | '16bit' {
+  if (def.fineChannelAliases?.length) return packed ? '16bit' : '8bit';
+  return clampResolution(def.dmxValueResolution);
+}
+
+/** Editor name of a template channel: "Red $pixelKey" → "Red". */
+function templateDisplayName(templateKey: string): string {
+  return templateKey.replace(/\s*\$pixelKey\s*/g, '').trim() || templateKey;
+}
+
+/** How `buildOflFixture` writes the fine bytes of 16/24-bit channels. */
+interface FinePlan {
+  /** OFL `fineChannelAliases` per coarse draft id. */
+  aliasesById: Map<string, string[]>;
+  /** Packed drafts: the alias written directly after each mode reference. */
+  impliedById: Map<string, string>;
+  /** Drafts written only as a fine alias of their coarse channel, not as a channel. */
+  fineDraftIds: Set<string>;
+}
+
+/**
+ * Plans the fine aliases of a save: links unpacked drafts to the drafts of
+ * their fine bytes and names the implicit fine byte of every '16bit' draft
+ * (the loaded alias while the channel keeps its name, else "<name> fine").
+ * Aliases share the channel namespace, so they never reuse a channel key.
+ */
+function planFineChannels(
+  channels: ChannelDraft[],
+  modes: ModeDraft[],
+  perHeadChannelIds: ReadonlySet<string>,
+): FinePlan {
+  const plan: FinePlan = { aliasesById: new Map(), impliedById: new Map(), fineDraftIds: new Set() };
+  const byId = new Map(channels.map(c => [c.id, c as FineChannelDraft]));
+  const globalUseIds = new Set(modes.flatMap(m => m.entries.filter(e => !e.perHead).map(e => e.channelId)));
+  /** OFL key of a channel name in the given namespace. */
+  const refName = (name: string, template: boolean) => (template ? `${name} $pixelKey` : name);
+  const used = new Set(channels.map(c => refName(c.name, perHeadChannelIds.has(c.id))));
+
+  // ── Unpacked: link the separate fine drafts (8-bit coarse channels only) ──
+  for (const ch of byId.values()) {
+    if (ch.resolution !== '8bit' || !ch.fineChannelIds?.length || plan.fineDraftIds.has(ch.id)) continue;
+    const template = perHeadChannelIds.has(ch.id);
+    const fines = ch.fineChannelIds
+      .map(id => byId.get(id))
+      .filter((f): f is FineChannelDraft => !!f
+        && f.id !== ch.id
+        && f.resolution === '8bit'
+        && !plan.fineDraftIds.has(f.id)
+        && !plan.aliasesById.has(f.id)
+        // The fine draft must be referenced in the namespace of its coarse channel.
+        && !(template ? globalUseIds.has(f.id) : perHeadChannelIds.has(f.id)))
+      .slice(0, 2); // OFL resolutions end at 24 bit
+    if (fines.length === 0) continue;
+    const aliases = fines.map(f => refName(f.name, template));
+    plan.aliasesById.set(ch.id, aliases);
+    for (const f of fines) plan.fineDraftIds.add(f.id);
+    for (const alias of aliases) used.add(alias);
+  }
+
+  // ── Packed: name the implicit fine byte of every '16bit' draft ───────────
+  for (const ch of byId.values()) {
+    if (ch.resolution !== '16bit') continue;
+    const template = perHeadChannelIds.has(ch.id);
+    const source = ch.fineAliasSource;
+    const loaded = source && source.coarseName === ch.name
+      && source.alias.includes('$pixelKey') === template ? source.alias : undefined;
+    let alias = loaded !== undefined && !used.has(loaded) ? loaded : undefined;
+    for (let n = 1; alias === undefined; n++) {
+      const candidate = refName(n === 1 ? `${ch.name} fine` : `${ch.name} fine ${n}`, template);
+      if (!used.has(candidate)) alias = candidate;
+    }
+    used.add(alias);
+    plan.aliasesById.set(ch.id, [alias]);
+    plan.impliedById.set(ch.id, alias);
+  }
+  return plan;
 }
 
 // ─── buildOflFixture ─────────────────────────────────────────────────────────
@@ -256,11 +449,17 @@ export function buildOflFixture(
     }
   }
 
+  // ── Fine bytes of 16/24-bit channels ──────────────────────────────────────
+  const fine = planFineChannels(channels, modes, perHeadChannelIds);
+
   // ── Build availableChannels / templateChannels ────────────────────────────
   const availableChannels: Record<string, OflChannel> = {};
   const templateChannelMap: Record<string, OflChannel> = {};
 
   for (const ch of channels) {
+    // A linked fine draft is written as an alias of its coarse channel only.
+    if (fine.fineDraftIds.has(ch.id)) continue;
+
     // Convert CapabilityRange[] back to OflCapability[]
     // IMPORTANT: translate editor ChannelType (RED/GREEN/…) into proper OFL
     // capability shape ({type:'ColorIntensity', color:'Red'}, …). Without this
@@ -293,10 +492,13 @@ export function buildOflFixture(
       caps.push(synth as OflCapability);
     }
 
+    // Fine bytes: 16-bit with one alias, 24-bit with two.
+    const aliases = fine.aliasesById.get(ch.id);
     const oflCh: OflChannel = {
       name: ch.name,
+      ...(aliases ? { fineChannelAliases: aliases } : {}),
       defaultValue: ch.defaultValue,
-      dmxValueResolution: ch.resolution,
+      dmxValueResolution: aliases ? (aliases.length > 1 ? '24bit' : '16bit') : ch.resolution,
       capabilities: caps,
     };
 
@@ -320,6 +522,9 @@ export function buildOflFixture(
         // Global channel → plain string reference
         const ch = channels.find((c) => c.id === e.channelId);
         modeChannels.push(ch ? ch.name : null);
+        // A '16bit' draft takes two addresses: its fine byte follows directly.
+        const implied = ch ? fine.impliedById.get(ch.id) : undefined;
+        if (implied) modeChannels.push(implied);
         i++;
       } else {
         // Consecutive perHead entries → single OflMatrixChannelInsert
@@ -328,6 +533,9 @@ export function buildOflFixture(
         while (i < m.entries.length && m.entries[i]!.perHead) {
           const ch = channels.find((c) => c.id === m.entries[i]!.channelId);
           templateNames.push(ch ? `${ch.name} $pixelKey` : null);
+          // Per-pixel fine byte of a '16bit' template channel follows directly.
+          const implied = ch ? fine.impliedById.get(ch.id) : undefined;
+          if (implied) templateNames.push(implied);
           i++;
         }
         if (templateNames.length > 0) {
@@ -341,7 +549,13 @@ export function buildOflFixture(
       }
     }
 
-    return { name: m.name, channels: modeChannels };
+    // RDM personality (plan M4.7): only written when set, so an unset field
+    // does not leave an `rdmPersonalityIndex: undefined` key behind.
+    return {
+      name: m.name,
+      ...(isRdmPersonalityIndex(m.rdmPersonalityIndex) ? { rdmPersonalityIndex: m.rdmPersonalityIndex } : {}),
+      channels: modeChannels,
+    };
   });
 
   // ── Build wheels ──────────────────────────────────────────────────────────
@@ -401,6 +615,15 @@ export function buildOflFixture(
       lastModifyDate: new Date().toISOString().split('T')[0]!,
     },
     comment: state.comment || undefined,
+    // RDM model ID (+ preserved software version); omitted when no model ID is set.
+    ...(isRdmId(state.rdmModelId)
+      ? {
+          rdm: {
+            modelId: state.rdmModelId,
+            ...(state.rdmSoftwareVersion ? { softwareVersion: state.rdmSoftwareVersion } : {}),
+          },
+        }
+      : {}),
     physical: {
       dimensions: [state.fixtureWidth, state.fixtureHeight, state.fixtureDepth],
       weight: state.weight || undefined,
@@ -433,6 +656,9 @@ export function buildOflFixture(
           }
         : undefined,
     pixelmapper: {
+      // Custom fixtures have no OFL manufacturer entry, so the RDM
+      // manufacturer ID lives in the definition; omitted when not set.
+      ...(isRdmId(state.rdmManufacturerId) ? { rdmManufacturerId: state.rdmManufacturerId } : {}),
       headLayout: {
         headCount: effectiveHeadCount,
         gridCols: matrixCols,
@@ -497,6 +723,10 @@ export function initFromOflFixture(ofl: OflFixture) {
     colorTemperature: ofl.physical?.bulb?.colorTemperature || 0,
     beamAngleMin: ofl.physical?.lens?.degreesMinMax?.[0] || 0,
     beamAngleMax: ofl.physical?.lens?.degreesMinMax?.[1] || 0,
+    // RDM identification (plan M4.7); `null` / '' = not set.
+    rdmManufacturerId: isRdmId(ofl.pixelmapper?.rdmManufacturerId) ? ofl.pixelmapper!.rdmManufacturerId! : null,
+    rdmModelId: isRdmId(ofl.rdm?.modelId) ? ofl.rdm!.modelId : null,
+    rdmSoftwareVersion: ofl.rdm?.softwareVersion ?? '',
   };
 
   const rawCategory = ofl.categories?.[0];
@@ -508,19 +738,70 @@ export function initFromOflFixture(ofl: OflFixture) {
   // Maps OFL channel key / template key → ChannelDraft.id for mode matching.
   const channelIdByKey = new Map<string, string>();
 
+  // Fine bytes (16/24-bit): which coarse channels pack their fine byte into
+  // one '16bit' draft (see "Fine channels" above). Global channels are
+  // referenced by the mode lists, template channels by the matrix inserts.
+  const globalAliasOwners = collectFineAliasOwners(ofl.availableChannels);
+  const templateAliasOwners = collectFineAliasOwners(ofl.templateChannels);
+  const packedGlobal = findPackedChannels(ofl.availableChannels, globalAliasOwners, modeSequences(ofl));
+  const packedTemplates = findPackedChannels(ofl.templateChannels, templateAliasOwners, insertSequences(ofl));
+  const packedGlobalAliases = new Set(packedGlobal.values());
+  const packedTemplateAliases = new Set(packedTemplates.values());
+
+  /**
+   * Records the fine bytes of a loaded coarse channel on its draft. Packed:
+   * remembers the alias so a save writes the same name. Unpacked: adds one
+   * 8-bit draft per alias right after the coarse draft (mode references find
+   * it via `channelIdByKey`) and links them.
+   */
+  function addFineDrafts(
+    draft: FineChannelDraft,
+    def: OflChannel,
+    packedAlias: string | undefined,
+    displayName: (alias: string) => string,
+  ) {
+    const aliases = def.fineChannelAliases ?? [];
+    if (aliases.length === 0) return;
+    if (packedAlias !== undefined) {
+      draft.fineAliasSource = { coarseName: draft.name, alias: packedAlias };
+      return;
+    }
+    draft.fineChannelIds = aliases.map((alias) => {
+      const existing = channelIdByKey.get(alias);
+      if (existing) return existing;
+      const id = crypto.randomUUID();
+      channelIdByKey.set(alias, id);
+      channels.push({
+        id,
+        name: displayName(alias),
+        capabilityType: 'GENERIC',
+        resolution: '8bit',
+        defaultValue: 0,
+        capabilities: [],
+      });
+      return id;
+    });
+  }
+
   // 1. Global channels (availableChannels)
   if (ofl.availableChannels) {
     for (const [key, ch] of Object.entries(ofl.availableChannels)) {
+      // A fine alias that is also listed as a channel comes with its coarse channel.
+      const aliasOwner = globalAliasOwners.get(key);
+      if (aliasOwner !== undefined && aliasOwner !== key) continue;
+
       const id = crypto.randomUUID();
       channelIdByKey.set(key, id);
-      channels.push({
+      const draft: FineChannelDraft = {
         id,
         name: ch.name || key,
         capabilityType: resolveOflChannel(ch, key).type,
-        resolution: clampResolution(ch.dmxValueResolution),
+        resolution: draftResolution(ch, packedGlobal.has(key)),
         defaultValue: (ch.defaultValue as number) || 0,
         capabilities: parseOflCapabilities(ch),
-      });
+      };
+      channels.push(draft);
+      addFineDrafts(draft, ch, packedGlobal.get(key), alias => alias);
     }
   }
 
@@ -528,37 +809,97 @@ export function initFromOflFixture(ofl: OflFixture) {
   // Template key e.g. "Red $pixelKey" → display name "Red"
   if (ofl.templateChannels) {
     for (const [templateKey, ch] of Object.entries(ofl.templateChannels)) {
-      // Skip fine-channel aliases — the coarse channel already covers them.
-      const isFineAlias = Object.values(ofl.templateChannels ?? {}).some((other) =>
-        other.fineChannelAliases?.includes(templateKey),
-      );
-      if (isFineAlias) continue;
+      // A fine alias that is also listed as a template comes with its coarse channel.
+      const aliasOwner = templateAliasOwners.get(templateKey);
+      if (aliasOwner !== undefined && aliasOwner !== templateKey) continue;
 
       const id = crypto.randomUUID();
       channelIdByKey.set(templateKey, id);
-
-      // Strip "$pixelKey" placeholder (with optional surrounding spaces)
-      const displayName = templateKey.replace(/\s*\$pixelKey\s*/g, '').trim() || templateKey;
-
-      channels.push({
+      const draft: FineChannelDraft = {
         id,
-        name: displayName,
+        name: templateDisplayName(templateKey),
         capabilityType: resolveOflChannel(ch, templateKey).type,
-        resolution: clampResolution(ch.dmxValueResolution),
+        resolution: draftResolution(ch, packedTemplates.has(templateKey)),
         defaultValue: (ch.defaultValue as number) || 0,
         capabilities: parseOflCapabilities(ch),
-      });
+      };
+      channels.push(draft);
+      addFineDrafts(draft, ch, packedTemplates.get(templateKey), templateDisplayName);
     }
+  }
+
+  // ── Pixel grid ────────────────────────────────────────────────────────────
+  // Restore from OFL matrix.pixelCount ([cols, rows, layers]).
+  // Falls back to 1×1 for single-head fixtures that have no matrix block.
+  // (Computed before the modes: folding explicit pixel channels needs headCount.)
+  const pixelCols = ofl.matrix?.pixelCount?.[0] ?? 1;
+  const pixelRows = ofl.matrix?.pixelCount?.[1] ?? 1;
+  const headCount = Math.max(
+    1,
+    ofl.pixelmapper?.headLayout?.headCount
+      ?? ofl.pixelmapper?.customSvg?.headCount
+      ?? ((pixelCols || 1) * (pixelRows || 1)),
+  );
+
+  // Pixel keys of the source matrix in head order. Explicitly listed pixel
+  // channels ("Red 1", "Green 1", …) are only folded into a per-head group when
+  // the matrix has exactly one pixel per editor head, so the DMX footprint of
+  // every mode stays the same after saving.
+  const sourcePixelKeys = collectPixelKeysRowMajor(ofl.matrix);
+  const canFoldPixelRuns = sourcePixelKeys.length > 0 && sourcePixelKeys.length === headCount;
+  const sourcePixelKeySet = new Set(sourcePixelKeys);
+
+  /**
+   * Tries to fold the run of explicit per-pixel references starting at
+   * `start` into perHead entries (see custom-fixture-template-runs.ts).
+   * Returns the entries and how many mode items they consumed, or `null`.
+   */
+  function foldPixelRunAt(items: OflMode['channels'], start: number) {
+    if (!canFoldPixelRuns) return null;
+    const run: TemplateRef[] = [];
+    for (let j = start; j < items.length; j++) {
+      const key = items[j];
+      // A run consists of strings that are no global channel but an
+      // instance of a template channel the editor has a draft for.
+      if (typeof key !== 'string' || ofl.availableChannels?.[key]) break;
+      const ref = resolveTemplateRef(key, ofl, sourcePixelKeySet);
+      if (!ref || !channelIdByKey.has(ref.templateKey)) break;
+      // A packed '16bit' template would gain fine bytes these strings do not list.
+      if (packedTemplates.has(ref.templateKey)) break;
+      run.push(ref);
+    }
+    const folded = foldTemplateRun(run, sourcePixelKeys);
+    if (!folded) return null;
+    const entries: ModeDraft['entries'] = folded.templateKeys.map(templateKey => ({
+      entryId: crypto.randomUUID(),
+      channelId: channelIdByKey.get(templateKey)!,
+      perHead: true,
+      order: folded.order,
+    }));
+    return { entries, consumed: run.length };
   }
 
   // ── Modes ─────────────────────────────────────────────────────────────────
   const modes: ModeDraft[] = (ofl.modes || []).map((m, i) => {
     const entries: ModeDraft['entries'] = [];
+    const items = m.channels || [];
 
-    for (const item of m.channels || []) {
+    for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
+      const item = items[itemIdx];
       if (!item) continue;
 
       if (typeof item === 'string') {
+        // Fine byte of a packed '16bit' channel: the coarse entry covers it.
+        if (packedGlobalAliases.has(item)) continue;
+
+        // Explicit per-pixel channels ("Red 1" … "Blue 4") → one per-head group.
+        const folded = foldPixelRunAt(items, itemIdx);
+        if (folded) {
+          entries.push(...folded.entries);
+          itemIdx += folded.consumed - 1;
+          continue;
+        }
+
         // Plain global channel reference
         let channelId = channelIdByKey.get(item);
 
@@ -574,7 +915,8 @@ export function initFromOflFixture(ofl: OflFixture) {
               id: channelId,
               name: item, // e.g. "Red Master"
               capabilityType: resolveOflChannel(chDef, tplKey || undefined).type,
-              resolution: clampResolution(chDef.dmxValueResolution),
+              // Instance fine bytes ("Red fine Master") stay separate drafts.
+              resolution: draftResolution(chDef, false),
               defaultValue: (chDef.defaultValue as number) || 0,
               capabilities: parseOflCapabilities(chDef),
             });
@@ -594,6 +936,8 @@ export function initFromOflFixture(ofl: OflFixture) {
         const insert = item as OflMatrixChannelInsert;
         for (const tplName of insert.templateChannels || []) {
           if (!tplName) continue;
+          // Per-pixel fine byte of a packed '16bit' template: covered by the coarse entry.
+          if (packedTemplateAliases.has(tplName)) continue;
           const channelId = channelIdByKey.get(tplName) || '';
           if (channelId) {
             entries.push({
@@ -610,6 +954,8 @@ export function initFromOflFixture(ofl: OflFixture) {
     return {
       id: `mode-${crypto.randomUUID()}`,
       name: m.name || `Mode ${i + 1}`,
+      // RDM personality (plan M4.7); only kept when it is a valid index.
+      ...(isRdmPersonalityIndex(m.rdmPersonalityIndex) ? { rdmPersonalityIndex: m.rdmPersonalityIndex } : {}),
       entries,
     };
   });
@@ -641,17 +987,7 @@ export function initFromOflFixture(ofl: OflFixture) {
     }
   }
 
-  // ── Pixel grid ────────────────────────────────────────────────────────────
-  // Restore from OFL matrix.pixelCount ([cols, rows, layers]).
-  // Falls back to 1×1 for single-head fixtures that have no matrix block.
-  const pixelCols = ofl.matrix?.pixelCount?.[0] ?? 1;
-  const pixelRows = ofl.matrix?.pixelCount?.[1] ?? 1;
-  const headCount = Math.max(
-    1,
-    ofl.pixelmapper?.headLayout?.headCount
-      ?? ofl.pixelmapper?.customSvg?.headCount
-      ?? ((pixelCols || 1) * (pixelRows || 1)),
-  );
+  // ── Custom SVG ────────────────────────────────────────────────────────────
   const customSvgData = ofl.pixelmapper?.customSvg?.data ?? null;
   const useCustomSvg = Boolean(ofl.pixelmapper?.customSvg?.enabled && customSvgData);
   const headToElementMap = ofl.pixelmapper?.customSvg?.headToElement ?? {};

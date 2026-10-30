@@ -3,11 +3,10 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from './use-history';
 import { GroupNodesCommand, UngroupNodesCommand } from '../commands/group-command';
 import { DeleteNodesCommand } from '../commands/delete-node-command';
-import { AddFixturesCommand } from '../commands/add-fixture-command';
 import { MoveFixtureCommand } from '../commands/move-fixture-command';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 import type { Fixture } from '~/utils/engine/core/fixture';
-import { assignIdsAndAddresses } from '~/utils/engine/addressing';
+import { createAddFixturesCommand, selectionWithAdded } from '~/utils/engine/add-fixtures';
 import { newPrefixedId } from '~/utils/ids';
 
 export function useWorkspaceOperations(
@@ -17,22 +16,15 @@ export function useWorkspaceOperations(
 ) {
   const history = useHistory();
 
+  /**
+   * Adds fixtures from the add dialog through the shared add path (plan
+   * M4.1): appended after the highest used address, cascaded from the
+   * centre, one undo step, then added to the selection.
+   */
   function handleAddOflFixtures(fixtures: Fixture[]) {
-    assignIdsAndAddresses(fixtures, flatFixtures.value);
-    // Cascade initial positions so several added fixtures don't overlap.
-    // Kind geometry is relative to fixturePosition, so this works for all.
-    fixtures.forEach((f, i) => {
-      f.fixturePosition = { x: 0.5 + (i * 0.02), y: 0.5 + (i * 0.02) };
-    });
-
-    const command = new AddFixturesCommand(sceneNodes.value, fixtures);
+    const command = createAddFixturesCommand(sceneNodes.value, fixtures, flatFixtures.value);
     history.execute(command);
-
-    const next = new Set(selectedIds.value);
-    for (const f of fixtures) {
-      next.add(f.id);
-    }
-    selectedIds.value = next;
+    selectedIds.value = selectionWithAdded(selectedIds.value, fixtures);
   }
 
   function handleGroup() {

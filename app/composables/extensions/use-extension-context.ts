@@ -10,6 +10,9 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { createCoreCommandFactory } from '~/utils/extensions/core-command-factory';
 import { fixtureView } from '~/utils/extensions/scope-views';
+import { runAsExtension } from '~/utils/extensions/fixture-patch-observer';
+import { findFixtureInTree } from '~/utils/engine/scene-tree';
+import type { SceneNode } from '~/utils/engine/core/group';
 import { EXTENSION_OWNER_KEY, SLOT_ID_KEY } from './scope-keys';
 import { useScopes } from './use-scope';
 
@@ -29,7 +32,9 @@ export function setExtensionRunHook(hook: typeof afterRunHook): void {
  * tick). Views are frozen in dev, so the readonly typing is enforced at runtime.
  */
 export const getFixture: ExtensionContext['getFixture'] = (id: FixtureId) => {
-  const fixture = useEngineStore().flatFixtures.find(f => f.id === id);
+  // Live tree (tracks `sceneNodes` like `flatFixtures`, but is never stale
+  // right after a command added a fixture).
+  const fixture = findFixtureInTree(useEngineStore().sceneNodes as SceneNode[], id);
   return fixture ? (fixtureView(fixture) as unknown as ReturnType<ExtensionContext['getFixture']>) : undefined;
 };
 
@@ -76,7 +81,8 @@ export function useExtensionContext(): ExtensionContext {
     getFixture,
     preview,
     run(command: Command) {
-      history.execute(command);
+      // Attributed to the extension for patch observers (`initiator`, plan M4.6).
+      runAsExtension(extensionId, () => history.execute(command));
       afterRunHook?.(extensionId, command);
     },
   };

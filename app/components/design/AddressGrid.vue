@@ -3,6 +3,8 @@ import { computed, ref, onUnmounted, onMounted, nextTick } from 'vue';
 import { useEngineStore } from '~/stores/engine-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { UpdateDmxCommand } from '~/components/engine/commands/update-dmx-command';
+import { requestFixtureChanges } from '~/utils/extensions/fixture-change-guard';
+import { patchStateAt, patchStateOf } from '~/utils/extensions/fixture-patch-state';
 import type { Fixture } from '~/utils/engine/core/fixture';
 
 const CELL_W = 32;
@@ -228,7 +230,14 @@ function onStripPointerUp(e: PointerEvent, universe: number) {
   const conflict = ghostIsConflict.value;
   dragFixture.value = null;
   if (newAddr !== oldAddr && !conflict) {
-    history.execute(new UpdateDmxCommand(fixture, oldAddr, newAddr));
+    // Fixture change guards (plan M4.5) may confirm or deny the move.
+    void requestFixtureChanges([{
+      fixtureId: fixture.id,
+      before: patchStateOf(fixture),
+      after: patchStateAt(newAddr, fixture.channels.length, fixture.source?.modeIndex),
+    }]).then((allowed) => {
+      if (allowed && fixture.startAddress === oldAddr) history.execute(new UpdateDmxCommand(fixture, oldAddr, newAddr));
+    });
   }
 }
 
