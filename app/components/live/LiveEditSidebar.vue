@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { Play, GripVertical, Trash2, MapPin, Plus } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+import { Play, Trash2, MapPin, Plus } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import {
+  UpdateLiveSectionCommand,
   UpdateLivePageCommand,
   UpdateControllerChildMappingCommand,
   UpdateWidgetMappingCommand,
   SetWidgetControllerInstanceCommand,
   AddLiveSectionCommand,
   RemoveLiveSectionCommand,
-  UpdateLiveSectionCommand,
   SetSectionMembersCommand,
 } from '~/components/engine/commands/live-widget-commands';
 import {
@@ -21,14 +21,15 @@ import {
   type LiveMapping,
   type ControllerChildBinding,
   type LiveSection,
-  type SectionColorEntry,
   type SectionMember,
-  type SectionMode,
   type SectionSource,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
-import { resolveSectionSource } from '~/utils/live/sections';
-import { getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
+import { sectionDisplayName } from '~/utils/live/sections';
+import MappingEditor from './MappingEditor.vue';
+import LiveSectionEditor from './LiveSectionEditor.vue';
+import LiveButtonPanel from './LiveButtonPanel.vue';
+import LiveButtonAppearance from './LiveButtonAppearance.vue';
 
 const store = useLiveModeStore();
 const engineStore = useEngineStore();
@@ -100,7 +101,7 @@ const selectedButton = computed<LiveWidget | null>(() => {
   return widget && widget.type !== 'controller-twin' ? widget : null;
 });
 
-function patchWidget(patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>>) {
+function patchWidget(patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>) {
   const w = selectedButton.value;
   if (!w || !store.activePageId) return;
   history.execute(new UpdateWidgetMappingCommand(store.activePageId, w.id, patch));
@@ -130,7 +131,7 @@ const selectedChild = computed<ControllerChildBinding | null>(() => {
   return twin.controllerChildren?.find(c => c.controlId === ctrl.id) ?? null;
 });
 
-function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>) {
+function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>) {
   const twin = selectedTwin.value;
   const ctrl = selectedControl.value;
   if (!twin || !ctrl || !store.activePageId) return;
@@ -141,10 +142,6 @@ function patchChild(patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'lab
 
 function setLabel(label: string) {
   patchChild({ label });
-}
-
-function setColor(color: string) {
-  patchChild({ color });
 }
 
 // ── Sections ────────────────────────────────────────────────────────────────
@@ -173,6 +170,12 @@ const selectionMembers = computed<SectionMember[]>(() => {
 
 const availableSections = computed<LiveSection[]>(() => store.activePage?.sections ?? []);
 
+/** Section containing the given member, if any. */
+function sectionOfMember(member: SectionMember): LiveSection | null {
+  const mk = memberMatchKey(member);
+  return availableSections.value.find(s => s.members.some(m => memberMatchKey(m) === mk)) ?? null;
+}
+
 // Common section across all selected members (null if mixed or none).
 // Also accepts a direct selectedSectionId (set when clicking a twin sub-control
 // that belongs to a section, without drilling into the control level).
@@ -183,18 +186,22 @@ const selectionSection = computed<LiveSection | null>(() => {
   }
   const members = selectionMembers.value;
   if (members.length === 0) return null;
-  const sections = availableSections.value;
-  if (sections.length === 0) return null;
   let candidate: LiveSection | null = null;
   for (const m of members) {
-    const mk = memberMatchKey(m);
-    const sec = sections.find(s => s.members.some(mm => memberMatchKey(mm) === mk));
+    const sec = sectionOfMember(m);
     if (!sec) return null;
     if (!candidate) candidate = sec;
     else if (candidate.id !== sec.id) return null;
   }
   return candidate;
 });
+
+/**
+ * Group-level section panel: several controls selected (e.g. a whole section
+ * via plain click) or a section surfaced directly. A single button is edited
+ * in the button panel instead, where "Section" is just one of its actions.
+ */
+const showSectionPanel = computed(() => !!store.selectedSectionId || selectionMembers.value.length > 1);
 
 // Sections eligible as "add target": skip ones the selection already fully belongs to.
 const eligibleAddTargets = computed<LiveSection[]>(() => {
@@ -207,215 +214,118 @@ const eligibleAddTargets = computed<LiveSection[]>(() => {
   });
 });
 
-function defaultModeForSource(source: SectionSource): SectionMode {
-  switch (source) {
-    case 'all-presets':         return 'single-select';
-    case 'selected-presets':    return 'single-select';
-    case 'preset-variants':     return 'single-select';
-    case 'color-variants':      return 'single-select';
-  }
-}
-
-/** Preset IDs the 'all-presets' source would currently surface, in its order. */
-function allPresetIds(): string[] {
-  return resolveSectionSource('all-presets', {
-    savedPresets: engineStore.savedPresets,
-    selectedPresetId: engineStore.selectedPresetId,
-  }).map(s => s.preset.id);
-}
-
-function createSectionFromSelection() {
-  if (!store.activePageId) return;
-  const members = selectionMembers.value;
-  if (members.length === 0) return;
+/** Creates a new section holding `members` (defaults to all presets). */
+function createSection(members: SectionMember[]) {
+  if (!store.activePageId || members.length === 0) return;
   const source: SectionSource = 'all-presets';
   const section: LiveSection = {
     id: crypto.randomUUID(),
     source,
-    mode: defaultModeForSource(source),
     members: members.map(m => ({ ...m })),
   };
   history.execute(new AddLiveSectionCommand(store.activePageId, section));
 }
 
-function addSelectionToSection(sectionId: string) {
-  const page = store.activePage;
-  if (!page || !store.activePageId) return;
-  const section = page.sections?.find(s => s.id === sectionId);
-  if (!section) return;
+/** Appends `members` to section `sectionId`, skipping ones already in it. */
+function addMembersToSection(sectionId: string, members: SectionMember[]) {
+  const section = availableSections.value.find(s => s.id === sectionId);
+  if (!section || !store.activePageId) return;
   const existing = new Set(section.members.map(memberMatchKey));
   const next = section.members.map(m => ({ ...m }));
-  for (const m of selectionMembers.value) {
+  for (const m of members) {
     if (!existing.has(memberMatchKey(m))) next.push({ ...m });
   }
   history.execute(new SetSectionMembersCommand(store.activePageId, sectionId, next));
 }
 
-function removeSelectionFromSection() {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  const toRemove = new Set(selectionMembers.value.map(memberMatchKey));
-  const next = sec.members.filter(m => !toRemove.has(memberMatchKey(m)));
+/** Removes `members` from `section`; an emptied section is deleted. */
+function removeMembersFromSection(section: LiveSection, members: SectionMember[]) {
+  if (!store.activePageId) return;
+  const toRemove = new Set(members.map(memberMatchKey));
+  const next = section.members.filter(m => !toRemove.has(memberMatchKey(m)));
   if (next.length === 0) {
     // Empty sections have no purpose — drop the whole section instead.
-    history.execute(new RemoveLiveSectionCommand(store.activePageId, sec.id));
+    history.execute(new RemoveLiveSectionCommand(store.activePageId, section.id));
   } else {
-    history.execute(new SetSectionMembersCommand(store.activePageId, sec.id, next));
+    history.execute(new SetSectionMembersCommand(store.activePageId, section.id, next));
   }
 }
 
-function updateSectionMode(mode: SectionMode) {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { mode }));
+function createSectionFromSelection() {
+  createSection(selectionMembers.value);
 }
 
-function updateSectionSource(source: SectionSource) {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  // When swapping source, snap mode to the source's preferred default — keeps
-  // surprise low: e.g. switching to preset-variants resets to single-select.
-  const patch: Partial<Omit<LiveSection, 'id' | 'members'>> = {
-    source,
-    mode: defaultModeForSource(source),
-  };
-  // Seed a stable color palette so it doesn't shift on every recount.
-  if (source === 'color-variants') {
-    const baseRGB = engineStore.selectedPresetId
-      ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
-      : null;
-    patch.colorVariants = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
-  }
-  // Seed the curated list from the current "all presets" set on first switch,
-  // so the user starts from everything and prunes/reorders from there.
-  if (source === 'selected-presets' && (!sec.selectedPresetIds || sec.selectedPresetIds.length === 0)) {
-    patch.selectedPresetIds = allPresetIds();
-  }
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, patch));
+function addSelectionToSection(sectionId: string) {
+  addMembersToSection(sectionId, selectionMembers.value);
 }
 
-// ── Selected-presets list editor ──────────────────────────────────────────
-
-/** Ordered entries for the selected-presets editor (preset may be null if deleted). */
-const selectedPresetEntries = computed(() => {
+function removeSelectionFromSection() {
   const sec = selectionSection.value;
-  if (!sec || sec.source !== 'selected-presets') return [];
-  const byId = new Map(engineStore.savedPresets.map(p => [p.id, p]));
-  return (sec.selectedPresetIds ?? []).map(id => ({ id, preset: byId.get(id) ?? null }));
+  if (sec) removeMembersFromSection(sec, selectionMembers.value);
+}
+
+// ── Single button / pad: Action | Section ───────────────────────────────────
+
+/** The one control being edited as a button (canvas widget or twin sub-control). */
+const singleMember = computed<SectionMember | null>(() => {
+  if (store.selectedSectionId || selectionMembers.value.length !== 1) return null;
+  return selectionMembers.value[0] ?? null;
 });
 
-/** Top-level presets not yet in the curated list — candidates for the add picker. */
-const addablePresets = computed(() => {
-  const sec = selectionSection.value;
-  if (!sec || sec.source !== 'selected-presets') return [];
-  const have = new Set(sec.selectedPresetIds ?? []);
-  return resolveSectionSource('all-presets', {
-    savedPresets: engineStore.savedPresets,
-    selectedPresetId: engineStore.selectedPresetId,
-  }).map(s => s.preset).filter(p => !have.has(p.id));
+/** Section the single control belongs to, if any. */
+const singleMemberSection = computed<LiveSection | null>(() =>
+  singleMember.value ? sectionOfMember(singleMember.value) : null,
+);
+
+/** Selected pad (twin sub-control of type button), edited with the button panel. */
+const selectedPad = computed(() => (selectedControl.value?.type === 'button' ? selectedControl.value : null));
+
+// "Section" chosen while sections exist: the user still has to pick one.
+const pendingSectionChoice = ref(false);
+watch(() => singleMember.value && memberMatchKey(singleMember.value), () => {
+  pendingSectionChoice.value = false;
 });
 
-function setSelectedPresetIds(ids: string[]) {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { selectedPresetIds: ids }));
+/** Switch to Section: create one right away if none exist, else ask which. */
+function chooseSectionMode() {
+  if (singleMemberSection.value) return;
+  if (availableSections.value.length === 0) moveSingleMemberTo('new');
+  else pendingSectionChoice.value = true;
 }
 
-// Drag-to-reorder state for the selected-presets list.
-const dragFromIdx = ref<number | null>(null);
-const dragOverIdx = ref<number | null>(null);
-
-function onSelectedPresetDrop(toIdx: number) {
-  const from = dragFromIdx.value;
-  dragFromIdx.value = null;
-  dragOverIdx.value = null;
-  if (from === null || from === toIdx) return;
-  const sec = selectionSection.value;
-  if (!sec) return;
-  const ids = [...(sec.selectedPresetIds ?? [])];
-  const [moved] = ids.splice(from, 1);
-  if (moved === undefined) return;
-  ids.splice(toIdx, 0, moved);
-  setSelectedPresetIds(ids);
+/** Switch to Action: leave the section. The button's actions stay stored. */
+function chooseActionMode() {
+  pendingSectionChoice.value = false;
+  const member = singleMember.value;
+  const sec = singleMemberSection.value;
+  if (!member || !sec) return;
+  removeMembersFromSection(sec, [member]);
+  // Drop section isolation since this control is no longer a member.
+  if (store.isolatedSectionId === sec.id) store.isolatedSectionId = null;
 }
 
-function removeSelectedPreset(index: number) {
-  const sec = selectionSection.value;
-  if (!sec) return;
-  const ids = [...(sec.selectedPresetIds ?? [])];
-  ids.splice(index, 1);
-  setSelectedPresetIds(ids);
+/** Moves the single control into section `target` ('new' creates one). */
+function moveSingleMemberTo(target: string) {
+  const member = singleMember.value;
+  if (!member) return;
+  pendingSectionChoice.value = false;
+  const current = singleMemberSection.value;
+  if (current?.id === target) return;
+  if (current) removeMembersFromSection(current, [member]);
+  if (target === 'new') createSection([member]);
+  else addMembersToSection(target, [member]);
 }
 
-function addSelectedPreset(id: string) {
-  const sec = selectionSection.value;
-  if (!sec || !id) return;
-  const ids = [...(sec.selectedPresetIds ?? [])];
-  if (ids.includes(id)) return;
-  ids.push(id);
-  setSelectedPresetIds(ids);
+/** Label / color / actions / appearance change of the edited button or pad. */
+function patchButton(patch: Partial<Pick<LiveWidget, 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>) {
+  if (selectedTwin.value && selectedControl.value) patchChild(patch);
+  else patchWidget(patch);
 }
 
-/** Update a single slot's stored color (slot 0 is always preset-natural and not user-editable). */
-function setColorVariantSlot(index: number, rgb: RGB) {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  if (index <= 0) return;
-  const baseRGB = engineStore.selectedPresetId
-    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
-    : null;
-  const current = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
-  const next: SectionColorEntry[] = current.map((e, i) => i === index ? { ...rgb } : e);
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { colorVariants: next }));
-}
-
-function regenerateColorVariants() {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  const baseRGB = engineStore.selectedPresetId
-    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
-    : null;
-  const fresh = growColorVariants(undefined, sec.members.length, baseRGB);
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { colorVariants: fresh }));
-}
-
-/** Hex string ("#rrggbb") for a slot's effective color, used in the editor swatches. */
-function slotHex(index: number): string {
-  const sec = selectionSection.value;
-  if (!sec) return '#000000';
-  const baseRGB = engineStore.selectedPresetId
-    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
-    : null;
-  const entries = growColorVariants(sec.colorVariants, sec.members.length, baseRGB);
-  const entry = entries[index];
-  const rgb = entry ?? baseRGB;
-  if (!rgb) return '#000000';
-  const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
-  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
-}
-
-function hexToRGB(hex: string): RGB | null {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
-  if (!m) return null;
-  return { r: parseInt(m[1]!, 16), g: parseInt(m[2]!, 16), b: parseInt(m[3]!, 16) };
-}
-
-function onSlotColorInput(index: number, value: string) {
-  const rgb = hexToRGB(value);
-  if (rgb) setColorVariantSlot(index, rgb);
-}
-
-/** Visible slot indices for the color editor (matches the section's member count). */
-const colorVariantSlots = computed<number[]>(() => {
-  const sec = selectionSection.value;
-  if (!sec || sec.source !== 'color-variants') return [];
-  return Array.from({ length: sec.members.length }, (_, i) => i);
-});
-
-function updateSectionName(name: string) {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  history.execute(new UpdateLiveSectionCommand(store.activePageId, sec.id, { name }));
+/** Shared color / look of a section (set from a member's Appearance group). */
+function patchSection(sectionId: string, patch: Partial<Pick<LiveSection, 'color' | 'appearance'>>) {
+  if (!store.activePageId) return;
+  history.execute(new UpdateLiveSectionCommand(store.activePageId, sectionId, patch));
 }
 
 // ── Moving Head Positions (shown under XY-Pad widgets) ──────────────────────
@@ -447,85 +357,6 @@ function renamePosition(id: string, name: string) {
   store.updatePositionName(id, name.trim() || 'Position');
 }
 
-function deleteSelectedSection() {
-  const sec = selectionSection.value;
-  if (!sec || !store.activePageId) return;
-  history.execute(new RemoveLiveSectionCommand(store.activePageId, sec.id));
-}
-
-// Section containing the currently-focused control (for per-control isolation view).
-const focusedControlSection = computed<LiveSection | null>(() => {
-  const twin = selectedTwin.value;
-  const ctrl = selectedControl.value;
-  if (!twin || !ctrl) return null;
-  const sections = availableSections.value;
-  for (const s of sections) {
-    if (s.members.some(m => m.widgetId === twin.id && m.controlId === ctrl.id)) return s;
-  }
-  return null;
-});
-
-function removeControlFromSection() {
-  const twin = selectedTwin.value;
-  const ctrl = selectedControl.value;
-  const sec = focusedControlSection.value;
-  if (!twin || !ctrl || !sec || !store.activePageId) return;
-  const next = sec.members.filter(m => !(m.widgetId === twin.id && m.controlId === ctrl.id));
-  if (next.length === 0) {
-    history.execute(new RemoveLiveSectionCommand(store.activePageId, sec.id));
-  } else {
-    history.execute(new SetSectionMembersCommand(store.activePageId, sec.id, next));
-  }
-  // Drop section isolation since this control is no longer a member.
-  store.isolatedSectionId = null;
-}
-
-function enterSectionMappingMode() {
-  const sec = selectionSection.value;
-  if (!sec) return;
-  store.sectionMappingMode = sec.id;
-  store.isolatedSectionId = null;
-  store.isolatedGroupId = null;
-  // While mapping, we surface the section directly — no individual widget
-  // should appear "selected" with a blue ring on the canvas.
-  store.selectedWidgetIds = new Set();
-  store.selectedControlId = null;
-  store.selectedSectionId = sec.id;
-}
-
-const isInMappingMode = computed(() => {
-  const sec = selectionSection.value;
-  return !!sec && store.sectionMappingMode === sec.id;
-});
-
-const SOURCE_LABELS: Record<SectionSource, string> = {
-  'all-presets': 'Presets',
-  'selected-presets': 'Presets',
-  'preset-variants': 'Variants of Active Preset',
-  'color-variants': 'Color Variants',
-};
-
-// The "Content" dropdown groups the two preset sources under one entry; a
-// second dropdown then picks between all vs. a hand-picked set.
-type SectionContent = 'presets' | 'preset-variants' | 'color-variants';
-const CONTENT_LABELS: Record<SectionContent, string> = {
-  'presets': 'Presets',
-  'preset-variants': 'Variants of Active Preset',
-  'color-variants': 'Color Variants',
-};
-function contentOf(source: SectionSource): SectionContent {
-  return (source === 'all-presets' || source === 'selected-presets') ? 'presets' : source;
-}
-function updateSectionContent(content: SectionContent) {
-  // Switching into "Presets" defaults to the dynamic all-presets source.
-  updateSectionSource(content === 'presets' ? 'all-presets' : content);
-}
-const MODE_LABELS: Record<SectionMode, string> = {
-  'flash': 'Flash (hold = active)',
-  'single-select': 'Single-select (one active)',
-  'multi-select': 'Multi-select (toggle)',
-};
-
 </script>
 
 <template>
@@ -542,8 +373,8 @@ const MODE_LABELS: Record<SectionMode, string> = {
     </div>
 
     <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-5">
-      <!-- ── Section editor ─────────────────────────────────────────────── -->
-      <div v-if="(selectionMembers.length > 0 || selectionSection) && !focusedControlSection" class="flex flex-col gap-2 pb-4 border-b border-border">
+      <!-- ── Section panel (several controls / whole section) ───────────── -->
+      <div v-if="showSectionPanel" class="flex flex-col gap-2 pb-4 border-b border-border">
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Section</span>
           <span v-if="selectionSection" class="text-[10px] text-muted-foreground">
@@ -551,181 +382,25 @@ const MODE_LABELS: Record<SectionMode, string> = {
           </span>
         </div>
 
-        <!-- In-section: editor -->
-        <template v-if="selectionSection">
-          <!-- Mapping mode banner -->
-          <div
-            v-if="isInMappingMode"
-            class="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-violet-500/20 ring-1 ring-violet-400/50"
-          >
-            <span class="text-[10px] text-violet-300 leading-snug">Click = toggle membership</span>
+        <!-- In-section: shared appearance, then the editor -->
+        <LiveButtonAppearance
+          v-if="selectionSection"
+          :show-label="false"
+          :color="selectionSection.color"
+          :appearance="selectionSection.appearance"
+          @patch="(p) => patchSection(selectionSection!.id, p)"
+        />
+        <LiveSectionEditor v-if="selectionSection" :section="selectionSection">
+          <template v-if="selectionMembers.length > 0" #actions>
             <button
               type="button"
-              class="shrink-0 px-2 py-1 rounded text-[11px] font-medium bg-violet-500 hover:bg-violet-400 text-white transition-colors"
-              @click="store.exitSectionMappingMode()"
-            >
-              Done
-            </button>
-          </div>
-
-          <div class="flex gap-1.5">
-            <input
-              type="text"
-              class="flex-1 min-w-0 text-xs bg-background border border-border rounded px-2 py-1.5"
-              placeholder="Section name"
-              :value="selectionSection.name ?? ''"
-              @change="(e) => updateSectionName((e.target as HTMLInputElement).value)"
-            />
-            <button
-              type="button"
-              class="shrink-0 px-2 py-1.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap"
-              :class="isInMappingMode
-                ? 'bg-violet-500 hover:bg-violet-400 text-white'
-                : 'bg-accent hover:bg-accent/80'"
-              title="Assign buttons to this section"
-              @click="enterSectionMappingMode"
-            >
-              Assign
-            </button>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Content</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="contentOf(selectionSection.source)"
-              @change="(e) => updateSectionContent((e.target as HTMLSelectElement).value as SectionContent)"
-            >
-              <option v-for="(label, key) in CONTENT_LABELS" :key="key" :value="key">{{ label }}</option>
-            </select>
-          </div>
-
-          <!-- Presets: all vs. a hand-picked, ordered set -->
-          <div v-if="contentOf(selectionSection.source) === 'presets'" class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Presets</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectionSection.source"
-              @change="(e) => updateSectionSource((e.target as HTMLSelectElement).value as SectionSource)"
-            >
-              <option value="all-presets">All presets</option>
-              <option value="selected-presets">Selected presets</option>
-            </select>
-          </div>
-
-          <!-- Selected-presets editor: reorder, remove, add -->
-          <div v-if="selectionSection.source === 'selected-presets'" class="flex flex-col gap-1.5">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Selected presets</span>
-            <div v-if="selectedPresetEntries.length === 0" class="text-[10px] text-muted-foreground/70 leading-snug">
-              No presets selected. Add some below.
-            </div>
-            <div v-else class="flex flex-col gap-1">
-              <div
-                v-for="(entry, i) in selectedPresetEntries"
-                :key="entry.id"
-                class="group/row flex items-center gap-1 text-[11px] rounded"
-                :class="dragOverIdx === i ? 'border-t-2 border-primary' : ''"
-                draggable="true"
-                @dragstart="dragFromIdx = i"
-                @dragover.prevent="dragOverIdx = i"
-                @drop="onSelectedPresetDrop(i)"
-                @dragend="dragFromIdx = null; dragOverIdx = null"
-              >
-                <GripVertical class="size-3 shrink-0 text-muted-foreground/40 cursor-grab active:cursor-grabbing" />
-                <span class="text-muted-foreground/60 w-4 tabular-nums shrink-0">{{ i + 1 }}</span>
-                <span class="flex-1 min-w-0 truncate" :class="{ 'text-destructive italic': !entry.preset }">
-                  {{ entry.preset?.name ?? '(deleted preset)' }}
-                </span>
-                <button
-                  type="button"
-                  class="shrink-0 p-1 rounded hover:bg-destructive/20 text-destructive opacity-0 group-hover/row:opacity-100"
-                  title="Remove from list"
-                  @click="removeSelectedPreset(i)"
-                >
-                  <Trash2 class="size-3" />
-                </button>
-              </div>
-            </div>
-            <select
-              v-if="addablePresets.length > 0"
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              @change="(e) => {
-                const v = (e.target as HTMLSelectElement).value;
-                if (v) addSelectedPreset(v);
-                (e.target as HTMLSelectElement).value = '';
-              }"
-            >
-              <option value="">+ Add preset…</option>
-              <option v-for="p in addablePresets" :key="p.id" :value="p.id">{{ p.name ?? p.id }}</option>
-            </select>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Behavior</span>
-            <select
-              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-              :value="selectionSection.mode"
-              @change="(e) => updateSectionMode((e.target as HTMLSelectElement).value as SectionMode)"
-            >
-              <option v-for="(label, key) in MODE_LABELS" :key="key" :value="key">{{ label }}</option>
-            </select>
-          </div>
-
-          <!-- Color Variants editor: stable, editable palette -->
-          <div v-if="selectionSection.source === 'color-variants'" class="flex flex-col gap-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Colors</span>
-              <button
-                type="button"
-                class="text-[9px] text-muted-foreground/70 hover:text-muted-foreground underline-offset-2 hover:underline"
-                title="Regenerate evenly distributed colors"
-                @click="regenerateColorVariants"
-              >
-                Regenerate
-              </button>
-            </div>
-            <div class="flex flex-col gap-1">
-              <div
-                v-for="i in colorVariantSlots"
-                :key="i"
-                class="flex items-center gap-2 text-[10px]"
-              >
-                <span class="text-muted-foreground/60 w-5 tabular-nums">{{ i + 1 }}</span>
-                <template v-if="i === 0">
-                  <div
-                    class="w-5 h-5 rounded border border-border shrink-0"
-                    :style="{ backgroundColor: slotHex(i) }"
-                  />
-                  <span class="text-muted-foreground/70">Preset (auto)</span>
-                </template>
-                <template v-else>
-                  <input
-                    type="color"
-                    class="w-5 h-5 rounded border border-border shrink-0 cursor-pointer bg-transparent p-0"
-                    :value="slotHex(i)"
-                    @input="(e) => onSlotColorInput(i, (e.target as HTMLInputElement).value)"
-                  />
-                  <span class="text-muted-foreground/70 font-mono">{{ slotHex(i) }}</span>
-                </template>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex gap-1.5 mt-1">
-            <button
               class="flex-1 px-2 py-1.5 rounded text-[11px] font-medium bg-accent hover:bg-accent/80 transition-colors"
               @click="removeSelectionFromSection"
             >
               Remove from section
             </button>
-            <button
-              class="px-2 py-1.5 rounded text-[11px] font-medium bg-destructive/15 hover:bg-destructive/25 text-destructive transition-colors"
-              @click="deleteSelectedSection"
-            >
-              Delete
-            </button>
-          </div>
-        </template>
+          </template>
+        </LiveSectionEditor>
 
         <!-- Not in any section: add / create -->
         <template v-else>
@@ -750,7 +425,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
             >
               <option value="">— choose —</option>
               <option v-for="s in eligibleAddTargets" :key="s.id" :value="s.id">
-                {{ s.name || SOURCE_LABELS[s.source] }} ({{ s.members.length }})
+                {{ sectionDisplayName(s) }} ({{ s.members.length }})
               </option>
             </select>
           </div>
@@ -817,7 +492,7 @@ const MODE_LABELS: Record<SectionMode, string> = {
         </p>
       </div>
 
-      <!-- ── Control-level: per-control mapping (control focused) ──────── -->
+      <!-- ── Control-level: per-control action (control focused) ──────── -->
       <div
         v-else-if="selectedTwin && twinDefinition && store.selectedControlId && selectedControl"
         class="flex flex-col gap-2"
@@ -830,99 +505,99 @@ const MODE_LABELS: Record<SectionMode, string> = {
           ← Back to controller
         </button>
 
-        <!-- Section-isolated control: section indicator + remove button -->
-        <div
-          v-if="focusedControlSection"
-          class="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-yellow-400/10 ring-1 ring-yellow-400/40"
-        >
-          <span class="text-[10px] text-yellow-300 leading-snug truncate">
-            Part of "{{ focusedControlSection.name || SOURCE_LABELS[focusedControlSection.source] }}"
-          </span>
-          <button
-            type="button"
-            class="shrink-0 px-2 py-1 rounded text-[10px] font-medium bg-accent hover:bg-accent/80 transition-colors whitespace-nowrap"
-            @click="removeControlFromSection"
-          >
-            Remove
-          </button>
-        </div>
-
         <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {{ selectedControl.label ?? selectedControl.id }} · Mapping
+          {{ selectedControl.label ?? selectedControl.id }}
         </span>
 
-        <MappingEditor
-          v-if="!focusedControlSection"
-          :mapping="selectedChild?.mapping ?? { type: 'none' }"
-          :variant="selectedControl?.type === 'slider' ? 'slider' : 'button'"
-          @patch="(p: { mapping: LiveMapping }) => patchChild(p)"
+        <!-- Pad: same panel as a canvas button -->
+        <LiveButtonPanel
+          v-if="selectedPad"
+          :label="selectedChild?.label"
+          :color="selectedChild?.color"
+          :actions="selectedChild?.actions"
+          :appearance="selectedChild?.appearance"
+          :inputs="selectedChild?.inputs"
+          :section="singleMemberSection"
+          :sections="availableSections"
+          :section-pending="pendingSectionChoice"
+          @patch="patchButton"
+          @patch-section="patchSection"
+          @choose-section="chooseSectionMode"
+          @choose-action="chooseActionMode"
+          @move="moveSingleMemberTo"
         />
-        <div v-else-if="focusedControlSection" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Type</span>
-          <div class="w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-muted-foreground">
-            Section
+
+        <!-- Fader: one continuous mapping -->
+        <template v-else>
+          <div class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Label</span>
+            <input
+              type="text"
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              :value="selectedChild?.label ?? ''"
+              @change="(e) => setLabel((e.target as HTMLInputElement).value)"
+            />
           </div>
-        </div>
-
-        <div class="flex flex-col gap-1" :class="{ 'opacity-50 pointer-events-none': focusedControlSection }">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Label</span>
-          <input
-            type="text"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            :value="selectedChild?.label ?? ''"
-            :disabled="!!focusedControlSection"
-            @change="(e) => setLabel((e.target as HTMLInputElement).value)"
+          <MappingEditor
+            :mapping="selectedChild?.mapping ?? { type: 'none' }"
+            variant="slider"
+            @patch="(p: { mapping: LiveMapping }) => patchChild(p)"
           />
-        </div>
-
-        <div v-if="!focusedControlSection" class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Color</span>
-          <input
-            type="color"
-            class="w-full h-8 bg-background border border-border rounded"
-            :value="selectedChild?.color ?? '#3b82f6'"
-            @change="(e) => setColor((e.target as HTMLInputElement).value)"
-          />
-        </div>
+        </template>
       </div>
 
       <!-- ── Plain widget properties (button, slider, etc.) ─────────────── -->
       <div
-        v-else-if="selectedButton && !selectionSection"
+        v-else-if="selectedButton && !showSectionPanel"
         class="flex flex-col gap-4"
       >
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Widget</span>
-
-        <!-- Label -->
-        <div class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Label</span>
-          <input
-            type="text"
-            class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
-            placeholder="Button label"
-            :value="selectedButton.label ?? ''"
-            @change="(e) => setButtonLabel((e.target as HTMLInputElement).value)"
-          />
-        </div>
-
-        <!-- Color -->
-        <div class="flex flex-col gap-1">
-          <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Color</span>
-          <input
-            type="color"
-            class="w-full h-8 bg-background border border-border rounded"
-            :value="selectedButton.color ?? '#334155'"
-            @change="(e) => setButtonColor((e.target as HTMLInputElement).value)"
-          />
-        </div>
-
-        <!-- Mapping (buttons and sliders) -->
-        <MappingEditor
-          v-if="selectedButton.type === 'button' || selectedButton.type === 'slider'"
-          :mapping="selectedButton.mapping"
-          :variant="selectedButton.type === 'slider' ? 'slider' : 'button'"
-          @patch="(p: { mapping: LiveMapping }) => patchWidget(p)"
+        <!-- Button: Action | Section, Appearance, actions -->
+        <LiveButtonPanel
+          v-if="selectedButton.type === 'button'"
+          :label="selectedButton.label"
+          :color="selectedButton.color"
+          :actions="selectedButton.actions"
+          :appearance="selectedButton.appearance"
+          :inputs="selectedButton.inputs"
+          :section="singleMemberSection"
+          :sections="availableSections"
+          :section-pending="pendingSectionChoice"
+          @patch="patchButton"
+          @patch-section="patchSection"
+          @choose-section="chooseSectionMode"
+          @choose-action="chooseActionMode"
+          @move="moveSingleMemberTo"
         />
+
+        <!-- Other widgets: label, color and (sliders) one mapping -->
+        <template v-else>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Widget</span>
+          <div class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Label</span>
+            <input
+              type="text"
+              class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+              placeholder="Label"
+              :value="selectedButton.label ?? ''"
+              @change="(e) => setButtonLabel((e.target as HTMLInputElement).value)"
+            />
+          </div>
+          <div class="flex flex-col gap-1">
+            <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Color</span>
+            <input
+              type="color"
+              class="w-full h-8 bg-background border border-border rounded"
+              :value="selectedButton.color || '#334155'"
+              @change="(e) => setButtonColor((e.target as HTMLInputElement).value)"
+            />
+          </div>
+          <MappingEditor
+            v-if="selectedButton.type === 'slider'"
+            :mapping="selectedButton.mapping"
+            variant="slider"
+            @patch="(p: { mapping: LiveMapping }) => patchWidget(p)"
+          />
+        </template>
 
         <!-- Moving Head Positions (XY-Pad only) -->
         <div v-if="selectedButton.type === 'xy'" class="flex flex-col gap-2 pt-4 mt-1 border-t border-border">

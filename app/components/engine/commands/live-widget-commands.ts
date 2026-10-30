@@ -188,12 +188,12 @@ registerCommand('live.moveWidget', (p) => new MoveResizeLiveWidgetCommand(p.page
 export class UpdateWidgetMappingCommand implements SerializableCommand {
   readonly commandType = 'live.updateMapping';
   description = 'Update Widget Mapping';
-  private _before: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>> | null = null;
+  private _before: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>> | null = null;
 
   constructor(
     private pageId: string,
     private widgetId: string,
-    private patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>>,
+    private patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>,
   ) {}
 
   execute() {
@@ -205,6 +205,9 @@ export class UpdateWidgetMappingCommand implements SerializableCommand {
       if ('mapping' in this.patch) this._before.mapping = JSON.parse(JSON.stringify(widget.mapping));
       if ('label' in this.patch) this._before.label = widget.label;
       if ('color' in this.patch) this._before.color = widget.color;
+      if ('actions' in this.patch) this._before.actions = widget.actions ? JSON.parse(JSON.stringify(widget.actions)) : undefined;
+      if ('appearance' in this.patch) this._before.appearance = widget.appearance ? { ...widget.appearance } : undefined;
+      if ('inputs' in this.patch) this._before.inputs = widget.inputs ? JSON.parse(JSON.stringify(widget.inputs)) : undefined;
     }
     store.updateWidgetMapping(this.pageId, this.widgetId, this.patch);
   }
@@ -434,14 +437,14 @@ registerCommand('live.batchSetGroupIds', (p) => new BatchSetWidgetGroupIdsComman
 export class UpdateControllerChildMappingCommand implements SerializableCommand {
   readonly commandType = 'live.updateChildMapping';
   description = 'Update Controller Mapping';
-  private _before: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>> | null = null;
+  private _before: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>> | null = null;
   private _wasMissing = false;
 
   constructor(
     private pageId: string,
     private twinId: string,
     private controlId: string,
-    private patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>,
+    private patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>,
   ) {}
 
   execute() {
@@ -455,9 +458,12 @@ export class UpdateControllerChildMappingCommand implements SerializableCommand 
         if ('mapping' in this.patch) this._before.mapping = JSON.parse(JSON.stringify(child.mapping));
         if ('label' in this.patch) this._before.label = child.label;
         if ('color' in this.patch) this._before.color = child.color;
+        if ('actions' in this.patch) this._before.actions = child.actions ? JSON.parse(JSON.stringify(child.actions)) : undefined;
+        if ('appearance' in this.patch) this._before.appearance = child.appearance ? { ...child.appearance } : undefined;
+        if ('inputs' in this.patch) this._before.inputs = child.inputs ? JSON.parse(JSON.stringify(child.inputs)) : undefined;
       } else {
         this._wasMissing = true;
-        this._before = { mapping: { type: 'none' } };
+        this._before = { mapping: { type: 'none' }, actions: undefined, appearance: undefined };
       }
     }
     store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, this.patch);
@@ -467,7 +473,7 @@ export class UpdateControllerChildMappingCommand implements SerializableCommand 
     const store = getLiveStore();
     if (this._wasMissing) {
       // Restore the empty default — the child didn't exist before.
-      store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, { mapping: { type: 'none' } });
+      store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, { mapping: { type: 'none' }, actions: undefined, appearance: undefined });
     } else {
       store.updateControllerChildMapping(this.pageId, this.twinId, this.controlId, this._before);
     }

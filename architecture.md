@@ -142,6 +142,25 @@ pixelmapper/
 - **Preset variants** depend on a `basePresetId` and store only their *differences* (overrides). Applying a variant merges the base state with the overrides at apply time, so base edits propagate to all variants. Diffing and merging are pure functions.
 - **Groups** (`SceneNode`s) organize fixtures hierarchically for selection and for applying modifiers to many fixtures at once.
 
+## Live Buttons: Actions & Sections
+
+A **live button** (canvas `button` widget or controller-twin pad) is set to either **Action** or **Section** (segmented control at the top of its sidebar panel).
+
+- **Action**: the button runs a script, `actions: ButtonAction[]` on `LiveWidget` / `ControllerChildBinding`. Each action is *trigger → action → duration*:
+  - Trigger: On press · On double press (2nd press within 300 ms; On press still fires on the first) · On long press (`hold`: time or beats, progress bar on the button) · While pressing · On release · Toggle.
+  - Action: a `LiveMapping` (preset, global function incl. **Stop all**, page switch, position, channel, dimmer, effect param).
+  - Duration (only for press / double / long / release, hidden when not changeable): Forever (default) · Beats · Time · Once (presets: one pass of the slowest modifier; it does not yet restart the animation at phase 0, see below).
+  - Smart default: until the user picks a trigger, it follows the action (flash preset / blackout → While pressing, Stop all → On long press).
+  - `mapping` is only used by sliders and faders now.
+- **Section**: the button is a member of a `LiveSection` (membership lives in `section.members`). The section fills its buttons ("All presets", "Presets I pick", "Variants / Colors of the active preset") and has a `trigger`: On press, While pressing or Toggle. Exactly one member is active, because only one preset can be active (the old multi-select was dropped).
+- **Appearance**: label (Action only; empty = first action's name), color (empty = preset color), look when active (full / blink / pulse) and inactive (dimmed / off / full). Per button with Action; once per section with Section (`section.color` / `section.appearance`). It drives the canvas color and the controller LEDs (quantized, deduplicated).
+- **Runtime** (`composables/live-ops/button-runtime.ts`): `pressButton` / `releaseButton` map each action under a sub-key `${buttonKey}#${actionId}` onto the existing primitives: normal presets → `setActivePreset` (forever) or the flash stack (momentary), overwrites / globals → `applyMapping`, Stop all → clears presets, flashes, overwrites, speed and button state and broadcasts `engine.stopAll`. Reactive `running` / `longPress` state drives lit buttons and progress bars. Rules are pure in `utils/live/button-actions.ts`.
+- **Input** (`inputs` on the button / pad): a keyboard key (`KeyboardEvent.code`) and / or a MIDI note or CC (channel + number, any input port), learned in the panel's Input group. They press the button exactly like a click or pad hit (key / note-on / CC > 0 down, key / note-off / CC 0 up), so every trigger works with them, and section members press their slot. Play mode only; keys are ignored in text fields and with Cmd / Ctrl / Alt (`use-button-input-triggers.ts`, `live-ops/midi-input.ts`; MIDI access is requested only when a button uses it or on Learn).
+- **Stop all** ends overwrites, flashes and the active preset in one step and outputs a single frame (`stopEverything` in `preset-activation.ts`). Ending the overwrites on their own first would briefly show the look under a held blackout.
+- **Selection in the controller twin**: the selected pad / fader gets a solid primary outline (like the canvas `ring-primary`); the section box stays dashed.
+- **UI**: `LiveButtonPanel.vue` (Action | Section, Appearance group, Actions / Section group), `LiveActionList.vue` + `LiveActionCard.vue` (cards like modifier cards, "Add Action" below), `LiveDurationInput.vue` (SpeedControl-style mode button + value), `LiveButtonAppearance.vue` (label + "More"), `LiveSectionAssignment.vue` / `LiveSectionEditor.vue`.
+- **Open**: "Once" starting at phase 0 needs a phase origin per modifier in `SpeedConfig`. That field would travel through the binary protocol (also read by the ESP32 firmware), so it is a separate step.
+
 ## Software Patterns & Guidelines
 
 Complements `AGENTS.md` (code style) and ADR 0001 (plugin rules).

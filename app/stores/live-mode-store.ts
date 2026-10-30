@@ -171,7 +171,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     if (widget) Object.assign(widget, { gridX, gridY, gridW, gridH });
   }
 
-  function updateWidgetMapping(pageId: string, widgetId: string, patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'controllerInstanceId'>>) {
+  function updateWidgetMapping(pageId: string, widgetId: string, patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'controllerInstanceId' | 'actions' | 'appearance' | 'inputs'>>) {
     const page = pages.value.find(p => p.id === pageId);
     const widget = page?.widgets.find(w => w.id === widgetId);
     if (widget) Object.assign(widget, patch);
@@ -215,7 +215,7 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     pageId: string,
     twinId: string,
     controlId: string,
-    patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color'>>,
+    patch: Partial<Pick<ControllerChildBinding, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>>,
   ) {
     const page = pages.value.find(p => p.id === pageId);
     const twin = page?.widgets.find(w => w.id === twinId);
@@ -228,6 +228,9 @@ export const useLiveModeStore = defineStore('live-mode', () => {
     }
     if ('mapping' in patch && patch.mapping) child.mapping = patch.mapping;
     if ('label' in patch) child.label = patch.label;
+    if ('actions' in patch) child.actions = patch.actions;
+    if ('appearance' in patch) child.appearance = patch.appearance;
+    if ('inputs' in patch) child.inputs = patch.inputs;
     if ('color' in patch) child.color = patch.color;
   }
 
