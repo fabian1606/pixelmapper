@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Usability eval harness for the agent tools (WP-J item 4).
  *
@@ -13,16 +14,37 @@
  *   output (text, isError) to `PM_EVAL_OUT` (default `<calls>.out.txt`).
  *   An `isError` result counts as a failed first try.
  *
+ * `observe` renders headless previews through the real `rs-engine-core`
+ * (needs `bun run build:wasm && bun run build:plugins`; without them observe
+ * reports itself unavailable). Live mode has no running engine here.
+ *
  * Usage: PM_EVAL_DUMP=/tmp/eval bunx vitest run app/utils/agents/usability-eval.test.ts
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, beforeEach, describe, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, it, vi } from 'vitest';
 import { createTools, findTool, toolDescriptor, type AgentHost, type ToolOutput } from '@pixelmapper/agent-kit';
+import { enginePkgDir } from '~~/scripts/engine-packages';
+import { observe, setPreviewCoreLoader } from '~/utils/observability';
 import { eventLog } from '~/utils/observability/event-log';
+import type { HeadlessCore } from '~/utils/observability/preview-core';
 import { createOperationRegistry, registerCoreOperations } from '~/utils/operations';
 import { resetOperationState, seedScene, stubOperationGlobals, type FixtureSpec } from '~/utils/operations/test-utils';
+import { getManifest, isBuiltin, loadWasm } from '~/utils/plugins/plugin-store';
 import { createAppAgentHost } from './host';
+
+const ROOT = join(__dirname, '../../..');
+const CORE = enginePkgDir('rs-engine-core', ROOT);
+/** The headless engine and the built-in plugins are built: observe previews work. */
+const engineReady = existsSync(join(CORE, 'rs_engine_core_bg.wasm')) && existsSync(join(ROOT, 'public/plugins'));
+
+/** Built-ins from `public/plugins`, built plugins from the store. */
+const plugins = {
+  getManifest,
+  loadWasm: async (hash: string) => (isBuiltin(hash)
+    ? new Uint8Array(readFileSync(join(ROOT, 'public/plugins', `${hash.slice(7)}.wasm`)))
+    : loadWasm(hash)),
+};
 
 const DUMP_DIR = process.env.PM_EVAL_DUMP;
 const CALLS_FILE = process.env.PM_EVAL_CALLS;
@@ -62,7 +84,22 @@ function render(out: ToolOutput): string {
   return out.content.map(c => (c.type === 'text' ? c.text : c.type === 'json' ? JSON.stringify(c.json, null, 2) : '[image]')).join('\n\n');
 }
 
-beforeAll(stubOperationGlobals);
+beforeAll(() => {
+  stubOperationGlobals();
+  // Built-in plugin sources (`/plugins/<hash>.json`) come from `public/`.
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', (url: string | URL | Request, init?: RequestInit) => (typeof url === 'string' && url.startsWith('/plugins/')
+    ? Promise.resolve(new Response(readFileSync(join(ROOT, 'public', url), 'utf8')))
+    : realFetch(url, init)));
+  if (engineReady) {
+    setPreviewCoreLoader(async () => {
+      const core = await import(join(CORE, 'rs_engine_core.js'));
+      await core.default({ module_or_path: readFileSync(join(CORE, 'rs_engine_core_bg.wasm')) });
+      return core as unknown as HeadlessCore;
+    });
+  }
+});
+afterAll(() => setPreviewCoreLoader(null));
 beforeEach(() => {
   // Deterministic ids, so a replayed session addresses the same modifier ids.
   let uuid = 0;
@@ -70,7 +107,10 @@ beforeEach(() => {
   resetOperationState();
   eventLog.clear();
   seedScene(evalStage());
-  host = createAppAgentHost({ registry: registerCoreOperations(createOperationRegistry()), observe: async () => null });
+  host = createAppAgentHost({
+    registry: registerCoreOperations(createOperationRegistry()),
+    observe: async () => (engineReady ? (req, opts) => observe(req, { plugins, ...opts }) : null),
+  });
 });
 
 describe('agent tool usability eval', () => {
@@ -99,5 +139,5 @@ describe('agent tool usability eval', () => {
     }
     lines.unshift(`${calls.length} call(s), ${errors} error(s)\n`);
     writeFileSync(process.env.PM_EVAL_OUT ?? `${CALLS_FILE!.split(',')[0]}.out.txt`, lines.join('\n'));
-  });
+  }, 600_000); // long sessions with observe previews exceed the 5 s default
 });
