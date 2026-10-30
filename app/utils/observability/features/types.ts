@@ -77,6 +77,39 @@ export interface MirrorFeature {
   y?: MirrorAxis;
 }
 
+/**
+ * Compact features of one head (pixel / cell) of a fixture: intensity
+ * range (no sd), time of the (first) peak and of the first onset (first
+ * rising crossing of the group's mid level; missing when the head never
+ * crosses it). Times in s relative to the window start.
+ */
+export interface HeadFeatures {
+  range: { min: number; max: number; mean: number };
+  peak: number;
+  onset?: number;
+}
+
+/**
+ * Onset order of a group: does light start one sample after the other?
+ * `r` is the Pearson r of first-onset time vs. position along `axis`
+ * (`spread` = rank / spatial of the instance, `layout` = fixture order,
+ * then head); `cyclic` = fitted after rotating the order (a loop entered
+ * mid-way). `direction`: `forward` (r ≥ 0.8, later along the axis),
+ * `reverse` (r ≤ −0.8), `simultaneous` (all onsets within one frame),
+ * `none`. `onsets` of `of` samples had an onset.
+ */
+export interface OnsetOrder {
+  axis: 'spread' | 'layout';
+  direction: 'forward' | 'reverse' | 'simultaneous' | 'none';
+  r: number;
+  cyclic: boolean;
+  span: number;
+  first: string;
+  last: string;
+  onsets: number;
+  of: number;
+}
+
 /** Per-component features of a group. */
 export interface ComponentFeatures {
   range: Range;
@@ -98,17 +131,26 @@ export interface GroupFeatures {
   spatial: Spatial;
   radial?: Radial;
   mirror?: MirrorFeature;
+  /** Onset order over the samples (missing with < 2 onsets). */
+  order?: OnsetOrder;
   /** Fraction of samples that are not constant. */
   active: number;
   issues: string[];
 }
 
-/** Features of one fixture (heads merged by their mean). */
+/**
+ * Features of one fixture. `range` pools every head and frame: `max` is
+ * the brightest head (so "every fixture reaches X" is
+ * `fixtures.*.range.max`), `mean` the average over heads and frames;
+ * "every pixel reaches X" is `fixtures.*.heads.*.range.max`. `temporal`
+ * and `color` analyze the heads jointly; `issues` the head mean.
+ */
 export interface FixtureFeatures {
   name: string;
   x: number;
   y: number;
-  heads: number;
+  /** Per head in head order (`heads.length` = head count). */
+  heads: HeadFeatures[];
   range: Range;
   color?: Color;
   temporal: Temporal;
@@ -136,7 +178,11 @@ export interface ObservationJson {
   group: GroupFeatures;
   groups?: Record<string, GroupFeatures>;
   fixtures: Record<string, FixtureFeatures>;
-  raw?: { times: number[]; fixtures: Record<string, number[][]> };
+  /**
+   * `detail: 'raw'`: `fixtures.<id>[frame][component]` (head mean) and
+   * `heads.<id>[head][frame][component]`.
+   */
+  raw?: { times: number[]; fixtures: Record<string, number[][]>; heads: Record<string, number[][][]> };
 }
 
 /** Options of `analyzeTrace`. */

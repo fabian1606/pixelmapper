@@ -205,13 +205,66 @@ describe('json layout', () => {
     const { json } = analyzeTrace(trace, { detail: 'raw', groups: [{ id: 7, name: 'bars', fixtureIds: ['a'] }] });
     expect(json.group.count).toBe(2);
     expect(json.group.samples).toBe(3);
-    expect(json.fixtures.a?.heads).toBe(2);
+    expect(json.fixtures.a?.heads).toHaveLength(2);
+    expect(json.fixtures.a?.heads[1]?.range.max).toBe(0.2);
     expect(json.fixtures.a?.x).toBe(0.1);
     expect(json.fixtures.a?.range.mean).toBe(0.1);
+    // Pooled over heads: max is the brightest head, not the head mean.
+    expect(json.fixtures.a?.range.max).toBe(0.2);
+    expect(json.raw?.heads.a).toHaveLength(2);
+    expect(json.raw?.heads.a?.[1]?.[0]).toEqual([0.2]);
     expect(json.groups?.['7']?.count).toBe(1);
     expect(json.groups?.['7']?.name).toBe('bars');
     expect(json.raw?.fixtures.b?.[0]).toEqual([0.8]);
     expect(json.raw?.times).toHaveLength(60);
+  });
+});
+
+// ── Heads / order ───────────────────────────────
+
+describe('per-head features and onset order', () => {
+  /** One 12-pixel tube: pixel `h` flashes for 0.1 s starting at `h · 0.1 s` (+ 0.05 s). */
+  const tube = Array.from({ length: 12 }, (_, h) => ({ fixtureId: 'tube', fixtureName: 'tube', head: h, headCount: 12, x: h / 11 }));
+  const runner = (reverse: boolean) => (i: number, t: number) => {
+    const slot = reverse ? 11 - i : i;
+    const start = 0.05 + slot * 0.1;
+    return [t >= start && t < start + 0.1 ? 0.95 : 0];
+  };
+
+  it('reports every pixel at its own max while the head mean stays low', () => {
+    const { json } = analyzeTrace(makeTrace({ samples: tube, fn: runner(false), duration: 1.5 }));
+    const f = json.fixtures.tube!;
+    expect(f.heads).toHaveLength(12);
+    expect(f.range.max).toBe(0.95);
+    expect(f.range.mean).toBeLessThan(0.1);
+    expect(f.heads.every(h => h.range.max === 0.95)).toBe(true);
+    // Onsets follow the head order.
+    expect(f.heads[0]?.onset).toBeCloseTo(0.0667, 2);
+    expect(f.heads[11]?.onset).toBeCloseTo(1.167, 2);
+    expect(json.group.order?.direction).toBe('forward');
+    expect(json.group.order?.axis).toBe('layout');
+    expect(json.group.order?.first).toBe('tube.0');
+    expect(json.group.order?.last).toBe('tube.11');
+  });
+
+  it('detects a reversed runner and simultaneous flashes', () => {
+    expect(analyzeTrace(makeTrace({ samples: tube, fn: runner(true), duration: 1.5 })).json.group.order?.direction).toBe('reverse');
+    const flash = analyzeTrace(makeTrace({ samples: tube, fn: (_, t) => [t > 0.5 ? 1 : 0], duration: 1 }));
+    expect(flash.json.group.order?.direction).toBe('simultaneous');
+  });
+
+  it('handles a loop entered mid-way (cyclic) along the spread', () => {
+    // Ranks 0..11; the chase starts at rank 6 and wraps around.
+    const ring = tube.map((s, i) => ({ ...s, rank: i }));
+    const fn = (i: number, t: number) => {
+      const slot = (i - 6 + 12) % 12;
+      const start = 0.05 + slot * 0.1;
+      return [t >= start && t < start + 0.1 ? 1 : 0];
+    };
+    const order = analyzeTrace(makeTrace({ samples: ring, fn, duration: 1.5 })).json.group.order;
+    expect(order?.axis).toBe('spread');
+    expect(order?.cyclic).toBe(true);
+    expect(order?.direction).toBe('forward');
   });
 });
 

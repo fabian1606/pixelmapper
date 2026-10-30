@@ -173,7 +173,7 @@ function fixtureLine(f: FixtureFeatures, reasons: string[]): string {
   const value = f.color ? `${f.color.name} value ${short(f.range.min)}–${short(f.range.max)}` : `${short(f.range.min)}–${short(f.range.max)}`;
   const issues = f.issues.filter(i => i !== 'constant');
   const notes = [...reasons.filter(r => r !== 'constant'), ...issues];
-  const heads = f.heads > 1 ? ` ${f.heads} heads` : '';
+  const heads = f.heads.length > 1 ? ` ${f.heads.length} heads` : '';
   return `FIXTURE ${f.name} (x ${short(f.x)} y ${short(f.y)}${heads}) ${value} ${temporalText(f.temporal)}${notes.length > 0 ? ` · ${notes.join(', ')}` : ''}`;
 }
 

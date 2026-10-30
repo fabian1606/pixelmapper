@@ -111,9 +111,29 @@ signature   'scalar' | 'rgb' | 'panTilt'
 sources[]   { plugin, hash, modifierId?, output, blend, strength, spread }   (preview)
 group       GroupFeatures over all samples
 groups.<id> GroupFeatures per requested group (+ name)
-fixtures.<id> { name, x, y, heads, range, color?, temporal, issues[] }
-raw         { times[], fixtures.<id>[frame][component] }   (detail: 'raw' only)
+fixtures.<id> { name, x, y, heads[], range, color?, temporal, issues[] }
+raw         { times[], fixtures.<id>[frame][component],          (detail: 'raw' only)
+              heads.<id>[head][frame][component] }
 ```
+
+**Fixtures and heads.** A fixture's `range` pools every head and frame:
+`max` is the brightest head (the max over heads), `min` the darkest,
+`mean` the average over heads and frames. So:
+
+| Question | Path |
+|---|---|
+| every fixture reaches X (some pixel of it) | `fixtures.*.range.max` |
+| every pixel reaches X | `fixtures.*.heads.*.range.max` |
+| average brightness of a fixture | `fixtures.*.range.mean` |
+| head count | `fixtures.<id>.heads.length` |
+
+`heads[i]` (head order = patch order) is compact: `range { min, max, mean }`,
+`peak` (time of the first frame at the head's max) and `onset` (first
+rising crossing of the observation's mid level — halfway between the
+pooled min and max of all samples — missing when the head never crosses
+it, or only starts above it). Times are seconds from the window start.
+`temporal` / `color` of a fixture analyze its heads jointly; `issues` use
+the head mean (a fixture is `stuck-0` only when every head is).
 
 `GroupFeatures`:
 
@@ -134,6 +154,7 @@ raw         { times[], fixtures.<id>[frame][component] }   (detail: 'raw' only)
 | `radial.{from,r,speed,kind}` | Pearson r of per-sample lag vs. distance to the nearest point (positive = outward), world units/s, `outward`/`inward`/`none` |
 | `mirror.x.{at,r,pairs}` | left ↔ right: each sample is paired with the sample nearest to its reflection across the vertical line `x = at` (tolerance ≈ 0.6 × head spacing, samples on the line skipped); `r` = Pearson r of the paired intensity series (1 = mirror images, −1 = complementary, ≈ 0 = unrelated, e.g. a chase across the line). Missing with < 2 pairs |
 | `mirror.y.{at,r,pairs}` | front ↔ back: the same across the horizontal line `y = at` |
+| `order.{axis,direction,r,cyclic,span,first,last,onsets,of}` | onset order: Pearson r of each sample's first onset vs. its position along `axis` (`spread` = rank / spatial when every sample has one, else `layout` = fixture order, then head). `direction` `forward` (r ≥ 0.8: later along the axis), `reverse` (r ≤ −0.8), `simultaneous` (all onsets within one frame), `none`. `cyclic`: fitted after rotating the order (a loop entered mid-way, e.g. a chase around the room); `first` / `last` = `<fixtureId>.<head>`. Missing with < 2 onsets. Use it for one-shot runs (edge run, sweep); periodic chases are better read from `spatial` |
 | `active` | fraction of non-constant samples |
 | `issues[]` | `constant`, `stuck-0`, `stuck-1`, `clamped`, `no-targets`, `nan` |
 
@@ -146,7 +167,9 @@ Typical expectations:
  { "path": "group.radial.r", "gt": 0.9 },
  { "path": "group.mirror.x.r", "gte": 0.9 },
  { "path": "fixtures.*.range.max", "gt": 0.5 },
- { "path": "fixtures.*.range.max", "gt": 0.05, "label": "no fixture stays dark" }]
+ { "path": "fixtures.*.range.max", "gt": 0.05, "label": "no fixture stays dark" },
+ { "path": "fixtures.*.heads.*.range.max", "gt": 0.5, "label": "every pixel lit" },
+ { "path": "group.order.direction", "eq": "forward" }]
 ```
 
 ## Findings
