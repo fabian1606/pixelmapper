@@ -28,7 +28,7 @@ import {
   type ParamControlKind,
 } from '~/utils/live/control-param-value';
 import type { CoreReadApi } from '../read-api';
-import { FixtureIdSchema } from './shared';
+import { FixtureIdSchema, modifierAmbiguous } from './shared';
 
 // ── Widget types ────────────────────────────────
 
@@ -278,6 +278,9 @@ function effectParamFindings(read: CoreReadApi, widgetType: string, m: LiveMappi
   if (!modifier) {
     return [mappingError('modifier-not-found', `modifier "${m.effectId}" not found (use modifiers.list to list ids)`, widgetId)];
   }
+  // A shared id drives the first instance only; flag it instead of guessing.
+  const sharing = read.modifiers().filter(x => x.id === m.effectId).length;
+  if (sharing > 1) return [mappingError('modifier-ambiguous', modifierAmbiguous(m.effectId, sharing), widgetId)];
   const kind = widgetType in CONTROL_PARAM_TYPES ? widgetType as ParamControlKind : null;
   if ((BUILTIN_EFFECT_PARAMS as readonly string[]).includes(m.paramKey)) {
     return kind && !BUILTIN_PARAM_CONTROLS.includes(kind) ? [paramIgnoredWarning(widgetType, kind, `"${m.paramKey}"`, widgetId)] : [];
