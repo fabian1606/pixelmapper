@@ -68,6 +68,12 @@ export interface ObserveRequest {
    * from here?". Preview adds the instance's canvas `point` params itself.
    */
   points?: Array<{ x: number; y: number }>;
+  /**
+   * Mirror lines for the `mirror` feature (normalized world coordinates):
+   * `x` = the vertical line (left ↔ right), `y` = the horizontal line
+   * (front ↔ back). Default: the room center.
+   */
+  mirror?: { x?: number; y?: number };
   expect?: Expectation[];
 }
 
@@ -85,6 +91,8 @@ export const ObserveRequestSchema = z.object({
     signature: z.string().optional(),
   }).optional(),
   points: z.array(z.object({ x: z.number(), y: z.number() })).max(16).optional(),
+  mirror: z.object({ x: z.number().optional(), y: z.number().optional() }).optional()
+    .describe('Mirror lines for group.mirror (world x of the vertical line, world y of the horizontal line); default the room center.'),
   expect: z.array(ExpectationSchema).optional(),
 });
 

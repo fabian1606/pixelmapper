@@ -340,6 +340,18 @@ targets: "all", "selection", fixture/group ids, or a filter { ids, groupIds, kin
           "maximum": 120,
           "type": "number",
         },
+        "mirror": {
+          "description": "Mirror lines for group.mirror (world x of the vertical line, world y of the horizontal line); default the room center.",
+          "properties": {
+            "x": {
+              "type": "number",
+            },
+            "y": {
+              "type": "number",
+            },
+          },
+          "type": "object",
+        },
         "mode": {
           "enum": [
             "live",

@@ -16,7 +16,8 @@ import { rangeOf } from './range';
 import { analyzeColor } from './color';
 import { analyzeTemporal } from './temporal';
 import { analyzeSpatial, phaseLags } from './spatial';
-import { analyzeRadial, analyzeSymmetry } from './radial';
+import { analyzeRadial } from './radial';
+import { analyzeMirror } from './mirror';
 
 export type * from './types';
 
@@ -70,7 +71,7 @@ function groupFeatures(prepared: Prepared[], ctx: Context): GroupFeatures {
   const lags = temporal.kind === 'periodic' ? phaseLags(signals, temporal.hz, trace.fps) : null;
   const spatialSamples: SpatialSample[] = prepared.map(p => ({ x: p.sample.x, y: p.sample.y, spread: spreadOf(p.sample), signal: p.signal }));
   const radial = trace.points && trace.points.length > 0 ? analyzeRadial(spatialSamples, trace.points, temporal, lags, ctx.times) : null;
-  const symmetry = analyzeSymmetry(spatialSamples);
+  const mirror = analyzeMirror(spatialSamples, trace.mirrorAxes);
   // Optional keys are spread in place to keep the documented key order.
   return {
     count: new Set(prepared.map(p => String(p.sample.fixtureId))).size,
@@ -81,7 +82,7 @@ function groupFeatures(prepared: Prepared[], ctx: Context): GroupFeatures {
     temporal,
     spatial: analyzeSpatial(spatialSamples, temporal, lags, ctx),
     ...(radial ? { radial } : {}),
-    ...(symmetry ? { symmetry } : {}),
+    ...(mirror ? { mirror } : {}),
     active: round4(prepared.length > 0 ? signals.filter(s => !s.constant).length / prepared.length : 0),
     issues: groupIssues(prepared),
   };

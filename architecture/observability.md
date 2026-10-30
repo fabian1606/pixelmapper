@@ -20,7 +20,7 @@ request ─► resolveTargets ─► capture (preview | live) ─► Trace
 | `preview.ts` / `preview-core.ts` | `preview` mode: one modifier instance in a private headless `rs-engine-core` |
 | `capture.ts` | `live` mode: signature tuples via `liveHub`, DMX fallback, resampling |
 | `types.ts` | `Trace` (the capture result), `parseTimeRef` |
-| `features/*` | `range`, `color`, `temporal`, `spatial`, `radial` (+ symmetry); `analyzeTrace` |
+| `features/*` | `range`, `color`, `temporal`, `spatial`, `radial`, `mirror`; `analyzeTrace` |
 | `report.ts` | compact text report (ADR §6.4) |
 
 ## Request handling
@@ -36,6 +36,10 @@ request ─► resolveTargets ─► capture (preview | live) ─► Trace
   filter `{ ids, groupIds, kind, signature, name }`. Named groups additionally
   get their own features under `json.groups[<id>]`. Unknown ids produce
   `observe-unknown-target` warnings.
+- **mirror:** optional `{ x?, y? }`: world x of the vertical / world y of the
+  horizontal mirror line for `group.mirror`. Default: the center of the
+  engine's room box (bounding box of every head in the layout — the same line
+  plugins see as `Sample.u/v = 0.5`).
 - **points:** optional `[{ x, y }]` (normalized world coordinates) for the
   radial feature. Previews add the instance's `point` params with a canvas
   hint (`ui.canvas === 'point'`) automatically, keyed by param key.
@@ -128,7 +132,8 @@ raw         { times[], fixtures.<id>[frame][component] }   (detail: 'raw' only)
 | `spatial.corr` | independent: mean pairwise zero-lag correlation |
 | `spatial.span` | gradient: value difference across the rig |
 | `radial.{from,r,speed,kind}` | Pearson r of per-sample lag vs. distance to the nearest point (positive = outward), world units/s, `outward`/`inward`/`none` |
-| `symmetry.{axis,x,corr}` | mirror correlation across the vertical axis through the rig center (≥ 4 samples) |
+| `mirror.x.{at,r,pairs}` | left ↔ right: each sample is paired with the sample nearest to its reflection across the vertical line `x = at` (tolerance ≈ 0.6 × head spacing, samples on the line skipped); `r` = Pearson r of the paired intensity series (1 = mirror images, −1 = complementary, ≈ 0 = unrelated, e.g. a chase across the line). Missing with < 2 pairs |
+| `mirror.y.{at,r,pairs}` | front ↔ back: the same across the horizontal line `y = at` |
 | `active` | fraction of non-constant samples |
 | `issues[]` | `constant`, `stuck-0`, `stuck-1`, `clamped`, `no-targets`, `nan` |
 
@@ -139,8 +144,9 @@ Typical expectations:
  { "path": "group.temporal.hz", "within": [0.95, 1.05] },
  { "path": "group.spatial.kind", "eq": "chase" },
  { "path": "group.radial.r", "gt": 0.9 },
+ { "path": "group.mirror.x.r", "gte": 0.9 },
  { "path": "fixtures.*.range.max", "gt": 0.5 },
- { "path": "group.issues", "contains": "stuck-0", "label": "nothing stuck dark" }]
+ { "path": "fixtures.*.range.max", "gt": 0.05, "label": "no fixture stays dark" }]
 ```
 
 ## Findings
@@ -177,7 +183,7 @@ findings follow as `WARNING`/`INFO` lines.
 ## Tests
 
 - `features/index.test.ts`, `report.test.ts`: synthetic traces (sine/square/
-  saw periods, chase, noise, events, radial grid, issues, zero samples).
+  saw periods, chase, noise, events, radial grid, mirror, issues, zero samples).
 - `observe.test.ts`: end-to-end through the real core in Node with the
   built-in `waveform`/`noise` plugins and a toolchain-compiled radial plugin
   (4 canvas points, `minDistToPoints`), plus live capture over a fake hub.

@@ -57,11 +57,24 @@ export interface Radial {
   kind: 'outward' | 'inward' | 'none';
 }
 
-/** Mirror symmetry across the vertical axis `x`. */
-export interface Symmetry {
-  axis: 'x';
-  x: number;
-  corr: number;
+/** Mirror correlation across one mirror line. */
+export interface MirrorAxis {
+  /** Position of the mirror line (world x for `x`, world y for `y`). */
+  at: number;
+  /** Pearson r of the paired intensity series (1 = mirror images). */
+  r: number;
+  /** Samples that found a mirror partner (samples on the line excluded). */
+  pairs: number;
+}
+
+/**
+ * Mirror symmetry: `x` reflects across the vertical line (left ↔ right),
+ * `y` across the horizontal line (front ↔ back). An axis is missing when
+ * fewer than 2 samples have a mirror partner.
+ */
+export interface MirrorFeature {
+  x?: MirrorAxis;
+  y?: MirrorAxis;
 }
 
 /** Per-component features of a group. */
@@ -84,7 +97,7 @@ export interface GroupFeatures {
   temporal: Temporal;
   spatial: Spatial;
   radial?: Radial;
-  symmetry?: Symmetry;
+  mirror?: MirrorFeature;
   /** Fraction of samples that are not constant. */
   active: number;
   issues: string[];

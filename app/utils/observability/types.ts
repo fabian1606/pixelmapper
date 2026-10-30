@@ -76,6 +76,12 @@ export interface Trace {
   points?: TracePoint[];
   /** Preview: the distribution handle (Spatial 2D axis). */
   handle?: { origin: { x: number; y: number }; end: { x: number; y: number } };
+  /**
+   * Mirror lines for the `mirror` feature (world x of the vertical line,
+   * world y of the horizontal line); default: center of the samples.
+   * `observe` sets the room center or the request's `mirror`.
+   */
+  mirrorAxes?: { x?: number; y?: number };
   /** Capture-level notes (e.g. fallbacks used), copied into findings. */
   notes?: string[];
 }

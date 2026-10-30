@@ -23,6 +23,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { createModifier } from '~/utils/engine/modifiers';
 import type { ModifierInstance, Signature } from '~/utils/engine/types';
+import { roomFromPoints } from '~/utils/engine/room';
 import { liveHub } from '~/utils/extensions/live-hub';
 import { fixtureInfo, fixtureSignatures, readApi, type CoreReadApi } from '~/utils/operations/read-api';
 import { pluginNotFound, resolvePlugin } from '~/utils/operations/core/plugin-ref';
@@ -31,7 +32,7 @@ import { captureLive, type CaptureHub } from './capture';
 import { analyzeTrace } from './features';
 import { renderPreview, type PreviewPlugins } from './preview';
 import { renderReport } from './report';
-import { pickSignature, resolveTargets, type ResolvedTargets } from './targets';
+import { headSamples, pickSignature, resolveTargets, type ResolvedTargets } from './targets';
 import { parseTimeRef, type Trace } from './types';
 
 export type { Trace, TraceSample, TracePoint, TraceSource } from './types';
@@ -113,6 +114,19 @@ async function previewInstance(req: ObserveRequest, read: CoreReadApi, targets: 
   });
 }
 
+/**
+ * Mirror lines of the `mirror` feature: the center of the engine's room box
+ * (bounding box of every head in the layout, `Sample.u/v = 0.5`), overridden
+ * per axis by the request.
+ */
+function mirrorAxes(layout: readonly Fixture[], requested?: { x?: number; y?: number }): { x: number; y: number } {
+  const room = roomFromPoints(headSamples(layout, layout, () => []));
+  return {
+    x: requested?.x ?? room.minX + room.width / 2,
+    y: requested?.y ?? room.minY + room.depth / 2,
+  };
+}
+
 // ── Observe ─────────────────────────────────────
 
 /** Runs one observation (see module docs). Never throws for bad input: problems become findings. */
@@ -167,6 +181,7 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
     return failed([...findings, errorFinding('observe-failed', (err as Error).message)]);
   }
 
+  trace.mirrorAxes = mirrorAxes(layout, req.mirror);
   const analysis = analyzeTrace(trace, { detail: req.detail, groups: resolved.groups });
   findings.push(...analysis.findings);
   const expectations = evaluateExpectations(analysis.json, req.expect ?? []);

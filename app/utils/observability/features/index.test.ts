@@ -86,7 +86,7 @@ describe('spatial features', () => {
   it('reports identical samples as uniform', () => {
     const { json } = analyzeTrace(makeTrace({ samples: 5, fn: (_, t) => [sine01(t, 1)] }));
     expect(json.group.spatial.kind).toBe('uniform');
-    expect(json.group.symmetry?.corr).toBe(1);
+    expect(json.group.mirror?.x?.r).toBe(1);
   });
 
   it('reports a static ramp across x as gradient', () => {
@@ -212,5 +212,36 @@ describe('json layout', () => {
     expect(json.groups?.['7']?.name).toBe('bars');
     expect(json.raw?.fixtures.b?.[0]).toEqual([0.8]);
     expect(json.raw?.times).toHaveLength(60);
+  });
+});
+
+// ── Mirror ──────────────────────────────────────
+
+describe('mirror feature', () => {
+  /** 4 × 4 grid in [0.2, 0.8]². */
+  const grid = Array.from({ length: 16 }, (_, i) => ({ x: 0.2 + (i % 4) * 0.2, y: 0.2 + Math.floor(i / 4) * 0.2 }));
+
+  it('reports r = 1 about x for a left/right mirrored signal and a low r about y', () => {
+    // Phase follows |x − 0.5| (mirror image left/right) and y (a chase front → back).
+    const trace = makeTrace({ samples: grid, fn: (i, t) => [sine01(t, 1, Math.abs(grid[i]!.x - 0.5) + grid[i]!.y * 0.6)] });
+    trace.mirrorAxes = { x: 0.5, y: 0.5 };
+    const mirror = analyzeTrace(trace).json.group.mirror;
+    expect(mirror?.x?.r).toBeGreaterThan(0.99);
+    expect(mirror?.x?.at).toBe(0.5);
+    expect(mirror?.x?.pairs).toBe(16);
+    expect(mirror?.y?.r).toBeLessThan(0.6);
+  });
+
+  it('reports a chase across the axis as not mirrored', () => {
+    const trace = makeTrace({ samples: grid, fn: (i, t) => [sine01(t, 1, grid[i]!.x * 0.8)] });
+    expect(analyzeTrace(trace).json.group.mirror?.x?.r).toBeLessThan(0.5);
+  });
+
+  it('defaults to the center of the samples and skips partnerless axes', () => {
+    // A row: every sample has an x partner; on the y axis each sample is its own mirror image.
+    const { json } = analyzeTrace(makeTrace({ samples: 6, fn: (i, t) => [sine01(t, 1, Math.abs(i - 2.5) * 0.1)] }));
+    expect(json.group.mirror?.x?.at).toBe(0.5);
+    expect(json.group.mirror?.x?.r).toBeGreaterThan(0.99);
+    expect(json.group.mirror?.y).toBeUndefined();
   });
 });

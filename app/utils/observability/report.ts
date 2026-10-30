@@ -138,8 +138,11 @@ function groupBlock(g: GroupFeatures, json: ObservationJson): string[] {
     lines.push(`${label('color')}${c.name} · hue ${Math.round(c.hue.min)}°–${Math.round(c.hue.max)}° mean ${Math.round(c.hue.mean)}° · sat ${short(c.sat.mean)} · value ${rangeText(c.value)}`);
   }
   lines.push(`${label('temporal')}${temporalText(g.temporal)}${g.active < 1 && g.active > 0 ? ` · ${Math.round(g.active * 100)}% active` : ''}`);
-  const mirror = g.symmetry && g.symmetry.corr >= 0.9 && g.spatial.kind !== 'uniform' && g.spatial.kind !== 'constant'
-    ? ` · mirror x ${short(g.symmetry.x)}`
+  // Mirror note only when it says something (a uniform group is trivially symmetric).
+  const moving = g.spatial.kind !== 'uniform' && g.spatial.kind !== 'constant';
+  const mirrored = (['x', 'y'] as const).filter(a => (g.mirror?.[a]?.r ?? 0) >= 0.9);
+  const mirror = moving && mirrored.length > 0
+    ? ` · mirror ${mirrored.map(a => `${a} ${short(g.mirror![a]!.at)}`).join(', ')}`
     : '';
   lines.push(`${label('spatial')}${spatialText(g.spatial)}${mirror}`);
   if (g.radial) {
