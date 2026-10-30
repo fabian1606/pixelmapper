@@ -24,8 +24,9 @@ declare module '@pixelmapper/extension-api' {
    * Coordinates: points are `{ x, y }` in normalized world space (x across the
    * world width, y across the world height, each 0–1). A radius is measured in
    * **normalized world-x units** (1 = the world width): the ring is a true
-   * circle on the canvas, and a plugin compares it against
-   * `hypot(dx, dy / worldAspect)` with `worldAspect = worldWidth / worldHeight`.
+   * circle on the canvas. The world is square, so world x/y are isotropic and
+   * a plugin compares the radius against `dist2(s.x, s.y, px, py, 1.0)`
+   * (`ctx.worldAspect` is only needed for room coordinates `Sample.u/v`).
    */
 
   /** Kinds of canvas handles a param can declare. */

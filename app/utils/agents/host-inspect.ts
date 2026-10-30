@@ -5,6 +5,8 @@
 import type { InspectRequest, InspectResult, OperationCaller, OperationContext } from '@pixelmapper/agent-kit';
 import type { EventLog, EventQuery } from '~/utils/observability/event-log';
 import type { CoreReadApi } from '~/utils/operations/read-api';
+import { liveWidgetView, livePageView } from '~/utils/operations/core/live';
+import { normalizeInputAliases } from '~/utils/operations/input-aliases';
 import type { OperationRegistry } from '~/utils/operations/registry';
 
 // ── Dependencies ────────────────────────────────
@@ -29,7 +31,8 @@ export async function runQuery(deps: InspectDeps, id: string, input: unknown): P
     throw new Error(`Unknown operation "${id}".${similar.length ? ` Did you mean: ${similar.join(', ')}?` : ''}`);
   }
   if (def.kind !== 'query') throw new Error(`"${id}" is a ${def.kind}; run it with the apply tool.`);
-  const parsed = def.input.safeParse(input ?? {});
+  // Accept key aliases (`id` for `modifierId`) before validation.
+  const parsed = def.input.safeParse(normalizeInputAliases(def.input, input ?? {}));
   if (!parsed.success) {
     throw new Error(`${id}: ${parsed.error.issues.map(i => `${i.path.map(String).join('.') || '(input)'}: ${i.message}`).join('; ')}`);
   }
@@ -45,7 +48,12 @@ export async function runQuery(deps: InspectDeps, id: string, input: unknown): P
 
 // ── Entities ────────────────────────────────────
 
-/** Resolves one entity id (`fixture:12`, `modifier:abc`, `group:g1`, `livePage:p1`, or a plain fixture id). */
+/**
+ * Resolves one entity id (`fixture:12`, `modifier:abc`, `group:g1`,
+ * `livePage:p1`, `liveWidget:w1`, or a plain fixture id). Live pages and
+ * widgets use the agent vocabulary of `live.listPages` (mapping `modifierId`,
+ * bare param keys), not the stored `effectId` / `params.<key>` form.
+ */
 function entityView(deps: InspectDeps, ref: string, full: boolean): unknown {
   const colon = ref.indexOf(':');
   const type = colon < 0 ? 'fixture' : ref.slice(0, colon);
@@ -60,10 +68,19 @@ function entityView(deps: InspectDeps, ref: string, full: boolean): unknown {
       return read.modifier(id);
     case 'group':
       return read.groups().find(g => String(g.id) === id) ?? null;
-    case 'livePage':
-      return read.livePages().find(p => p.id === id) ?? null;
+    case 'livePage': {
+      const page = read.livePages().find(p => p.id === id);
+      return page ? livePageView(page) : null;
+    }
+    case 'liveWidget': {
+      for (const page of read.livePages()) {
+        const widget = page.widgets.find(w => w.id === id);
+        if (widget) return { ...liveWidgetView(widget), pageId: page.id };
+      }
+      return null;
+    }
     default:
-      return { error: `Unknown entity type "${type}" (use fixture, modifier, group or livePage).` };
+      return { error: `Unknown entity type "${type}" (use fixture, modifier, group, livePage or liveWidget).` };
   }
 }
 

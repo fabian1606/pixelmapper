@@ -135,7 +135,13 @@ Runners with **different speeds** on one line: `crossingTimeLine(a0, va, b0, vb)
 
 A `trigger` param (4 slots) is driven by the card button or a live `button` widget. Read it with the SDK; `render` stays pure because the host encodes press/release times.
 
+Two output choices (see ui-rules *Output and blend*):
+
+- **`absolute` with pass-through** (shown below) when the trigger must go **above** the programmed look (a real blinder, a white flash): idle writes the programmed values `s.base0..2`, the blinder writes 1.0, blackout 0.
+- **`scale`** when the trigger only dims the programmed look (blackout, a dark wave): `1` = programmed level, so a "blinder" would equal the idle look.
+
 ```ts
+// manifest: "output": "absolute", signatures ["scalar"]
 // params: [0] trigger "hit" (4 slots), [4] number "waveSpeed" (room depths per second), [5] number "width"
 corners: StaticArray<f32> = new StaticArray<f32>(8);
 prepare(p: Params): void {
@@ -145,20 +151,22 @@ prepare(p: Params): void {
 }
 render(ctx: Frame, s: Sample, out: Out): void {
   if (triggerPressed(this.params, 0)) {
-    out.setScalar(triggerClicks(this.params, 0) >= 2 ? 1.0 : 0.0);   // double click held: blinder; else blackout
+    out.setScalar(triggerClicks(this.params, 0) >= 2 ? 1.0 : 0.0);   // double click held: full blinder; else blackout
     return;
   }
   const ms = triggerMsSinceRelease(this.params, 0, ctx);           // TRIGGER_NEVER before the first release
   const d = minDistToPoints(s.u, s.v, ctx.worldAspect, this.corners, 4);
   const r: f32 = ms * 0.001 * this.waveSpeed;                       // shock-wave radius
   const wave = pulse(d, r, this.width, 0.7) * envelope(ms, 0.0, 1500.0);
-  out.setScalar(wave);                                              // scale output: 0 dark, 1 programmed level
+  // Idle: pass the programmed value through; the wave lifts it towards full.
+  out.setScalar(s.base0 + (1.0 - s.base0) * wave);
 }
 ```
 
 - `envelope(msSince, attackMs, decayMs)` → linear 0→1→0; shape with `ease(EASE_OUT_QUAD, …)`.
 - `triggerClicks` counts presses in the current burst (`multiClickMs`, default 350). Blinder after release: `triggerClicks(...) >= 2 && msSinceRelease < 300`.
-- Output when idle: decide explicitly (programmed level vs. dark) and say it in the description.
+- Output when idle: decide explicitly (programmed level via `s.base0..2` pass-through vs. dark) and say it in the description. With `scale` output the same code would write `out.setScalar(wave)` (0 dark, 1 programmed level) — idle dark, no blinder above the programmed level.
+- Test it with `modifiers.trigger` + live `observe`, or frozen states in a preview (verification.md *Triggers*).
 
 ## 7. Chase duo with overtake events
 

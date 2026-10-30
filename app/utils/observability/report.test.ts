@@ -37,7 +37,7 @@ describe('renderReport', () => {
     ]);
     const text = renderReport(trace, json, expectations, findings, { title: 'front' });
     const lines = text.split('\n');
-    expect(lines[0]).toBe('observe front · 0.0–2.0s · 30 fps · preview · bpm 120');
+    expect(lines[0]).toBe('observe front · 0.0–2.0s · 30 fps · preview (this layer on the programmed base) · bpm 120');
     expect(lines[1]).toBe('GROUP 8 fixtures · scalar · sources: waveform@sha256:3fa…(absolute, add, 1.0)');
     expect(text).toContain('temporal periodic 1.00 Hz · 2 beats · beat lock');
     expect(text).toContain('spatial  chase +x · step .125');
@@ -58,6 +58,22 @@ describe('renderReport', () => {
     expect(text).toContain('periodic 2.00 Hz');
     expect(text).not.toContain('EXPECT');
     expect(text).not.toContain('FIXTURE');
+    // The group covers 2 of 4 fixtures: the combined block (what `group.*` tests) comes first.
+    const lines = text.split('\n');
+    expect(lines[1]).toMatch(/^GROUP combined · 4 fixtures · rgb/);
+    expect(lines.findIndex(l => l.startsWith('GROUP front'))).toBeGreaterThan(1);
+  });
+
+  it('prints mirror r with the line position and short windows with more decimals', () => {
+    // A row mirrored left/right with a chase towards the center.
+    const trace = makeTrace({ samples: 6, fn: (i, t) => [sine01(t, 1, Math.abs(i - 2.5) * 0.1)] });
+    trace.mirrorAxes = { x: 0.5 };
+    const { json, findings } = analyzeTrace(trace);
+    expect(renderReport(trace, json, [], findings)).toMatch(/mirror x r 1\.00 @ \.50/);
+    const flash = makeTrace({ samples: 2, fn: () => [1], duration: 0.1 });
+    flash.fromS = 1.05;
+    const res = analyzeTrace(flash);
+    expect(renderReport(flash, res.json, [], res.findings).split('\n')[0]).toContain('1.05–1.15s');
   });
 
   it('lists every fixture with detail fixture and survives zero targets', () => {

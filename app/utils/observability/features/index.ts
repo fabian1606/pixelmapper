@@ -3,7 +3,8 @@
  *
  * `analyzeTrace` turns a `Trace` into the `ObservationJson` (subject of
  * the observe expectations) plus findings. Group features aggregate over
- * samples (heads); fixture features merge a fixture's heads by their mean.
+ * samples (heads); fixture features pool their heads (range max = the
+ * brightest head) and list per-head records (`heads[i]`, see `heads.ts`).
  */
 import type { Finding } from '@pixelmapper/agent-kit';
 import type { Trace, TraceSample } from '../types';
@@ -18,6 +19,7 @@ import { analyzeTemporal } from './temporal';
 import { analyzeSpatial, phaseLags } from './spatial';
 import { analyzeRadial } from './radial';
 import { analyzeMirror } from './mirror';
+import { headFeatures, onsetLevel, orderOf } from './heads';
 
 export type * from './types';
 
@@ -27,6 +29,10 @@ export type * from './types';
 interface Prepared {
   sample: TraceSample;
   signal: Signal;
+  /** First onset (s, relative), from the all-samples mid level. */
+  onset?: number;
+  /** Index in trace (layout) order. */
+  index: number;
 }
 
 /** Shared context of one analysis. */
@@ -72,6 +78,12 @@ function groupFeatures(prepared: Prepared[], ctx: Context): GroupFeatures {
   const spatialSamples: SpatialSample[] = prepared.map(p => ({ x: p.sample.x, y: p.sample.y, spread: spreadOf(p.sample), signal: p.signal }));
   const radial = trace.points && trace.points.length > 0 ? analyzeRadial(spatialSamples, trace.points, temporal, lags, ctx.times) : null;
   const mirror = analyzeMirror(spatialSamples, trace.mirrorAxes);
+  const order = orderOf(prepared.map(p => ({
+    key: `${p.sample.fixtureId}.${p.sample.head}`,
+    spread: spreadOf(p.sample),
+    layout: p.index,
+    onset: p.onset,
+  })), 1 / trace.fps);
   // Optional keys are spread in place to keep the documented key order.
   return {
     count: new Set(prepared.map(p => String(p.sample.fixtureId))).size,
@@ -83,6 +95,7 @@ function groupFeatures(prepared: Prepared[], ctx: Context): GroupFeatures {
     spatial: analyzeSpatial(spatialSamples, temporal, lags, ctx),
     ...(radial ? { radial } : {}),
     ...(mirror ? { mirror } : {}),
+    ...(order ? { order } : {}),
     active: round4(prepared.length > 0 ? signals.filter(s => !s.constant).length / prepared.length : 0),
     issues: groupIssues(prepared),
   };
@@ -110,19 +123,24 @@ function fixtureSignal(heads: Prepared[], trace: Trace): Signal {
   return merged;
 }
 
-/** Features of one fixture from its heads. */
-function fixtureFeatures(heads: Prepared[], signal: Signal, ctx: Context): FixtureFeatures {
+/**
+ * Features of one fixture from its heads: range pooled over heads and
+ * frames (max = brightest head, mean = average), temporal / color over the
+ * heads jointly, issues of the head mean, plus one record per head.
+ */
+function fixtureFeatures(heads: Prepared[], signal: Signal, ctx: Context, level: number | null): FixtureFeatures {
   const first = heads[0]!.sample;
   const avg = (f: (s: TraceSample) => number) => heads.reduce((acc, h) => acc + f(h.sample), 0) / heads.length;
-  const range = ctx.trace.signature === 'panTilt' ? rangeOf(signal.comps) : rangeOf([signal.intensity]);
+  const signals = heads.map(h => h.signal);
+  const range = ctx.trace.signature === 'panTilt' ? rangeOf(signals.flatMap(s => s.comps)) : rangeOf(signals.map(s => s.intensity));
   return {
     name: first.fixtureName,
     x: round4(avg(s => s.x)),
     y: round4(avg(s => s.y)),
-    heads: heads.length,
+    heads: [...heads].sort((a, b) => a.sample.head - b.sample.head).map(h => headFeatures(h.signal, level, ctx.times)),
     range,
-    ...(ctx.trace.signature === 'rgb' ? { color: analyzeColor([signal]) } : {}),
-    temporal: analyzeTemporal([signal], ctx),
+    ...(ctx.trace.signature === 'rgb' ? { color: analyzeColor(signals) } : {}),
+    temporal: analyzeTemporal(signals, ctx),
     issues: signalIssues(signal),
   };
 }
@@ -181,7 +199,14 @@ export function analyzeTrace(trace: Trace, opts: AnalyzeOptions = {}): { json: O
   const prepared: Prepared[] = trace.samples.map((sample, i) => ({
     sample,
     signal: makeSignal(splitComponents(trace.values[i] ?? new Float32Array(0), trace.arity, frames), intensityOf),
+    index: i,
   }));
+  // One onset level for every head: the mid level of all samples.
+  const level = onsetLevel(prepared.map(p => p.signal));
+  for (const p of prepared) {
+    const h = headFeatures(p.signal, level, ctx.times);
+    if (h.onset !== undefined) p.onset = h.onset;
+  }
 
   // Fixtures (heads merged).
   const fixtureMap = byFixture(prepared);
@@ -190,7 +215,7 @@ export function analyzeTrace(trace: Trace, opts: AnalyzeOptions = {}): { json: O
   for (const [id, heads] of fixtureMap) {
     const signal = fixtureSignal(heads, trace);
     merged.set(id, { signal, name: heads[0]!.sample.fixtureName });
-    fixtures[id] = fixtureFeatures(heads, signal, ctx);
+    fixtures[id] = fixtureFeatures(heads, signal, ctx, level);
   }
 
   const json: ObservationJson = {
@@ -213,10 +238,13 @@ export function analyzeTrace(trace: Trace, opts: AnalyzeOptions = {}): { json: O
 
   if (opts.detail === 'raw') {
     const raw: Record<string, number[][]> = {};
-    for (const [id, f] of merged) {
-      raw[id] = Array.from({ length: frames }, (_, fr) => f.signal.comps.map(c => round4(c[fr]!)));
+    const rawHeads: Record<string, number[][][]> = {};
+    const series = (sig: Signal) => Array.from({ length: frames }, (_, fr) => sig.comps.map(c => round4(c[fr]!)));
+    for (const [id, f] of merged) raw[id] = series(f.signal);
+    for (const [id, heads] of fixtureMap) {
+      rawHeads[id] = [...heads].sort((a, b) => a.sample.head - b.sample.head).map(h => series(h.signal));
     }
-    json.raw = { times: Array.from(ctx.times, round4), fixtures: raw };
+    json.raw = { times: Array.from(ctx.times, round4), fixtures: raw, heads: rawHeads };
   }
 
   return { json: reorder(json), findings: collectFindings(trace, prepared, merged) };

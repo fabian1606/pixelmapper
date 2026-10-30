@@ -2401,7 +2401,7 @@
       "id": "fixtures.get",
       "kind": "query",
       "namespace": "fixtures",
-      "summary": "Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), beams/heads (local offsets), kind config and extension data."
+      "summary": "Full detail of fixtures by id: compact view plus channels (index, type, DMX address, current programmed value 0–255, range), heads, beams, kind config and extension data."
     },
     {
       "id": "fixtures.move",
@@ -2486,6 +2486,12 @@
       "kind": "mutation",
       "namespace": "modifiers",
       "summary": "Reorder the modifier stack. `order` is the complete new order: every modifier id exactly once, bottom (evaluated first) to top."
+    },
+    {
+      "id": "modifiers.trigger",
+      "kind": "action",
+      "namespace": "modifiers",
+      "summary": "Press, release or click a trigger param of a modifier like a performer on the card button / a live button: momentary input, NO undo step, not rolled back, skipped on dryRun."
     },
     {
       "id": "modifiers.update",

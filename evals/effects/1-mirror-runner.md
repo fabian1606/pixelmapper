@@ -35,16 +35,17 @@ Preview of the added instance, 8 beats:
     { "path": "group.mirror.x.r", "gte": 0.9 },
     { "path": "group.mirror.x.pairs", "gte": 48 },
     { "path": "group.range.min", "lte": 0.05 },
-    { "path": "fixtures.*.range.max", "gt": 0.5 },
+    { "path": "fixtures.*.heads.*.range.max", "gt": 0.5 },
     { "path": "group.issues", "oneOf": [[], ["clamped"]] }
   ]
 }
 ```
 
 - `beats` may be 4 (one round trip) or 2 (most pixels are passed twice per trip); with time mode replace it by `group.temporal.period` within ±5 % of the cycle (or half of it).
+- `fixtures.*.heads.*.range.max`: **every pixel** is passed by the runner. `fixtures.*.range.max` is the brightest pixel of a tube (also fine, weaker); `fixtures.*.range.mean` stays low (0.1–0.3) for a narrow runner — expected, not a failure.
 - `group.mirror.x.pairs`: the 8 × 24 heads minus heads on the center line; at least the side-wall pixels must pair.
 - Front/back check: `modifiers.update { "params": { "mirror": "frontBack" } }` → `group.mirror.y.r` `gte: 0.9`.
-- Reverse check: with `reverse: true` the mirror expectations still pass (the start end changes; use `detail: "raw"` to see the first-lit pixel if needed).
+- Reverse check: preview the instance twice with `plugin: { "ref": "<plugin>", "params": { "reverse": false } }` / `{ "reverse": true }` (no undo entries); the mirror expectations still pass, and the start end flips: in a window that starts while the tubes are dark, `fixtures.<tube>.heads.0.onset` vs. the last head's onset swap order (or `group.order.first` changes).
 
 **Variant B** (side walls patched the same way): the agent's preview shows `group.mirror.x.r` clearly below 0.9 (the side walls run against each other). Expected reaction (verification.md failure table): say so, explain that the tubes on one wall are patched the other way, and either ask the user or fix it — e.g. a second instance with `reverse: true` on the right-wall tubes only, or re-patch advice. Claiming success with a low `mirror.x.r` fails the scenario.
 

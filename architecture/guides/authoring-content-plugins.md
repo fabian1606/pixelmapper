@@ -321,7 +321,7 @@ Sandbox: the panel runs in `<iframe sandbox="allow-scripts">` with an opaque ori
 
 ## Validation (what makes a build fail)
 
-The harness renders 240 frames (4 s @ 60 fps) on a synthetic layout of 64 fixtures × 1–8 heads, for several param variants and every declared signature. Rejected:
+The harness renders 240 frames (4 s @ 60 fps; `timePhase` sweeps 0–4 cycles at 1 cycle/s) on a synthetic layout of 64 fixtures × 1–8 heads, for several param variants, every declared signature and every distribution the manifest offers (`distribution.modes` × `scopes`, default all; order ranks = fixture index with `rankCount` 64, within ranks = head with `rankCount` = max heads, gradient handles left → right / from the center; every-4 grouping when `grouping: 'required'`). `spatial`, `rank`, `distGroup`, `spread` and the handle are filled like the engine does; legacy `phase` = `timePhase − spatial`. Rejected:
 
 1. Invalid manifest (rules above).
 2. Compile errors; forbidden imports (only `env.memory`, `env.abort`, `pm.budget`, `pm.log` allowed).

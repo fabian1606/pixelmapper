@@ -14,7 +14,7 @@ selector:
 - "selection": what the user has selected in the app.
 - "events": recent event log (commands, undo/redo, operations, warnings) with actors; \`limit\` = newest N (default 50), \`filter\` { kind, actor, sinceId }.
 - { op, input }: run a query operation (see \`operations\`), e.g. { "op": "fixtures.find", "input": { "name": "bar" } }.
-- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", …] or plain fixture ids: details of those entities.
+- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings use the live.addWidget vocabulary: modifierId, bare paramKey).
 detail: "summary" (default) or "full".
 Coordinates: normalized world space 0–1, x left→right, y top→bottom on the 2D canvas; z = height above the floor.",
     "inputSchema": {
@@ -264,7 +264,7 @@ Get input schemas with \`describe\` first. Coordinates are normalized 0–1 worl
     },
     "description": "See what the lights actually do. Returns a compact text report (range, color, temporal period / beat lock, spatial pattern such as chase direction or radiating from a point) plus feature JSON.
 mode "live": capture the running output over \`window\` (default 2 s from now). mode "preview": render a modifier (\`modifierId\`) or a plugin (\`plugin: { ref, params }\`) headlessly on the real fixture positions — deterministic, can look ahead; default when modifierId/plugin is set.
-targets: "all", "selection", fixture/group ids, or a filter { ids, groupIds, kind, signature, name }. detail: "group" (default), "fixture", "raw".
+targets: "all", "selection", fixture/group ids, or a filter { ids | fixtureIds, groupIds, kind, signature, channelTypes, name } (a modifier's targets can be passed as they are; unknown keys are an error). detail: "group" (default), "fixture" (every fixture line), "raw" (+ per-frame values per fixture and head).
 \`expect\`: assertions on the feature JSON (same shape as in \`apply\`), e.g. { "path": "groups.*.temporal.hz", "within": [0.9, 1.1] }. Use it after \`apply\` to verify the intent.",
     "inputSchema": {
       "properties": {
@@ -427,7 +427,36 @@ targets: "all", "selection", fixture/group ids, or a filter { ids, groupIds, kin
               "type": "array",
             },
             {
+              "additionalProperties": false,
               "properties": {
+                "channelTypes": {
+                  "description": "Only fixtures with at least one channel of these types (e.g. ["DIMMER"]).",
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "fixtureIds": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                          },
+                          {
+                            "type": "number",
+                          },
+                        ],
+                      },
+                      "type": "array",
+                    },
+                    {
+                      "type": "null",
+                    },
+                  ],
+                  "description": "Alias of ids (modifiers.add vocabulary); null = all fixtures.",
+                },
                 "groupIds": {
                   "items": {
                     "anyOf": [

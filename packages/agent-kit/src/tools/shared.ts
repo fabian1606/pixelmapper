@@ -44,6 +44,19 @@ export function json(value: unknown): ToolContent {
   return { type: 'json', json: value };
 }
 
+/** JSON longer than this (pretty-printed) is serialized without indentation. */
+export const PRETTY_JSON_MAX_CHARS = 8_000;
+
+/**
+ * Serializes a value for a text item: indented when small, compact when
+ * large (indentation alone can double the size of entity dumps, pushing
+ * them over MCP client output caps).
+ */
+export function jsonText(value: unknown): string {
+  const pretty = JSON.stringify(value, null, 2) ?? 'null';
+  return pretty.length <= PRETTY_JSON_MAX_CHARS ? pretty : JSON.stringify(value) ?? 'null';
+}
+
 /** Output with a text summary and the exact JSON value. */
 export function textAndJson(summary: string, value: unknown, isError = false): ToolOutput {
   return { content: [text(summary), json(value)], ...(isError ? { isError: true } : {}) };

@@ -3,7 +3,7 @@
  * operations, entities). Read-only.
  */
 import { InspectRequestSchema } from '../host';
-import { errorOutput, messageOf, parseInput, text, textAndJson, toolInputSchema } from './shared';
+import { errorOutput, jsonText, messageOf, parseInput, text, textAndJson, toolInputSchema } from './shared';
 import type { ToolDefinition } from './types';
 
 /** Creates the `inspect` tool. */
@@ -18,7 +18,7 @@ export function createInspectTool(): ToolDefinition {
       '- "selection": what the user has selected in the app.',
       '- "events": recent event log (commands, undo/redo, operations, warnings) with actors; `limit` = newest N (default 50), `filter` { kind, actor, sinceId }.',
       '- { op, input }: run a query operation (see `operations`), e.g. { "op": "fixtures.find", "input": { "name": "bar" } }.',
-      '- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", …] or plain fixture ids: details of those entities.',
+      '- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings use the live.addWidget vocabulary: modifierId, bare paramKey).',
       'detail: "summary" (default) or "full".',
       'Coordinates: normalized world space 0–1, x left→right, y top→bottom on the 2D canvas; z = height above the floor.',
     ].join('\n'),
@@ -31,7 +31,7 @@ export function createInspectTool(): ToolDefinition {
         const result = await host.inspect(parsed.value);
         return result.text
           ? textAndJson(result.text, result.value)
-          : { content: [text(JSON.stringify(result.value, null, 2) ?? 'null')] };
+          : { content: [text(jsonText(result.value))] };
       }
       catch (err) {
         return errorOutput(`inspect failed: ${messageOf(err)}`);

@@ -15,31 +15,59 @@ import { FindingSchema, type Finding } from './finding';
 // ── Selector / time ─────────────────────────────
 
 /**
- * What to observe: `'all'`, `'selection'`, fixture/group ids, or a filter
- * (same fields as the `fixtures.find` operation).
+ * What to observe: `'all'`, `'selection'`, fixture/group ids, or a filter.
+ * The filter speaks the `fixtures.find` vocabulary (`ids`, `kind`, `name`)
+ * and the `modifiers.add` targets vocabulary (`fixtureIds` = `ids`,
+ * `groupIds`, `signature`, `channelTypes` = fixtures with any of these
+ * channel types), so a modifier's targets can be passed as they are.
+ * Unknown keys are rejected (they used to fall back to all fixtures).
  */
 export type ObserveTargets =
   | 'all'
   | 'selection'
   | Array<string | number>
-  | { ids?: Array<string | number>; groupIds?: Array<string | number>; kind?: string; signature?: string; name?: string };
+  | {
+    ids?: Array<string | number>;
+    fixtureIds?: Array<string | number> | null;
+    groupIds?: Array<string | number>;
+    kind?: string;
+    signature?: string;
+    channelTypes?: string[];
+    name?: string;
+  };
 
 /** Duration / time reference: `'2s'`, `'500ms'`, `'8 beats'`, or seconds as a number. */
 export type TimeRef = string | number;
 
-/** Zod schema of the observe targets. */
+/** Keys of the observe target filter (error messages, docs). */
+export const OBSERVE_TARGET_KEYS = ['ids', 'fixtureIds', 'groupIds', 'kind', 'signature', 'channelTypes', 'name'] as const;
+
+/** Clear message for a target filter with unknown keys (instead of zod's "Invalid input"). */
+function targetsError(issue: { input?: unknown; errors?: Array<Array<{ code: string; keys?: string[] }>> }): string | undefined {
+  const keys = (issue.errors ?? []).flat().filter(e => e.code === 'unrecognized_keys').flatMap(e => e.keys ?? []);
+  if (keys.length > 0) {
+    return `unknown target key${keys.length === 1 ? '' : 's'} ${keys.map(k => `"${k}"`).join(', ')}; use "all", "selection", an id list, or a filter with ${OBSERVE_TARGET_KEYS.join(', ')}`;
+  }
+  return undefined;
+}
+
+/** Zod schema of the observe targets (strict filter: unknown keys are errors). */
 export const ObserveTargetsSchema = z.union([
   z.literal('all'),
   z.literal('selection'),
   z.array(z.union([z.string(), z.number()])),
-  z.object({
+  z.strictObject({
     ids: z.array(z.union([z.string(), z.number()])).optional(),
+    fixtureIds: z.array(z.union([z.string(), z.number()])).nullable().optional()
+      .describe('Alias of ids (modifiers.add vocabulary); null = all fixtures.'),
     groupIds: z.array(z.union([z.string(), z.number()])).optional(),
     kind: z.string().optional(),
     signature: z.string().optional(),
+    channelTypes: z.array(z.string()).optional()
+      .describe('Only fixtures with at least one channel of these types (e.g. ["DIMMER"]).'),
     name: z.string().optional(),
   }),
-]);
+], { error: iss => targetsError(iss as never) });
 
 /** Zod schema of a time reference. */
 export const TimeRefSchema = z

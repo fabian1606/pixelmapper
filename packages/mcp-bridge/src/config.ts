@@ -7,6 +7,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { DEFAULT_MAX_OUTPUT_CHARS } from './output-limit';
+
 /** Default WebSocket port of the hub (Art-Net bridge uses 7777). */
 export const DEFAULT_PORT = 7778;
 
@@ -48,6 +50,11 @@ export interface BridgeConfig {
   appWaitMs?: number;
   /** Root directory scanned for `**\/prompts/*.md`. */
   skillsDir: string;
+  /**
+   * Character budget of one tool result sent to the MCP client; larger
+   * results are cut with an explicit notice (see `output-limit.ts`).
+   */
+  maxOutputChars?: number;
 }
 
 /** Directory of the Pixelmapper user data (`~/.pixelmapper`). */
@@ -84,6 +91,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     helloTimeoutMs: 5_000,
     appWaitMs: intFromEnv(env.PIXELMAPPER_MCP_APP_WAIT_MS, DEFAULT_APP_WAIT_MS),
     skillsDir: env.PIXELMAPPER_SKILLS_DIR || defaultSkillsDir(),
+    maxOutputChars: intFromEnv(env.PIXELMAPPER_MCP_MAX_OUTPUT_CHARS, DEFAULT_MAX_OUTPUT_CHARS),
   };
 }
 

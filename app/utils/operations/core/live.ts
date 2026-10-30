@@ -176,6 +176,40 @@ function widgetFindings(read: CoreReadApi, pageId: string, widgetId: string): Fi
   return [...mappingFindings(read, widget.type, widget.mapping, widget.id), ...belowPageFinding(page, widget)];
 }
 
+// ── Views ───────────────────────────────────────
+
+/**
+ * Agent-facing view of a widget: the mapping in the input shape of
+ * `live.addWidget` (`modifierId`, bare param key) plus a one-line summary.
+ */
+export function liveWidgetView(w: LiveWidget): z.infer<typeof LiveWidgetInfoSchema> {
+  return {
+    id: w.id,
+    type: w.type,
+    ...(w.label !== undefined ? { label: w.label } : {}),
+    ...(w.color !== undefined ? { color: w.color } : {}),
+    gridX: w.gridX,
+    gridY: w.gridY,
+    gridW: w.gridW,
+    gridH: w.gridH,
+    mapping: fromLiveMapping(w.mapping),
+    mappingSummary: mappingSummary(w.mapping),
+  };
+}
+
+/** Agent-facing view of a page (`live.listPages`, inspect `livePage:<id>`). */
+export function livePageView(p: LivePage): z.infer<typeof LivePageInfoSchema> {
+  return {
+    id: p.id,
+    name: p.name,
+    columns: p.columns,
+    rows: pageRows(p),
+    aspectRatio: `${p.aspectRatioW}:${p.aspectRatioH}`,
+    backgroundColor: p.backgroundColor,
+    widgets: p.widgets.map(liveWidgetView),
+  };
+}
+
 // ── Queries ─────────────────────────────────────
 
 /** `live.listPages`. */
@@ -193,26 +227,7 @@ export const liveListPages = defineCoreOperation({
   run(ctx, input) {
     const pages = ctx.read.livePages()
       .filter(p => !input.pageId || p.id === input.pageId)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        columns: p.columns,
-        rows: pageRows(p),
-        aspectRatio: `${p.aspectRatioW}:${p.aspectRatioH}`,
-        backgroundColor: p.backgroundColor,
-        widgets: p.widgets.map(w => ({
-          id: w.id,
-          type: w.type,
-          ...(w.label !== undefined ? { label: w.label } : {}),
-          ...(w.color !== undefined ? { color: w.color } : {}),
-          gridX: w.gridX,
-          gridY: w.gridY,
-          gridW: w.gridW,
-          gridH: w.gridH,
-          mapping: fromLiveMapping(w.mapping),
-          mappingSummary: mappingSummary(w.mapping),
-        })),
-      }));
+      .map(livePageView);
     return { kind: 'query', value: { pages } };
   },
 });

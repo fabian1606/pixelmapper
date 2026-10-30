@@ -42,8 +42,8 @@ inspect { "selector": { "op": "plugins.list", "input": {} } }
 
 Derive and write down:
 - **Targets**: which fixtures/groups (by kind, name, group). Color effects need `rgb`; dimmer-like effects `scalar`.
-- **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes add the head offsets from `fixtures.get` (`detail.beams`). Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
-- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` shows the head offsets and rotation. Single-head fixtures make a point cloud.
+- **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes take the head world positions from `fixtures.get` (`detail.heads[i].x/y`, same space as `Sample.x/y`, rotation already applied): room box = min/max over every head of every fixture. Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
+- **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` lists `detail.heads` (head index = patch order, with world x/y) — compare the first and last head to see which way a tube is patched. `detail.beams` are local offsets in fixture footprints before rotation; you rarely need them. Single-head fixtures make a point cloud.
 - **Order / contour**: for loops around the room, the order of fixtures along the outline (see patterns.md *Path along ranks*).
 - **Existing stack**: an `override` layer on top hides what is below; place the effect accordingly (`index`).
 - **BPM**, for beat-synced speeds.
@@ -102,7 +102,7 @@ apply {
 
 - `spread`: `same` | `spatial` (linear/radial/conical handle) | `order` (fixture by fixture, `ranks` or `fixtureOrder`) | `within` (over the pixels of each fixture). Offer only what the plugin's `distribution.modes` declares; plugins with their own geometry (points, room coordinates) declare `"modes": ["none"]`.
 - `speed`: `{ "mode": "beat", "value": beats per cycle }` or `{ "mode": "time", "value": seconds per cycle }`. Choose musically: 1 = every beat, 4 = one bar.
-- `blend`: `absolute` plugins default to `override`; modulators (`scale`/`bipolar`) to `add`.
+- `blend`: `absolute` plugins default to `override`; modulators (`scale`/`bipolar`) to `add`. A `scale` runner over other layers usually wants `multiply` (Mask); trigger blinders want `absolute` output with `s.base0..2` pass-through (ui-rules *Output and blend*).
 - Use `dryRun: true` first when the batch is large; it returns the same diff and findings and changes nothing.
 - Live page rules (which widgets, layout): [ui-rules.md](ui-rules.md) *Live page*. Skip the page when the user only wants the card.
 
@@ -114,7 +114,7 @@ observe { "mode": "preview", "modifierId": "ai-corner-wave", "targets": { "group
                       { "path": "fixtures.*.range.max", "gt": 0.2 }, { "path": "group.issues", "oneOf": [[], ["clamped"]] } ] }
 ```
 
-`preview` renders the instance headlessly through the real engine core on the real fixture positions (deterministic, fast, only this layer); `live` captures what the app really outputs (use it last, it includes the rest of the stack and overrides; per fixture, first head only). Trigger effects: see *Triggers* in verification.md — a preview can freeze a pressed/released state, but no tool presses a button live. Read the text report, not only pass/fail. On a failure, follow the reaction table in [verification.md](verification.md) — fix params with `modifiers.update`, or fix the code, rebuild, and swap the plugin (`modifiers.remove` + `modifiers.add` with the new hash, same `id`, in one batch). Never stop at a failing expectation without saying so.
+`preview` renders the instance headlessly through the real engine core on the real fixture positions (deterministic, fast, only this layer); `live` captures what the app really outputs (use it last, it includes the rest of the stack and overrides; per fixture, first head only). Trigger effects: see *Triggers* in verification.md — a preview can freeze a time-free pressed/released state; to press a button live, use `modifiers.trigger` (press / release / click, no undo step, returns the engine-clock time) and then a live `observe`. Never write trigger timestamps with `modifiers.update`. Read the text report, not only pass/fail. On a failure, follow the reaction table in [verification.md](verification.md) — fix params with `modifiers.update`, or fix the code, rebuild, and swap the plugin (`modifiers.remove` + `modifiers.add` with the new hash, same `id`, in one batch). Never stop at a failing expectation without saying so.
 
 ### 7. Report
 

@@ -15,6 +15,8 @@ import { buildPackage, type ContentPluginManifest } from '@pixelmapper/plugin-to
 import { useEngineStore } from '~/stores/engine-store';
 import { BUILTIN_ALIASES, builtinHash, createModifier } from '~/utils/engine/modifiers';
 import type { ModifierInstance } from '~/utils/engine/types';
+import { Beam } from '~/utils/engine/core/beam';
+import { createDistribution } from '~/utils/engine/distribution/create';
 import type { FrameCallback, LiveListener } from '~/utils/extensions/live-hub';
 import { getManifest, isBuiltin, loadWasm, registerPackage } from '~/utils/plugins/plugin-store';
 import { resetOperationState, seedScene, stubOperationGlobals } from '~/utils/operations/test-utils';
@@ -106,11 +108,59 @@ describe.skipIf(!ready)('observe (preview, real engine)', () => {
     expect(report.findings?.some(f => f.code === 'observe-constant-output')).toBe(true);
   });
 
+  it('stuck output warns, but only info for snapshot windows or passing expectations', async () => {
+    scene(4);
+    const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ, strength: 0 });
+    const level = async (req: Partial<Parameters<typeof observe>[0]>) => {
+      const report = await observe({ targets: 'all', modifierId: m.id, ...req }, { plugins });
+      return report.findings?.find(f => f.code === 'observe-stuck')?.level;
+    };
+    expect(await level({})).toBe('warning');
+    expect(await level({ window: { duration: '100ms' } })).toBe('info');
+    expect(await level({ expect: [{ path: 'group.range.min', gte: 0.99 }] })).toBe('info');
+    // A failing expectation keeps the warning.
+    expect(await level({ expect: [{ path: 'group.range.min', lt: 0.5 }] })).toBe('warning');
+  });
+
   it('zero targets → finding, no crash', async () => {
     scene(4);
     const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ });
     const report = await observe({ targets: { name: 'nothing-matches' }, modifierId: m.id }, { plugins });
     expect(report.findings?.some(f => f.code === 'observe-zero-targets')).toBe(true);
+  });
+
+  it('12-pixel tube, waveform spread within → per-pixel max, fixture max = brightest pixel, onset order', async () => {
+    // One DRGB tube with 12 pixels along x (the waveform scales the full dimmer base).
+    const [f] = scene(1);
+    const template = f!.channels;
+    f!.beams = Array.from({ length: 12 }, (_, h) => new Beam(`px-${h}`, (h - 5.5) * 2, 0));
+    f!.channels = f!.beams.flatMap((b, h) => template.map(c => ({
+      ...c,
+      addressOffset: h * 4 + c.addressOffset,
+      beamId: b.id,
+      chaserConfig: { ...c.chaserConfig, stepValues: [255] },
+    })));
+    const m = addModifier(BUILTIN_ALIASES.waveform, {
+      speed: ONE_HZ,
+      distribution: createDistribution({ mode: 'order', scope: 'within' }),
+    });
+    const report = await observe({
+      targets: 'all',
+      modifierId: m.id,
+      window: { duration: '2s' },
+      expect: [
+        { path: 'fixtures.*.heads.length', eq: 12 },
+        { path: 'fixtures.*.heads.*.range.max', gt: 0.9, label: 'every pixel lights up' },
+        { path: 'fixtures.*.range.max', gt: 0.9 },
+      ],
+    }, { plugins });
+    expect(report.expectations.map(e => e.message).filter((_, i) => !report.expectations[i]!.pass), report.text).toEqual([]);
+    const json = report.json as { group: { order?: { direction: string; axis: string } }; fixtures: Record<string, { heads: Array<{ onset?: number }> }> };
+    const heads = Object.values(json.fixtures)[0]!.heads;
+    expect(heads).toHaveLength(12);
+    // Waveform within: pixels run one after another along the rank.
+    expect(json.group.order?.axis, report.text).toBe('spread');
+    expect(['forward', 'reverse']).toContain(json.group.order?.direction);
   });
 
   it('unknown modifier → error finding', async () => {

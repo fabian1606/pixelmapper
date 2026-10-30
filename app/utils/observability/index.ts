@@ -58,6 +58,8 @@ const DEFAULT_FPS = 30;
 const DEFAULT_DURATION_S = 2;
 /** Upper bound of frames per observation (keeps reports cheap). */
 const MAX_FRAMES = 3600;
+/** Windows shorter than this are snapshots: a constant / stuck output is expected. */
+const SNAPSHOT_WINDOW_S = 0.5;
 
 // ── Helpers ─────────────────────────────────────
 
@@ -127,6 +129,33 @@ function mirrorAxes(layout: readonly Fixture[], requested?: { x?: number; y?: nu
   };
 }
 
+/**
+ * Why a constant / stuck output is intended by the request, or null:
+ * - a snapshot window (< 0.5 s, e.g. "is it a full flash right now?");
+ * - a preview that freezes a trigger state through `plugin.params`
+ *   (held = blinder / blackout is a constant state by design);
+ * - every expectation of the request passed (the caller asserted the
+ *   state it wanted — a stuck-at-0 blackout check is not a problem).
+ */
+function intendedHold(req: ObserveRequest, durationS: number, triggerKeys: readonly string[], expectations: ReturnType<typeof evaluateExpectations>): string | null {
+  if (durationS < SNAPSHOT_WINDOW_S) return `snapshot window (${durationS}s < ${SNAPSHOT_WINDOW_S}s)`;
+  const frozen = triggerKeys.filter(k => req.plugin?.params && k in req.plugin.params);
+  if (frozen.length > 0) return `frozen trigger state (${frozen.join(', ')})`;
+  if (expectations.length > 0 && expectations.every(e => e.pass)) return 'all expectations passed';
+  return null;
+}
+
+/**
+ * Downgrades `observe-stuck` to info when the hold is intended (see
+ * `intendedHold`); the issues stay in the JSON and the report's issues line.
+ */
+function relaxIntendedHolds(findings: Finding[], reason: string | null): Finding[] {
+  if (!reason) return findings;
+  return findings.map(f => (f.code === 'observe-stuck' && f.level === 'warning'
+    ? { ...f, level: 'info', message: `${f.message} Expected here: ${reason}.` }
+    : f));
+}
+
 // ── Observe ─────────────────────────────────────
 
 /** Runs one observation (see module docs). Never throws for bad input: problems become findings. */
@@ -156,13 +185,17 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
   const points = req.points?.map((p, i) => ({ key: `p${i}`, x: p.x, y: p.y }));
 
   let trace: Trace;
+  /** Trigger param keys of the previewed plugin (frozen-state detection). */
+  let triggerKeys: string[] = [];
   try {
     if (mode === 'preview') {
       const modifier = await previewInstance(req, read, resolved.fixtures, findings);
       if (!modifier) return failed(findings);
+      const plugins = deps.plugins ?? { getManifest, loadWasm };
+      triggerKeys = (plugins.getManifest(modifier.plugin)?.params ?? []).filter(p => p.type === 'trigger').map(p => p.key);
       trace = await renderPreview(
         { layout, targets: resolved.fixtures, modifier, bpm, fromS, durationS, fps, points, groupIds },
-        deps.plugins ?? { getManifest, loadWasm },
+        plugins,
       );
     }
     else {
@@ -183,8 +216,8 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
 
   trace.mirrorAxes = mirrorAxes(layout, req.mirror);
   const analysis = analyzeTrace(trace, { detail: req.detail, groups: resolved.groups });
-  findings.push(...analysis.findings);
   const expectations = evaluateExpectations(analysis.json, req.expect ?? []);
+  findings.push(...relaxIntendedHolds(analysis.findings, intendedHold(req, durationS, triggerKeys, expectations)));
   const text = renderReport(trace, analysis.json, expectations, findings, { title: targetTitle(req, resolved), detail: req.detail });
   return { text, json: analysis.json as unknown as Record<string, unknown>, expectations, findings };
 }

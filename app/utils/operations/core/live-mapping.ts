@@ -76,6 +76,18 @@ export function normalizeParamKey(key: string): string {
   return `params.${key}`;
 }
 
+/**
+ * Presents a stored param key in the agent vocabulary (inverse of
+ * `normalizeParamKey`): `params.count` → `count`; built-in keys stay; a
+ * plugin param named like a built-in keeps its prefix (`params.speed`) so it
+ * round-trips through `normalizeParamKey` unchanged.
+ */
+export function presentParamKey(key: string): string {
+  if (!key.startsWith('params.')) return key;
+  const bare = key.slice('params.'.length);
+  return (BUILTIN_EFFECT_PARAMS as readonly string[]).includes(bare) ? key : bare;
+}
+
 // ── Friendly mapping schema ─────────────────────
 
 /** Fixture or group id. */
@@ -193,13 +205,19 @@ export function toLiveMapping(read: CoreReadApi, input: LiveMappingInput): LiveM
   }
 }
 
-/** Translates a stored mapping back into the friendly shape (`live.listPages`). */
+/**
+ * Translates a stored mapping back into the friendly input shape of
+ * `live.addWidget` (`modifierId`, bare param key) for every agent-facing view
+ * (`live.listPages`, inspect `livePage:` / `liveWidget:`, the apply diff).
+ */
 export function fromLiveMapping(m: LiveMapping): Record<string, unknown> {
   switch (m.type) {
-    case 'effect-param':
+    case 'effect-param': {
+      const paramKey = m.paramKey !== undefined ? presentParamKey(m.paramKey) : undefined;
       return m.behavior !== undefined
-        ? { type: m.type, modifierId: m.effectId, paramKey: m.paramKey, behavior: m.behavior }
-        : { type: m.type, modifierId: m.effectId, paramKey: m.paramKey };
+        ? { type: m.type, modifierId: m.effectId, paramKey, behavior: m.behavior }
+        : { type: m.type, modifierId: m.effectId, paramKey };
+    }
     case 'global-function':
       return { type: m.type, function: m.globalFunction, config: m.globalFunctionConfig };
     default: {
@@ -212,7 +230,7 @@ export function fromLiveMapping(m: LiveMapping): Record<string, unknown> {
 /** One-line human/AI summary of a stored mapping. */
 export function mappingSummary(m: LiveMapping): string {
   switch (m.type) {
-    case 'effect-param': return `effect-param: modifier ${m.effectId ?? '?'} → ${m.paramKey ?? '?'}`;
+    case 'effect-param': return `effect-param: modifier ${m.effectId ?? '?'} → ${m.paramKey !== undefined ? presentParamKey(m.paramKey) : '?'}`;
     case 'channel': return m.groupId !== undefined
       ? `channel: group ${m.groupId} ${m.channelType ?? '?'}`
       : `channel: fixture ${m.fixtureId ?? '?'} #${m.channelOffset ?? '?'}`;

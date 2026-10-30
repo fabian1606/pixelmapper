@@ -41,6 +41,17 @@ Every param must pass this test: *"<Label> changes <what the user sees>."* If yo
 - Canvas points: defaults are static world coordinates, so **set them on add** to the targets' room box (from the digest, inset ~5 %) via `modifiers.add` `params`. Recipes keep dragged points unless they name them, so recipes should normally *not* set points.
 - Speed: set it in every recipe (manifest form: `"speed": { "mode": "beat", "beatValue": 4 }` or `{ "mode": "time", "timeMs": 2000 }`) and again in `modifiers.add` if the user asked for a tempo (operation form: `"speed": { "mode": "beat", "value": 4 }`, time mode `value` in seconds).
 
+## Output and blend (host-owned, but choose them deliberately)
+
+The output mode is the manifest's (`scale`, `absolute`, `bipolar`); the blend is chosen per instance on add (`modifiers.add` `blend`, the card's "More").
+
+- **Scale runners on a lit base** (a runner / tail that dims everything except the runner): `scale` output is a level as a fraction of the programmed value — `1` keeps the programmed level, `0` is dark, so it can never be brighter than the base and shows nothing on a dark base. Blend:
+  - `add` (default for modulators) subtracts its dimming from whatever is below: `result = below − base · (1 − level)`. Right when it is the only layer on those channels; over another effect it removes a fixed amount and can leave the lower effect half visible or clip it to 0.
+  - `multiply` ("Mask") scales whatever is below by the level: the runner masks the whole stack proportionally. Choose it when the runner should cut through other layers (a chase over a color wash).
+  - `override` ignores layers below (`base · level`).
+  - On a dark base use an `absolute` plugin instead.
+- **Trigger effects** (blinder, flash, blackout): with `scale` output the brightest possible look is the programmed level, so a "blinder" equals the idle look when idle passes through at 1. For a real blinder use `absolute` output: write `s.base0..2` (the programmed values) when idle — pass-through — and full values (`1.0`) for the blinder; blackout writes 0. Use `scale` only when the effect is purely "dim the programmed look" (blackout, fade-outs) and say so in the description. Absolute instances default to blend `override`.
+
 ## Tiers, `when`, groups
 
 - `tier: "primary"` (default) for everything a recipe changes visibly or a documented look needs.

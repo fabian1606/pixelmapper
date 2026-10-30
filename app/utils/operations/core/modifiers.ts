@@ -1,7 +1,7 @@
 /**
  * Modifier operations: `modifiers.list`, `modifiers.add`, `modifiers.update`,
  * `modifiers.remove`, `modifiers.reorder`, `modifiers.applyRecipe`
- * (ADR 0002 §4.2, amendment B3).
+ * (ADR 0002 §4.2, amendment B3), plus the `modifiers.trigger` action.
  *
  * They speak the vocabulary of the modifier card (plugin alias, recipe,
  * params, spread, strength, blend, speed) and translate it with the card
@@ -23,22 +23,20 @@ import { defineCoreOperation } from '../define';
 import type { CoreReadApi } from '../read-api';
 import type { CoreOperation } from '../registry';
 import { buildInstance, instanceFindings, InstanceFieldsSchema, patchInstance, targetFixtures, withRecipe } from './modifier-build';
+import { modifiersTrigger } from './modifier-trigger';
 import { distributionToSpread, speedView, SpeedViewSchema, SpreadViewSchema } from './modifier-spread';
 import { PluginRefSchema, requirePlugin } from './plugin-ref';
-import { FixtureIdSchema, SignatureSchema } from './shared';
+import { FixtureIdSchema, ModifierIdSchema, modifierNotFound, SignatureSchema } from './shared';
 
 // ── Helpers ─────────────────────────────────────
 
 /** A caller-chosen id (letters, digits, `-`, `_`). */
 export const ClientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'use 1–64 letters, digits, "-" or "_"');
 
-/** Modifier id input. */
-const ModifierIdSchema = z.string().min(1).describe('Modifier instance id (see modifiers.list).');
-
-/** Readable "not found" message. */
-function modifierNotFound(id: string): string {
-  return `modifier "${id}" not found (use modifiers.list to list ids)`;
-}
+/** Modifier id list input (`modifierIds`; a single `modifierId` / `id` is accepted as alias). */
+const ModifierIdListSchema = z.array(ModifierIdSchema, {
+  error: iss => (iss.input === undefined ? 'required: pass the modifier ids as "modifierIds" (a single "modifierId" or "id" is accepted as alias)' : undefined),
+}).min(1);
 
 /** One `SetModifiersCommand` from the current list to `after`. */
 function setModifiers(after: ModifierInstance[], description: string): SetModifiersCommand {
@@ -203,7 +201,7 @@ export const modifiersRemove = defineCoreOperation({
   id: 'modifiers.remove',
   kind: 'mutation',
   description: 'Remove modifiers from the stack by id (the whole instance, for all its target fixtures). Unknown ids fail the operation.',
-  input: z.object({ modifierIds: z.array(ModifierIdSchema).min(1) }),
+  input: z.object({ modifierIds: ModifierIdListSchema.describe('Ids to remove. Alias: a single "modifierId" or "id".') }),
   output: z.object({ removed: z.array(z.string()) }),
   produces: ['SetModifiers'],
   examples: [{ input: { modifierIds: ['mod-1'] } }],
@@ -267,5 +265,5 @@ export const modifiersApplyRecipe = defineCoreOperation({
   verify: (ctx, input) => verifyInstance(ctx.read, input.modifierId),
 });
 
-/** All modifier operations. */
-export const modifierOperations: CoreOperation[] = [modifiersList, modifiersAdd, modifiersUpdate, modifiersRemove, modifiersReorder, modifiersApplyRecipe];
+/** All modifier operations (`modifiers.trigger` lives in `modifier-trigger.ts`). */
+export const modifierOperations: CoreOperation[] = [modifiersList, modifiersAdd, modifiersUpdate, modifiersRemove, modifiersReorder, modifiersApplyRecipe, modifiersTrigger];

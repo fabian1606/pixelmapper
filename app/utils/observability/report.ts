@@ -2,7 +2,7 @@
  * Compact text report of an observation (ADR 0002 §6.4).
  *
  * ```
- * observe front · 0.0–2.0s · 30 fps · preview · bpm 120
+ * observe front · 0.0–2.0s · 30 fps · preview (this layer on the programmed base) · bpm 120
  * GROUP 8 fixtures · scalar · sources: waveform@sha256:3fa…(absolute, add, 1.0)
  *   range    0–1.00 mean .50 sd .35
  *   temporal periodic 1.00 Hz · 2 beats · beat lock
@@ -12,8 +12,10 @@
  * EXPECT   ✓ group.temporal.kind = "periodic" · ✗ …
  * ```
  *
- * Group blocks come from `json.groups` (named) or the aggregate `json.group`;
- * FIXTURE lines list outliers only (all fixtures with `detail: 'fixture'`).
+ * Group blocks: the aggregate `json.group` (what `group.*` expectations
+ * test), followed by one block per named group (`json.groups`) when there
+ * are several or they cover only part of the samples; FIXTURE lines list
+ * outliers only (all fixtures with `detail: 'fixture'`).
  */
 import type { ExpectationResult, Finding } from '@pixelmapper/agent-kit';
 import type { Trace } from './types';
@@ -44,9 +46,24 @@ function trim(x: number, digits = 2): string {
   return String(Number(x.toFixed(digits)));
 }
 
-/** Seconds with one decimal. */
-function secs(x: number): string {
-  return x.toFixed(1);
+/**
+ * Decimals for the window bounds: one, or up to three when the bounds need
+ * them (a 0.1 s flash window must not read `0.0–0.1s` for 0.05–0.15 s).
+ */
+export function windowDigits(from: number, to: number): number {
+  let digits = to - from < 1 ? 2 : 1;
+  const exact = (x: number, d: number) => Math.abs(Number(x.toFixed(d)) - x) < 1e-6;
+  while (digits < 3 && !(exact(from, digits) && exact(to, digits))) digits++;
+  return digits;
+}
+
+/**
+ * Mode label. A preview renders one layer over the **programmed** base
+ * values (channel chasers), without other layers, live overrides, presets
+ * or blackout — the header says so.
+ */
+function modeText(mode: 'live' | 'preview'): string {
+  return mode === 'preview' ? 'preview (this layer on the programmed base)' : 'live (full stack)';
 }
 
 /** Padded line label (`  range    `). */
@@ -112,10 +129,10 @@ function sourceText(s: ObservationSource): string {
 // ── Blocks ──────────────────────────────────────
 
 /** GROUP block: header plus indented feature lines. */
-function groupBlock(g: GroupFeatures, json: ObservationJson): string[] {
+function groupBlock(g: GroupFeatures, json: ObservationJson, combined = false): string[] {
   const head = [
     'GROUP',
-    g.name ? `${g.name} ·` : '',
+    g.name ? `${g.name} ·` : combined ? 'combined ·' : '',
     `${g.count} fixture${g.count === 1 ? '' : 's'}`,
   ].filter(Boolean).join(' ');
   const parts = [head, json.signature];
@@ -140,11 +157,17 @@ function groupBlock(g: GroupFeatures, json: ObservationJson): string[] {
   lines.push(`${label('temporal')}${temporalText(g.temporal)}${g.active < 1 && g.active > 0 ? ` · ${Math.round(g.active * 100)}% active` : ''}`);
   // Mirror note only when it says something (a uniform group is trivially symmetric).
   const moving = g.spatial.kind !== 'uniform' && g.spatial.kind !== 'constant';
-  const mirrored = (['x', 'y'] as const).filter(a => (g.mirror?.[a]?.r ?? 0) >= 0.9);
-  const mirror = moving && mirrored.length > 0
-    ? ` · mirror ${mirrored.map(a => `${a} ${short(g.mirror![a]!.at)}`).join(', ')}`
+  // `mirror x r 1.00 @ .50 · y r -0.13 @ .50`: r first, then the line position.
+  const axes = (['x', 'y'] as const).filter(a => g.mirror?.[a]);
+  const mirror = moving && axes.length > 0
+    ? ` · mirror ${axes.map(a => `${a} r ${g.mirror![a]!.r.toFixed(2)} @ ${short(g.mirror![a]!.at)}`).join(' · ')}`
     : '';
   lines.push(`${label('spatial')}${spatialText(g.spatial)}${mirror}`);
+  if (g.order && g.order.direction !== 'none') {
+    const o = g.order;
+    const along = o.direction === 'simultaneous' ? '' : ` along ${o.axis}${o.cyclic ? ' (loop)' : ''} r ${o.r.toFixed(2)}`;
+    lines.push(`${label('order')}${o.direction}${along} · ${o.first} → ${o.last} · span ${trim(o.span)}s · ${o.onsets}/${o.of} onsets`);
+  }
   if (g.radial) {
     const r = g.radial;
     const speed = r.kind !== 'none' && r.speed > 0 ? ` · ${trim(r.speed)} u/s` : '';
@@ -173,7 +196,7 @@ function fixtureLine(f: FixtureFeatures, reasons: string[]): string {
   const value = f.color ? `${f.color.name} value ${short(f.range.min)}–${short(f.range.max)}` : `${short(f.range.min)}–${short(f.range.max)}`;
   const issues = f.issues.filter(i => i !== 'constant');
   const notes = [...reasons.filter(r => r !== 'constant'), ...issues];
-  const heads = f.heads > 1 ? ` ${f.heads} heads` : '';
+  const heads = f.heads.length > 1 ? ` ${f.heads.length} heads` : '';
   return `FIXTURE ${f.name} (x ${short(f.x)} y ${short(f.y)}${heads}) ${value} ${temporalText(f.temporal)}${notes.length > 0 ? ` · ${notes.join(', ')}` : ''}`;
 }
 
@@ -198,11 +221,16 @@ export function renderReport(
   opts: { title?: string; detail?: 'group' | 'fixture' | 'raw' } = {},
 ): string {
   const w = json.window;
+  const to = w.from + w.duration;
+  const digits = windowDigits(w.from, to);
   const lines = [
-    `observe${opts.title ? ` ${opts.title}` : ''} · ${secs(w.from)}–${secs(w.from + w.duration)}s · ${w.fps} fps · ${trace.mode} · bpm ${trim(w.bpm, 1)}`,
+    `observe${opts.title ? ` ${opts.title}` : ''} · ${w.from.toFixed(digits)}–${to.toFixed(digits)}s · ${w.fps} fps · ${modeText(trace.mode)} · bpm ${trim(w.bpm, 1)}`,
   ];
   const groups = json.groups ? Object.values(json.groups) : [];
-  for (const g of groups.length > 0 ? groups : [json.group]) lines.push(...groupBlock(g, json));
+  // The aggregate block first whenever it differs from the single named group.
+  const showCombined = groups.length !== 1 || groups[0]!.samples !== json.group.samples;
+  if (showCombined) lines.push(...groupBlock(json.group, json, groups.length > 0));
+  for (const g of groups) lines.push(...groupBlock(g, json));
 
   // Fixtures: outliers vs. the aggregate group, or all with detail 'fixture'.
   const all = opts.detail === 'fixture';
