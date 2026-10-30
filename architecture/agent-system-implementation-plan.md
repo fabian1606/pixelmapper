@@ -202,7 +202,7 @@ Legend: **Files** = main files to create (+) / change (~) / delete (−). **Done
 
 - [x] **A8.1 Bridge transport (host-only).** + `app/platform/{web,tauri}/agent-bridge.ts` exported from `#platform` (host-only, not part of the extension `Platform` contract): delivers incoming tool calls to `AgentHost` with actor `agent:mcp:<client>`. "Allow external agents" toggle + pairing token in the UI.
   *Done via MCP-first slice (B12):* one shared WebSocket client (`app/utils/agents/agent-bridge.ts`, `bridge-client.ts`) exported as `getAgentBridge()` from both `#platform` entries instead of per-platform files; Settings → External agents (toggle, token, status).
-- [x] **A8.2 Web: `pixelmapper-mcp` CLI.** + `packages/mcp-bridge` (Bun, stdio MCP server exposing the seven tools, forwarding over `ws://127.0.0.1:<port>` to the open tab).
+- [x] **A8.2 Web: `pixelmapper-mcp` CLI.** + `packages/mcp-bridge` (Bun, stdio MCP server exposing the app's tools (five over MCP, B12, plus the local `pixelmapper_status`), forwarding over `ws://127.0.0.1:<port>` to the open tab).
   *Done via MCP-first slice (B12):* five tools (+ local `pixelmapper_status`), port 7778, token + Origin check, relay mode for a second instance, skill prompts. Serves the Tauri webview too until A8.3. Contract: [mcp-bridge-protocol.md](mcp-bridge-protocol.md).
 - [ ] **A8.3 Tauri: in-process MCP server.** ~ `src-tauri/`: streamable-HTTP MCP server on `127.0.0.1` (Rust), forwarding tool calls to the webview over a Tauri `Channel`/event and back. No CLI needed for desktop users.
   *Done when:* Claude Code and Codex can arrange fixtures and observe results against both the web app (via CLI) and the desktop app (direct); results identical to the in-app tools (tool-surface test).
