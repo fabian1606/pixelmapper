@@ -35,3 +35,16 @@ export const FixtureInfoSchema = z.object({
 export function fixtureNotFound(id: string | number): string {
   return `fixture "${String(id)}" not found (use fixtures.find to list ids)`;
 }
+
+/**
+ * Modifier id input (`modifierId`; the transaction runner also accepts `id`
+ * as alias, see `input-aliases.ts`). A missing value names the right key.
+ */
+export const ModifierIdSchema = z.string({
+  error: iss => (iss.input === undefined ? 'required: pass the modifier id as "modifierId" ("id" is accepted as alias; see modifiers.list)' : undefined),
+}).min(1).describe('Modifier instance id (see modifiers.list). Alias: "id".');
+
+/** Readable "modifier not found" message. */
+export function modifierNotFound(id: string): string {
+  return `modifier "${id}" not found (use modifiers.list to list ids)`;
+}

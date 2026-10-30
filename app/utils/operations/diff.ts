@@ -6,6 +6,7 @@
  * (`fixture:12`), and diffs two snapshots field by field.
  */
 import type { EntityView, SemanticChange } from '@pixelmapper/agent-kit';
+import { fromLiveMapping } from './core/live-mapping';
 import type { CoreReadApi } from './read-api';
 
 // ── Snapshot ────────────────────────────────────
@@ -45,7 +46,8 @@ export function captureState(read: CoreReadApi): StateSnapshot {
     const { widgets, ...pageRest } = page;
     out.set(`livePage:${page.id}`, { ...pageRest, widgetIds: widgets.map(w => w.id) } as Record<string, unknown>);
     for (const w of widgets) {
-      out.set(`liveWidget:${w.id}`, { ...w, pageId: page.id } as Record<string, unknown>);
+      // Mapping in the agent vocabulary (`modifierId`, bare param key) like live.listPages.
+      out.set(`liveWidget:${w.id}`, { ...w, mapping: fromLiveMapping(w.mapping), pageId: page.id } as Record<string, unknown>);
     }
   }
   return out;

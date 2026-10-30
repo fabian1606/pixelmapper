@@ -49,7 +49,7 @@ describe('core catalog', () => {
     expect(reg.list().map(s => s.id)).toEqual(expect.arrayContaining([
       'project.digest', 'project.setBpm', 'fixtures.find', 'fixtures.get', 'fixtures.move', 'fixtures.rotate',
       'nodes.rename', 'fixtures.setKindConfig', 'extensionData.set', 'channels.set', 'groups.list', 'selection.get',
-      'modifiers.list', 'modifiers.add', 'modifiers.update', 'modifiers.remove', 'modifiers.reorder', 'modifiers.applyRecipe',
+      'modifiers.list', 'modifiers.add', 'modifiers.update', 'modifiers.remove', 'modifiers.reorder', 'modifiers.applyRecipe', 'modifiers.trigger',
       'plugins.list', 'plugins.get', 'plugins.build', 'plugins.publish',
       'live.listPages', 'live.addPage', 'live.addWidget', 'live.updateWidget', 'live.removeWidget',
     ]));

@@ -29,13 +29,14 @@ function expectationLines(results: readonly ExpectationResult[]): string[] {
 
 /** Text summary of an apply result. */
 export function summarizeApply(result: ApplyResult, dryRun: boolean, label: string): string {
-  // Actions (e.g. plugins.build) run outside history, so a batch of only
-  // actions commits nothing even when every action succeeded.
+  // Actions (e.g. plugins.build, modifiers.trigger) run outside history, so
+  // a batch of only actions commits nothing even when every action succeeded
+  // — and may still change state (a trigger press shows up in the diff).
   const actionsRan = result.results.some(r => r.kind === 'action' && !r.skipped);
   const head = result.committed
     ? `Committed "${label}" as one undo step (${result.undoGroupId ?? 'no id'}).`
     : dryRun ? `Dry run of "${label}": nothing was changed.`
-      : actionsRan && result.diff.length === 0 && !result.findings.some(f => f.level === 'error')
+      : actionsRan && !result.findings.some(f => f.level === 'error')
         ? `Ran "${label}": action results below (actions are not part of undo history).`
         : `Not committed: "${label}" was rolled back or changed nothing.`;
   const lines = [head, `${result.diff.length} change(s):`];

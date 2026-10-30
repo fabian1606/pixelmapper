@@ -33,6 +33,7 @@ import { CompositeCommand } from '~/components/engine/commands/composite-command
 import { useHistory, type Command } from '~/components/engine/composables/use-history';
 import { eventLog, logEvent } from '~/utils/observability/event-log';
 import { affectedEntities, captureState, diffStates } from './diff';
+import { normalizeInputAliases } from './input-aliases';
 import { readApi as defaultReadApi, type CoreReadApi } from './read-api';
 import { operations as defaultRegistry, type OperationRegistry } from './registry';
 
@@ -115,7 +116,8 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
       const hint = registry.list({ search: id.split('.').pop() }).slice(0, 5).map(s => s.id).join(', ');
       throw new AbortBatch([{ level: 'error', code: 'unknown-operation', message: `Unknown operation "${id}".${hint ? ` Did you mean: ${hint}?` : ''}`, opIndex }]);
     }
-    const valid = def.input.safeParse(input);
+    // Accept key aliases (`id` for `modifierId`) before validation.
+    const valid = def.input.safeParse(normalizeInputAliases(def.input, input));
     if (!valid.success) {
       throw new AbortBatch([{ level: 'error', code: 'invalid-input', message: `${id}: ${issuesText(valid.error.issues)}`, opIndex }]);
     }

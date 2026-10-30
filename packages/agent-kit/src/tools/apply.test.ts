@@ -15,6 +15,14 @@ describe('summarizeApply', () => {
     expect(text.split('\n')[0]).toBe('Ran "Build": action results below (actions are not part of undo history).');
   });
 
+  it('reports a state-changing action (modifiers.trigger) as run even with a diff', () => {
+    const text = summarizeApply(result({
+      results: [{ op: 'modifiers.trigger', kind: 'action', value: { changed: true } }],
+      diff: [{ entity: 'modifier:m1', field: 'params.hit.pressed', from: false, to: true }],
+    }), false, 'Press');
+    expect(text.split('\n')[0]).toBe('Ran "Press": action results below (actions are not part of undo history).');
+  });
+
   it('still reports a failed batch as not committed', () => {
     const text = summarizeApply(result({
       results: [{ op: 'plugins.build', kind: 'action', value: { ok: false } }],

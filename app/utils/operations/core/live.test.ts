@@ -12,6 +12,7 @@ import { applyOperations } from '../apply';
 import { readApi } from '../read-api';
 import { registryWith, resetOperationState, seedScene, stateFingerprint, stubOperationGlobals } from '../test-utils';
 import { findFreeSpot, liveOperations } from './live';
+import { fromLiveMapping } from './live-mapping';
 
 // ── Setup ───────────────────────────────────────
 
@@ -94,6 +95,33 @@ describe('live.listPages', () => {
       mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'speed' },
       mappingSummary: 'effect-param: modifier mod-1 → speed',
     });
+  });
+
+  it('presents plugin param keys bare (input vocabulary); the diff uses modifierId too', async () => {
+    const res = await applyOperations({
+      label: 'Add',
+      ops: [
+        { op: 'live.addWidget', input: { pageId: 'page-1', type: 'button', mapping: { type: 'effect-param', modifierId: 'mod-2', paramKey: 'hit' } } },
+        { op: 'live.listPages', input: { pageId: 'page-1' } },
+      ],
+    }, { registry: registry() });
+    const { widgetId } = res.results[0]!.value as { widgetId: string };
+    // Stored form is unchanged …
+    expect(widget('page-1', widgetId)?.mapping).toEqual({ type: 'effect-param', effectId: 'mod-2', paramKey: 'params.hit' });
+    // … but every agent-facing view speaks the input vocabulary.
+    const { pages } = res.results[1]!.value as { pages: Array<{ widgets: Array<Record<string, unknown>> }> };
+    expect(pages[0]!.widgets.find(w => w.id === widgetId)).toMatchObject({
+      mapping: { type: 'effect-param', modifierId: 'mod-2', paramKey: 'hit' },
+      mappingSummary: 'effect-param: modifier mod-2 → hit',
+    });
+    const added = res.diff.find(c => c.entity === `liveWidget:${widgetId}` && c.field === 'added');
+    expect(JSON.stringify(res.diff)).not.toContain('effectId');
+    expect(added).toBeDefined();
+  });
+
+  it('keeps the params. prefix for plugin params named like a built-in key', () => {
+    expect(fromLiveMapping({ type: 'effect-param', effectId: 'm', paramKey: 'params.speed' })).toEqual({ type: 'effect-param', modifierId: 'm', paramKey: 'params.speed' });
+    expect(fromLiveMapping({ type: 'effect-param', effectId: 'm', paramKey: 'strength' })).toEqual({ type: 'effect-param', modifierId: 'm', paramKey: 'strength' });
   });
 });
 

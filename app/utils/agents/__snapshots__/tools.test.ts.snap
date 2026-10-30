@@ -14,7 +14,7 @@ selector:
 - "selection": what the user has selected in the app.
 - "events": recent event log (commands, undo/redo, operations, warnings) with actors; \`limit\` = newest N (default 50), \`filter\` { kind, actor, sinceId }.
 - { op, input }: run a query operation (see \`operations\`), e.g. { "op": "fixtures.find", "input": { "name": "bar" } }.
-- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", …] or plain fixture ids: details of those entities.
+- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings use the live.addWidget vocabulary: modifierId, bare paramKey).
 detail: "summary" (default) or "full".
 Coordinates: normalized world space 0–1, x left→right, y top→bottom on the 2D canvas; z = height above the floor.",
     "inputSchema": {
