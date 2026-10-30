@@ -32,6 +32,8 @@ import { getManifest, loadWasm } from '~/utils/plugins/plugin-store';
 import { captureLiveSignatures, type CaptureHub } from './capture';
 import { analyzeTrace } from './features';
 import { layersOn, planLiveSignatures, primaryIndex, signatureFindings, stackClock } from './live-signature';
+import { heldTriggerFindings, planTriggers, waitWithTriggers, type TriggerFirer } from './observe-triggers';
+import type { TriggerAction } from '~/utils/operations/core/modifier-trigger';
 import { renderPreview, type PreviewPlugins } from './preview';
 import { renderReport } from './report';
 import { headSamples, resolveTargets, type ResolvedTargets } from './targets';
@@ -55,6 +57,9 @@ export interface ObserveDeps {
   now?: () => number;
   /** Fatal engine failure message, null while the engine renders (default: the engine store). */
   engineFailure?: () => string | null;
+  /** Timed triggers: validation and firing (default: `modifiers.trigger`'s path; tests). */
+  checkTrigger?: (read: CoreReadApi, action: TriggerAction) => void;
+  fireTrigger?: TriggerFirer;
 }
 
 /** The running engine's fatal failure, if any (no store → none). */
@@ -186,12 +191,15 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
   const durationS = Math.min(parseTimeRef(req.window?.duration, bpm, DEFAULT_DURATION_S), MAX_FRAMES / fps);
   const fromS = parseTimeRef(req.window?.from, bpm, 0);
   const hasInstance = !!(req.modifierId || req.plugin);
-  let mode = req.mode ?? (hasInstance ? 'preview' : 'live');
+  // Timed triggers only make sense live: they imply the mode.
+  let mode = req.mode ?? (req.triggers?.length ? 'live' : hasInstance ? 'preview' : 'live');
   if (mode === 'sim') {
     findings.push(infoFinding('observe-sim-unavailable', `mode "sim" is not implemented yet; using ${hasInstance ? 'preview' : 'live'}`));
     mode = hasInstance ? 'preview' : 'live';
   }
   if (mode === 'preview' && !hasInstance) return failed([errorFinding('invalid-input', 'preview needs `modifierId` or `plugin`')]);
+  const triggers = planTriggers(req.triggers, { mode, durationS, bpm, read, check: deps.checkTrigger });
+  if (triggers.errors.length > 0) return failed([...findings, ...triggers.errors]);
 
   const resolved = resolveTargets(req.targets, { fixtures: layout, groups: read.groups(), selection: read.selection().fixtureIds });
   for (const id of resolved.unknown) findings.push(warningFinding('observe-unknown-target', `target "${id}" is neither a fixture nor a group`));
@@ -233,10 +241,21 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
       const wait = deps.wait ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
       if (fromS > 0) await wait(fromS * 1000); // live cannot look ahead: wait for the window start
       const traces = await captureLiveSignatures(
-        { fixtures: resolved.fixtures, signature: plan.signatures[0]!, durationS, fps, bpm, groupIds, wait, now: deps.now },
+        {
+          fixtures: resolved.fixtures,
+          signature: plan.signatures[0]!,
+          durationS,
+          fps,
+          bpm,
+          groupIds,
+          // Timed triggers fire at their offsets while the window runs.
+          wait: waitWithTriggers(wait, triggers.schedule, read, findings, deps.fireTrigger),
+          now: deps.now,
+        },
         plan.signatures,
         deps.hub ?? liveHub,
       );
+      findings.push(...heldTriggerFindings(triggers.schedule));
       for (const [i, t] of traces.entries()) {
         if (points) t.points = points;
         const clock = stackClock(layers, plan.signatures[i]!);

@@ -102,8 +102,38 @@ export interface ObserveRequest {
    * (front ↔ back). Default: the room center.
    */
   mirror?: { x?: number; y?: number };
+  /**
+   * Live only: trigger actions fired at offsets inside the capture window
+   * (`at` relative to the window start), like `modifiers.trigger`: no undo
+   * step, no project change. Catches the start of a release wave or flash
+   * that a separate trigger call + observe would miss.
+   */
+  triggers?: ObserveTrigger[];
   expect?: Expectation[];
 }
+
+/** One timed trigger action of a live observation. */
+export interface ObserveTrigger {
+  /** Offset from the window start (`'0.5s'`, `'500ms'`, `'1 beat'`, seconds). */
+  at: TimeRef;
+  modifierId: string;
+  paramKey: string;
+  action: 'press' | 'release' | 'click';
+  /** Only for `click`: clicks in the burst (1–8). */
+  clicks?: number;
+}
+
+/** Most timed triggers per observation. */
+export const MAX_OBSERVE_TRIGGERS = 8;
+
+/** Zod schema of a timed trigger (strict: unknown keys are an error). */
+export const ObserveTriggerSchema = z.object({
+  at: TimeRefSchema.describe('Offset from the window start: "0.5s", "500ms", "1 beat" or seconds. Must lie inside the window.'),
+  modifierId: z.string().min(1).describe('Modifier with the trigger param.'),
+  paramKey: z.string().min(1).describe('Trigger param key (e.g. "hit").'),
+  action: z.enum(['press', 'release', 'click']).describe('"press" holds, "release" lets go, "click" = press + release.'),
+  clicks: z.number().int().min(1).max(8).optional().describe('Only for "click": clicks in the burst (default 1).'),
+}).strict();
 
 /** Zod schema of the observe request. */
 export const ObserveRequestSchema = z.object({
@@ -121,6 +151,8 @@ export const ObserveRequestSchema = z.object({
   points: z.array(z.object({ x: z.number(), y: z.number() })).max(16).optional(),
   mirror: z.object({ x: z.number().optional(), y: z.number().optional() }).optional()
     .describe('Mirror lines for group.mirror (world x of the vertical line, world y of the horizontal line); default the room center.'),
+  triggers: z.array(ObserveTriggerSchema).max(MAX_OBSERVE_TRIGGERS).optional()
+    .describe('Live only: trigger actions fired at `at` inside the capture window (like modifiers.trigger: no undo step). E.g. [{ at: "0.5s", modifierId: "ai-flash", paramKey: "hit", action: "release" }].'),
   expect: z.array(ExpectationSchema).optional(),
 });
 

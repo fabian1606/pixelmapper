@@ -19,6 +19,7 @@ request ─► resolveTargets ─► capture (preview | live) ─► Trace
 | `targets.ts` | `resolveTargets` (selector → fixtures + named groups), `pickSignature`, `headSamples` (heads and world positions exactly as `buildLayoutBin`) |
 | `preview.ts` / `preview-core.ts` | `preview` mode: one modifier instance in a private headless `rs-engine-core` |
 | `capture.ts` | `live` mode: signature tuples via `liveHub`, DMX fallback, engine-timeline resampling |
+| `observe-triggers.ts` | `live` mode: timed trigger actions inside the window (validation, split wait, findings) |
 | `live-signature.ts` | `live` mode: which signatures to capture (the stack on the targets), the reported one, signature findings |
 | `types.ts` | `Trace` (the capture result), `parseTimeRef` |
 | `features/*` | `range`, `color`, `temporal`, `spatial`, `radial`, `mirror`; `analyzeTrace` |
@@ -111,6 +112,8 @@ and linearly resampled onto the fps grid. Live samples are per fixture (head
 0), carry no `spatial` coordinate, and `from > 0` waits before capturing
 (live cannot look ahead). No frames during the window → `observe-note`
 ("engine stopped?").
+
+**Timed triggers** (`observe-triggers.ts`). `triggers: [{ at, modifierId, paramKey, action, clicks? }]` (live only, ≤ 8, strict keys; implies `mode: "live"`) are validated before capturing (`at` inside the window, trigger param exists: `checkTriggerAction`), then the capture's window wait is split at the offsets and each action fires through `fireTrigger` — the `modifiers.trigger` path (`setEffectTrigger`, no undo step). Findings: `observe-trigger` per fired action (engine time), `observe-trigger-failed`, `observe-trigger-held` when the last action leaves a trigger pressed.
 
 **Signature choice** (`live-signature.ts`). A requested `targets.signature`
 wins. Otherwise the capture takes the signatures of the modifiers acting on
