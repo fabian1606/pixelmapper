@@ -90,15 +90,15 @@ describe('RdmInspectorSection', () => {
     const [a, b] = await twoTubes();
     const { wrapper, selected } = mountSection(a);
     await refresh();
-    await wrapper.find('[data-rdm-identify] [role="switch"]').trigger('click');
+    await wrapper.find('[data-rdm-identify] [data-identify-button]').trigger('click');
     await refresh();
     expect(h.tubes.devices.get(A)!.identify).toBe(true);
-    expect(wrapper.find('[data-rdm-identify] [role="switch"]').attributes('aria-checked')).toBe('true');
+    expect(wrapper.find('[data-rdm-identify] [data-identify-button]').attributes('aria-pressed')).toBe('true');
 
     selected.value = b;
     await refresh();
     expect(h.tubes.devices.get(A)!.identify).toBe(false);
-    await wrapper.find('[data-rdm-identify] [role="switch"]').trigger('click');
+    await wrapper.find('[data-rdm-identify] [data-identify-button]').trigger('click');
     await refresh();
     expect(h.tubes.devices.get(B)!.identify).toBe(true);
 
