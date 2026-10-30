@@ -49,6 +49,36 @@ function writesFor(read: CoreReadApi, fixtureId: string | number, w: z.infer<typ
   return out;
 }
 
+/** One channel write (`channels.set` entry). */
+export type ChannelWrite = z.infer<typeof WriteSchema>;
+
+/**
+ * `SetChannelValues` commands for `writes`, merged into one command per
+ * fixture (later writes win). Throws on unknown fixtures / channels.
+ * Shared with `modifiers.add` / `update` (`color` sets the base color).
+ */
+export function channelWriteCommands(read: CoreReadApi, writes: readonly ChannelWrite[]): { commands: Command[]; written: number } {
+  const perFixture = new Map<string | number, Map<number, number>>();
+  for (const w of writes) {
+    for (const raw of w.fixtureIds) {
+      const id = read.fixtures().find(f => String(f.id) === String(raw))?.id;
+      if (id === undefined) throw new Error(fixtureNotFound(raw));
+      const map = perFixture.get(id) ?? new Map<number, number>();
+      for (const { channelIndex, value } of writesFor(read, id, w)) map.set(channelIndex, value);
+      perFixture.set(id, map);
+    }
+  }
+  const factory = createCoreCommandFactory();
+  const commands: Command[] = [];
+  let written = 0;
+  for (const [fixtureId, map] of perFixture) {
+    const values = [...map].map(([channelIndex, value]) => ({ channelIndex, value }));
+    written += values.length;
+    commands.push(factory.setChannelValues({ fixtureId, values, description: 'Set channel values' }) as Command);
+  }
+  return { commands, written };
+}
+
 /** `channels.set`. */
 export const channelsSet = defineCoreOperation({
   id: 'channels.set',
@@ -56,6 +86,7 @@ export const channelsSet = defineCoreOperation({
   description: [
     'Set the programmed base value of fixture channels (the static look before modifiers). Values are normalized 0–1 (→ DMX 0–255).',
     'Address channels by `channelType` (all heads) or `channelIndex`; `color: "#rrggbb"` sets RED/GREEN/BLUE at once. Several writes in one call.',
+    'Scale effects (Waveform, Noise, Sequencer chases/pulses) dim this programmed value: a fixture whose DIMMER or color base is 0 stays dark under them. For a colored effect, `modifiers.add { color: "#rrggbb" }` sets the base color (and a zero dimmer to full) in the same op.',
   ].join('\n'),
   input: z.object({ writes: z.array(WriteSchema).min(1) }),
   output: z.object({ written: z.number().int().describe('Number of channel values written.') }),
@@ -65,25 +96,7 @@ export const channelsSet = defineCoreOperation({
     { input: { writes: [{ fixtureIds: ['fx-1'], color: '#ff8000' }] }, note: 'Orange base color.' },
   ],
   run(ctx, input) {
-    // Merge all writes per fixture into one SetChannelValues command.
-    const perFixture = new Map<string | number, Map<number, number>>();
-    for (const w of input.writes) {
-      for (const raw of w.fixtureIds) {
-        const id = ctx.read.fixtures().find(f => String(f.id) === String(raw))?.id;
-        if (id === undefined) throw new Error(fixtureNotFound(raw));
-        const map = perFixture.get(id) ?? new Map<number, number>();
-        for (const { channelIndex, value } of writesFor(ctx.read, id, w)) map.set(channelIndex, value);
-        perFixture.set(id, map);
-      }
-    }
-    const factory = createCoreCommandFactory();
-    const commands: Command[] = [];
-    let written = 0;
-    for (const [fixtureId, map] of perFixture) {
-      const values = [...map].map(([channelIndex, value]) => ({ channelIndex, value }));
-      written += values.length;
-      commands.push(factory.setChannelValues({ fixtureId, values, description: 'Set channel values' }) as Command);
-    }
+    const { commands, written } = channelWriteCommands(ctx.read, input.writes);
     return { kind: 'mutation', commands, value: { written } };
   },
 });

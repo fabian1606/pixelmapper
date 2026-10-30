@@ -22,14 +22,14 @@ import type { BlendMode, ChannelType, ModifierInstance, Signature } from '~/util
 import { getManifest } from '~/utils/plugins/plugin-store';
 import type { CoreReadApi, FixtureInfo } from '../read-api';
 import { paramProblems } from './modifier-params';
-import { applySpeed, SpeedSchema, SpreadSchema, spreadToDistribution } from './modifier-spread';
+import { applySpeed, directedAxis, SpeedSchema, SpreadSchema, spreadToDistribution, type Direction } from './modifier-spread';
 import { FixtureIdSchema, SignatureSchema } from './shared';
 
 // ── Schemas ─────────────────────────────────────
 
 /** Blend modes of the stack. */
 export const BlendSchema = z.enum(['add', 'override', 'multiply', 'max', 'min'])
-  .describe('How the output combines with the layers below: add (default for modulating plugins), override (default for absolute plugins like Color Shift), multiply, max, min.');
+  .describe('How the layer combines with the value below it. scale output (Waveform/Noise/Sequencer, dims the programmed base): add (default) applies the dimming to what is below, override replaces it with the dimmed base, multiply multiplies what is below by the level, max/min keep the brighter/darker. absolute output (Color Shift): override (default) replaces, add adds on top, multiply filters, max/min. A base of 0 stays dark under scale output.');
 
 /** Modifier targets. */
 export const TargetsSchema = z.object({
@@ -142,9 +142,21 @@ export function resolveTargets(
   return { ids: resolvedIds, signature, targetChannels, fixtures: targetFixtures(read, resolvedIds) };
 }
 
-/** Selection shape of the target fixtures (default handles and recipes). */
-export function targetShape(fixtures: readonly FixtureInfo[]): SelectionShape {
-  return analyzeSelection(fixtures.map(f => ({ x: f.x, y: f.y, heads: f.heads })));
+/**
+ * Selection shape of the target fixtures (default handles and recipes).
+ * Unlike the card (PCA main axis), agent ops run along an explicit,
+ * predictable axis: `direction`, default left→right along x (see
+ * `directedAxis`), so a chase never silently runs front-to-back.
+ */
+export function targetShape(fixtures: readonly FixtureInfo[], direction?: Direction): SelectionShape {
+  const shape = analyzeSelection(fixtures.map(f => ({ x: f.x, y: f.y, heads: f.heads })));
+  const axis = directedAxis(fixtures, direction);
+  return axis ? { ...shape, axis } : shape;
+}
+
+/** Direction named by a spread input, if any. */
+function spreadDirection(input: InstanceFields): Direction | undefined {
+  return input.spread && 'direction' in input.spread ? input.spread.direction : undefined;
 }
 
 /** The targets show a saturated programmed color (recipe rule `hasColor`). */
@@ -195,7 +207,7 @@ export function buildInstance(
 ): ModifierInstance {
   const { hash, manifest } = plugin;
   const targets = resolveTargets(read, manifest, input.targets);
-  const shape = targetShape(targets.fixtures);
+  const shape = targetShape(targets.fixtures, spreadDirection(input));
   // Spread along the targets' main axis only when the plugin offers linear;
   // otherwise keep the manifest's default distribution (e.g. modes ["none"]).
   const modes = manifest.distribution?.modes;
@@ -231,7 +243,7 @@ export function patchInstance(read: CoreReadApi, current: ModifierInstance, inpu
     next.signature = targets.signature;
     next.targetChannels = targets.targetChannels;
   }
-  return applyFields(next, manifest, input, targetShape(targets.fixtures));
+  return applyFields(next, manifest, input, targetShape(targets.fixtures, spreadDirection(input)));
 }
 
 /** `m` with a recipe applied like the card's preset bar (placed on the targets when the spread changes). */

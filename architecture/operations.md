@@ -34,6 +34,14 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
    - `state` holds `bpm`, `fixtures`, `groups`, `modifiers`, `livePages` and `selection`;
    - paths use dots, `*` fans out, and numeric segments index arrays;
    - `state.livePages` is the stored form (`mapping.effectId`, `paramKey: "params.<key>"`), unlike the views below.
+9. **End-of-batch postconditions** (`OperationDefinition.verifyAfterBatch`): checked once after the last op, on the final state, for problems a later op of the same batch may still fix. Same semantics as `verify` (errors roll back). `modifiers.add` / `update` / `applyRecipe` use it for the `dark-base` warning, so "add chase, then `channels.set` the dimmer" in one batch stays quiet.
+
+## Modifier ergonomics for agents (WP-L)
+
+- **Colored scalar effects.** Waveform / Noise / Sequencer are `scale` output on the DIMMER, so the visible color is the fixtures' base color. `modifiers.add` / `update` take `color: "#rrggbb"` (`core/modifier-color.ts`): one `SetChannelValues` per fixture (RED/GREEN/BLUE of the targets with RGB, plus DIMMER 0 → full where it was 0) before the `SetModifiers`, same undo step. Output `baseColor { color, fixtureIds, dimmerRaised }`, info finding `base-color-set`. Decision: an option on the existing op instead of a new `fixtures.setColor`, because the common phrase "a blue chase" is then one op, and `channels.set` stays the general tool.
+- **Dark base** (`core/modifier-dark.ts`): `dark-base` warning when targets of a `scale` / `bipolar` layer (or blend `multiply`) have DIMMER base 0 or an all-zero color base, unless the layer itself (absolute output) or an absolute layer below drives that channel. The message names the fixtures and carries a ready `channels.set` op. `observe` adds the same warning in preview (the instance) and live (stack layers on the observed fixtures).
+- **Blend semantics** per output kind are in the `modifiers.add` / `update` description and `docs/ai/skills/effect-authoring/ui-rules.md` *Output and blend*.
+- **Direction.** Agent ops do not use the card's PCA main axis (which can run front-to-back on a two-row rig): `targetShape` replaces it with `directedAxis` (`core/modifier-spread.ts`): left→right along x by default (top→bottom when all targets share one x; a single fixture keeps its own axis). `spread.direction` (`left-to-right` | `right-to-left` | `top-to-bottom` | `bottom-to-top`) on `spatial` / `order` re-places the handle / order line; `origin`/`end`, `ranks`/`fixtureOrder` and `reverse` still win. The card UI keeps PCA.
 
 ## Agent vocabulary of live mappings
 

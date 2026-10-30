@@ -45,6 +45,17 @@ Every param must pass this test: *"<Label> changes <what the user sees>."* If yo
 
 The output mode is the manifest's (`scale`, `absolute`, `bipolar`); the blend is chosen per instance on add (`modifiers.add` `blend`, the card's "More").
 
+What each blend does (`below` = the value from the layers under it, `base` = the programmed value, `level` = `1 − strength + strength · out`):
+
+| blend | `scale` output (Waveform, Noise, Sequencer) | `absolute` output (Color Shift, Corner Wave) |
+|---|---|---|
+| `add` | `below − base · (1 − level)`: applies its dimming to what is below (default) | `below + out` |
+| `override` | `base · level`: ignores the layers below | `out` (default) |
+| `multiply` | `below · level`: masks the whole stack proportionally | `below · out`: filters what is below |
+| `max` / `min` | brighter / darker of `below` and `base · level` | brighter / darker of `below` and `out` |
+
+`absolute` results are mixed in by strength (`below + (result − below) · strength`). A `scale` layer can never be brighter than the base: **on a DIMMER or color base of 0 it stays dark** (`dark-base` warning). Set the base first — `modifiers.add { "color": "#rrggbb" }` sets the targets' base color and raises a zero dimmer to full, or use `channels.set`.
+
 - **Scale runners on a lit base** (a runner / tail that dims everything except the runner): `scale` output is a level as a fraction of the programmed value — `1` keeps the programmed level, `0` is dark, so it can never be brighter than the base and shows nothing on a dark base. Blend:
   - `add` (default for modulators) subtracts its dimming from whatever is below: `result = below − base · (1 − level)`. Right when it is the only layer on those channels; over another effect it removes a fixed amount and can leave the lower effect half visible or clip it to 0.
   - `multiply` ("Mask") scales whatever is below by the level: the runner masks the whole stack proportionally. Choose it when the runner should cut through other layers (a chase over a color wash).

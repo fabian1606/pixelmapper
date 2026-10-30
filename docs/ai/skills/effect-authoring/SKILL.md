@@ -103,6 +103,8 @@ apply {
 ```
 
 - `spread`: `same` | `spatial` (linear/radial/conical handle) | `order` (fixture by fixture, `ranks` or `fixtureOrder`) | `within` (over the pixels of each fixture). Offer only what the plugin's `distribution.modes` declares; plugins with their own geometry (points, room coordinates) declare `"modes": ["none"]`.
+- Direction: `spatial` and `order` run **left→right along x** by default (fixtures sharing an x move together; top→bottom when all targets share one x). Pick another with `direction: "right-to-left" | "top-to-bottom" | "bottom-to-top"`, exact `origin`/`end`, or `fixtureOrder`; `reverse` flips.
+- Color of scalar effects: Waveform / Noise / Sequencer dim the DIMMER, so the color you see is the fixtures' base color. A colored chase or pulse is one op: `{ "plugin": "waveform", "recipe": "chase", "color": "#0000ff" }` (sets the base color, raises a zero dimmer to full, same undo step). A layer that would stay dark gets a `dark-base` warning with the fix.
 - `speed`: `{ "mode": "beat", "value": beats per cycle }` or `{ "mode": "time", "value": seconds per cycle }`. Choose musically: 1 = every beat, 4 = one bar.
 - `blend`: `absolute` plugins default to `override`; modulators (`scale`/`bipolar`) to `add`. A `scale` runner over other layers usually wants `multiply` (Mask); trigger blinders want `absolute` output with `s.base0..2` pass-through (ui-rules *Output and blend*).
 - Use `dryRun: true` first when the batch is large; it returns the same diff and findings and changes nothing.
