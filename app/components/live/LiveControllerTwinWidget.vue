@@ -11,10 +11,12 @@ import { registerTwinState } from '~/composables/live-ops/twin-state-hub';
 import { SetSectionMembersCommand } from '~/components/engine/commands/live-widget-commands';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { findBoundPreset, sectionPress, sectionRelease } from '~/composables/live-ops/use-section-binding';
-import { applyMapping, isFlashMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { applyMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { hasPendingLongPress, isButtonActive, longPressProgress, pressButton, releaseButton } from '~/composables/live-ops/button-runtime';
+import { appearanceLevel, autoColor, autoLabel, isAnimatedLook, sectionTrigger } from '~/utils/live/button-actions';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { memberKey, findSectionFor } from '~/utils/live/sections';
-import type { ControlInputEvent, ControllerControl } from '~/utils/controllers/types';
+import type { ControlFeedbackState, ControlInputEvent, ControllerControl } from '~/utils/controllers/types';
 
 const props = defineProps<{
   widget: LiveWidget;
@@ -61,6 +63,39 @@ function mappingCtx(controlId: string, value?: number) {
   return { key: `${props.widget.id}::${controlId}`, value, controlId, dimmerState };
 }
 
+/** Button-runtime key of a pad (same key the section / flash stacks use). */
+function padKey(controlId: string): string {
+  return `${props.widget.id}::${controlId}`;
+}
+
+/** Pad press / release: section membership wins, otherwise the pad's actions run. */
+function padPress(controlId: string) {
+  if (sectionPress({ widgetId: props.widget.id, controlId })) return;
+  pressButton(getChild(controlId)?.actions, { key: padKey(controlId), dimmerState });
+}
+function padRelease(controlId: string) {
+  if (sectionRelease({ widgetId: props.widget.id, controlId })) return;
+  releaseButton(getChild(controlId)?.actions, { key: padKey(controlId), dimmerState });
+}
+
+/** Whether a pad looks active: held, latched section slot, or a running action. */
+function isPadActive(controlId: string): boolean {
+  return pressedControls.value.has(controlId)
+    || isSectionActive(controlId)
+    || isButtonActive(padKey(controlId), getChild(controlId)?.actions);
+}
+
+/** Look of a pad: its section's shared one for members, its own otherwise. */
+function padAppearance(controlId: string) {
+  const bound = boundPresetFor(controlId);
+  return bound ? bound.membership.section.appearance : getChild(controlId)?.appearance;
+}
+
+/** Brightness 0–1 of a pad right now (appearance × active state × time). */
+function padLevel(controlId: string): number {
+  return appearanceLevel(padAppearance(controlId), isPadActive(controlId), performance.now(), engineStore.engine?.globalBpm?.value ?? 120);
+}
+
 // ── SVG element registry (populated after v-html mounts) ───────────────────
 type ButtonRig = {
   kind: 'button';
@@ -69,6 +104,8 @@ type ButtonRig = {
   labelEl?: SVGTextElement;
   labelPosition: 'inside' | 'below';
   flashIconEl?: SVGPathElement;
+  /** Long-press progress bar along the pad's bottom edge. */
+  progressEl?: SVGRectElement;
 };
 type SliderRig = {
   kind: 'slider';
@@ -122,22 +159,24 @@ function isSectionActive(controlId: string): boolean {
 function isFlashControl(id: string): boolean {
   const bound = boundPresetFor(id);
   if (bound) {
-    if (bound.membership.section.mode === 'flash') return true;
+    if (sectionTrigger(bound.membership.section) === 'hold') return true;
     if (bound.preset.type === 'flash') return true;
+    return false;
   }
-  const child = getChild(id);
-  // Child mapping flash/overwrite/global-function detection (shared with canvas buttons).
-  return child ? isFlashMapping(child.mapping) : false;
+  // Pads with a "While pressing" action get the same ⚡ as canvas buttons.
+  return getChild(id)?.actions?.some(a => a.trigger === 'hold' && a.action.type !== 'none') ?? false;
 }
 
 function boundColorFor(id: string): string | null {
   const bound = boundPresetFor(id);
   if (bound) {
+    if (bound.membership.section.color) return bound.membership.section.color;
     const c = bound.colorOverride;
     if (c) return `rgb(${c.r}, ${c.g}, ${c.b})`;
     return getPresetMainColor(bound.preset);
   }
-  return getChild(id)?.color ?? null;
+  const child = getChild(id);
+  return child?.color || autoColor(child?.actions, engineStore.savedPresets);
 }
 
 function applyButtonFill(id: string) {
@@ -157,14 +196,13 @@ function applyButtonFill(id: string) {
     }
   }
 
-  const physicallyPressed = pressedControls.value.has(id);
-  const sectionActive = isSectionActive(id);
-  const active = physicallyPressed || sectionActive;
+  const active = isPadActive(id);
   const color = boundColorFor(id);
   if (color) {
-    // Always show the bound color. Inactive = dimmed, active = full + glow.
+    // Always show the bound color; brightness follows the Appearance (dimmed / off / blink / pulse).
+    const level = padLevel(id);
     rig.el.style.fill = color;
-    rig.el.style.opacity = active ? '1' : '0.35';
+    rig.el.style.opacity = String(Math.max(0.08, level));
     rig.el.style.filter = active ? `drop-shadow(0 0 3px ${color})` : '';
   } else {
     // No section / no child color → restore the SVG's intrinsic look.
@@ -183,15 +221,44 @@ function applyKnob(id: string) {
   rig.knob.setAttribute('transform', `translate(0 ${dy.toFixed(2)})`);
 }
 
+const SELECTED_OUTLINE_ID = 'pm-selected-control-outline';
+
+/**
+ * Outline around the selected pad / fader (edit mode): a solid primary
+ * stroke like the canvas selection ring, so it reads differently from the
+ * dashed section box. Drawn as its own rect because the pad's inline
+ * glow filter would hide a CSS filter on the element itself.
+ */
 function applySelectionHighlight() {
-  for (const [id, rig] of rigs) {
-    const target = rig.kind === 'button' ? rig.el : rig.group;
-    if (props.editMode && isSelectedTwin.value && store.selectedControlId === id) {
-      target.classList.add('ctrl-selected');
-    } else {
-      target.classList.remove('ctrl-selected');
-    }
+  const svg = host.value?.querySelector('svg') as SVGSVGElement | null;
+  if (!svg) return;
+  let rect = svg.getElementById(SELECTED_OUTLINE_ID) as SVGRectElement | null;
+
+  const id = props.editMode && isSelectedTwin.value ? store.selectedControlId : null;
+  const rig = id ? rigs.get(id) : undefined;
+  const bb = rig ? (rig.kind === 'button' ? rig.el : rig.group).getBBox() : null;
+  if (!bb || (bb.width === 0 && bb.height === 0)) { rect?.remove(); return; }
+
+  if (!rect) {
+    rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.id = SELECTED_OUTLINE_ID;
+    rect.setAttribute('fill', 'none');
+    rect.setAttribute('pointer-events', 'none');
+    rect.style.stroke = 'var(--primary)';
   }
+  // Always on top of labels, flash icons and the section box.
+  svg.appendChild(rect);
+
+  // Constant on-screen thickness regardless of the twin's zoom.
+  const vbW = svg.viewBox?.baseVal?.width || svg.clientWidth;
+  const scale = svg.clientWidth > 0 ? vbW / svg.clientWidth : 1;
+  const pad = 2 * scale;
+  rect.setAttribute('x', (bb.x - pad).toString());
+  rect.setAttribute('y', (bb.y - pad).toString());
+  rect.setAttribute('width', (bb.width + pad * 2).toString());
+  rect.setAttribute('height', (bb.height + pad * 2).toString());
+  rect.setAttribute('rx', (1.5 * scale).toString());
+  rect.setAttribute('stroke-width', (2 * scale).toString());
 }
 
 // The section to draw a bounding box around. Highlights in two cases:
@@ -328,20 +395,13 @@ function pickLabelPosition(ctrl: ControllerControl): 'inside' | 'below' {
  * actually bound — the definition's default ("Pad 0,0") is not shown so
  * unbound buttons stay clean. Manual child-label override is honored.
  */
-const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout' };
 
 function resolveLabelText(controlId: string, _ctrl: ControllerControl): string {
   const bound = boundPresetFor(controlId);
   if (bound) return bound.label ?? bound.preset.name ?? '';
   const child = getChild(controlId);
   if (child?.label) return child.label;
-  const m = child?.mapping;
-  if (m?.type === 'global-function' && m.globalFunction) return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
-  if (m?.type === 'preset' && m.presetId) {
-    const p = engineStore.savedPresets.find((sp: any) => sp.id === m.presetId);
-    if (p?.name) return p.name;
-  }
-  return '';
+  return autoLabel(child?.actions, engineStore.savedPresets) ?? '';
 }
 
 interface LabelMetrics {
@@ -482,6 +542,54 @@ function createFlashIcon(ctrl: ControllerControl, svg: SVGSVGElement): SVGPathEl
   return path;
 }
 
+/** Long-press bar: a thin rect along the pad's bottom edge, width = progress. */
+function createProgressBar(ctrl: ControllerControl, svg: SVGSVGElement): SVGRectElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const rect = document.createElementNS(NS, 'rect');
+  const h = Math.max(0.8, ctrl.rect.h * 0.08);
+  rect.setAttribute('x', ctrl.rect.x.toString());
+  rect.setAttribute('y', (ctrl.rect.y + ctrl.rect.h - h).toString());
+  rect.setAttribute('height', h.toString());
+  rect.setAttribute('width', '0');
+  rect.setAttribute('fill', 'rgba(255,255,255,0.85)');
+  rect.setAttribute('pointer-events', 'none');
+  svg.appendChild(rect);
+  return rect;
+}
+
+function applyProgressBar(id: string, nowMs: number) {
+  const rig = rigs.get(id);
+  if (!rig || rig.kind !== 'button' || !rig.progressEl) return;
+  const ctrl = definition.value?.controls.find(c => c.id === id);
+  const progress = longPressProgress(padKey(id), nowMs);
+  rig.progressEl.setAttribute('width', ctrl && progress !== null ? (ctrl.rect.w * progress).toString() : '0');
+}
+
+// ── Animation: blink / pulse looks and long-press bars ─────────────────────
+let raf = 0;
+/** Pads whose look moves right now (animated active look, or a pending long press). */
+function animatedPads(): string[] {
+  const ids: string[] = [];
+  for (const [id, rig] of rigs) {
+    if (rig.kind !== 'button') continue;
+    if (hasPendingLongPress(padKey(id)) || (isPadActive(id) && isAnimatedLook(padAppearance(id)))) ids.push(id);
+  }
+  return ids;
+}
+function animate() {
+  raf = 0;
+  const ids = animatedPads();
+  const now = performance.now();
+  for (const id of rigs.keys()) applyProgressBar(id, now);
+  for (const id of ids) { applyButtonFill(id); sendLedFeedback(id); }
+  if (ids.length > 0) raf = requestAnimationFrame(animate);
+}
+/** Starts the loop if anything animates (idempotent). */
+function kickAnimation() {
+  if (!raf) raf = requestAnimationFrame(animate);
+}
+onUnmounted(() => cancelAnimationFrame(raf));
+
 function applyFlashIcon(id: string) {
   const rig = rigs.get(id);
   if (!rig || rig.kind !== 'button') return;
@@ -530,7 +638,8 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
   const origFill = readFill(el);
   const labelPosition = pickLabelPosition(ctrl);
   const labelEl = createButtonLabel(ctrl, svg, labelPosition);
-  rigs.set(ctrl.id, { kind: 'button', el, origFill, labelEl, labelPosition });
+  const progressEl = createProgressBar(ctrl, svg);
+  rigs.set(ctrl.id, { kind: 'button', el, origFill, labelEl, labelPosition, progressEl });
   applyButtonLabel(ctrl.id);
   applyButtonFill(ctrl.id);
   applyFlashIcon(ctrl.id);
@@ -540,11 +649,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     e.stopPropagation();
     try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
     setPressed(ctrl.id, true);
-    const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ctrl.id });
-    if (!sectionHandled) {
-      const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, true, mappingCtx(ctrl.id));
-    }
+    padPress(ctrl.id);
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ctrl.id,
     });
@@ -555,11 +660,7 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     e.stopPropagation();
     if (!pressedControls.value.has(ctrl.id)) return;
     setPressed(ctrl.id, false);
-    const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ctrl.id });
-    if (!sectionHandled) {
-      const child = getChild(ctrl.id);
-      if (child) applyMapping(child.mapping, false, mappingCtx(ctrl.id));
-    }
+    padRelease(ctrl.id);
     liveBus.dispatch('widget.trigger', {
       pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ctrl.id,
     });
@@ -622,8 +723,8 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
     el.style.opacity = '';
     el.style.filter = '';
     el.style.cursor = '';
-    el.classList.remove('ctrl-selected');
     labelEl.remove();
+    progressEl.remove();
     const rig2 = rigs.get(ctrl.id);
     if (rig2?.kind === 'button') rig2.flashIconEl?.remove();
   });
@@ -733,7 +834,6 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     document.removeEventListener('pointercancel', onUpDoc);
     knob.removeAttribute('transform');
     group.style.cursor = '';
-    group.classList.remove('ctrl-selected');
   });
 }
 
@@ -746,6 +846,7 @@ watch(pressedControls, () => {
       sendLedFeedback(id);
     }
   }
+  kickAnimation();
 }, { deep: true });
 
 watch(faderValues, () => {
@@ -793,6 +894,22 @@ watch(
   { deep: true },
 );
 
+// Button runtime changed (actions started / stopped, long press armed) → repaint.
+watch(
+  () => (definition.value?.controls ?? [])
+    .filter(c => c.type === 'button')
+    .map(c => `${isButtonActive(padKey(c.id), getChild(c.id)?.actions)}:${hasPendingLongPress(padKey(c.id))}`)
+    .join(','),
+  () => {
+    for (const id of rigs.keys()) {
+      if (rigs.get(id)?.kind !== 'button') continue;
+      applyButtonFill(id);
+      sendLedFeedback(id);
+    }
+    kickAnimation();
+  },
+);
+
 watch(
   [() => props.editMode, () => store.selectedControlId, isSelectedTwin],
   () => applySelectionHighlight(),
@@ -827,25 +944,19 @@ onUnmounted(offSlide);
 let offDriverInput: (() => void) | null = null;
 function attachDriver() {
   detachDriver();
+  // A new device starts dark: resend every LED state.
+  lastLedState.clear();
   const driver = controllerStore.getBindingFor(props.widget.controllerInstanceId ?? '');
   if (!driver) return;
   offDriverInput = driver.onInput((ev: ControlInputEvent) => {
     if (ev.type === 'press') {
       setPressed(ev.controlId, true);
-      const sectionHandled = sectionPress({ widgetId: props.widget.id, controlId: ev.controlId });
-      if (!sectionHandled) {
-        const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, true, mappingCtx(ev.controlId));
-      }
+      padPress(ev.controlId);
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, true);
     } else if (ev.type === 'release') {
       setPressed(ev.controlId, false);
-      const sectionHandled = sectionRelease({ widgetId: props.widget.id, controlId: ev.controlId });
-      if (!sectionHandled) {
-        const child = getChild(ev.controlId);
-        if (child) applyMapping(child.mapping, false, mappingCtx(ev.controlId));
-      }
+      padRelease(ev.controlId);
       liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false, controlId: ev.controlId });
       sendLedFeedback(ev.controlId, false);
     } else if (ev.type === 'value' && ev.value !== undefined) {
@@ -866,33 +977,34 @@ function sendLedFeedback(controlId: string, _active?: boolean) {
   const instanceId = props.widget.controllerInstanceId;
   const driver = instanceId ? controllerStore.getBindingFor(instanceId) : null;
   if (!driver) return;
-  const physicallyPressed = pressedControls.value.has(controlId);
-  const sectionActive = isSectionActive(controlId);
-  const active = physicallyPressed || sectionActive;
+  const active = isPadActive(controlId);
   const bound = boundPresetFor(controlId);
   // LED feedback needs hex so it can be parsed downstream — emit hex for override RGB too.
   const sectionColor = bound
-    ? (bound.colorOverride
+    ? bound.membership.section.color || (bound.colorOverride
         ? '#' + [bound.colorOverride.r, bound.colorOverride.g, bound.colorOverride.b]
             .map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')
         : getPresetMainColor(bound.preset))
     : null;
-  const childColor = getChild(controlId)?.color;
-  const color = sectionColor ?? childColor;
-  if (color) {
-    const rgb = parseHexColor(color);
-    if (rgb) {
-      if (active) {
-        driver.sendFeedback({ controlId, state: { type: 'rgb', ...rgb } });
-      } else {
-        // Dimmed inactive state (~20% brightness), matching on-screen opacity 0.35.
-        driver.sendFeedback({ controlId, state: { type: 'rgb', r: Math.round(rgb.r * 0.2), g: Math.round(rgb.g * 0.2), b: Math.round(rgb.b * 0.2) } });
-      }
-      return;
-    }
+  const child = getChild(controlId);
+  const color = sectionColor ?? (child?.color || autoColor(child?.actions, engineStore.savedPresets));
+  // LED brightness follows the Appearance; quantized so blink / pulse don't flood the device.
+  const level = Math.round(padLevel(controlId) * 4) / 4;
+  let state: ControlFeedbackState = level > 0 ? 'on' : 'off';
+  const rgb = color ? parseHexColor(color) : null;
+  if (rgb) {
+    // Inactive "dimmed" maps to ~20% LED brightness (LEDs read brighter than the screen).
+    const f = active ? level : level * 0.57;
+    state = { type: 'rgb', r: Math.round(rgb.r * f), g: Math.round(rgb.g * f), b: Math.round(rgb.b * f) };
   }
-  driver.sendFeedback({ controlId, state: active ? 'on' : 'off' });
+  const sig = JSON.stringify(state);
+  if (lastLedState.get(controlId) === sig) return;
+  lastLedState.set(controlId, sig);
+  driver.sendFeedback({ controlId, state });
 }
+
+/** Last LED state sent per control, to skip duplicate MIDI messages. */
+const lastLedState = new Map<string, string>();
 function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!m) return null;
@@ -944,8 +1056,5 @@ watch(() => props.widget.controllerInstanceId, attachDriver);
   width: 100%;
   height: 100%;
   display: block;
-}
-.svg-host :deep(.ctrl-selected) {
-  filter: drop-shadow(0 0 1.5px #818cf8) drop-shadow(0 0 1.5px #818cf8);
 }
 </style>

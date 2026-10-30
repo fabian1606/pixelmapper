@@ -49,7 +49,7 @@ Preview of the added instance, 8 beats:
 
 **Variant B** (side walls patched the same way): the agent's preview shows `group.mirror.x.r` clearly below 0.9 (the side walls run against each other). Expected reaction (verification.md failure table): say so, explain that the tubes on one wall are patched the other way, and either ask the user or fix it — e.g. a second instance with `reverse: true` on the right-wall tubes only, or re-patch advice. Claiming success with a low `mirror.x.r` fails the scenario.
 
-Live (last): `{ "mode": "live", "targets": { "groupIds": ["g-tubes"] }, "window": { "duration": "4s" }, "expect": [{ "path": "group.temporal.kind", "ne": "constant" }] }` (live sees only the first pixel of each tube, so no mirror check there).
+Live (last): `{ "mode": "live", "targets": { "groupIds": ["g-tubes"], "signature": "scalar" }, "window": { "duration": "4s" }, "expect": [{ "path": "group.temporal.kind", "ne": "constant" }] }` (live sees only the first pixel of each tube, so no mirror check there). The runner is a DIMMER (scalar) layer on RGB tubes: pass `signature: "scalar"`, otherwise live reads the static RGB base. Since WP-M a live observe without `signature` picks the signature of the moving layer on its own and says so in an `observe-signature` finding; the explicit filter keeps the check independent of that.
 
 ## Pass criteria
 

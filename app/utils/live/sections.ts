@@ -171,3 +171,16 @@ export function findSectionFor(
 export function memberKey(m: SectionMember): string {
   return m.controlId ? `${m.widgetId}::${m.controlId}` : m.widgetId;
 }
+
+/** Human-readable label per section source (used when a section has no name). */
+export const SECTION_SOURCE_LABELS: Record<SectionSource, string> = {
+  'all-presets': 'Presets',
+  'selected-presets': 'Presets',
+  'preset-variants': 'Variants of Active Preset',
+  'color-variants': 'Color Variants',
+};
+
+/** Display name of a section: its user-given name, else its source label. */
+export function sectionDisplayName(section: LiveSection): string {
+  return section.name || SECTION_SOURCE_LABELS[section.source] || 'Section';
+}

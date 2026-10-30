@@ -32,10 +32,14 @@ export interface Color {
   name: ColorName;
 }
 
-/** Temporal verdict of a signal. */
+/**
+ * Temporal verdict of a signal. `periodic.clock` is the speed clock of the
+ * observed modifier(s) when known: `beatLock` is only true for a period on
+ * the beat grid that is not driven by a `time` clock.
+ */
 export type Temporal =
   | { kind: 'constant' }
-  | { kind: 'periodic'; hz: number; period: number; beats: number; beatLock: boolean; strength: number }
+  | { kind: 'periodic'; hz: number; period: number; beats: number; beatLock: boolean; strength: number; clock?: 'beat' | 'time' }
   | { kind: 'aperiodic'; band: [number, number] }
   | { kind: 'events'; on: number[]; off: number[] };
 

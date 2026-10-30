@@ -204,6 +204,7 @@ function setDimmerGroup(raw: string) {
         <option value="blind">Blind (Full White)</option>
         <option value="blackout">Blackout</option>
         <option value="speed">Speed</option>
+        <option value="stop-all">Stop all</option>
       </select>
 
       <!-- Speed config -->
@@ -234,17 +235,6 @@ function setDimmerGroup(raw: string) {
             :value="(mapping.globalFunctionConfig as any)?.multiplier ?? 2"
             @change="(e) => setSpeedConfig({ multiplier: Number((e.target as HTMLInputElement).value) })"
           />
-        </div>
-        <div class="flex items-center gap-2 text-xs">
-          <label class="text-muted-foreground/70 w-20 shrink-0">Behavior</label>
-          <select
-            class="flex-1 text-xs bg-background border border-border rounded px-2 py-1"
-            :value="(mapping.globalFunctionConfig as any)?.behavior ?? 'latch'"
-            @change="(e) => setSpeedConfig({ behavior: (e.target as HTMLSelectElement).value as 'hold' | 'latch' })"
-          >
-            <option value="latch">Latch (toggle state)</option>
-            <option value="hold">Hold (momentary)</option>
-          </select>
         </div>
       </template>
 

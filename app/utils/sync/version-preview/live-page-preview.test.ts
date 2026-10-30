@@ -5,7 +5,7 @@
  * mapping, kinds and labels, page ordering and the removed / summary text.
  */
 import { describe, expect, it } from 'vitest';
-import type { LivePage, LiveWidget } from '~/utils/live/types';
+import type { LiveMapping, LivePage, LiveWidget } from '~/utils/live/types';
 import type { LivePageHighlight } from '~/utils/sync/version-preview/highlight-types';
 import { layoutLivePage, livePageSummary, pickLivePages, removedPagesText, removedWidgetsText, safeColor } from '~/utils/sync/version-preview/live-page-preview';
 import { widgetDisplayLabel, widgetKind } from '~/utils/sync/version-preview/live-page-text';
@@ -100,10 +100,11 @@ describe('kinds and labels', () => {
     expect(widgetKind(42)).toBe('extension');
   });
 
-  it('derives labels from label, mapping or type', () => {
+  it('derives labels from label, the first button action or type', () => {
+    const action = (m: LiveMapping) => ({ id: 'x', trigger: 'press' as const, action: m });
     expect(widgetDisplayLabel(widget('a', { label: ' Go ' }))).toBe('Go');
-    expect(widgetDisplayLabel(widget('a', { mapping: { type: 'global-function', globalFunction: 'strobe' } }))).toBe('Strobe');
-    expect(widgetDisplayLabel(widget('a', { mapping: { type: 'global-function', globalFunction: 'speed', globalFunctionConfig: { multiplier: 0, behavior: 'hold' } } }))).toBe('Freeze');
+    expect(widgetDisplayLabel(widget('a', { actions: [action({ type: 'none' }), action({ type: 'global-function', globalFunction: 'strobe' })] }))).toBe('Strobe');
+    expect(widgetDisplayLabel(widget('a', { actions: [action({ type: 'global-function', globalFunction: 'speed', globalFunctionConfig: { multiplier: 0, behavior: 'hold' } })] }))).toBe('Freeze');
     expect(widgetDisplayLabel(widget('a', { type: 'acme/big-knob' }))).toBe('Big knob');
     expect(widgetDisplayLabel(widget('a', { type: 'controller-twin', controllerKey: 'apc-mini' }))).toBe('apc-mini');
     expect(widgetDisplayLabel(widget('a', { type: 'beat' }))).toBe('BPM');

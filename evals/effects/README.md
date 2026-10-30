@@ -21,6 +21,8 @@ All scenarios assume the same project; build it once and save it as `evals-room`
 - **4 RGB PARs** at the room corners, group `PARs` (`g-pars`), ids written as `par-tl`, `par-tr`, `par-br`, `par-bl`.
 - Programmed base: every fixture at a visible color (e.g. warm white at 60 %), so `scale` effects have something to scale.
 - **BPM 120** (one beat = 0.5 s, one 4-beat bar = 2 s). Empty modifier stack, no live pages.
+
+**Rig size scaling.** The numbers in the scenarios are for the reference room (8 tubes × 24 pixels = 192 loop pixels). A smaller rig is fine (the 2026-10-30 runs used 4 tubes × 12 pixels = 48), but rig-dependent expectations scale with it: pixel counts and pairs (`group.mirror.x.pairs` counts paired heads: up to 192 on 8 × 24, 48 on 4 × 12 — scenario 1's `gte: 48` is the whole 4 × 12 rig, so lower it on anything smaller), chase steps (`spatial.step` ≈ 1 / pixels per loop), the time a point needs per pixel (`T / (speed · L)`), and the tube a point sits on (`floor(p · N)`, so windows derived from tube positions — e.g. scenario 6's `t_mid` — differ between N = 8 and N = 4). Periods, flash times, colours and radial / mirror correlations do not depend on the rig. Record the rig in the results.
 - The JSON snippets use these placeholder ids; replace them with the real ids from `inspect { "selector": "project" }`. The room box (bounding box of all heads) is written as `minX…maxX`, `minY…maxY`; the room center as `cx, cy`.
 
 ## Setup

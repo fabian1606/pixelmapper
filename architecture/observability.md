@@ -18,7 +18,9 @@ request ─► resolveTargets ─► capture (preview | live) ─► Trace
 | `index.ts` | `observe()`: validation, defaults, mode choice, target resolution, findings, wiring |
 | `targets.ts` | `resolveTargets` (selector → fixtures + named groups), `pickSignature`, `headSamples` (heads and world positions exactly as `buildLayoutBin`) |
 | `preview.ts` / `preview-core.ts` | `preview` mode: one modifier instance in a private headless `rs-engine-core` |
-| `capture.ts` | `live` mode: signature tuples via `liveHub`, DMX fallback, resampling |
+| `capture.ts` | `live` mode: signature tuples via `liveHub`, DMX fallback, engine-timeline resampling |
+| `observe-triggers.ts` | `live` mode: timed trigger actions inside the window (validation, split wait, findings) |
+| `live-signature.ts` | `live` mode: which signatures to capture (the stack on the targets), the reported one, signature findings |
 | `types.ts` | `Trace` (the capture result), `parseTimeRef` |
 | `features/*` | `range`, `color`, `temporal`, `spatial`, `radial`, `mirror`; `analyzeTrace` |
 | `report.ts` | compact text report (ADR §6.4) |
@@ -103,10 +105,37 @@ uses the Rust implementation.
 worker reads the first head's tuple after each render) and records every
 engine frame via `addFrameCallback`. Fixtures without a tuple fall back to
 the coarse DMX bytes of their signature channels (wire value / 255, after
-range remap; noted in the findings). Frames are resampled onto the fps grid
-(sample-and-hold). Live samples are per fixture (head 0), carry no `spatial`
-coordinate, and `from > 0` waits before capturing (live cannot look ahead).
-No frames during the window → `observe-note` ("engine stopped?").
+range remap; noted in the findings). Frames reach the main thread in
+bursts, so they are placed on the engine's own timeline (`LiveFrame.timeMs`;
+wall clock only when the engine time is missing, not increasing or reset)
+and linearly resampled onto the fps grid. Live samples are per fixture (head
+0), carry no `spatial` coordinate, and `from > 0` waits before capturing
+(live cannot look ahead). No frames during the window → `observe-note`
+("engine stopped?").
+
+**Timed triggers** (`observe-triggers.ts`). `triggers: [{ at, modifierId, paramKey, action, clicks? }]` (live only, ≤ 8, strict keys; implies `mode: "live"`) are validated before capturing (`at` inside the window, trigger param exists: `checkTriggerAction`), then the capture's window wait is split at the offsets and each action fires through `fireTrigger` — the `modifiers.trigger` path (`setEffectTrigger`, no undo step). Findings: `observe-trigger` per fired action (engine time), `observe-trigger-failed`, `observe-trigger-held` when the last action leaves a trigger pressed.
+
+**Signature choice** (`live-signature.ts`). A requested `targets.signature`
+wins. Otherwise the capture takes the signatures of the modifiers acting on
+the observed fixtures (strength > 0, targets intersect), captures all of
+them in one window (`captureLiveSignatures`), reports the first one whose
+group output moves and adds findings: `observe-signature` (which signature
+the report shows, and why) and one `observe-other-signature` per other
+captured signature with its verdict and the filter to observe it in detail
+(`signature: 'scalar'`, …). So a moving DIMMER layer on RGB fixtures no
+longer reads as constant RGB. Without layers the default pick applies
+(every target offers rgb → rgb, panTilt → panTilt, else scalar).
+
+**Speed clock.** Each trace carries the speed clock of its layers (preview:
+the instance's `speed.mode`; live: shared by every layer of the signature,
+unknown when mixed). A `time` clock never yields `beatLock: true`; the
+report says `matches 4 beats (time speed, not locked)` instead.
+
+**Jitter.** Live traces compare each fixture's own period to the joint lag
+with 5 % tolerance (preview 3 %), and up to 20 % of the own periods may
+misfit when those signals still repeat at the joint lag (an own period
+near half the window is estimated from few frames). Unrelated periods on
+half the fixtures (1 Hz / 1.37 Hz) stay non-periodic.
 
 ## Feature JSON (expectation subject)
 
@@ -154,7 +183,7 @@ the head mean (a fixture is `stuck-0` only when every head is).
 | `range.{min,max,mean,sd}` | intensity: scalar value, rgb HSV value, panTilt both pooled |
 | `color.hue.{min,max,mean}`, `color.sat.mean`, `color.value`, `color.name` | rgb only; hue in degrees, `min > max` when the arc wraps; name bucket `red`…`magenta`, `white`, `black`, `gray`, `mixed` |
 | `temporal.kind` | `constant` · `periodic` · `aperiodic` · `events` |
-| `temporal.hz`, `.period`, `.beats`, `.beatLock`, `.strength` | periodic: autocorrelation peak (+ sine-fit refinement); beat lock = beats within 3 % of 1/8…16 |
+| `temporal.hz`, `.period`, `.beats`, `.beatLock`, `.strength`, `.clock` | periodic: autocorrelation peak (+ sine-fit refinement); beat lock = beats within 3 % of 1/8…16 and the speed clock is not `time`; `clock` = `beat` / `time` when the layers' speed mode is known |
 | `temporal.band` | aperiodic: `[loHz, hiHz]` holding 80 % of the spectrum energy |
 | `temporal.on`, `.off` | events: threshold crossing times |
 | `spatial.kind` | `uniform` · `chase` · `independent` · `gradient` · `constant` |

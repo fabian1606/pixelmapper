@@ -29,11 +29,14 @@ import { fixtureInfo, fixtureSignatures, readApi, type CoreReadApi } from '~/uti
 import { darkTargetFindings } from '~/utils/operations/core/modifier-dark';
 import { pluginNotFound, resolvePlugin } from '~/utils/operations/core/plugin-ref';
 import { getManifest, loadWasm } from '~/utils/plugins/plugin-store';
-import { captureLive, type CaptureHub } from './capture';
+import { captureLiveSignatures, type CaptureHub } from './capture';
 import { analyzeTrace } from './features';
+import { layersOn, planLiveSignatures, primaryIndex, signatureFindings, stackClock } from './live-signature';
+import { heldTriggerFindings, planTriggers, waitWithTriggers, type TriggerFirer } from './observe-triggers';
+import type { TriggerAction } from '~/utils/operations/core/modifier-trigger';
 import { renderPreview, type PreviewPlugins } from './preview';
 import { renderReport } from './report';
-import { headSamples, pickSignature, resolveTargets, type ResolvedTargets } from './targets';
+import { headSamples, resolveTargets, type ResolvedTargets } from './targets';
 import { parseTimeRef, type Trace } from './types';
 
 export type { Trace, TraceSample, TracePoint, TraceSource } from './types';
@@ -54,6 +57,9 @@ export interface ObserveDeps {
   now?: () => number;
   /** Fatal engine failure message, null while the engine renders (default: the engine store). */
   engineFailure?: () => string | null;
+  /** Timed triggers: validation and firing (default: `modifiers.trigger`'s path; tests). */
+  checkTrigger?: (read: CoreReadApi, action: TriggerAction) => void;
+  fireTrigger?: TriggerFirer;
 }
 
 /** The running engine's fatal failure, if any (no store → none). */
@@ -185,12 +191,15 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
   const durationS = Math.min(parseTimeRef(req.window?.duration, bpm, DEFAULT_DURATION_S), MAX_FRAMES / fps);
   const fromS = parseTimeRef(req.window?.from, bpm, 0);
   const hasInstance = !!(req.modifierId || req.plugin);
-  let mode = req.mode ?? (hasInstance ? 'preview' : 'live');
+  // Timed triggers only make sense live: they imply the mode.
+  let mode = req.mode ?? (req.triggers?.length ? 'live' : hasInstance ? 'preview' : 'live');
   if (mode === 'sim') {
     findings.push(infoFinding('observe-sim-unavailable', `mode "sim" is not implemented yet; using ${hasInstance ? 'preview' : 'live'}`));
     mode = hasInstance ? 'preview' : 'live';
   }
   if (mode === 'preview' && !hasInstance) return failed([errorFinding('invalid-input', 'preview needs `modifierId` or `plugin`')]);
+  const triggers = planTriggers(req.triggers, { mode, durationS, bpm, read, check: deps.checkTrigger });
+  if (triggers.errors.length > 0) return failed([...findings, ...triggers.errors]);
 
   const resolved = resolveTargets(req.targets, { fixtures: layout, groups: read.groups(), selection: read.selection().fixtureIds });
   for (const id of resolved.unknown) findings.push(warningFinding('observe-unknown-target', `target "${id}" is neither a fixture nor a group`));
@@ -224,14 +233,45 @@ export async function observe(request: ObserveRequest, deps: ObserveDeps = {}): 
         const hits = !m.targetFixtureIds || m.targetFixtureIds.some(id => observed.has(String(id)));
         if (hits) findings.push(...darkTargetFindings(read, m));
       }
-      const signature = pickSignature(resolved.fixtures, typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined);
+      // Signatures: requested, else those of the layers on the targets (a
+      // moving DIMMER layer on RGB fixtures must not read as constant RGB).
+      const layers = layersOn(read.modifiers(), resolved.fixtures);
+      const requested = typeof req.targets === 'object' && !Array.isArray(req.targets) ? req.targets.signature : undefined;
+      const plan = planLiveSignatures(resolved.fixtures, layers, requested);
       const wait = deps.wait ?? (ms => new Promise<void>(r => setTimeout(r, ms)));
       if (fromS > 0) await wait(fromS * 1000); // live cannot look ahead: wait for the window start
-      trace = await captureLive(
-        { fixtures: resolved.fixtures, signature, durationS, fps, bpm, groupIds, wait, now: deps.now },
+      const traces = await captureLiveSignatures(
+        {
+          fixtures: resolved.fixtures,
+          signature: plan.signatures[0]!,
+          durationS,
+          fps,
+          bpm,
+          groupIds,
+          // Timed triggers fire at their offsets while the window runs.
+          wait: waitWithTriggers(wait, triggers.schedule, read, findings, deps.fireTrigger),
+          now: deps.now,
+        },
+        plan.signatures,
         deps.hub ?? liveHub,
       );
-      if (points) trace.points = points;
+      findings.push(...heldTriggerFindings(triggers.schedule));
+      for (const [i, t] of traces.entries()) {
+        if (points) t.points = points;
+        const clock = stackClock(layers, plan.signatures[i]!);
+        if (clock) t.clock = clock;
+      }
+      // Several signatures: report the moving one, name the others.
+      if (traces.length > 1) {
+        const quick = traces.map(t => analyzeTrace(t, {}).json);
+        const primary = primaryIndex(quick);
+        findings.push(...signatureFindings(plan, layers, quick, primary));
+        trace = traces[primary]!;
+      }
+      else {
+        trace = traces[0]!;
+        findings.push(...signatureFindings(plan, layers, [], 0));
+      }
     }
   }
   catch (err) {

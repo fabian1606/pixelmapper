@@ -43,8 +43,8 @@ export function fixtureNotFound(id: string | number): string {
  * as alias, see `input-aliases.ts`). A missing value names the right key.
  */
 export const ModifierIdSchema = z.string({
-  error: iss => (iss.input === undefined ? 'required: pass the modifier id as "modifierId" ("id" is accepted as alias; see modifiers.list)' : undefined),
-}).min(1).describe('Modifier instance id (see modifiers.list). Alias: "id".');
+  error: iss => (iss.input === undefined ? 'required: pass `modifierId` (or its alias `id`): the modifier instance id from modifiers.list' : undefined),
+}).min(1).describe('Modifier instance id (see modifiers.list). Alias: "id" (both may be given only when equal).');
 
 /** Readable "modifier not found" message. */
 export function modifierNotFound(id: string): string {

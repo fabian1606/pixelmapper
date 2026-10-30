@@ -10,6 +10,8 @@ Target effect 5: one button — hold = blackout, release = shock wave from the r
 
 Reference scene (README), targets `g-tubes` + `g-pars`. Room corners in world coordinates from the room box (`minX, minY` …; ≈ `(0.1, 0.2)`, `(0.9, 0.2)`, `(0.9, 0.8)`, `(0.1, 0.8)` in the reference scene).
 
+**Base: the README's warm white at 60 % is required.** With a full-white base the blinder (full white) looks exactly like the idle pass-through, so the double-click cannot be told apart from idle (the 2026-10-30 run hit this). Check before starting: `observe { "mode": "live", "window": { "duration": "0.3s" } }` → `group.range.max` `within: [0.5, 0.7]`.
+
 ## Expected controls
 
 - **Card params**: `trigger` "Hit" (default `{ "pressed": false }`, card button; optional `multiClickMs`), Wave speed, Wave width, Decay (how long the wave lives), optionally Blinder length.
@@ -21,7 +23,7 @@ Reference scene (README), targets `g-tubes` + `g-pars`. Room corners in world co
 
 ## Observe (preview, frozen trigger states)
 
-The tools cannot press the button; a preview renders a stored trigger state on the preview clock (ms from the window start). Each call: `modifierId` + `plugin: { "ref": "<plugin hash or alias>", "params": { "hit": … } }`.
+A preview renders a stored trigger state on the preview clock (ms from the window start); the live checks below press the real trigger. Each call: `modifierId` + `plugin: { "ref": "<plugin hash or alias>", "params": { "hit": … } }`.
 
 Held → blackout:
 
@@ -68,7 +70,15 @@ Double-click → blinder (use the variant matching the declared behaviour):
 }
 ```
 
-(after-release variant: `"pressed": false, "clicks": 2`, window inside the declared blinder length.)
+(after-release variant: `"pressed": false, "clicks": 2`, window inside the declared blinder length.) On the 60 % base the blinder (≥ 0.9) is clearly above idle (≈ 0.6).
+
+## Live check (agent, timed triggers)
+
+The agent presses the real trigger inside the capture window (`observe.triggers`, the `modifiers.trigger` path: no undo steps), so the start of each response is in the window:
+
+1. **Hold → blackout, release → wave**: `observe { "mode": "live", "targets": { "groupIds": ["g-tubes", "g-pars"] }, "window": { "duration": "5s" }, "fps": 60, "points": [<4 corners>], "triggers": [{ "at": "0.5s", "modifierId": "ai-hit", "paramKey": "hit", "action": "press" }, { "at": "1.5s", "modifierId": "ai-hit", "paramKey": "hit", "action": "release" }] }` → dark between 0.5 s and 1.5 s, the wave starts at 1.5 s (outward), idle by the declared decay.
+2. **Held double-click → blinder**: click then press in **one** request, so both land inside the multi-click window (the hold counts as the second click). Either one `apply` with two ops — `modifiers.trigger` `"action": "click"`, then `modifiers.trigger` `"action": "press"` — followed by a live `observe` of the held state, or both inside the capture: `"triggers": [{ "at": "0.3s", …, "action": "click" }, { "at": "0.4s", …, "action": "press" }]`, `"window": { "duration": "1s" }` → after 0.4 s `range.min` ≥ 0.9 (white, above the 60 % idle). Then `modifiers.trigger` `"action": "release"` (the report warns `observe-trigger-held` until then). With click and press in two separate calls the press arrives after the multi-click window and reads as a single hold (blackout).
+3. `modifiers.list`/undo history: the trigger actions added no undo steps.
 
 ## Manual live check (tester)
 

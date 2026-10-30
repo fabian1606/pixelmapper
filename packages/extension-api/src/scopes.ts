@@ -252,8 +252,10 @@ export interface LiveWidgetView {
   gridH: number;
   label?: string;
   color?: string;
-  /** Mapping record (shape depends on `mapping.type`). */
+  /** Mapping record of sliders (shape depends on `mapping.type`). */
   mapping: Record<string, Json>;
+  /** Button script: `{ id, trigger, action, duration?, hold? }` per step (buttons only). */
+  actions?: Record<string, Json>[];
   /** Namespaced extension data. */
   extensionData?: Record<string, Record<string, Json>>;
 }

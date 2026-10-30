@@ -37,7 +37,7 @@ export const LIVE_WIDGET_TYPES = ['button', 'slider', 'xy', 'color', 'label', 'b
 
 /** Widget type schema. */
 export const LiveWidgetTypeSchema = z.enum(LIVE_WIDGET_TYPES).describe([
-  'Widget type: "button" (momentary/toggle pad; presets, global functions, page switch, channel, dimmer group, effect-param on bool/trigger params),',
+  'Widget type: "button" (scripted pad: a list of actions with triggers; presets, global functions, page switch, channel, dimmer group, effect-param on bool/trigger params),',
   '"slider" (vertical fader, value 0–1; channel, dimmer-group, effect-param on strength/speed/fanning or number/int/bool/trigger params),',
   '"xy" (2D pad; "channel": x drives channelOffset, y drives channelOffset + 1; "effect-param" on a point param: x/y 0–1 drive the point),',
   '"color" (color picker), "label" (text), "beat" (BPM/tap display), "fixture-preview" (live 2D view). The last four ignore mappings.',
@@ -133,12 +133,12 @@ export const LiveMappingInputSchema = z.discriminatedUnion('type', [
   }).describe('Switch to another live page.'),
   z.object({
     type: z.literal('global-function'),
-    function: z.enum(['strobe', 'blind', 'blackout', 'speed']).describe('Global function.'),
+    function: z.enum(['strobe', 'blind', 'blackout', 'speed', 'stop-all']).describe('Global function ("stop-all" clears preset, flashes, overwrites and speed at once; buttons only, default trigger "long").'),
     config: z.record(z.string(), z.unknown()).optional().describe([
       'Optional config merged over the defaults: strobe { frequency: 8 (Hz), beatSync: false, beatDivision: 8 },',
       'blind { color: "#ffffff", dimmerCurve: false }, speed { multiplier: 2, behavior: "latch" | "hold" }.',
     ].join(' ')),
-  }).describe('Global function while held (strobe, blind, blackout) or speed multiplier.'),
+  }).describe('Global function while held (strobe, blind, blackout), speed multiplier, or stop-all.'),
   z.object({
     type: z.literal('position-recall'),
     positionId: z.string().describe('Saved moving-head position id.'),

@@ -258,6 +258,7 @@ export function liveWidgetView(widget: LiveWidget): LiveWidgetView {
     label: widget.label,
     color: widget.color,
     mapping: jsonClone(widget.mapping) as unknown as Record<string, Json>,
+    actions: widget.actions ? (jsonClone(widget.actions) as unknown as Record<string, Json>[]) : undefined,
     extensionData: extra.extensionData ? jsonClone(extra.extensionData) : undefined,
   };
 }

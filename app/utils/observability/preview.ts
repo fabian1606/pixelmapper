@@ -202,6 +202,8 @@ export async function renderPreview(input: PreviewInput, plugins: PreviewPlugins
     source,
     points: points.length > 0 ? points : undefined,
     handle: { origin: { ...m.distribution.origin }, end: { ...m.distribution.end } },
+    // Only a beat-mode speed can lock to the beat (time / frozen speeds cannot).
+    clock: m.speed.mode === 'beat' ? 'beat' : 'time',
     notes: notes.length > 0 ? notes : undefined,
   };
 }

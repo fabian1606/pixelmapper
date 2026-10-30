@@ -18,6 +18,7 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import type { ChannelType, ModifierInstance, Signature } from '~/utils/engine/types';
 import type { LivePage } from '~/utils/live/types';
+import type { PresetType } from '~/utils/engine/preset-types';
 import { fixtureView as projectFixture, selectionView } from '~/utils/extensions/scope-views';
 
 // ── Views ───────────────────────────────────────
@@ -60,6 +61,14 @@ export interface GroupInfo {
   fixtureIds: Array<string | number>;
 }
 
+/** Compact saved-preset view (live button actions pick their trigger from the type). */
+export interface PresetInfo {
+  id: string;
+  name: string;
+  /** Absent = normal (switches the base preset); flash / overwrite act while held. */
+  type?: PresetType;
+}
+
 /** Readonly project access for operations. */
 export interface CoreReadApi {
   /** Effective base BPM (what tap tempo / `project.setBpm` writes). */
@@ -74,6 +83,8 @@ export interface CoreReadApi {
   modifier(id: string): ModifierInstance | null;
   /** Live pages (deep copies). */
   livePages(): LivePage[];
+  /** Saved presets (id, name, type). */
+  presets(): PresetInfo[];
   selection(): SelectionInfo;
   /** Project-level extension data (deep copy). */
   projectExtensionData(): Record<string, Record<string, unknown>> | undefined;
@@ -170,6 +181,7 @@ export function createCoreReadApi(): CoreReadApi {
       return m ? cloneModifiers([m])[0]! : null;
     },
     livePages: () => jsonClone(useLiveModeStore().pages) as LivePage[],
+    presets: () => engine().savedPresets.map(p => ({ id: p.id, name: p.name, ...(p.type ? { type: p.type } : {}) })),
     selection: () => selectionView(engine().selectedIds, engine().sceneNodes as SceneNode[]),
     projectExtensionData: () => jsonClone(engine().projectExtension.extensionData) as Record<string, Record<string, unknown>> | undefined,
   };

@@ -194,6 +194,9 @@ export function analyzeTrace(trace: Trace, opts: AnalyzeOptions = {}): { json: O
     bpm: trace.bpm,
     times: trace.times.map(t => t - t0),
     handle: trace.handle,
+    // Live frame timing jitters; a known speed clock decides beat locks.
+    jitter: trace.mode === 'live',
+    ...(trace.clock ? { clock: trace.clock } : {}),
   };
   const intensityOf = (comps: Float64Array[]) => intensitySeries(comps, trace.signature);
   const prepared: Prepared[] = trace.samples.map((sample, i) => ({

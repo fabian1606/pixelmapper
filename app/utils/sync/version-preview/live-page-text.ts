@@ -63,6 +63,7 @@ function mappingLabel(m: LiveMapping | undefined): string | null {
   if (!m || typeof m !== 'object') return null;
   if (m.type === 'global-function' && m.globalFunction === 'speed') return speedLabel(m.globalFunctionConfig as SpeedConfig);
   if (m.type === 'global-function' && typeof m.globalFunction === 'string') return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
+  if (m.type === 'global-function' && m.globalFunction === 'stop-all') return 'Stop all';
   if (m.type === 'preset') return 'Preset';
   if (m.type === 'page-switch') return 'Page';
   if (m.type === 'position-recall') return 'Position';
@@ -74,7 +75,14 @@ export function widgetDisplayLabel(w: Partial<LiveWidget>): string {
   if (typeof w.label === 'string' && w.label.trim()) return w.label.trim();
   const kind = widgetKind(w.type);
   if (kind === 'controller-twin' && typeof w.controllerKey === 'string' && w.controllerKey) return w.controllerKey;
-  if (kind === 'button') return mappingLabel(w.mapping) ?? KIND_LABELS.button;
+  if (kind === 'button') {
+    // Buttons run a script of actions: label after the first one with a name.
+    for (const a of Array.isArray(w.actions) ? w.actions : []) {
+      const l = mappingLabel(a?.action);
+      if (l) return l;
+    }
+    return KIND_LABELS.button;
+  }
   return typeDisplayName(w.type);
 }
 

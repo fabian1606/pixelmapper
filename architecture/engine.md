@@ -137,7 +137,7 @@ The store builds binary packets when the model changes and dispatches only chang
 | global bases | channels |
 | `modifiers` (deep) | modifiers (0x16) + plugin table; ensures the referenced plugins are loaded into the worker |
 
-A light rAF loop forwards changed packets to the worker (`subarray(5)` strips the framing header); `flushEngineOutput()` forces an immediate rebuild + dispatch during drags. Frames come back via `engine.onFrame` and fan out to connectors (`sendFrame`), the live hub and UI.
+A light rAF loop forwards changed packets to the worker (`subarray(5)` strips the framing header); `flushEngineOutput()` forces an immediate rebuild + dispatch during drags. The layout build is skipped while a fingerprint of the layout-relevant fixture fields is unchanged; the fingerprint starts as `null` (not built yet), so an empty project still gets its first, valid layout packet (`metersPerUnit`, count 0 — the engine accepts it with 0 fixtures). The packet caches start as valid empty packets, never as 0-byte payloads: the engine rejects truncated payloads (`dispatch` returns -1), and the worker reports a 0-byte payload as "empty packet (never built)" rather than a format mismatch. Frames come back via `engine.onFrame` and fan out to connectors (`sendFrame`), the live hub and UI.
 
 ## Modifier instances (TS model)
 

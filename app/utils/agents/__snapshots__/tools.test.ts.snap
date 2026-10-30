@@ -14,7 +14,7 @@ Input: { "selector": … } (always the key "selector"):
 - "selection": what the user has selected in the app.
 - "events": recent event log (commands, undo/redo, operations, warnings) with actors; \`limit\` = newest N (default 50), \`filter\` { kind, actor, sinceId }.
 - { op, input }: run a query operation (see \`operations\`), e.g. { "selector": { "op": "fixtures.find", "input": { "name": "bar" } } }.
-- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings use the live.addWidget vocabulary: modifierId, bare paramKey).
+- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings and button actions use the live.addWidget vocabulary: modifierId, bare paramKey).
 detail: "summary" (default) or "full".
 Coordinates: normalized world space 0–1, x left→right, y top→bottom on the 2D canvas; z = height above the floor. The default 3D camera looks from the bottom edge, so "front" (audience side) is conventionally high y, "back" low y; the room center is (0.5, 0.5).
 Rotation: yaw in degrees, clockwise on the canvas; at 0° a multi-head fixture (LED bar, pixel strip) has head 0 on the left and its heads run toward +x (90° = top→bottom). To place many fixtures use fixtures.arrange (grid/line/circle/distribute/align, orient along/across).",
@@ -281,6 +281,7 @@ Coordinates are normalized 0–1 world space.",
     "description": "See what the lights actually do. Returns a compact text report (range, color, temporal period / beat lock, spatial pattern such as chase direction or radiating from a point) plus feature JSON.
 mode "live": capture the running output over \`window\` (default 2 s from now). mode "preview": render a modifier (\`modifierId\`) or a plugin (\`plugin: { ref, params }\`) headlessly on the real fixture positions — deterministic, can look ahead; default when modifierId/plugin is set.
 targets: "all", "selection", fixture/group ids, or a filter { ids | fixtureIds, groupIds, kind, signature, channelTypes, name } (a modifier's targets can be passed as they are; unknown keys are an error). detail: "group" (default), "fixture" (every fixture line), "raw" (+ per-frame values per fixture and head).
+\`triggers\` (live only): fire trigger actions at offsets inside the window, e.g. [{ "at": "0.5s", "modifierId": "ai-flash", "paramKey": "hit", "action": "release" }] — the same momentary input as modifiers.trigger (no undo step, project unchanged), timed so the capture sees the response from its first frame.
 \`expect\`: assertions on the feature JSON (same shape as in \`apply\`), e.g. { "path": "groups.*.temporal.hz", "within": [0.9, 1.1] }. Use it after \`apply\` to verify the intent.",
     "inputSchema": {
       "properties": {
@@ -512,6 +513,61 @@ targets: "all", "selection", fixture/group ids, or a filter { ids | fixtureIds, 
               "type": "object",
             },
           ],
+        },
+        "triggers": {
+          "description": "Live only: trigger actions fired at \`at\` inside the capture window (like modifiers.trigger: no undo step). E.g. [{ at: "0.5s", modifierId: "ai-flash", paramKey: "hit", action: "release" }].",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "description": ""press" holds, "release" lets go, "click" = press + release.",
+                "enum": [
+                  "press",
+                  "release",
+                  "click",
+                ],
+                "type": "string",
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "pattern": "^\\s*\\d+(\\.\\d+)?\\s*(ms|s|beats?)\\s*$",
+                    "type": "string",
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "number",
+                  },
+                ],
+                "description": "Offset from the window start: "0.5s", "500ms", "1 beat" or seconds. Must lie inside the window.",
+              },
+              "clicks": {
+                "description": "Only for "click": clicks in the burst (default 1).",
+                "maximum": 8,
+                "minimum": 1,
+                "type": "integer",
+              },
+              "modifierId": {
+                "description": "Modifier with the trigger param.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "paramKey": {
+                "description": "Trigger param key (e.g. "hit").",
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "at",
+              "modifierId",
+              "paramKey",
+              "action",
+            ],
+            "type": "object",
+          },
+          "maxItems": 8,
+          "type": "array",
         },
         "window": {
           "properties": {

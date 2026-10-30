@@ -1,5 +1,6 @@
 import { registerLiveOp } from '~/stores/live-bus-store';
 import type { GlobalFunctionType, GlobalFunctionConfig } from '~/utils/live/types';
+import { stopAll } from './button-runtime';
 
 registerLiveOp<{ bpm: number }>('engine.bpm', {
   scope: 'shared',
@@ -51,5 +52,15 @@ registerLiveOp<{ epochMs: number }>('engine.clock', {
     if (epochMs < ctx.engineStore.clockEpoch) {
       ctx.engineStore.setClockEpoch(epochMs);
     }
+  },
+});
+
+// "Stop all" from a button in another tab: clear everything here too.
+registerLiveOp<Record<string, never>>('engine.stopAll', {
+  scope: 'shared',
+  throttle: 'immediate',
+  persistent: false,
+  apply: () => {
+    stopAll({ fromRemote: true });
   },
 });

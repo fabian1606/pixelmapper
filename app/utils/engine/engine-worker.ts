@@ -176,7 +176,12 @@ function handleMessage(e: MessageEvent) {
     case 'dispatch':
       if (engine && m.packetType !== undefined && m.data) {
         if (engine.dispatch(m.packetType, new Uint8Array(m.data)) < 0) {
-          reportFailure({ kind: 'dispatch', message: `Engine rejected packet 0x${m.packetType.toString(16)} (format mismatch?). ${ENGINE_REBUILD_HINT}`, fatal: false });
+          // A 0-byte payload is a sender bug (packet never built), not a stale
+          // engine build: report it as such instead of a format mismatch.
+          const message = m.data.byteLength === 0
+            ? `Engine received an empty packet 0x${m.packetType.toString(16)} (packet was never built).`
+            : `Engine rejected packet 0x${m.packetType.toString(16)} (format mismatch?). ${ENGINE_REBUILD_HINT}`;
+          reportFailure({ kind: 'dispatch', message, fatal: false });
         }
       }
       break;

@@ -89,14 +89,17 @@ export const SpreadViewSchema = z.object({
 /** Spread view type. */
 export type SpreadView = z.infer<typeof SpreadViewSchema>;
 
-/** Speed input. */
+/**
+ * Speed input: a partial patch merged onto the instance's current speed
+ * (`applySpeed`), so any subset of mode / value / beatOffset may be given.
+ */
 export const SpeedSchema = z.object({
-  mode: z.enum(['beat', 'time', 'infinite'])
-    .describe('beat = synced to the project BPM; time = fixed duration; infinite = frozen (no motion).'),
+  mode: z.enum(['beat', 'time', 'infinite']).optional()
+    .describe('beat = synced to the project BPM; time = fixed duration; infinite = frozen (no motion). Omitted = keep the current mode.'),
   value: z.number().positive().optional()
-    .describe('Length of one cycle (one pass of the effect): beat mode = beats per cycle (1 = one beat, 4 = one bar, 0.5 = half a beat); time mode = seconds per cycle. Omitted = keep the current value.'),
-  beatOffset: z.number().optional().describe('Beat mode: phase offset in beats (e.g. 0.5 = half a beat later).'),
-});
+    .describe('Length of one cycle (one pass of the effect) in the resulting mode: beat mode = beats per cycle (1 = one beat, 4 = one bar, 0.5 = half a beat); time mode = seconds per cycle. Not allowed in infinite mode. Omitted = keep that mode\'s current value.'),
+  beatOffset: z.number().optional().describe('Beat mode: phase offset in beats (e.g. 0.5 = half a beat later). Omitted = keep the current offset.'),
+}).describe('Partial: given keys are merged onto the current speed (e.g. { value: 2 } keeps the mode).');
 
 /** Speed input type. */
 export type SpeedInput = z.infer<typeof SpeedSchema>;
@@ -223,11 +226,23 @@ export function distributionToSpread(d: Distribution, points: readonly OrderPoin
 
 // ── Speed ───────────────────────────────────────
 
-/** `speed` with the input applied (time values are seconds, stored as ms). */
+/**
+ * `speed` with the partial input merged on (time values are seconds, stored
+ * as ms). Omitted keys keep the current values; `value` applies to the
+ * resulting mode. Throws a readable error when the merged speed is invalid
+ * (a `value` for infinite mode, which has no cycle length).
+ */
 export function applySpeed(speed: SpeedConfig, input: SpeedInput): SpeedConfig {
-  const next: SpeedConfig = { ...speed, mode: input.mode };
-  if (input.mode === 'time' && input.value !== undefined) next.timeMs = input.value * 1000;
-  if (input.mode === 'beat' && input.value !== undefined) next.beatValue = input.value;
+  const mode = input.mode ?? speed.mode;
+  const next: SpeedConfig = { ...speed, mode };
+  if (input.value !== undefined) {
+    // Guard clause: a frozen speed has no cycle length to set.
+    if (mode === 'infinite') {
+      throw new Error(`speed.value ${input.value} has no effect in infinite mode (frozen)${input.mode ? '' : ' — the modifier\'s current mode'}; pass speed.mode "beat" or "time" with the value`);
+    }
+    if (mode === 'time') next.timeMs = input.value * 1000;
+    else next.beatValue = input.value;
+  }
   if (input.beatOffset !== undefined) next.beatOffset = input.beatOffset;
   return next;
 }

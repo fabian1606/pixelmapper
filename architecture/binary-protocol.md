@@ -60,7 +60,7 @@ ESP32-only. Used for clock alignment via exponential smoothing: `offset = offset
 ### TYPE_LAYOUT_BIN (0x14, v3)
 ```
 [meters_per_unit: f32 LE]   // v3: meters per normalized world unit (STAGE_SIZE_METERS)
-[fixture_count: u16 LE]
+[fixture_count: u16 LE]     // 0 is valid (empty project): 6-byte payload
 for each fixture:
   [group_index: u16 LE]     // position in the flat fixture list
   [id_hash: u32 LE]         // FNV-1a of the fixture id (stable seeds)

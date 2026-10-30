@@ -21,7 +21,7 @@ import { ModifierIdSchema, requireModifier } from './shared';
 // ── Helpers ─────────────────────────────────────
 
 /** Most clicks one `click` action may send (a burst, not a stress test). */
-const MAX_CLICKS = 8;
+export const MAX_CLICKS = 8;
 
 /** Plugin param key without the stored `params.` prefix. */
 function bareParamKey(key: string): string {
@@ -43,6 +43,66 @@ function requireTriggerParam(read: CoreReadApi, modifierId: string, key: string)
   if (param.type !== 'trigger') throw new Error(`param "${key}" of modifier "${modifierId}" is a ${param.type} param, not a trigger (${hint}); set other params with modifiers.update`);
 }
 
+// ── Firing ──────────────────────────────────────
+
+/** One trigger action (the op's input after alias normalization). */
+export interface TriggerAction {
+  modifierId: string;
+  paramKey: string;
+  action: 'press' | 'release' | 'click';
+  clicks?: number;
+}
+
+/** A fired trigger action: the op's output plus findings. */
+export interface TriggerResult {
+  modifierId: string;
+  paramKey: string;
+  action: string;
+  engineTimeMs: number;
+  wallTimeMs: number;
+  changed: boolean;
+  value: TriggerValue;
+  findings: Finding[];
+}
+
+/**
+ * Validates a trigger action without firing it: the modifier exists once,
+ * `paramKey` is one of its trigger params, `clicks` only with "click".
+ * Throws a readable error otherwise.
+ */
+export function checkTriggerAction(read: CoreReadApi, input: TriggerAction): void {
+  requireTriggerParam(read, input.modifierId, bareParamKey(input.paramKey));
+  if (input.clicks !== undefined && input.action !== 'click') throw new Error('clicks is only valid with action "click"');
+}
+
+/**
+ * Fires a trigger action like a performer (`setEffectTrigger`, no undo
+ * step). Shared by `modifiers.trigger` and the timed triggers of a live
+ * `observe` (`triggers: [{ at, … }]`).
+ */
+export function fireTrigger(read: CoreReadApi, input: TriggerAction): TriggerResult {
+  checkTriggerAction(read, input);
+  const key = bareParamKey(input.paramKey);
+
+  // One timestamp for every edge of the action, so the burst is one instant.
+  const engineTimeMs = currentEngineClockMs();
+  const wallTimeMs = Date.now();
+  const edges: boolean[] = input.action === 'press' ? [true]
+    : input.action === 'release' ? [false]
+      : Array.from({ length: input.clicks ?? 1 }, () => [true, false]).flat();
+  let changed = false;
+  for (const pressed of edges) changed = setEffectTrigger(input.modifierId, key, pressed, engineTimeMs) || changed;
+
+  const value = (read.modifier(input.modifierId)?.params[key] ?? { pressed: false }) as TriggerValue;
+  const findings: Finding[] = changed ? [] : [{
+    level: 'info',
+    code: 'trigger-unchanged',
+    message: `trigger "${key}" was already ${value.pressed ? 'pressed' : 'released'}; nothing changed`,
+    entityIds: [`modifier:${input.modifierId}`],
+  }];
+  return { modifierId: input.modifierId, paramKey: key, action: input.action, engineTimeMs, wallTimeMs, changed, value: { ...value }, findings };
+}
+
 // ── Operation ───────────────────────────────────
 
 /** `modifiers.trigger`. */
@@ -52,8 +112,8 @@ export const modifiersTrigger = defineCoreOperation({
   description: [
     'Press, release or click a trigger param of a modifier like a performer on the card button / a live button: momentary input, NO undo step, not rolled back, skipped on dryRun.',
     'action: "press" (held until "release"), "release", or "click" (press + release; `clicks` > 1 sends a multi-click burst within the plugin\'s multi-click window, so the plugin sees clicks = n). On a held trigger the first click\'s press is a no-op, so the hold counts as the first click.',
-    'Returns engineTimeMs: the engine-clock time of the edge(s), the same clock as the plugin\'s ctx.timeMs / pressedAt / releasedAt. Follow with a live observe to verify hold, release or double-click behavior.',
-    'Never write trigger timestamps with modifiers.update; use this op. Errors when the modifier is unknown or paramKey is not a trigger param.',
+    'Returns engineTimeMs: the engine-clock time of the edge(s), the same clock as the plugin\'s ctx.timeMs / pressedAt / releasedAt. Follow with a live observe to verify hold, release or double-click behavior; to catch the first second of a response (a release wave, a flash), fire it inside the capture instead: observe { mode: "live", triggers: [{ at: "0.5s", modifierId, paramKey, action }] }.',
+    'Address the modifier with `modifierId` (alias `id`). Never write trigger timestamps with modifiers.update; use this op. Errors when the modifier is unknown or paramKey is not a trigger param.',
   ].join('\n'),
   input: z.object({
     modifierId: ModifierIdSchema,
@@ -81,30 +141,7 @@ export const modifiersTrigger = defineCoreOperation({
     { input: { modifierId: 'ai-flash', paramKey: 'hit', action: 'press' }, note: 'Hold; observe, then send "release".' },
   ],
   run(ctx, input) {
-    const key = bareParamKey(input.paramKey);
-    requireTriggerParam(ctx.read, input.modifierId, key);
-    if (input.clicks !== undefined && input.action !== 'click') throw new Error('clicks is only valid with action "click"');
-
-    // One timestamp for every edge of the action, so the burst is one instant.
-    const engineTimeMs = currentEngineClockMs();
-    const wallTimeMs = Date.now();
-    const edges: boolean[] = input.action === 'press' ? [true]
-      : input.action === 'release' ? [false]
-        : Array.from({ length: input.clicks ?? 1 }, () => [true, false]).flat();
-    let changed = false;
-    for (const pressed of edges) changed = setEffectTrigger(input.modifierId, key, pressed, engineTimeMs) || changed;
-
-    const value = (ctx.read.modifier(input.modifierId)?.params[key] ?? { pressed: false }) as TriggerValue;
-    const findings: Finding[] = changed ? [] : [{
-      level: 'info',
-      code: 'trigger-unchanged',
-      message: `trigger "${key}" was already ${value.pressed ? 'pressed' : 'released'}; nothing changed`,
-      entityIds: [`modifier:${input.modifierId}`],
-    }];
-    return {
-      kind: 'action',
-      value: { modifierId: input.modifierId, paramKey: key, action: input.action, engineTimeMs, wallTimeMs, changed, value: { ...value } },
-      findings,
-    };
+    const { findings, ...value } = fireTrigger(ctx.read, input);
+    return { kind: 'action', value, findings };
   },
 });

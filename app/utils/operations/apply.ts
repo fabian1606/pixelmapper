@@ -153,8 +153,12 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
       const hint = registry.list({ search: id.split('.').pop() }).slice(0, 5).map(s => s.id).join(', ');
       throw new AbortBatch([{ level: 'error', code: 'unknown-operation', message: `Unknown operation "${id}".${hint ? ` Did you mean: ${hint}?` : ''}`, opIndex }]);
     }
-    // Accept key aliases (`id` for `modifierId`) before validation.
-    const valid = def.input.safeParse(normalizeInputAliases(def.input, input));
+    // Accept key aliases (`id` for `modifierId`) before validation; a conflicting pair is invalid input.
+    const aliased = normalizeInputAliases(def.input, input);
+    if (!aliased.ok) {
+      throw new AbortBatch([{ level: 'error', code: 'invalid-input', message: invalidInputMessage(id, def.input, input, aliased.message), opIndex }]);
+    }
+    const valid = def.input.safeParse(aliased.input);
     if (!valid.success) {
       throw new AbortBatch([{ level: 'error', code: 'invalid-input', message: invalidInputMessage(id, def.input, input, issuesText(valid.error.issues)), opIndex }]);
     }

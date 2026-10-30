@@ -331,6 +331,14 @@ register(new BlackoutFlash());
       ],
     });
     expect(added.isError, textOf(added)).toBeUndefined();
+    // The button stores one "While pressing" action, so press and release both reach the trigger.
+    const listed = JSON.parse(textOf(await run('inspect', { selector: { op: 'live.listPages', input: { pageId: 'ai-flash-page' } } }))) as {
+      pages: Array<{ widgets: Array<Record<string, unknown>> }>;
+    };
+    expect(listed.pages[0]!.widgets[0]).toMatchObject({
+      type: 'button',
+      actions: [{ trigger: 'hold', action: { type: 'effect-param', modifierId: 'ai-flash', paramKey: 'hit' } }],
+    });
     const targets = { groupIds: ['g-tubes', 'g-pars'] };
     const withHit = (hit: Record<string, unknown>) => ({ ref: hash, params: { hit } });
 

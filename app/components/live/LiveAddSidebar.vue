@@ -2,15 +2,18 @@
 import { computed } from 'vue';
 import { Gamepad2 } from 'lucide-vue-next';
 import { useLiveModeStore } from '~/stores/live-mode-store';
+import { useEngineStore } from '~/stores/engine-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { AddLiveWidgetCommand } from '~/components/engine/commands/live-widget-commands';
-import { defaultLiveWidget, type LiveWidget, type ControllerChildBinding } from '~/utils/live/types';
+import { defaultButtonAction, defaultLiveWidget, type LiveWidget, type ControllerChildBinding, type LiveMapping } from '~/utils/live/types';
+import { defaultTriggerFor } from '~/utils/live/button-actions';
 import { listWidgetTypes, type WidgetTypeInfo } from '~/utils/live/widget-registry';
 import { registryVersion } from '~/utils/extensions/registry';
 import { listControllerDefinitions } from '~/utils/controllers/catalog';
 import type { ControllerDefinition } from '~/utils/controllers/types';
 
 const store = useLiveModeStore();
+const engineStore = useEngineStore();
 const history = useHistory();
 
 /** Addable widget types (core + installed extensions). */
@@ -41,10 +44,21 @@ function addControllerTwin(def: ControllerDefinition) {
   widget.controllerKey = def.key;
   widget.label = def.label;
   // Pre-populate child bindings so command replays are deterministic across clients.
-  const children: ControllerChildBinding[] = def.controls.map(c => ({
-    controlId: c.id,
-    mapping: c.defaultMapping ? { type: 'none', ...c.defaultMapping } as any : { type: 'none' },
-  }));
+  // Pads get their suggested mapping as their first action; faders keep it as mapping.
+  const children: ControllerChildBinding[] = def.controls.map(c => {
+    const suggested = c.defaultMapping ? { type: 'none', ...c.defaultMapping } as LiveMapping : null;
+    if (c.type === 'button') {
+      return {
+        controlId: c.id,
+        mapping: { type: 'none' },
+        // Every pad starts with one action (On press, or the suggested mapping).
+        actions: suggested && suggested.type !== 'none'
+          ? [{ id: crypto.randomUUID(), trigger: defaultTriggerFor(suggested, engineStore.savedPresets), action: suggested }]
+          : [defaultButtonAction()],
+      };
+    }
+    return { controlId: c.id, mapping: suggested ?? { type: 'none' } };
+  });
   widget.controllerChildren = children;
   history.execute(new AddLiveWidgetCommand(store.activePageId, widget));
 }
