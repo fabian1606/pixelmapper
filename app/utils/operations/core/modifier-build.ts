@@ -196,6 +196,10 @@ export function buildInstance(
   const { hash, manifest } = plugin;
   const targets = resolveTargets(read, manifest, input.targets);
   const shape = targetShape(targets.fixtures);
+  // Spread along the targets' main axis only when the plugin offers linear;
+  // otherwise keep the manifest's default distribution (e.g. modes ["none"]).
+  const modes = manifest.distribution?.modes;
+  const linear = !modes || modes.includes('linear');
   const base = createModifier(hash, {
     signature: targets.signature,
     targetChannels: targets.targetChannels,
@@ -203,7 +207,7 @@ export function buildInstance(
     strength: 1,
     speed: { mode: 'beat', timeMs: 2000, beatValue: 1, beatOffset: 0 },
     blendMode: manifest.output === 'absolute' ? 'override' : 'add',
-    distribution: { mode: 'linear', origin: { ...shape.axis.a }, end: { ...shape.axis.b } },
+    ...(linear ? { distribution: { mode: 'linear', origin: { ...shape.axis.a }, end: { ...shape.axis.b } } } : {}),
   });
   const preset = input.recipe
     ? findRecipe(manifest, input.recipe)
