@@ -118,6 +118,12 @@ export default defineNuxtConfig({
         'reka-ui',
         'semver',
         'tailwind-merge',
+        // Discovered only at runtime (seen in the optimizer metadata); listing
+        // them avoids "504 Outdated Optimize Dep" reloads in WKWebView.
+        'errx',
+        '@nuxtjs/supabase > cookie',
+        '@supabase/supabase-js',
+        'qrcode',
         // Agent layer (agent-kit tools, loaded by the MCP bridge plugin at boot).
         'zod',
         // In-browser plugin toolchain (plugins.build, New modifier from code).
