@@ -10,11 +10,14 @@ const calls: string[] = [];
 const engineStore = {
   savedPresets: [
     { id: 'warm', name: 'Warm', createdAt: '', categories: [] },
+    { id: 'cool', name: 'Cool', createdAt: '', categories: [] },
     { id: 'burst', name: 'Burst', type: 'flash', createdAt: '', categories: [] },
   ],
   selectedPresetId: null as string | null,
   engine: { globalBpm: { value: 120 } },
-  setSpeedMultiplier: (m: number) => calls.push(`speed:${m}`),
+  speedMultiplier: 1,
+  baseBpm: 120,
+  setSpeedMultiplier: (m: number) => { calls.push(`speed:${m}`); engineStore.speedMultiplier = m; },
   clearOverwriteStack: () => calls.push('clearOverwrites'),
 };
 
@@ -26,6 +29,14 @@ vi.mock('~/components/engine/composables/preset-activation', () => ({
   releaseFlashPreset: () => calls.push('flash-'),
   stopEverything: () => { calls.push('stopEverything'); engineStore.selectedPresetId = null; },
 }));
+const colorOverrides = new Map<string, { r: number; g: number; b: number }>();
+vi.mock('./color-override-ops', () => ({
+  getColorOverride: (id: string | null) => (id ? colorOverrides.get(id) ?? null : null),
+  setColorOverride: (id: string, rgb: { r: number; g: number; b: number } | null) => {
+    calls.push(`color:${id}:${rgb ? rgb.r : 'own'}`);
+    if (rgb) colorOverrides.set(id, rgb); else colorOverrides.delete(id);
+  },
+}));
 vi.mock('~/stores/live-mode-store', () => ({ useLiveModeStore: () => ({ activeSectionMembers: new Map() }) }));
 vi.mock('~/components/engine/composables/preset-resolve', () => ({ resolvePreset: (p: unknown) => p }));
 vi.mock('./apply-mapping', () => ({
@@ -34,6 +45,7 @@ vi.mock('./apply-mapping', () => ({
 }));
 
 const { pressButton, releaseButton, isButtonActive, stopAll } = await import('./button-runtime');
+const { stepBack, clearLiveHistory } = await import('./live-history');
 
 const blackout = { type: 'global-function' as const, globalFunction: 'blackout' as const };
 const act = (id: string, trigger: ButtonAction['trigger'], extra: Partial<ButtonAction> = {}): ButtonAction =>
@@ -44,9 +56,12 @@ beforeEach(() => {
   vi.useFakeTimers();
   calls.length = 0;
   engineStore.selectedPresetId = null;
+  engineStore.speedMultiplier = 1;
+  colorOverrides.clear();
 });
 afterEach(() => {
   stopAll();
+  clearLiveHistory();
   vi.useRealTimers();
 });
 
@@ -134,5 +149,68 @@ describe('button runtime', () => {
     expect(calls).toEqual(['flash+:warm']);
     vi.advanceTimersByTime(500);
     expect(calls).toEqual(['flash+:warm', 'flash-']);
+  });
+});
+
+describe('step back', () => {
+  const warm = { type: 'preset' as const, presetId: 'warm' };
+  const cool = { type: 'preset' as const, presetId: 'cool' };
+  const tap = (actions: ButtonAction[], key: string) => {
+    pressButton(actions, { key }); releaseButton(actions, { key });
+    vi.advanceTimersByTime(400);
+  };
+
+  it('returns to the preset that was active before', () => {
+    tap([act('w', 'press', { action: warm })], 'w');
+    tap([act('c', 'press', { action: cool })], 'c');
+    calls.length = 0;
+    expect(stepBack()).toBe(true);
+    expect(calls).toEqual(['preset:warm']);
+  });
+
+  it('undoes a toggled blackout', () => {
+    tap([act('t', 'toggle')], 't');
+    calls.length = 0;
+    stepBack();
+    expect(calls).toEqual(['blackout:off']);
+  });
+
+  it('brings everything back after Stop all', () => {
+    const toggled = [act('t', 'toggle')];
+    tap([act('w', 'press', { action: warm })], 'w');
+    tap(toggled, 't');
+    stopAll();
+    calls.length = 0;
+    stepBack();
+    expect(calls).toEqual(['blackout:on', 'preset:warm']);
+    expect(isButtonActive('t', toggled)).toBe(true);
+  });
+
+  it('ignores momentary actions', () => {
+    tap([act('h', 'hold')], 'h');
+    expect(stepBack()).toBe(false);
+  });
+
+  it('a Step back button steps back', () => {
+    tap([act('w', 'press', { action: warm })], 'w');
+    tap([act('c', 'press', { action: cool })], 'c');
+    calls.length = 0;
+    tap([act('b', 'press', { action: { type: 'global-function', globalFunction: 'step-back' } })], 'b');
+    expect(calls).toEqual(['preset:warm']);
+  });
+
+  it('undoes a color variant on the active preset', async () => {
+    const { recordLiveStep } = await import('./live-history');
+    const { setColorOverride } = await import('./color-override-ops');
+    tap([act('w', 'press', { action: warm })], 'w');
+    recordLiveStep();
+    setColorOverride('warm', { r: 255, g: 0, b: 0 });
+    recordLiveStep();
+    setColorOverride('warm', { r: 0, g: 0, b: 255 });
+    calls.length = 0;
+    stepBack();
+    expect(calls).toEqual(['color:warm:255']);
+    stepBack();
+    expect(calls).toEqual(['color:warm:255', 'color:warm:own']);
   });
 });

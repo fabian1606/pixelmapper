@@ -40,8 +40,11 @@ export interface MovingHeadPosition {
   }>
 }
 
-/** `stop-all` is instant: clears preset, flashes, overwrites, toggles and speed. */
-export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed' | 'stop-all'
+/**
+ * `stop-all` is instant: clears preset, flashes, overwrites, toggles and speed.
+ * `step-back` is instant: returns to the look before the last lasting change (live-history).
+ */
+export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed' | 'stop-all' | 'step-back'
 
 export interface StrobeConfig {
   frequency: number

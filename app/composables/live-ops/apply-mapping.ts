@@ -141,8 +141,8 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
   const liveBus = useLiveBusStore();
   const { key, value } = ctx;
 
-  // "Stop all" is handled by the button runtime (it also clears button state).
-  if (mapping.type === 'global-function' && mapping.globalFunction === 'stop-all') return;
+  // "Stop all" / "Step back" are handled by the button runtime (they also touch button state).
+  if (mapping.type === 'global-function' && (mapping.globalFunction === 'stop-all' || mapping.globalFunction === 'step-back')) return;
 
   if (mapping.type === 'preset' && mapping.presetId) {
     const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);

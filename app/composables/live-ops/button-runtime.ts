@@ -5,6 +5,7 @@ import { setActivePreset, pressFlashPreset, releaseFlashPreset, stopEverything }
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { applyMapping, type DimmerState } from './apply-mapping';
+import { recordLiveStep, stepBack } from './live-history';
 import type { ButtonAction } from '~/utils/live/types';
 import {
   DOUBLE_PRESS_MS,
@@ -45,6 +46,15 @@ const state = reactive({
   longPress: new Map<string, { startedAt: number; at: number }>(),
 });
 
+/** An action that stays on until something ends it (toggle on, forever) — what Step back restores. */
+export interface LatchedEntry {
+  subKey: string;
+  action: ButtonAction;
+  ctx: ButtonContext;
+}
+
+/** Running actions that stay on (not held / timed), by sub-key. */
+const latched = new Map<string, LatchedEntry>();
 const stopTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const longTimers = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }[]>();
 const lastPressAt = new Map<string, number>();
@@ -85,6 +95,10 @@ function startAction(a: ButtonAction, ctx: ButtonContext, momentary: boolean): v
     stopAll();
     return;
   }
+  if (m.type === 'global-function' && m.globalFunction === 'step-back') {
+    stepBack();
+    return;
+  }
   if (isInstantAction(m)) {
     applyMapping(m, true, { key: sk, dimmerState: ctx.dimmerState });
     return;
@@ -104,6 +118,7 @@ function stopAction(a: ButtonAction, ctx: ButtonContext): void {
   const sk = subKey(ctx.key, a);
   const timer = stopTimers.get(sk);
   if (timer) { clearTimeout(timer); stopTimers.delete(sk); }
+  latched.delete(sk);
   if (!state.running.has(sk)) return;
   state.running.delete(sk);
 
@@ -128,7 +143,10 @@ function fireAction(a: ButtonAction, ctx: ButtonContext): void {
   const d = effectiveDuration(a);
   const ms = durationMs(d, currentBpm(), d.mode === 'once' ? presetPassMs(a.action.presetId) : 0);
   if (ms === null || isInstantAction(a.action)) {
+    // Forever = a lasting change: Step back can return to the look before it.
+    if (!isInstantAction(a.action) && a.action.type !== 'none') recordLiveStep();
     startAction(a, ctx, false);
+    if (state.running.has(subKey(ctx.key, a))) latched.set(subKey(ctx.key, a), { subKey: subKey(ctx.key, a), action: a, ctx });
     return;
   }
   const sk = subKey(ctx.key, a);
@@ -170,8 +188,12 @@ export function pressButton(actions: ButtonAction[] | undefined, ctx: ButtonCont
       case 'double': if (isDouble) fireAction(a, ctx); break;
       case 'hold': startAction(a, ctx, true); break;
       case 'toggle':
+        recordLiveStep();
         if (state.running.has(subKey(ctx.key, a))) stopAction(a, ctx);
-        else startAction(a, ctx, true);
+        else {
+          startAction(a, ctx, true);
+          latched.set(subKey(ctx.key, a), { subKey: subKey(ctx.key, a), action: a, ctx });
+        }
         break;
       case 'long': {
         const at = now + holdMs(a, currentBpm());
@@ -235,10 +257,12 @@ export function hasPendingLongPress(key: string): boolean {
  * speed and every running button action off. Broadcast to other tabs.
  */
 export function stopAll(opts: { fromRemote?: boolean } = {}): void {
+  if (!opts.fromRemote) recordLiveStep();
   for (const t of stopTimers.values()) clearTimeout(t);
   stopTimers.clear();
   for (const key of [...longTimers.keys()]) cancelLongPress(key);
   state.running.clear();
+  latched.clear();
 
   // Everything ends in one step with a single output frame (no flash in between).
   stopEverything({ fromRemote: opts.fromRemote });
@@ -246,4 +270,24 @@ export function stopAll(opts: { fromRemote?: boolean } = {}): void {
   // Lit section slots go dark too.
   useLiveModeStore().activeSectionMembers = new Map();
   if (!opts.fromRemote) queueMicrotask(() => useLiveBusStore().dispatch('engine.stopAll', {}));
+}
+
+// ── Step back support ───────────────────────────────────────────────────────
+
+/** Snapshot of the latched actions (for {@link recordLiveStep}). */
+export function latchedEntries(): LatchedEntry[] {
+  return [...latched.values()];
+}
+
+/** Brings the latched actions back to a snapshot: ends extra ones, restarts missing ones. */
+export function restoreLatched(entries: LatchedEntry[]): void {
+  const wanted = new Set(entries.map(e => e.subKey));
+  for (const e of [...latched.values()]) {
+    if (!wanted.has(e.subKey)) stopAction(e.action, e.ctx);
+  }
+  for (const e of entries) {
+    if (latched.has(e.subKey)) continue;
+    startAction(e.action, e.ctx, true);
+    latched.set(e.subKey, e);
+  }
 }

@@ -45,6 +45,30 @@ export function getEffectiveRGB(preset: Preset, fixtures: any[]): RGB | null {
   return null;
 }
 
+// ── Override tracking (for Step back) ────────────────────────────────────────
+
+/**
+ * Color override per preset ID that is currently on the fixtures. Only for
+ * Step back (live-history): the override itself is a fixture mutation, so
+ * this map is the only record of it. Cleared when a preset is (re)applied.
+ */
+const overrides = new Map<string, RGB>();
+
+function trackOverride(key: string, rgb: RGB | null): void {
+  if (rgb) overrides.set(key, { ...rgb });
+  else overrides.delete(key);
+}
+
+/** The override currently applied to a preset, or null when it shows its own colors. */
+export function getColorOverride(presetId: string | null): RGB | null {
+  return presetId ? overrides.get(presetId) ?? null : null;
+}
+
+/** A preset was (re)applied, which reloads its snapshot and drops the override. */
+export function forgetColorOverride(presetId: string | null): void {
+  if (presetId) overrides.delete(presetId);
+}
+
 /**
  * Apply a color override (or revert with rgb=null) directly to the fixtures of
  * the currently selected preset. No state is stored — the override is just a
@@ -75,6 +99,7 @@ export function setColorOverride(key: string, rgb: RGB | null): void {
   mark('color.start');
   const engineStore = useEngineStore();
   const preset = engineStore.savedPresets.find((p: any) => p.id === key);
+  trackOverride(key, rgb);
   if (preset) {
     const resolved = resolvePreset(preset, engineStore.savedPresets);
     trace('color.apply', () => applyRGBOverride(resolved, engineStore.flatFixtures, rgb));
@@ -106,6 +131,7 @@ registerLiveOp<ColorOverridePayload>('color.override', {
   coalesceKey: colorOverrideKey,
   apply: ({ key, rgb }) => {
     const engineStore = useEngineStore();
+    trackOverride(key, rgb);
     const preset = engineStore.savedPresets.find((p: any) => p.id === key);
     if (!preset) return;
     const resolved = resolvePreset(preset, engineStore.savedPresets);

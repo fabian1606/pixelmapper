@@ -53,7 +53,7 @@ export function sectionTrigger(section: LiveSection): SectionTrigger {
 /** Actions that happen once, instantly, and have nothing to end. */
 export function isInstantAction(m: LiveMapping): boolean {
   if (m.type === 'page-switch' || m.type === 'position-recall') return true;
-  return m.type === 'global-function' && m.globalFunction === 'stop-all';
+  return m.type === 'global-function' && (m.globalFunction === 'stop-all' || m.globalFunction === 'step-back');
 }
 
 /** A preset that switches the base preset (not a flash / overwrite preset). */
@@ -71,7 +71,7 @@ export function isNormalPreset(m: LiveMapping, presets: Preset[]): boolean {
 export function defaultTriggerFor(m: LiveMapping, presets: Preset[]): ButtonTrigger {
   if (m.type === 'global-function') {
     if (m.globalFunction === 'stop-all') return 'long';
-    if (m.globalFunction === 'speed') return 'press';
+    if (m.globalFunction === 'speed' || m.globalFunction === 'step-back') return 'press';
     return 'hold';
   }
   if (m.type === 'preset' && m.presetId) {
@@ -175,7 +175,7 @@ export function triggerBadge(actions: ButtonAction[] | undefined): string {
 }
 
 const GLOBAL_LABELS: Record<string, string> = {
-  strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all',
+  strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back',
 };
 
 /** Short name of one action, used for the auto label and the card summary. */

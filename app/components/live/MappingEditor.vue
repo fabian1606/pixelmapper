@@ -212,6 +212,7 @@ function setDimmerGroup(raw: string) {
             <option value="1">Reset (1×)</option>
             <option value="2">2×</option>
             <option value="4">4×</option>
+        <option value="step-back">Step back</option>
           </select>
         </div>
         <div class="flex items-center gap-2 text-xs">
