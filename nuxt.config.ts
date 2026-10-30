@@ -56,7 +56,8 @@ const VITE_CACHE_DIR = process.env.PM_VITE_CACHE_DIR
 
 /** Inline module (Tauri only): builds the OFL bundle before Nitro starts. */
 async function bundleOflForTauri(): Promise<void> {
-  const src = fileURLToPath(new URL('./ofl-data/fixtures', import.meta.url));
+  // OFL clone first, Pixelmapper's own fixture library on top.
+  const src = ['./ofl-data/fixtures', './fixture-library'].map(dir => fileURLToPath(new URL(dir, import.meta.url)));
   const stats = await buildOflBundle(src, TAURI_PUBLIC_DIR);
   if (!stats) console.warn('[ofl-bundle] ofl-data/fixtures missing — the desktop fixture library will be empty (run ./scripts/setup-ofl.sh)');
   else console.info(`[ofl-bundle] ${stats.fixtures} fixtures bundled for the desktop app`);
@@ -216,6 +217,11 @@ export default defineNuxtConfig({
       {
         baseName: 'ofl-fixtures',
         dir: '../ofl-data/fixtures'
+      },
+      {
+        // Pixelmapper's own fixtures (same layout), overlaid by server/utils/fixture-store.ts.
+        baseName: 'pm-fixtures',
+        dir: '../fixture-library'
       }
     ],
     // Desktop only: static OFL bundle next to the SPA (see TAURI_PUBLIC_DIR).

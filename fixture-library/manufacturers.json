@@ -1,0 +1,7 @@
+{
+  "botex-xb": {
+    "name": "Botex X-Tube (Pixelmapper Node)",
+    "comment": "Botex X-Tubes behind the XB proxy of the Pixelmapper Node: virtual RDM UIDs 7FF1:xxxxxxxx, RDM model ID = XB model byte.",
+    "rdmId": 32753
+  }
+}

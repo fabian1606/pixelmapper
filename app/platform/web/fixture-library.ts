@@ -25,5 +25,8 @@ export function createWebFixtureLibrary(): FixtureLibrary {
 
     getFixture: (manufacturerKey, fixtureKey) =>
       $fetch<OflFixture>(`/api/fixtures/${safeSegment(manufacturerKey)}/${safeSegment(fixtureKey)}`),
+
+    findByRdm: async (manufacturerId, modelId) =>
+      (await $fetch<{ keys: string[] }>(`/api/fixtures/rdm?manufacturerId=${manufacturerId}&modelId=${modelId}`)).keys,
   };
 }

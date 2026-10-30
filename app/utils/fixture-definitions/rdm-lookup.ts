@@ -3,11 +3,14 @@
  *
  * Finds the definition of a discovered device from its RDM manufacturer and
  * model ID: custom fixtures first (`ofl.pixelmapper.rdmManufacturerId` +
- * `ofl.rdm.modelId`), then the OFL library via `GET /api/fixtures/rdm`. The
- * match carries the mode mapping by RDM personality (`rdmPersonalityIndex`).
+ * `ofl.rdm.modelId`), then the platform fixture library: OFL plus
+ * Pixelmapper's own `fixture-library/` (web: `GET /api/fixtures/rdm`,
+ * desktop: the bundled index). The match carries the mode mapping by RDM
+ * personality (`rdmPersonalityIndex`).
  */
 import type { OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
+import { useFixtureLibrary } from '~/composables/use-fixture-library';
 import { customFixtureKey, customFixturesReady, getCustomFixtures } from './custom-fixtures';
 import type { StoredCustomFixture } from './custom-fixtures';
 import { isRdmId } from './ofl-rdm-index';
@@ -42,25 +45,20 @@ export interface RdmDefinitionMatch {
   modeByPersonality: Record<number, number>;
 }
 
-/** Default fetcher: `fetch` + JSON, throwing on HTTP errors. */
-const defaultFetcher: JsonFetcher = async (url) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
-  return res.json();
-};
+/** Test override (URL-based, same route as the web library); `null` = platform library. */
+let fetcher: JsonFetcher | null = null;
 
-let fetcher: JsonFetcher = defaultFetcher;
-
-/** Cached OFL key lists per `'<manufacturerId>:<modelId>'` (successful lookups only). */
+/** Cached library key lists per `'<manufacturerId>:<modelId>'` (successful lookups only). */
 const oflKeysCache = new Map<string, Promise<string[]>>();
 
 /**
- * Replaces the JSON fetcher used for `GET /api/fixtures/rdm` and clears the
- * cache (tests). OFL definitions themselves are loaded through
- * `resolveFixtureDefinition`, whose fetcher is set via `setDefinitionFetcher`.
+ * Replaces the platform library lookup by a JSON fetcher for
+ * `GET /api/fixtures/rdm` and clears the cache (tests); `null` restores it.
+ * Definitions themselves are loaded through `resolveFixtureDefinition`,
+ * whose fetcher is set via `setDefinitionFetcher`.
  */
 export function setRdmLookupFetcher(next: JsonFetcher | null): void {
-  fetcher = next ?? defaultFetcher;
+  fetcher = next;
   oflKeysCache.clear();
 }
 
@@ -108,18 +106,29 @@ export function buildRdmDefinitionMatch(
   return { key, source, name: definition.name, manufacturer, modes, modeByPersonality };
 }
 
-/** First custom fixture (newest first) with the given RDM IDs. */
-function findCustomFixtureByRdm(manufacturerId: number, modelId: number): StoredCustomFixture | undefined {
-  return getCustomFixtures().find(stored =>
+/**
+ * `meta.authors` entry of definitions the Art-Net connector generates from a
+ * device's RDM description (`GENERATED_AUTHOR` in
+ * `extensions/connector-artnet/devices/fixture-generation.ts`).
+ */
+export const RDM_GENERATED_AUTHOR = 'Pixelmapper (generated from RDM)';
+
+/** True for a custom fixture generated from RDM data (not written by a user). */
+function isRdmGenerated(stored: StoredCustomFixture): boolean {
+  return stored.ofl?.meta?.authors?.includes(RDM_GENERATED_AUTHOR) ?? false;
+}
+
+/** Custom fixtures (newest first) with the given RDM IDs. */
+function findCustomFixturesByRdm(manufacturerId: number, modelId: number): StoredCustomFixture[] {
+  return getCustomFixtures().filter(stored =>
     stored.ofl?.pixelmapper?.rdmManufacturerId === manufacturerId
     && stored.ofl?.rdm?.modelId === modelId,
   );
 }
 
 /**
- * OFL definition keys with the given RDM IDs from `GET /api/fixtures/rdm`
- * (cached). Errors (network, missing route as in the desktop SPA build,
- * malformed responses) are logged and yield `[]`.
+ * Library definition keys with the given RDM IDs (cached). Errors (network,
+ * missing index, malformed responses) are logged and yield `[]`.
  */
 function fetchOflKeys(manufacturerId: number, modelId: number): Promise<string[]> {
   const cacheKey = `${manufacturerId}:${modelId}`;
@@ -127,9 +136,11 @@ function fetchOflKeys(manufacturerId: number, modelId: number): Promise<string[]
   if (!pending) {
     // `Promise.resolve().then` also turns a synchronously throwing fetcher into a rejection.
     pending = Promise.resolve()
-      .then(() => fetcher(`/api/fixtures/rdm?manufacturerId=${manufacturerId}&modelId=${modelId}`))
-      .then((data) => {
-        const keys = (data as { keys?: unknown } | null)?.keys;
+      .then((): Promise<unknown> => (fetcher
+        ? fetcher(`/api/fixtures/rdm?manufacturerId=${manufacturerId}&modelId=${modelId}`)
+          .then(data => (data as { keys?: unknown } | null)?.keys)
+        : useFixtureLibrary().findByRdm(manufacturerId, modelId)))
+      .then((keys) => {
         if (!Array.isArray(keys)) throw new Error('response has no "keys" array');
         return keys.filter((k): k is string => typeof k === 'string');
       })
@@ -145,10 +156,13 @@ function fetchOflKeys(manufacturerId: number, modelId: number): Promise<string[]
 
 /**
  * Finds the fixture definition of a device by its RDM manufacturer and model
- * ID (D10 step 1): the first matching custom fixture, else the first OFL
- * fixture from `GET /api/fixtures/rdm`. Returns `null` for invalid IDs
- * (not an integer in 0..0xFFFF), when nothing matches, or when the OFL lookup
- * or definition cannot be loaded.
+ * ID (D10 step 1), in this order:
+ * 1. a custom fixture written by the user (newest first),
+ * 2. the first fixture of the platform library (OFL + own `fixture-library/`),
+ * 3. a custom fixture generated from RDM data — only a fallback, so a library
+ *    definition added later replaces an earlier generated guess.
+ * Returns `null` for invalid IDs (not an integer in 0..0xFFFF), when nothing
+ * matches, or when the library lookup or definition cannot be loaded.
  */
 export async function findFixtureDefinitionByRdm(
   manufacturerId: number,
@@ -157,12 +171,14 @@ export async function findFixtureDefinitionByRdm(
   if (!isRdmId(manufacturerId) || !isRdmId(modelId)) return null;
 
   await customFixturesReady();
-  const custom = findCustomFixtureByRdm(manufacturerId, modelId);
-  if (custom) return buildRdmDefinitionMatch(customFixtureKey(custom), 'custom', custom.ofl, '');
+  const customs = findCustomFixturesByRdm(manufacturerId, modelId);
+  const own = customs.find(stored => !isRdmGenerated(stored));
+  if (own) return buildRdmDefinitionMatch(customFixtureKey(own), 'custom', own.ofl, '');
 
   const [key] = await fetchOflKeys(manufacturerId, modelId);
-  if (!key) return null;
-  const resolved = await resolveFixtureDefinition(key);
-  if (!resolved) return null;
-  return buildRdmDefinitionMatch(key, 'ofl', resolved.definition, resolved.manufacturer);
+  const resolved = key ? await resolveFixtureDefinition(key) : null;
+  if (resolved) return buildRdmDefinitionMatch(resolved.key, 'ofl', resolved.definition, resolved.manufacturer);
+
+  const generated = customs[0];
+  return generated ? buildRdmDefinitionMatch(customFixtureKey(generated), 'custom', generated.ofl, '') : null;
 }

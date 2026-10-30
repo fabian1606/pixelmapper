@@ -1,8 +1,9 @@
 import type { OflFixtureEntry } from '../../../app/utils/fixture-definitions/ofl-rdm-index';
 import { findOflKeysByRdm, parseRdmIdParam } from '../../../app/utils/fixture-definitions/ofl-rdm-index';
+import { fixtureStore } from '../../utils/fixture-store';
 
-/** OFL fixture storage (`'<manufacturer>:<fixture>.json'`, `'manufacturers.json'`). */
-const storage = () => useStorage('assets:ofl-fixtures');
+/** OFL + own fixture library (`'<manufacturer>:<fixture>.json'`, `'manufacturers.json'`). */
+const storage = fixtureStore;
 
 /** Max. memoized (manufacturerId, modelId) pairs; the oldest entry is evicted first. */
 const MAX_CACHE_ENTRIES = 1024;

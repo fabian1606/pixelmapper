@@ -1,7 +1,9 @@
 import type { OflFixture, OflManufacturers, FixtureSummary, ManufacturerSummary } from '../../../app/utils/ofl/types';
 import { buildFixtureSummary, queryFixtures, sortByName } from '../../../app/utils/ofl/library-query';
+import { fixtureStore } from '../../utils/fixture-store';
 
-const storage = () => useStorage('assets:ofl-fixtures');
+/** OFL + own fixture library (see `server/utils/fixture-store.ts`). */
+const storage = fixtureStore;
 
 /**
  * GET /api/fixtures

@@ -56,6 +56,7 @@ pixelmapper/
 │       ├── controllers/           # Registry-driven controller catalog
 │       ├── fixture-definitions/   # Definition keys, custom fixture accessor, definition resolution, mode changes, RDM lookup
 │       └── ofl/                   # Open Fixture Library import
+├── fixture-library/               # Pixelmapper's own fixtures in OFL layout, overlaid on ofl-data (web: server/utils/fixture-store.ts, desktop: ofl-bundle)
 ├── extensions/                    # First-party extensions (Nuxt layers; Bun workspace)
 │   ├── color-picker/ pan-tilt/ connector-artnet/   # distribution set (layered into every build)
 │   ├── neopixel-strip/ connector-esp/ controller-akai-apc-mini-mk2/   # catalog (installable bundles)
@@ -179,6 +180,14 @@ Complements `AGENTS.md` (code style) and ADR 0001 (plugin rules).
 2. **Implement** through commands for every mutation; extensions use only `@pixelmapper/extension-api`.
 3. **Test** next to the code (`*.test.ts`), run the gate (typecheck, `bun run test`, lint, `check:extensions`, `cargo test`, build).
 4. **Document** here or in the sub-documents; regenerate `docs/ai/` when the extension API or SDK changes.
+
+## Own Fixture Library
+
+`fixture-library/` holds fixtures Pixelmapper ships itself, in the OFL layout (`manufacturers.json` + `<manufacturer>/<fixture>.json`). It is overlaid on the OFL clone everywhere the library is read: the Nitro routes go through `server/utils/fixture-store.ts` (own files win, `manufacturers.json` merged per entry), the desktop bundle (`scripts/tauri/ofl-bundle.ts`) takes both dirs. Own fixtures therefore appear in the add dialog and take part in the RDM lookup like OFL fixtures.
+
+**RDM auto-match:** a fixture is found for a discovered device when its manufacturer's `rdmId` equals the device's RDM manufacturer ID and its `rdm.modelId` the model ID; modes with `rdmPersonalityIndex` map personalities. `findFixtureDefinitionByRdm` (custom fixtures → `FixtureLibrary.findByRdm`) works on both platforms: the web asks `GET /api/fixtures/rdm`, the desktop reads the `rdm` table of the bundled index. To support a new device, add its JSON here with these IDs — no code changes.
+
+Current content: the Botex X-Tube 500/1000 behind the Node's XB proxy (manufacturer `botex-xb`, RDM `7FF1`, models `0x50`/`0xB0`; personality 1 = 6/12 × RGB pixels).
 
 ## Custom Fixtures (SVG Based)
 

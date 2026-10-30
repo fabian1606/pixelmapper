@@ -1,4 +1,5 @@
 import type { OflFixture } from '../../../../app/utils/ofl/types';
+import { fixtureStore } from '../../../utils/fixture-store';
 
 /**
  * GET /api/fixtures/:manufacturer/:fixture
@@ -26,7 +27,7 @@ export default defineEventHandler(async (event) => {
 
   // In Nitro storage, the key uses ':' as path separator
   const storageKey = `${safeManufacturer}:${safeFixture}.json`;
-  const oflFixture = await useStorage('assets:ofl-fixtures').getItem<OflFixture>(storageKey);
+  const oflFixture = await fixtureStore().getItem<OflFixture>(storageKey);
 
   if (!oflFixture) {
     throw createError({ statusCode: 404, statusMessage: `Fixture not found: ${safeManufacturer}/${safeFixture}` });

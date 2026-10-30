@@ -27,7 +27,11 @@ import type { RdmDeviceDescription, RdmPersonality, RdmSlot } from '../bridge/pr
 import { SLOT_TYPE, secondarySlotCapability, secondarySlotName, slotLabelCapability, slotLabelName } from './rdm-slot-labels';
 import type { JsonObject } from './rdm-slot-labels';
 
-/** Author written into `meta.authors` of generated definitions. */
+/**
+ * Author written into `meta.authors` of generated definitions. The core's RDM
+ * lookup recognizes it (`RDM_GENERATED_AUTHOR`) and ranks such definitions
+ * below library fixtures — keep both strings equal.
+ */
 const GENERATED_AUTHOR = 'Pixelmapper (generated from RDM)';
 
 // ── Helpers ────────────────────────────────────

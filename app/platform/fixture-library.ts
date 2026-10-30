@@ -24,6 +24,11 @@ export interface FixtureLibrary {
    * Rejects when it does not exist or is a redirect.
    */
   getFixture(manufacturerKey: string, fixtureKey: string): Promise<OflFixture>;
+  /**
+   * Definition keys (`'<manufacturer>/<fixture>'`, sorted) of all fixtures
+   * with the given RDM manufacturer + model ID; `[]` when none match.
+   */
+  findByRdm(manufacturerId: number, modelId: number): Promise<string[]>;
 }
 
 /** Strips everything but `[A-Za-z0-9_-]` from a path segment (same rule as the Nitro route). */

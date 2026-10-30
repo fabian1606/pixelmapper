@@ -3,8 +3,8 @@
  *
  * The Tauri build ships the OFL library as static files next to the SPA
  * (written by `scripts/tauri/ofl-bundle.ts`, served from `/ofl/`):
- * - `/ofl/index.json` — manufacturers + summaries of every fixture (~270 KB),
- *   loaded once on first use;
+ * - `/ofl/index.json` — manufacturers, summaries of every fixture (~270 KB)
+ *   and the RDM IDs table, loaded once on first use;
  * - `/ofl/fixtures/<manufacturer>/<fixture>.json` — full definitions, loaded
  *   on demand.
  * Queries run client-side with the same logic as the Nitro route, so the
@@ -45,5 +45,9 @@ export function createBundledFixtureLibrary(base = OFL_BASE): FixtureLibrary {
       if (!isFixtureDefinition(fixture)) throw new Error(`Fixture not found: ${mf}/${fix}`);
       return fixture;
     },
+
+    findByRdm: async (manufacturerId, modelId) => (await loadIndex()).rdm
+      .filter(e => e.manufacturerId === manufacturerId && e.modelId === modelId)
+      .map(e => e.key),
   };
 }

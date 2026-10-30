@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/OpenLightingProject/open-fixture-library/master/schemas/fixture.json",
+  "name": "X-Tube 500",
+  "categories": ["Pixel Bar"],
+  "meta": {
+    "authors": ["Pixelmapper"],
+    "createDate": "2026-10-30",
+    "lastModifyDate": "2026-10-30"
+  },
+  "comment": "Botex X-Tube 500 behind the XB proxy of the Pixelmapper Node (RDM 7FF1:0050). XB mode 0x00 (RDM personality 1) = 6 x RGB per pixelmapper-hardware protocol/xb-digest.md (unverified); the other XB modes have no known channel layout yet.",
+  "rdm": {
+    "modelId": 80
+  },
+  "physical": {
+    "dimensions": [500, 40, 40],
+    "matrixPixels": {
+      "dimensions": [83, 40, 40],
+      "spacing": [0, 0, 0]
+    }
+  },
+  "matrix": {
+    "pixelCount": [6, 1, 1]
+  },
+  "templateChannels": {
+    "Red $pixelKey": {
+      "capability": { "type": "ColorIntensity", "color": "Red" }
+    },
+    "Green $pixelKey": {
+      "capability": { "type": "ColorIntensity", "color": "Green" }
+    },
+    "Blue $pixelKey": {
+      "capability": { "type": "ColorIntensity", "color": "Blue" }
+    }
+  },
+  "availableChannels": {},
+  "modes": [
+    {
+      "name": "6x RGB",
+      "shortName": "18ch",
+      "rdmPersonalityIndex": 1,
+      "channels": [
+        {
+          "insert": "matrixChannels",
+          "repeatFor": "eachPixelABC",
+          "channelOrder": "perPixel",
+          "templateChannels": ["Red $pixelKey", "Green $pixelKey", "Blue $pixelKey"]
+        }
+      ]
+    }
+  ]
+}

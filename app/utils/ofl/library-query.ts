@@ -36,6 +36,21 @@ export interface OflLibraryIndex {
   manufacturers: ManufacturerSummary[];
   /** Summaries of every valid (non-redirect) fixture. */
   fixtures: FixtureSummary[];
+  /**
+   * Fixtures with RDM IDs (manufacturer `rdmId` + fixture `rdm.modelId`),
+   * sorted by key; the offline counterpart of `GET /api/fixtures/rdm`.
+   */
+  rdm: OflRdmEntry[];
+}
+
+/** One fixture of the library with RDM IDs. */
+export interface OflRdmEntry {
+  /** RDM manufacturer ID (`manufacturers.json` `rdmId`). */
+  manufacturerId: number;
+  /** RDM model ID (`rdm.modelId`). */
+  modelId: number;
+  /** Definition key `'<manufacturer>/<fixture>'`. */
+  key: string;
 }
 
 const DEFAULT_LIMIT = 50;

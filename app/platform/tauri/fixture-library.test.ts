@@ -9,6 +9,7 @@ import { createBundledFixtureLibrary } from './fixture-library';
 const INDEX: OflLibraryIndex = {
   manufacturers: [{ key: 'acme', name: 'ACME', fixtureCount: 1 }],
   fixtures: [{ key: 'acme/spot', manufacturer: 'ACME', manufacturerKey: 'acme', name: 'Spot', shortName: 'S', categories: [], modes: [] }],
+  rdm: [{ manufacturerId: 0x7ff1, modelId: 0x50, key: 'acme/spot' }],
 };
 
 /** Stubs fetch with a URL → JSON body map (missing = 404). */
@@ -44,6 +45,13 @@ describe('bundled fixture library', () => {
     expect(await lib.getFixture('acme', 'spot')).toEqual(def);
     await expect(lib.getFixture('..', 'spot')).rejects.toThrow(/Invalid/);
     await expect(lib.getFixture('acme', 'gone')).rejects.toThrow(/404/);
+  });
+
+  it('finds definition keys by RDM IDs in the index', async () => {
+    stubFetch({ '/ofl/index.json': INDEX });
+    const lib = createBundledFixtureLibrary();
+    expect(await lib.findByRdm(0x7ff1, 0x50)).toEqual(['acme/spot']);
+    expect(await lib.findByRdm(0x7ff1, 0xb0)).toEqual([]);
   });
 
   it('retries the index after a failed load', async () => {

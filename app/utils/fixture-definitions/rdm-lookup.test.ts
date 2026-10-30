@@ -3,7 +3,7 @@ import type { OflFixture } from '~/utils/ofl/types';
 import { customFixtureKey, saveCustomFixture } from './custom-fixtures';
 import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { setDefinitionFetcher } from './resolve-definition';
-import { buildRdmDefinitionMatch, findFixtureDefinitionByRdm, setRdmLookupFetcher } from './rdm-lookup';
+import { RDM_GENERATED_AUTHOR, buildRdmDefinitionMatch, findFixtureDefinitionByRdm, setRdmLookupFetcher } from './rdm-lookup';
 import xbar500Json from './__fixtures__/xbar500-rdm.json';
 
 /** XBAR500 custom definition: RDM manufacturer 0x7FF0, model 1, personalities 1..4. */
@@ -118,6 +118,23 @@ describe('findFixtureDefinitionByRdm', () => {
     const match = await findFixtureDefinitionByRdm(100, 7);
     expect(match).toMatchObject({ key: customFixtureKey(stored), source: 'custom', name: 'My Pixel Par' });
     expect(requested).toEqual([]);
+  });
+
+  it('prefers library fixtures over custom fixtures generated from RDM', async () => {
+    const generated = {
+      ...XBAR500,
+      name: 'Generated Par',
+      meta: { ...XBAR500.meta, authors: [RDM_GENERATED_AUTHOR] },
+      rdm: { modelId: 7 },
+      pixelmapper: { rdmManufacturerId: 100 },
+    };
+    const stored = (await saveCustomFixture(generated))!;
+    expect(await findFixtureDefinitionByRdm(100, 7)).toMatchObject({ key: 'acme/pixel-par', source: 'ofl' });
+
+    // Without a library match the generated definition is still the fallback.
+    routes[rdmUrl(100, 7)] = { keys: [] };
+    setRdmLookupFetcher(fakeFetcher);
+    expect(await findFixtureDefinitionByRdm(100, 7)).toMatchObject({ key: customFixtureKey(stored), source: 'custom' });
   });
 
   it('takes the first matching custom fixture (newest first)', async () => {
