@@ -79,3 +79,27 @@ Re-run of scenarios 1, 5 and 6 against the live app on `master` after WP-I to WP
 | Screenshot | PASS | |
 
 **Not covered:** a human tester clicking through a real Claude Desktop or Claude Code UI against a signed-in project in `dev:tauri`. The user has since used Claude Desktop against the desktop app; that feedback led to WP-J, WP-K and WP-L.
+
+## 2026-10-30: real Claude Code client and real button presses (master 1e1f6c1)
+
+**Setup.** Two headless runs of the **Claude Code CLI** (`claude -p`, v2.1.181) against the running app. Each run:
+- started from an empty directory, with no repo context;
+- used only the `pixelmapper` MCP server (`--strict-mcp-config`), with all non-MCP tools disallowed;
+- reached its own `pixelmapper-mcp` hub, which forwarded to the app in headless Chrome.
+
+The room is the 4×12-pixel tube loop with 4 corner PARs and a full base.
+
+| Run | Prompt (short) | Tool calls | Errors | Result |
+|---|---|---|---|---|
+| 1 | Tubes along the walls, rotated along them, PARs in the corners, check with a screenshot. Then a wave from the four corners with draggable points, a live page, and a check with observe. | 15 | 1 (`screenshot` `view: "canvas"`: no editor mounted headless; switched to `layout` by itself) | Read the layout and the head directions correctly from inspect and screenshot: tube-front 0° left→right, tube-right 90° top→bottom, … No rotation guessing. Built-in corner-wave with points A–D at the PAR corners as canvas handles, plus a live page with 4 xy pads, 5 sliders, a stage preview and beat: one undo step "AI: Corner Wave + live page". Checked with live observe. ≈ $0.74 |
+| 2 | Hold the button for blackout; release sends a shock wave from the corners inward; a double-click gives a blinder. Button first on a new page, sliders for speed and decay; check with observe and triggers. | 14 | 0 | Wrote and built its own plugin on the first try. Added modifier and page in one batch. Checked hold/release and the double-click with `observe.triggers`: press → black; release → PARs at 1.22 s, then tubes 67 ms later; double-click → white at once. ≈ $0.89 |
+
+**Real button presses.** The HIT button that Claude built in run 2 was pressed through the app's own button runtime (`pressButton` / `releaseButton`, the code a click on the live page runs) during a live `observe`:
+- **Hold, then release:** everything goes off at 1.62 s (press). On release the corner PARs come back first (2.85 s), then the tubes (2.91 s): `order` reads par-tl → tube-front, so the wave runs from the corners inward.
+- **Double-click** (two press/release pairs within 360 ms): a short off from the first press at 1.58 s, then full white at 1.70 s (blinder, colour "white").
+- The presses created no undo entries.
+
+**Still to check by hand:**
+- the Claude Desktop GUI;
+- the Tauri WKWebView (`dev:tauri`);
+- a mouse click on the live page in a signed-in project.
