@@ -4,6 +4,7 @@
 import { operations, type CoreOperation, type OperationRegistry } from '../registry';
 import { channelOperations } from './channels';
 import { fixtureOperations } from './fixtures';
+import { fixturesArrange } from './fixtures-arrange';
 import { liveOperations } from './live';
 import { modifierOperations } from './modifiers';
 import { pluginOperations } from './plugins';
@@ -14,6 +15,7 @@ import { sceneOperations } from './scene';
 export const CORE_OPERATIONS: readonly CoreOperation[] = [
   ...projectOperations,
   ...fixtureOperations,
+  fixturesArrange,
   ...sceneOperations,
   ...channelOperations,
   ...modifierOperations,
