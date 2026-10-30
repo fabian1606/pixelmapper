@@ -78,4 +78,10 @@ describe('toMcpContent', () => {
     expect(blocks.some((b) => b.type === 'image')).toBe(true);
     expect(joined(blocks)).toContain('[output truncated');
   });
+
+  it('never counts or cuts image data (screenshots), even far above the budget', () => {
+    const data = 'A'.repeat(100_000);
+    const blocks = toMcpContent([{ type: 'text', text: 'caption' }, { type: 'image', data, mimeType: 'image/png' }], 1_000);
+    expect(blocks).toEqual([{ type: 'text', text: 'caption' }, { type: 'image', data, mimeType: 'image/png' }]);
+  });
 });

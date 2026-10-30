@@ -65,7 +65,7 @@ export function createAgentBridge(platform: AgentBridgePlatform): AgentBridge {
   const loadDeps = (): Promise<BridgeDeps> => {
     deps ??= Promise.all([import('./host'), import('@pixelmapper/agent-kit')]).then(([hostModule, kit]) => ({
       host: hostModule.createAppAgentHost(),
-      tools: kit.createTools(),
+      tools: kit.createTools({ screenshot: true }),
     }));
     return deps;
   };

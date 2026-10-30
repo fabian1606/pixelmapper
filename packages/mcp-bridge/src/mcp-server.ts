@@ -38,7 +38,8 @@ export interface McpServerOptions {
 const INSTRUCTIONS =
   'Pixelmapper is a DMX/pixel lighting controller. These tools run inside the open Pixelmapper app. ' +
   'Start with `inspect` (selector "project") and `operations`, read details with `describe`, change things ' +
-  'with `apply` (use dryRun first for large batches) and verify with `observe`. If a tool reports that the ' +
+  'with `apply` (use dryRun first for large batches) and verify with `observe`. Use `screenshot` to look at the ' +
+  'stage (layout, rotation, how it looks) instead of drawing ASCII maps or asking the user. If a tool reports that the ' +
   'app is not connected, ask the user to open Pixelmapper and enable Settings → External agents.';
 
 /** Normalizes the MCP client name for actor ids (`agent:mcp:<client>`). */

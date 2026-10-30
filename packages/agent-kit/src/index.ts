@@ -8,6 +8,7 @@ export * from './expectation';
 export * from './operation';
 export * from './apply';
 export * from './observe';
+export * from './screenshot';
 export * from './host';
 export * from './json-schema';
 export * from './tools';

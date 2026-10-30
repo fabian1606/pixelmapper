@@ -4,8 +4,9 @@
  *   MCP SDK client ─stdio─► `pixelmapper-mcp` CLI (spawned with Bun)
  *                                 ◄─ws── bridge client ─► real app host + core operations
  *
- * Verifies tool listing, inspect, apply with actor attribution / undo label
- * and describe guides through the real CLI process. Skipped when `bun` is
+ * Verifies tool listing, inspect, apply with actor attribution / undo label,
+ * describe guides and screenshot image content (not cut by the text output
+ * budget) through the real CLI process. Skipped when `bun` is
  * not on the PATH.
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -29,6 +30,10 @@ import { createAppAgentHost } from './host';
 const HAS_BUN = spawnSync('bun', ['--version']).status === 0;
 const TOKEN = 'b'.repeat(64);
 const CLI = join(__dirname, '../../../packages/mcp-bridge/src/cli.ts');
+/** Small text budget of the CLI under test (the fake image is larger). */
+const MAX_OUTPUT_CHARS = 20_000;
+/** Fake PNG payload: PNG signature + filler, ~60 000 base64 characters. */
+const FAKE_PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(45_000, 7)]).toString('base64');
 
 /** `ws` WebSocket with a browser Origin the hub accepts for the app role. */
 class OriginWebSocket extends WebSocket {
@@ -65,6 +70,7 @@ describe.skipIf(!HAS_BUN)('MCP end to end (CLI over stdio ⇄ app bridge client)
         PIXELMAPPER_MCP_TOKEN_FILE: join(dir, 'mcp-token'),
         PIXELMAPPER_MCP_TOOL_CACHE: join(dir, 'mcp-tools.json'),
         PIXELMAPPER_MCP_QUIET: '1',
+        PIXELMAPPER_MCP_MAX_OUTPUT_CHARS: String(MAX_OUTPUT_CHARS),
       },
       stderr: 'ignore',
     });
@@ -72,8 +78,13 @@ describe.skipIf(!HAS_BUN)('MCP end to end (CLI over stdio ⇄ app bridge client)
     await mcp.connect(transport);
 
     // App side: real host with the core catalog, bridge client over `ws`.
-    const host = createAppAgentHost({ registry: registerCoreOperations(createOperationRegistry()), observe: async () => null });
-    const tools = createTools();
+    const host = createAppAgentHost({
+      registry: registerCoreOperations(createOperationRegistry()),
+      observe: async () => null,
+      // Node has no OffscreenCanvas: a fixed payload stands in for the PNG.
+      screenshot: { rasterize: async scene => ({ data: FAKE_PNG, width: scene.width, height: scene.height }), editorCanvas: () => null },
+    });
+    const tools = createTools({ screenshot: true });
     bridge = createBridgeClient({
       url: `ws://127.0.0.1:${port}`,
       token: TOKEN,
@@ -95,7 +106,7 @@ describe.skipIf(!HAS_BUN)('MCP end to end (CLI over stdio ⇄ app bridge client)
   it('lists the app tools plus pixelmapper_status', async () => {
     const { tools } = await mcp.listTools();
     const names = tools.map(t => t.name);
-    expect(names).toEqual(expect.arrayContaining(['inspect', 'operations', 'describe', 'apply', 'observe', 'pixelmapper_status']));
+    expect(names).toEqual(expect.arrayContaining(['inspect', 'operations', 'describe', 'apply', 'observe', 'screenshot', 'pixelmapper_status']));
   });
 
   it('inspects the project through the CLI', async () => {
@@ -120,5 +131,21 @@ describe.skipIf(!HAS_BUN)('MCP end to end (CLI over stdio ⇄ app bridge client)
   it('serves guide topics through describe', async () => {
     const result = await mcp.callTool({ name: 'describe', arguments: { id: 'guide:modifier-design' } });
     expect(firstText(result)).toContain('# Modifier Design Principles');
+  });
+
+  it('returns screenshot image content intact, outside the text budget', async () => {
+    const result = await mcp.callTool({ name: 'screenshot', arguments: { size: 512 } });
+    const content = (result as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }).content;
+    expect(result.isError).toBeFalsy();
+    expect(FAKE_PNG.length).toBeGreaterThan(MAX_OUTPUT_CHARS);
+    expect(content.find(c => c.type === 'image')).toEqual({ type: 'image', data: FAKE_PNG, mimeType: 'image/png' });
+    expect(firstText(result)).toContain('Layout view');
+    expect(content.some(c => c.text?.includes('[output truncated'))).toBe(false);
+  });
+
+  it('reports a readable error for the canvas view without an editor', async () => {
+    const result = await mcp.callTool({ name: 'screenshot', arguments: { view: 'canvas' } });
+    expect(result.isError).toBe(true);
+    expect(firstText(result)).toContain('Use view "layout"');
   });
 });

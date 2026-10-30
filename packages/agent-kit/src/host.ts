@@ -11,6 +11,7 @@ import type { Actor } from './actor';
 import type { ApplyRequest, ApplyResult } from './apply';
 import type { ObserveReport, ObserveRequest } from './observe';
 import type { OperationDescription, OperationQuery, OperationSummary } from './operation';
+import type { ScreenshotRequest, ScreenshotResult } from './screenshot';
 
 // ── Inspect ─────────────────────────────────────
 
@@ -92,5 +93,10 @@ export interface AgentHost {
   apply(request: ApplyRequest, ctx?: HostCallContext): Promise<ApplyResult>;
   /** Observes output; rejects with a readable error when observation is unavailable. */
   observe(request: ObserveRequest, ctx?: HostCallContext): Promise<ObserveReport>;
+  /**
+   * Renders a screenshot (optional, ADR 0002 §5 opt-in tool). Rejects with
+   * a readable error when the requested view is unavailable.
+   */
+  screenshot?(request: ScreenshotRequest, ctx?: HostCallContext): Promise<ScreenshotResult>;
   guides: GuideProvider;
 }

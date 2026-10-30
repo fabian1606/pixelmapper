@@ -58,6 +58,30 @@ function tick() {
   } catch {}
 }
 
+/**
+ * Captures the editor canvas as PNG (agent `screenshot` view "canvas"):
+ * draws a fresh frame and encodes it in the same task, before the WebGL
+ * drawing buffer is presented and cleared.
+ */
+function captureCanvas(requestId: number) {
+  const reply = (payload: Record<string, unknown>, transfer: Transferable[] = []) =>
+    (self as unknown as Worker).postMessage({ type: 'canvas.captured', requestId, ...payload }, transfer);
+  if (!canvasReady || !canvas || !offscreen || !engine) {
+    reply({ error: 'editor canvas is not initialized' });
+    return;
+  }
+  try {
+    canvas.draw(engine.get_dmx_view(), Date.now() - clockEpoch);
+    offscreen.convertToBlob({ type: 'image/png' })
+      .then(blob => blob.arrayBuffer())
+      .then(buffer => reply({ png: buffer }, [buffer]))
+      .catch(e => reply({ error: String(e) }));
+  }
+  catch (e) {
+    reply({ error: String(e) });
+  }
+}
+
 async function init() {
   // Init both WASM modules in parallel.
   await Promise.all([initWasm({ module_or_path: wasmUrl }), initCanvasWasm({ module_or_path: canvasWasmUrl })]);
@@ -107,6 +131,7 @@ function handleMessage(e: MessageEvent) {
     worldW?: number; worldH?: number;
     marqueeActive?: boolean; marqueeSx?: number; marqueeSy?: number; marqueeEx?: number; marqueeEy?: number;
     ids?: Array<string | number>;
+    requestId?: number;
   };
   switch (m.type) {
     case 'dispatch':
@@ -205,6 +230,9 @@ function handleMessage(e: MessageEvent) {
       if (canvas && m.ids) {
         canvas.set_selected(m.ids);
       }
+      break;
+    case 'canvas.capture':
+      captureCanvas(m.requestId ?? 0);
       break;
     case 'canvas.set_remote_selections':
       if (canvas && m.json !== undefined) {

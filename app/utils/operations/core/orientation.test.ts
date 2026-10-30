@@ -4,29 +4,17 @@
  */
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { useEngineStore } from '~/stores/engine-store';
-import { Beam } from '~/utils/engine/core/beam';
 import { Fixture } from '~/utils/engine/core/fixture';
 import { runQuery } from '~/utils/agents/host-inspect';
 import { eventLog } from '~/utils/observability/event-log';
 import { applyOperations } from '../apply';
 import { createOperationRegistry, registerCoreOperations } from '../index';
 import { readApi } from '../read-api';
-import { resetOperationState, stubOperationGlobals } from '../test-utils';
+import { makeBarFixture, resetOperationState, stubOperationGlobals } from '../test-utils';
 import { fixtureOrientation, orientationFromPoints, rotationToAlign, runsLabel } from './orientation';
 
-/** A 4-pixel RGB bar whose heads run along its local +x axis. */
-export function makeBar(id: string, x: number, y: number, rotation = 0, pixels = 4): Fixture {
-  const f = new Fixture(id, [], 1);
-  f.name = id;
-  f.fixturePosition = { x, y };
-  f.fixtureSize = { x: pixels, y: 1 };
-  f.rotation = rotation;
-  f.beams = Array.from({ length: pixels }, (_, i) => new Beam(`b${i}`, (i + 0.5) / pixels - 0.5, 0));
-  f.channels = f.beams.flatMap((b, i) => (['RED', 'GREEN', 'BLUE'] as const).map((type, c) => ({
-    type, addressOffset: i * 3 + c, role: 'COLOR' as const, colorValue: '#ffffff', defaultValue: 0, beamId: b.id,
-  }))) as Fixture['channels'];
-  return f;
-}
+/** Bar with heads along local +x (shared test helper). */
+const makeBar = makeBarFixture;
 
 beforeAll(stubOperationGlobals);
 beforeEach(resetOperationState);
@@ -129,9 +117,9 @@ describe('operations', () => {
   it('fixtures.rotate rejects alignTo on single-head fixtures and ambiguous entries', async () => {
     seed();
     const deps = { actor: 'user' as const, registry, read: readApi };
-    const single = await applyOperations({ ops: [{ op: 'fixtures.rotate', input: { rotations: [{ fixtureId: 'spot', alignTo: 'x' }] } }] }, deps);
+    const single = await applyOperations({ label: 'Rotate', ops: [{ op: 'fixtures.rotate', input: { rotations: [{ fixtureId: 'spot', alignTo: 'x' }] } }] }, deps);
     expect(single.committed).toBe(false);
-    const both = await applyOperations({ ops: [{ op: 'fixtures.rotate', input: { rotations: [{ fixtureId: 'front', rotation: 10, alignTo: 'x' }] } }] }, deps);
+    const both = await applyOperations({ label: 'Rotate', ops: [{ op: 'fixtures.rotate', input: { rotations: [{ fixtureId: 'front', rotation: 10, alignTo: 'x' }] } }] }, deps);
     expect(both.committed).toBe(false);
   });
 });

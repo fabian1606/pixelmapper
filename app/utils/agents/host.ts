@@ -6,12 +6,15 @@
  * the same host.
  */
 import type { AgentHost, GuideProvider, ObserveReport, ObserveRequest } from '@pixelmapper/agent-kit';
+import { useEngineStore } from '~/stores/engine-store';
+import type { Fixture } from '~/utils/engine/core/fixture';
 import { eventLog as defaultEventLog, type EventLog } from '~/utils/observability/event-log';
 import { applyOperations } from '~/utils/operations/apply';
 import { readApi as defaultReadApi, type CoreReadApi } from '~/utils/operations/read-api';
 import { operations as defaultRegistry, type OperationRegistry } from '~/utils/operations/registry';
 import { createGuideProvider } from './guides';
 import { inspect } from './host-inspect';
+import { takeScreenshot, type ScreenshotDeps } from './screenshot';
 
 // ── Observe ─────────────────────────────────────
 
@@ -41,6 +44,23 @@ export async function loadObserve(): Promise<ObserveFn | null> {
   }
 }
 
+// ── Screenshot ──────────────────────────────────
+
+/** A live engine frame older than this counts as "no live output". */
+const LIVE_FRAME_MAX_AGE_MS = 2_000;
+
+/** Default screenshot sources: engine store fixtures and the latest engine frame. */
+export function defaultScreenshotDeps(): ScreenshotDeps {
+  return {
+    fixtures: () => useEngineStore().flatFixtures as Fixture[],
+    dmx: () => {
+      const engine = useEngineStore().engine;
+      const fresh = engine.lastFrameAt > 0 && Date.now() - engine.lastFrameAt < LIVE_FRAME_MAX_AGE_MS;
+      return fresh ? engine.dmxBuffer : null;
+    },
+  };
+}
+
 // ── Host ────────────────────────────────────────
 
 /** Dependencies of the host (defaults: app singletons; tests inject their own). */
@@ -51,6 +71,8 @@ export interface AppAgentHostOptions {
   guides?: GuideProvider;
   /** Observe implementation; default {@link loadObserve}. */
   observe?: () => Promise<ObserveFn | null>;
+  /** Screenshot sources / rasterizer; default {@link defaultScreenshotDeps} (OffscreenCanvas). */
+  screenshot?: Partial<ScreenshotDeps>;
 }
 
 /** Creates the app agent host. */
@@ -76,6 +98,7 @@ export function createAppAgentHost(opts: AppAgentHostOptions = {}): AgentHost {
       }
       return fn(request, { signal: ctx?.signal });
     },
+    screenshot: request => takeScreenshot(request, { ...defaultScreenshotDeps(), ...opts.screenshot }),
     guides: opts.guides ?? createGuideProvider(),
   };
 }

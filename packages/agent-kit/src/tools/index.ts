@@ -1,27 +1,37 @@
 /**
  * Agent tool surface (ADR 0002 §5 minus `delegate` / `ask_user`; plan M3):
- * `inspect`, `operations`, `describe`, `apply`, `observe`.
+ * `inspect`, `operations`, `describe`, `apply`, `observe`, plus the opt-in
+ * `screenshot` tool.
  */
 import { createApplyTool } from './apply';
 import { createDescribeTool } from './describe';
 import { createInspectTool } from './inspect';
 import { createObserveTool } from './observe';
 import { createOperationsTool } from './operations';
+import { createScreenshotTool } from './screenshot';
 import type { ToolDefinition } from './types';
 
 export * from './types';
 export { DescribeInputSchema, GUIDE_PREFIX } from './describe';
 export { summarizeApply } from './apply';
-export { createApplyTool, createDescribeTool, createInspectTool, createObserveTool, createOperationsTool };
+export { SCREENSHOT_UNSUPPORTED } from './screenshot';
+export { createApplyTool, createDescribeTool, createInspectTool, createObserveTool, createOperationsTool, createScreenshotTool };
 
-/** All tools in workflow order (inspect → operations/describe → apply → observe). */
-export function createTools(): ToolDefinition[] {
+/** Options of {@link createTools}. */
+export interface CreateToolsOptions {
+  /** Adds the opt-in `screenshot` tool (ADR 0002 §5); the host should implement `screenshot`. */
+  screenshot?: boolean;
+}
+
+/** All tools in workflow order (inspect → operations/describe → apply → observe [→ screenshot]). */
+export function createTools(opts: CreateToolsOptions = {}): ToolDefinition[] {
   return [
     createInspectTool(),
     createOperationsTool(),
     createDescribeTool(),
     createApplyTool(),
     createObserveTool(),
+    ...(opts.screenshot ? [createScreenshotTool()] : []),
   ];
 }
 
