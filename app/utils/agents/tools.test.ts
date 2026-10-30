@@ -126,6 +126,56 @@ describe('apply', () => {
   });
 });
 
+describe('envelope ergonomics (WP-J)', () => {
+  it('describe shows the input summary and a ready-to-copy apply call', async () => {
+    const out = await run('describe', { id: 'fixtures.move' });
+    const body = textOf(out);
+    expect(body).toContain('Input (? = optional): { moves: { fixtureId: string | number, x?: number, y?: number, z?: number }[] }');
+    expect(body).toContain('apply {"label":"Move one fixture to the left-center","ops":[{"op":"fixtures.move","input":{"moves":[');
+    expect(jsonOf<{ exampleCall: { tool: string } }>(out).exampleCall.tool).toBe('apply');
+  });
+
+  it('describe accepts `selector` / `op` as alias of `id` and names the key otherwise', async () => {
+    expect((await run('describe', { selector: 'fixtures.move' })).isError).toBeUndefined();
+    expect((await run('describe', { op: 'fixtures.move' })).isError).toBeUndefined();
+    const bad = await run('describe', { what: 'fixtures.move' });
+    expect(bad.isError).toBe(true);
+    expect(textOf(bad)).toContain('Unknown key(s): what. Expected keys: id (required).');
+  });
+
+  it('inspect accepts `id` as alias of `selector` and a top-level { op, input }', async () => {
+    expect(textOf(await run('inspect', { id: 'project' }))).toContain('3 fixtures');
+    const found = await run('inspect', { op: 'fixtures.find', input: { name: 'fx-a' } });
+    expect(textOf(found)).toContain('fx-a');
+  });
+
+  it('operations ends with the envelope reminder', async () => {
+    const lines = textOf(await run('operations', {})).split('\n');
+    expect(lines.at(-1)).toContain('"ops": [ { "op": "<operation id>", "input": {');
+    expect(lines.at(-1)).toContain('describe { "id": "<operation id>" }');
+  });
+
+  it('folds input keys placed next to `op` (lenient form) and says so', async () => {
+    const out = await run('apply', { label: 'Move', ops: [{ op: 'fixtures.move', moves: [{ fixtureId: 'fx-a', x: 0.3 }] }] });
+    expect(out.isError).toBeUndefined();
+    expect(textOf(out)).toContain('INFO input-folded (op 0)');
+    expect(readApi.fixture('fx-a')?.x).toBeCloseTo(0.3);
+  });
+
+  it('names the expected input shape when the input is wrong', async () => {
+    const out = await run('apply', { label: 'Move', ops: [{ op: 'fixtures.move', input: { fixtures: [{ fixtureId: 'fx-a', x: 0.3 }] } }] });
+    expect(out.isError).toBe(true);
+    expect(textOf(out)).toContain('Expected input (? = optional): { moves: { fixtureId: string | number');
+    expect(textOf(out)).toContain('Entry shape: { "op": "fixtures.move", "input": { moves:');
+  });
+
+  it('rejects extra keys next to `input` with the fix', async () => {
+    const out = await run('apply', { label: 'Move', ops: [{ op: 'fixtures.move', input: {}, moves: [] }] });
+    expect(out.isError).toBe(true);
+    expect(textOf(out)).toContain('put `moves` inside `input`');
+  });
+});
+
 describe('observe', () => {
   it('reports a readable error when observability is unavailable', async () => {
     const out = await run('observe', { targets: 'all' });
