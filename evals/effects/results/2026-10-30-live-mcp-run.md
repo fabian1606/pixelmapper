@@ -36,3 +36,46 @@ First run of scenarios 0–6 against the **running app** (branch `feat/mcp-agent
   - `id` / `modifierId` consistency;
   - the `modifiers.trigger` action;
   - trigger, blend and window guidance in the skill.
+
+## 2026-10-30 — re-run on master (final)
+
+Re-run of scenarios 1, 5 and 6 against the live app on `master` after WP-I to WP-L, on the same 4 × 12 rig. The open items it left were fixed in WP-M (`feat/agent-final-fixes`): live signature choice, `modifiers.update` speed merge and the `id` alias, live group temporal under capture jitter, `beatLock` only for beat-mode speeds, timed triggers inside a live `observe`, the startup layout packet, and the scenario specs.
+
+**Scenario 1 (reused `mirror-runner`, DIMMER)**
+
+| Check | Verdict | Notes |
+|---|---|---|
+| Preview periodic, mirror | PASS | Periodic 1.999 s; `mirror.x.r` 1.00 over 48 pairs |
+| Every pixel lit | PASS | Head max 0.953 on all 48 heads |
+| Mirror A/B | PASS | `frontBack`: `mirror.y.r` 1.00 |
+| Reverse A/B | PASS | `order.first` flips tube-right.4 ↔ tube-front.4 |
+| Controls | PASS | |
+| Live | PARTIAL | Without `signature`, live read the static RGB base and reported `constant` / `stuck-1` while the DIMMER layer moved. Fixed in WP-M: live picks the signature of the moving layer. The spec now passes `signature: "scalar"` |
+| One undo | PASS | |
+| Screenshot | PASS | |
+
+**Scenario 6 (own plugin, built first try)**
+
+| Check | Verdict | Notes |
+|---|---|---|
+| Flashes at 2 / 6 / 10 s | PASS | |
+| Colour swap magenta → cyan | PASS | |
+| Speed B 0.75 | PASS | Flashes at 4 / 12 s |
+| Equal speeds | PASS | No NaN |
+| Controls | PASS | |
+| One undo | PASS | |
+| Group period | PASS on the derived expectation | Measured 16 beats. The spec said 8 and was wrong: the colour swap doubles the full period. Spec fixed in WP-M |
+
+**Scenario 5 (own plugin, built first try)**
+
+| Check | Verdict | Notes |
+|---|---|---|
+| Preview frozen states | PASS | |
+| Live press → blackout | PASS | |
+| Live release → wave | PASS | Wave from the corners (radial outward, r 0.98); recovered by 3.9 s |
+| Double-click | PARTIAL | The full-white base hid the blinder; the held double-click only proved white. The spec now requires the 60 % warm base and "click then press in one request" |
+| Triggers create no undo entries | PASS | |
+| One undo | PASS | |
+| Screenshot | PASS | |
+
+**Not covered:** a human tester clicking through a real Claude Desktop or Claude Code UI against a signed-in project in `dev:tauri`. The user has since used Claude Desktop against the desktop app; that feedback led to WP-J, WP-K and WP-L.
