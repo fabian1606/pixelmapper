@@ -2226,5 +2226,49 @@
         "description": "Dark where the profile is lit."
       }
     ]
+  },
+  {
+    "hash": "sha256:b73ce304b6b8ee631596bc98f48c9437f388c6a6a72897d5627e582c9bf3750e",
+    "alias": "@pixelmapper/mirror-runner",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "tail",
+        "type": "number",
+        "min": 0.02,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35,
+        "label": "Tail",
+        "tier": "primary",
+        "description": "Length of the fading trail behind the runner, as a fraction of the tube."
+      },
+      {
+        "key": "mirror",
+        "type": "enum",
+        "options": [
+          "leftRight",
+          "frontBack",
+          "off"
+        ],
+        "optionLabels": [
+          "Left/Right",
+          "Front/Back",
+          "Off"
+        ],
+        "default": "leftRight",
+        "label": "Mirror",
+        "tier": "primary",
+        "description": "Which halves of the room move as mirror images: left vs. right, front vs. back, or none."
+      },
+      {
+        "key": "reverse",
+        "type": "bool",
+        "default": false,
+        "label": "Reverse",
+        "tier": "primary",
+        "description": "Start at the other end of the tubes."
+      }
+    ]
   }
 ]

@@ -998,7 +998,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     "alias": "@pixelmapper/mirror-runner",
     "name": "Mirror Runner",
-    "hash": "sha256:b73ce304b6b8ee631596bc98f48c9437f388c6a6a72897d5627e582c9bf3750e",
+    "hash": "sha256:2389d5fb170ffad70c541459c8541b1226f98de3fdf3383ed2f6d7f17a7ed96c",
     "signatures": [
       "scalar"
     ],
@@ -1009,7 +1009,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
       "name": "Mirror Runner",
       "version": "1.0.0",
       "apiVersion": "^1.3.0",
-      "description": "A light runs along every LED tube or pixel bar and bounces back at the ends, dragging a fading tail. Mirror makes the two halves of the room move as mirror images (tubes on the far side of the room's center line run the other way). Tail is the length of the trail as a fraction of the tube, Reverse swaps the start end. One speed cycle is one trip there and back. Assumes the tubes are patched in the same direction (pixel 1 on the same side).",
+      "description": "A light runs along every LED tube or pixel bar and bounces back at the ends, dragging a fading tail. Mirror makes the two halves of the room move as mirror images (tubes on the far side of the room's center line run the other way). Tail is the length of the trail as a fraction of the tube, Reverse swaps the start end. One speed cycle is one trip there and back. The flip is per pixel: tubes running along the mirror direction (e.g. across the front wall) become true mirror images; tubes on opposite side walls mirror only when patched as a loop around the room (opposite directions), otherwise use Reverse on one wall.",
       "purpose": "Mirrored runners bounce along your LED tubes.",
       "speedUnit": "per round trip",
       "signatures": [
