@@ -20,7 +20,8 @@ import type { BackendState, ToolBackend } from './backend';
 import { logWarn } from './log';
 import { loadPrompts, renderPrompt } from './prompts';
 import { BRIDGE_VERSION, BridgeError, NO_APP_MESSAGE } from './protocol';
-import type { ToolCallOutcome, ToolContent } from './protocol';
+import type { ToolCallOutcome } from './protocol';
+import { DEFAULT_MAX_OUTPUT_CHARS, toMcpContent } from './output-limit';
 import { STATUS_TOOL_NAME, ToolCatalog } from './tool-catalog';
 
 /** Dependencies of the MCP server. */
@@ -29,6 +30,8 @@ export interface McpServerOptions {
   catalog: ToolCatalog;
   /** Directory scanned for prompts (`**\/prompts/*.md`). */
   skillsDir: string;
+  /** Character budget of one tool result (default {@link DEFAULT_MAX_OUTPUT_CHARS}). */
+  maxOutputChars?: number;
 }
 
 /** Instructions shown to the model on connect. */
@@ -44,14 +47,9 @@ export function normalizeClientName(name: string | undefined): string {
   return normalized || 'unknown';
 }
 
-/** Converts app content items into MCP content blocks. */
-export function toMcpContent(content: ToolContent[]): CallToolResult['content'] {
-  return content.map((item) => {
-    if (item.type === 'json') return { type: 'text' as const, text: JSON.stringify(item.json, null, 2) };
-    if (item.type === 'image') return { type: 'image' as const, data: item.data, mimeType: item.mimeType };
-    return { type: 'text' as const, text: item.text };
-  });
-}
+// Content conversion (with the output budget) lives in `output-limit.ts`;
+// re-exported here for existing importers.
+export { toMcpContent };
 
 /** Renders the status tool's report. */
 function statusText(state: BackendState, client: string): string {
@@ -67,7 +65,12 @@ function statusText(state: BackendState, client: string): string {
 }
 
 /** Creates the MCP server; call `server.connect(transport)` afterwards. */
-export function createMcpServer({ backend, catalog, skillsDir }: McpServerOptions): Server {
+export function createMcpServer({
+  backend,
+  catalog,
+  skillsDir,
+  maxOutputChars = DEFAULT_MAX_OUTPUT_CHARS,
+}: McpServerOptions): Server {
   const server = new Server(
     { name: 'pixelmapper', version: BRIDGE_VERSION },
     {
@@ -110,7 +113,7 @@ export function createMcpServer({ backend, catalog, skillsDir }: McpServerOption
         client: clientName(),
         signal: extra.signal,
       });
-      return { content: toMcpContent(outcome.content), isError: outcome.isError || undefined };
+      return { content: toMcpContent(outcome.content, maxOutputChars), isError: outcome.isError || undefined };
     } catch (error) {
       // Tool-level errors are returned as results so the model can react.
       const message = error instanceof BridgeError ? `${error.code}: ${error.message}` : String(error);

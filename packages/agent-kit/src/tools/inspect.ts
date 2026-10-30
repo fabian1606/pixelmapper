@@ -3,7 +3,7 @@
  * operations, entities). Read-only.
  */
 import { InspectRequestSchema } from '../host';
-import { errorOutput, messageOf, parseInput, text, textAndJson, toolInputSchema } from './shared';
+import { errorOutput, jsonText, messageOf, parseInput, text, textAndJson, toolInputSchema } from './shared';
 import type { ToolDefinition } from './types';
 
 /** Creates the `inspect` tool. */
@@ -31,7 +31,7 @@ export function createInspectTool(): ToolDefinition {
         const result = await host.inspect(parsed.value);
         return result.text
           ? textAndJson(result.text, result.value)
-          : { content: [text(JSON.stringify(result.value, null, 2) ?? 'null')] };
+          : { content: [text(jsonText(result.value))] };
       }
       catch (err) {
         return errorOutput(`inspect failed: ${messageOf(err)}`);

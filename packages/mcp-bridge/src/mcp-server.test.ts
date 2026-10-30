@@ -40,13 +40,14 @@ function skillsDir(files: Record<string, string>): string {
 }
 
 /** Hub + MCP server + SDK client connected in memory. */
-async function setup(options: { skills?: string; cacheFile?: string | null } = {}) {
+async function setup(options: { skills?: string; cacheFile?: string | null; maxOutputChars?: number } = {}) {
   const hub = await Hub.start(testConfig(), TEST_TOKEN);
   cleanup.push(() => hub.close());
   const server = createMcpServer({
     backend: hub,
     catalog: new ToolCatalog(options.cacheFile ?? null),
     skillsDir: options.skills ?? '/nonexistent/skills',
+    maxOutputChars: options.maxOutputChars,
   });
   const client = new Client({ name: 'Claude Code', version: '1.0.0' });
   let listChanged = 0;
@@ -102,6 +103,20 @@ describe('MCP tools', () => {
       client: 'claude-code',
       input: { selector: 'project' },
     });
+  });
+
+  it('cuts oversized results with an explicit notice instead of silently', async () => {
+    const { client, hub } = await setup({ maxOutputChars: 2_000 });
+    const app = await FakeApp.connect(hub.port);
+    cleanup.push(() => app.close());
+    const pixels = Array.from({ length: 500 }, (_, i) => ({ index: i, x: i / 500, y: 0.5 }));
+    app.onCall = () => ({ type: 'result', content: [{ type: 'text', text: '4 fixtures' }, { type: 'json', json: { pixels } }] });
+    const result = await client.callTool({ name: 'inspect', arguments: { selector: ['fixture:1'], detail: 'full' } });
+    const blocks = result.content as Array<{ text: string }>;
+    expect(blocks[0]!.text).toBe('4 fixtures');
+    expect(blocks.map((b) => b.text).join('').length).toBeLessThanOrEqual(2_000);
+    expect(blocks.at(-1)!.text).toMatch(/^\[output truncated: showed \d+ of \d+ characters \(limit 2000\)/);
+    expect(blocks.at(-1)!.text).toContain('Narrow the request');
   });
 
   it('marks app-reported domain errors as isError', async () => {

@@ -22,6 +22,7 @@ import {
   BRIDGE_VERSION,
   BridgeError,
   CLOSE_CODES,
+  MAX_FRAME_BYTES,
   NO_APP_MESSAGE,
   PROTOCOL_VERSION,
   isCompatibleProtocol,
@@ -47,6 +48,8 @@ interface Connection {
   /** Relay only: MCP client info and relay-call-id → hub-call-id map. */
   client?: ClientInfo;
   relayCalls: Map<string | number, number>;
+  /** Set when the socket sent a frame above {@link MAX_FRAME_BYTES}. */
+  oversize?: boolean;
 }
 
 /** A call waiting for the app's `result` / `error`. */
@@ -55,9 +58,6 @@ interface PendingCall {
   reject: (error: BridgeError) => void;
   timer: ReturnType<typeof setTimeout>;
 }
-
-/** Maximum frame size accepted from clients (screenshots may be large). */
-const MAX_PAYLOAD = 32 * 1024 * 1024;
 
 /** The port-owning bridge process. */
 export class Hub implements ToolBackend {
@@ -76,7 +76,7 @@ export class Hub implements ToolBackend {
   ) {
     this.wss = new WebSocketServer({
       server: http,
-      maxPayload: MAX_PAYLOAD,
+      maxPayload: MAX_FRAME_BYTES,
       // Browsers always send Origin. Reject foreign origins before the upgrade;
       // requests without Origin (CLI relays) may only authenticate as relay.
       verifyClient: (info, done) => {
@@ -171,7 +171,12 @@ export class Hub implements ToolBackend {
       this.handle(conn, data.toString());
     });
     ws.on('close', () => this.dropped(conn));
-    ws.on('error', (error) => logWarn('socket error', error));
+    ws.on('error', (error: Error & { code?: string }) => {
+      // `ws` closes the socket after an oversize frame; remember why so
+      // pending calls fail with a clear message instead of "disconnected".
+      if (error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH') conn.oversize = true;
+      logWarn('socket error', error);
+    });
     send(ws, { type: 'hello', role: 'hub', bridge: BRIDGE_VERSION, protocol: PROTOCOL_VERSION });
   }
 
@@ -189,7 +194,12 @@ export class Hub implements ToolBackend {
     if (conn === this.app) {
       this.app = null;
       logInfo('app disconnected');
-      this.failPending('app_disconnected', 'Pixelmapper disconnected while the call was running');
+      this.failPending(
+        'app_disconnected',
+        conn.oversize
+          ? `Tool result exceeded the bridge frame limit (${MAX_FRAME_BYTES} bytes) and was dropped; narrow the request (fewer entities, detail "summary").`
+          : 'Pixelmapper disconnected while the call was running',
+      );
       this.announce();
     } else if (conn.role === 'relay') {
       // Cancel the relay's in-flight calls in the app.

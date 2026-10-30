@@ -196,7 +196,7 @@ describe.skipIf(!ready)('effect acceptance through the agent tools (real engine)
     const plugin = await run('inspect', { selector: { op: 'plugins.get', input: { plugin: '@pixelmapper/corner-wave' } } });
     expect(plugin.isError, textOf(plugin)).toBeUndefined();
     // The agent sees the canvas hints and the reference source.
-    expect(textOf(plugin)).toContain('"canvas": "point"');
+    expect(textOf(plugin)).toMatch(/"canvas": ?"point"/);
     expect(textOf(plugin)).toContain('minDistToPoints');
 
     // 2. One batch: effect + control page, ids chosen by the caller.

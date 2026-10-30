@@ -44,7 +44,12 @@ async function serve(): Promise<void> {
     name: normalizeClientName(server?.getClientVersion()?.name),
     version: server?.getClientVersion()?.version,
   }));
-  server = createMcpServer({ backend, catalog, skillsDir: config.skillsDir });
+  server = createMcpServer({
+    backend,
+    catalog,
+    skillsDir: config.skillsDir,
+    maxOutputChars: config.maxOutputChars,
+  });
 
   let shuttingDown = false;
   const shutdown = async (reason: string) => {

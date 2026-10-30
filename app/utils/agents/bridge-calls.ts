@@ -5,6 +5,7 @@
  */
 import type { AgentHost, ToolDefinition } from '@pixelmapper/agent-kit';
 import { agentActor } from '@pixelmapper/agent-kit';
+import { MAX_FRAME_BYTES, frameBytes } from '~~/packages/mcp-bridge/src/protocol';
 
 // ── Helpers ─────────────────────────────────────
 
@@ -25,6 +26,14 @@ export function sanitizeClientName(value: unknown): string {
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || error.name;
   return String(error);
+}
+
+/** Error text for a result too large for one bridge frame. */
+export function oversizeMessage(tool: string, bytes: number): string {
+  return (
+    `Result of "${tool}" is too large to send (${bytes} bytes > ${MAX_FRAME_BYTES} byte frame limit). ` +
+    'Narrow the request: fewer entities, detail "summary", or a query operation.'
+  );
 }
 
 // ── Runner ──────────────────────────────────────
@@ -68,12 +77,20 @@ export class CallRunner {
       });
       // A cancelled call's late result is suppressed (the hub already gave up).
       if (!this.finish(id, controller)) return;
-      this.options.send({
+      const result = {
         type: 'result',
         id,
         content: output.content,
         ...(output.isError ? { isError: true } : {}),
-      });
+      };
+      // The hub drops sockets that send frames above its limit; answer with
+      // an explicit error instead of losing the connection and the result.
+      const bytes = frameBytes(JSON.stringify(result));
+      if (bytes > MAX_FRAME_BYTES) {
+        this.options.send({ type: 'error', id, code: 'tool_failed', message: oversizeMessage(tool.name, bytes) });
+        return;
+      }
+      this.options.send(result);
     } catch (error) {
       if (!this.finish(id, controller)) return;
       console.warn(`[agent-bridge] tool "${tool.name}" failed`, error);

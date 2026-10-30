@@ -69,6 +69,20 @@ export const CLOSE_CODES = {
   goingAway: 1001,
 } as const;
 
+/**
+ * Maximum WebSocket frame size (bytes) the hub accepts. A larger frame makes
+ * the hub drop the socket, so senders check against it first and answer with
+ * an explicit error instead (screenshots may be large, hence the headroom).
+ */
+export const MAX_FRAME_BYTES = 32 * 1024 * 1024;
+
+/** UTF-8 byte length of a serialized frame (cheap path for short strings). */
+export function frameBytes(serialized: string): number {
+  // A UTF-16 code unit encodes to at most 3 UTF-8 bytes.
+  if (serialized.length * 3 <= MAX_FRAME_BYTES) return serialized.length;
+  return new TextEncoder().encode(serialized).byteLength;
+}
+
 /** User-facing hint returned whenever no app is connected. */
 export const NO_APP_MESSAGE =
   'Pixelmapper is not connected. Open Pixelmapper and enable Settings → External agents ' +
