@@ -6,7 +6,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { makeStatus } from '../bridge/testing/fixtures';
 import { makeDescription } from '../rdm/parameter-form/testing/fixtures';
 import NodeDeviceSection from './NodeDeviceSection.vue';
 import { NODE_UID, installHost, setupNode, uninstallHost, type NodeHarness } from './testing/harness';
@@ -68,29 +67,6 @@ describe('NodeDeviceSection', () => {
     expect(h.argsOf('artAddress')).toEqual([]);
     expect(nameInput(w, 'shortName').attributes('maxlength')).toBe('17');
     expect(nameInput(w, 'longName').attributes('maxlength')).toBe('63');
-  });
-
-  it('identifies the node and switches identify off when it closes', async () => {
-    const w = await mountSection();
-    const toggle = () => w.find('[data-field="identify"] [data-pm="toggle"]');
-    await toggle().trigger('click');
-    await flushPromises();
-    expect(h.argsOf('artAddress')).toEqual([{ nodeId: NODE_UID, indicator: 'locate' }]);
-    expect(toggle().attributes('aria-checked')).toBe('false'); // until the node reports it
-    h.update({ status: makeStatus({ indicator: 'locate' }) });
-    await flushPromises();
-    expect(toggle().attributes('aria-checked')).toBe('true');
-    w.unmount();
-    wrapper = null;
-    expect(h.argsOf('artAddress').at(-1)).toEqual({ nodeId: NODE_UID, indicator: 'normal' });
-  });
-
-  it('leaves identify alone when it was started elsewhere', async () => {
-    h.update({ status: makeStatus({ indicator: 'locate' }) });
-    const w = await mountSection();
-    w.unmount();
-    wrapper = null;
-    expect(h.argsOf('artAddress')).toEqual([]);
   });
 
   it('shows firmware and identity read-only, without DEVICE_LABEL on the Pixelmapper Node', async () => {

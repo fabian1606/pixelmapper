@@ -14,6 +14,7 @@ import { FakeArtNetBackend } from '../bridge/testing/fake-backend';
 import { makeNode, makeStatus } from '../bridge/testing/fixtures';
 import { ArtNetNodeConnector } from '../node/node-connector';
 import ManualTargetPorts from './ManualTargetPorts.vue';
+import NodeNetworkSection from '../node-config/NodeNetworkSection.vue';
 import NodeConnectorSettings from './NodeConnectorSettings.vue';
 
 /** `pm.*` inputs of the node configuration, rendered as plain elements. */
@@ -58,7 +59,7 @@ describe('manual target card', () => {
     expect(wrapper.find('[data-manual-target]').exists()).toBe(true);
     expect(wrapper.text()).toContain('no ArtPollReply');
     expect(wrapper.find('[data-update-tubes]').exists()).toBe(false);
-    expect(wrapper.find('[data-node-config]').exists()).toBe(false);
+    expect(wrapper.find('[data-node-card]').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -92,7 +93,7 @@ describe('manual target card', () => {
     backend.emit({ type: 'node', node: makeNode() });
     await flushPromises();
     expect(wrapper.find('[data-manual-target]').exists()).toBe(false);
-    expect(wrapper.find('[data-node-config]').exists()).toBe(true);
+    expect(wrapper.find('[data-node-card]').exists()).toBe(true);
     expect(wrapper.find('[data-update-tubes]').exists()).toBe(true);
     wrapper.unmount();
   });
@@ -106,8 +107,33 @@ describe('device sections', () => {
     const wrapper = mount(NodeConnectorSettings, { props: { connector: c } });
     await flushPromises();
     expect(wrapper.find('[data-update-tubes]').exists()).toBe(false);
-    expect(wrapper.find('[data-node-config]').exists()).toBe(true);
+    expect(wrapper.find('[data-node-card]').exists()).toBe(true);
     expect(wrapper.text()).toContain('Port 1');
     wrapper.unmount();
+  });
+
+  it('opens “Update tubes…”, follows the node after a network change and persists what it learns', async () => {
+    const node = makeNode();
+    backend.emit({ type: 'node', node });
+    backend.handle('ipProg', () => ({ dhcp: true, ip: node.ip, mask: '255.0.0.0', gateway: '0.0.0.0' }));
+    const c = await connector(ArtNetNodeConnector.configForNode(node));
+    const wrapper = mount(NodeConnectorSettings, { props: { connector: c }, attachTo: document.body });
+    await flushPromises();
+    await wrapper.find('[data-update-tubes]').trigger('click');
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Update tube firmware');
+
+    // A network change moved the node: the card follows it.
+    await wrapper.find('[data-section="network"] > div > [data-section-toggle]').trigger('click');
+    wrapper.findComponent(NodeNetworkSection).vm.$emit('follow', { nodeId: node.nodeId, ip: '10.0.0.5' });
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([{ nodeId: node.nodeId, ip: '10.0.0.5' }]);
+    wrapper.unmount();
+
+    // What the connector learns from the network is persisted, card open or not.
+    const persist = (globalThis.__PIXELMAPPER_SHARED__!.api as unknown as { connectors: { persist: ReturnType<typeof vi.fn> } }).connectors.persist;
+    persist.mockClear();
+    backend.emit({ type: 'node', node: makeNode({ ip: '10.0.0.9' }) });
+    await nextTick();
+    expect(c.getConfig().ip).toBe('10.0.0.9');
+    expect(persist).toHaveBeenCalledWith(c.id);
   });
 });

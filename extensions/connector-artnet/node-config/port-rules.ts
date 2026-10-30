@@ -250,3 +250,44 @@ export const NODE_PORT_PIDS: readonly number[] = Array.from({ length: NODE_PORT_
   const { enabled, settings } = nodePortPids(i + 1);
   return [enabled, ...settings];
 }).flat().sort((a, b) => a - b);
+
+// ── Failsafe for the whole node (WP13) ─────────
+
+/** Ports the node-wide failsafe covers: every port that can output DMX. */
+export function failsafePorts(node: NodeState): PortState[] {
+  return node.ports.filter(p => p.canOutput);
+}
+
+/**
+ * Ports a node-wide failsafe write addresses: the first failsafe port of
+ * every BindIndex (the AcFail* commands carry no port number, so the node
+ * applies them per BindIndex anyway).
+ */
+export function failsafeTargets(node: NodeState): PortRef[] {
+  const seen = new Set<number>();
+  const targets: PortRef[] = [];
+  for (const p of failsafePorts(node)) {
+    if (seen.has(p.port.bind)) continue;
+    seen.add(p.port.bind);
+    targets.push({ ...p.port });
+  }
+  return targets;
+}
+
+/**
+ * The failsafe mode the node's ports share: that mode when every port that
+ * reports one reports the same, `mixed` when they differ, null when no
+ * port reports one (unknown ports do not count as different).
+ */
+export function sharedFailsafe(node: NodeState): FailsafeMode | 'mixed' | null {
+  const known = new Set(failsafePorts(node).map(p => p.failsafe).filter((m): m is FailsafeMode => m !== null));
+  if (known.size > 1) return 'mixed';
+  return known.size ? [...known][0]! : null;
+}
+
+/** Confirmation of “Record scene” for every port of the node. */
+export function recordAllScenesConfirm(portCount: number): string {
+  return portCount > 1
+    ? `Record the current output of all ${portCount} ports as their failsafe scenes? The stored scenes are replaced.`
+    : recordSceneConfirm('the port');
+}

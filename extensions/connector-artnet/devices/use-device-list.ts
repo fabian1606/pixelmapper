@@ -6,17 +6,22 @@
  * from the node connector.
  */
 import { computed, type ComputedRef } from 'vue';
-import { listFixtures, type FixtureId } from '@pixelmapper/extension-api';
+import { getFixture, listFixtures, type FixtureId } from '@pixelmapper/extension-api';
 import type { NodeId, PortRef, RdmUid } from '../bridge/protocol-model';
 import type { DeviceEntry } from './device-store';
 import type { DeviceRuntime } from './device-runtime';
 import { deviceLabel, presentDeviceSpans } from './addressing';
 import { conflictsOf, deviceSpanOf, formatAddress } from './conflicts';
+import { fixtureLinkState } from './fixture-link-state';
 import { linkedFixturesOf } from './link';
 import { portDisplayName, portUniverse } from './node-ports';
 
-/** State shown per device. */
-export type DeviceRowState = 'new' | 'linked' | 'conflict' | 'offline';
+/**
+ * State shown per device: `mismatch` / `unlinked` are the badge states of
+ * its linked fixture (device reports another patch / fixture moved out of
+ * the port universe), shown in the list too (WP13).
+ */
+export type DeviceRowState = 'new' | 'linked' | 'mismatch' | 'unlinked' | 'conflict' | 'offline';
 
 /** One row of the list. */
 export interface DeviceRow {
@@ -52,6 +57,13 @@ function personalityText(d: DeviceEntry): string {
   return `${info.currentPersonality}/${info.personalityCount} · ${name}`;
 }
 
+/** Row state of a present device with a linked fixture: its badge's Mismatch / Unlinked, else linked. */
+function linkedState(runtime: DeviceRuntime, fixtureId: FixtureId): DeviceRowState {
+  const view = getFixture(fixtureId);
+  const kind = view ? fixtureLinkState(runtime, view)?.status.kind : undefined;
+  return kind === 'mismatch' || kind === 'unlinked' ? kind : 'linked';
+}
+
 /** A node port without RDM (TodNak) for the list's hint. */
 export interface NoRdmPort {
   port: PortRef;
@@ -84,7 +96,7 @@ export function useDeviceList(runtime: DeviceRuntime, nodeId: () => NodeId | nul
       let state: DeviceRowState = 'new';
       if (!d.present) state = 'offline';
       else if (conflicts.length) state = 'conflict';
-      else if (fixtureId !== null) state = 'linked';
+      else if (fixtureId !== null) state = linkedState(runtime, fixtureId);
       return {
         uid: d.uid,
         port: d.port,

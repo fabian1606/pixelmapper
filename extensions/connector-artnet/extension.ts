@@ -52,7 +52,7 @@ export default defineExtension({
         create: id => new ArtNetNodeConnector(id),
         fromConfig: (id, config) => ArtNetNodeConnector.fromConfig(id, config),
         settings: NodeConnectorSettings,
-        // The settings render the port table (universe per port, D7).
+        // The card's port blocks render the universe per port (D7).
         ownsOutputMapping: true,
       }),
     ],

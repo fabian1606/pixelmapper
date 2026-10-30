@@ -1,21 +1,24 @@
 <script setup lang="ts">
 /**
- * Failsafe of one node port (plan D8, M7.3; bridge contract rev 2): what
- * the port outputs when Art-Net stops — hold, zero, full or the recorded
- * scene — and “Record scene…” for that port. The mode is per port
+ * Failsafe of one node port, shown in its port block when the card's
+ * Failsafe group is set to “Custom per port” (WP13; plan D8, M7.3; bridge
+ * contract rev 2): what the port outputs when Art-Net stops — hold, zero,
+ * full or the recorded scene — and, in Scene mode, “Record scene…”, which
+ * stores the port's current output. The mode is per port
  * (`PortState.failsafe`, per BindIndex), written with the port's
  * `artAddress` entry; the value shown is what the node reports afterwards
- * (D5). `null` = the bridge does not know it (pmnet-bridge 0.1 for ports
- * 2–4): shown as “unknown”, still writable.
+ * (D5). `null` = the bridge does not know it: shown as “unknown”, still
+ * writable.
  */
 import { computed, ref } from 'vue';
 import { useReplaceable } from '@pixelmapper/extension-api';
 import type { ArtNetBackend } from '../bridge/backend';
 import type { FailsafeMode, NodeState, PortState } from '../bridge/protocol-model';
 import { portLabel } from '../bridge/protocol-model';
-import { FAILSAFE_OPTIONS, failsafeHint, portsSharingFailsafe, recordSceneConfirm } from './port-rules';
-import { useCommandRunner } from './use-node-context';
-import ConfirmBox from './ConfirmBox.vue';
+import { FAILSAFE_OPTIONS, failsafeHint, portsSharingFailsafe, recordSceneConfirm } from '../node-config/port-rules';
+import { useCommandRunner } from '../node-config/use-node-context';
+import ConfirmBox from '../node-config/ConfirmBox.vue';
+import InfoTip from './InfoTip.vue';
 
 const props = defineProps<{
   node: NodeState;
@@ -53,6 +56,7 @@ function writeFailsafe(key: string, change: { failsafe: FailsafeMode } | { recor
 /** Sets the failsafe mode of the port. */
 function setMode(value: string) {
   recorded.value = false;
+  confirmRecord.value = false;
   void writeFailsafe('failsafe', { failsafe: value as FailsafeMode });
 }
 
@@ -64,9 +68,9 @@ async function recordScene() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1" data-failsafe>
+  <div class="flex flex-col gap-1 text-xs" data-failsafe>
     <div class="flex min-h-7 items-center gap-2">
-      <span class="w-20 shrink-0 text-muted-foreground" :title="hint">Failsafe</span>
+      <span class="flex w-24 shrink-0 items-center gap-1 text-muted-foreground">Failsafe <InfoTip topic="failsafe" /></span>
       <span v-if="mode === null" class="text-[10px] text-muted-foreground/70" :title="hint" data-failsafe-unknown>unknown</span>
       <span v-if="busy === 'failsafe'" class="text-[10px] text-muted-foreground/70">Writing…</span>
       <component
@@ -85,16 +89,18 @@ async function recordScene() {
     <div v-if="node.status.failsafeProgrammable" class="flex items-center gap-2">
       <span class="text-[10px] text-muted-foreground">{{ hint }}</span>
       <span v-if="recorded" class="text-[10px] text-primary">Scene recorded</span>
-      <button
-        v-if="!confirmRecord"
-        type="button"
-        class="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] transition-colors hover:bg-accent disabled:opacity-50"
-        :disabled="locked"
-        data-record-scene
-        @click="confirmRecord = true"
-      >
-        Record scene…
-      </button>
+      <span v-if="mode === 'scene' && !confirmRecord" class="ml-auto flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          class="rounded border border-border px-1.5 py-0.5 text-[11px] transition-colors hover:bg-accent disabled:opacity-50"
+          :disabled="locked"
+          data-record-scene
+          @click="confirmRecord = true"
+        >
+          Record scene…
+        </button>
+        <InfoTip topic="recordScene" />
+      </span>
     </div>
     <ConfirmBox v-if="confirmRecord" :message="confirmText" confirm-label="Record scene" :busy="busy === 'record'" @confirm="recordScene" @cancel="confirmRecord = false" />
     <p v-if="error" class="text-[10px] text-destructive">{{ error }}</p>

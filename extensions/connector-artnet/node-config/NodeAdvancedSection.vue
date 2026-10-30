@@ -23,7 +23,7 @@ const { description, address, loading, error } = desc;
 /** Goes up when the node changed: the form reads its values again. */
 const nodeChanges = useNodeChangeSignal(() => node.value);
 
-/** PIDs shown in the Ports section (only for the Pixelmapper Node: pids.toml numbers). */
+/** PIDs shown in the card's port blocks (only for the Pixelmapper Node: pids.toml numbers). */
 const exclude = computed(() => (desc.pixelmapperNode.value ? [...NODE_PORT_PIDS] : []));
 </script>
 

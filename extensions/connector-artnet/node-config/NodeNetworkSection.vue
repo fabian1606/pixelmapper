@@ -29,6 +29,7 @@ import {
 import { describeNodeError } from './device-rules';
 import { useCommandRunner, useNodeContext, type NodeConfigProps } from './use-node-context';
 import { useNodeFollow } from './use-node-follow';
+import InfoTip from '../card/InfoTip.vue';
 import ConfirmBox from './ConfirmBox.vue';
 
 const props = withDefaults(defineProps<NodeConfigProps & {
@@ -164,23 +165,23 @@ const BUTTON = 'px-1.5 py-0.5 rounded border border-border hover:bg-accent trans
     <p v-if="readError" class="text-[10px] text-destructive">Reading the network settings failed: {{ readError }}</p>
     <template v-if="current">
       <div class="flex min-h-7 items-center gap-2" data-field="mode">
-        <span class="w-20 shrink-0 text-muted-foreground">Address</span>
+        <span class="flex w-24 shrink-0 items-center gap-1 text-muted-foreground">Address <InfoTip topic="networkMode" /></span>
         <component :is="Select" v-if="modeOptions.length > 1" :model-value="draft.dhcp ? 'dhcp' : 'static'" :options="modeOptions" variant="segmented" size="sm" :disabled="locked" class="ml-auto w-36" @update:model-value="(v: string) => (draft.dhcp = v === 'dhcp')" />
         <span v-else class="ml-auto text-muted-foreground">Static</span>
       </div>
       <div class="flex min-h-7 items-center gap-2" data-field="ip">
-        <span class="w-20 shrink-0 text-muted-foreground">IP</span>
+        <span class="w-24 shrink-0 text-muted-foreground">IP</span>
         <input type="text" :class="INPUT" :value="draft.dhcp ? current.ip : draft.ip" :disabled="locked || draft.dhcp" aria-label="IP address" @input="draft.ip = text($event)">
       </div>
       <p v-if="errors.ip" class="text-[10px] text-destructive">{{ errors.ip }}</p>
       <div class="flex min-h-7 items-center gap-2" data-field="mask">
-        <span class="w-20 shrink-0 text-muted-foreground">Subnet mask</span>
+        <span class="w-24 shrink-0 text-muted-foreground">Subnet mask</span>
         <span v-if="draft.dhcp" class="ml-auto font-mono text-muted-foreground">{{ current.mask }}</span>
         <component :is="Select" v-else :model-value="draft.prefix === null ? '' : String(draft.prefix)" :options="maskOptions" variant="dropdown" size="sm" :disabled="locked" class="ml-auto w-48" @update:model-value="(v: string) => (draft.prefix = v === '' ? null : Number(v))" />
       </div>
       <p v-if="errors.prefix" class="text-[10px] text-destructive">{{ errors.prefix }}</p>
       <div class="flex min-h-7 items-center gap-2" data-field="gateway">
-        <span class="w-20 shrink-0 text-muted-foreground">Gateway</span>
+        <span class="w-24 shrink-0 text-muted-foreground">Gateway</span>
         <input type="text" :class="INPUT" :value="draft.dhcp ? (current.gateway === '0.0.0.0' ? '' : current.gateway) : draft.gateway" placeholder="none" :disabled="locked || draft.dhcp" aria-label="Gateway" @input="draft.gateway = text($event)">
       </div>
       <p v-if="errors.gateway" class="text-[10px] text-destructive">{{ errors.gateway }}</p>
@@ -189,6 +190,7 @@ const BUTTON = 'px-1.5 py-0.5 rounded border border-border hover:bg-accent trans
         <span v-if="reading" class="mr-auto text-[10px] text-muted-foreground/70">Reading…</span>
         <button v-if="change" type="button" :class="BUTTON" :disabled="busy !== null" @click="setCurrent(current!, true)">Discard</button>
         <button type="button" :class="BUTTON" :disabled="locked || !change || !valid || confirming !== null" data-apply @click="confirming = 'apply'">Apply…</button>
+        <InfoTip topic="networkApply" />
       </div>
       <ConfirmBox v-if="confirming === 'apply'" :message="applyConfirmMessage(draft)" :detail="CONNECTION_DROP_WARNING" confirm-label="Apply" :busy="busy === 'apply'" @confirm="apply" @cancel="confirming = null" />
     </template>

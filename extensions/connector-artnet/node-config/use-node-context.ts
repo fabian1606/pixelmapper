@@ -2,7 +2,7 @@
  * Shared plumbing of the node configuration sections (plan M7.3): the
  * backend and node directory a section talks to, the live node state, a
  * command runner with busy/error state, and the node's `rdmDescribe`
- * result shared by all sections of one panel (provide/inject).
+ * result shared by all sections of one card (provide/inject).
  *
  * State always comes from the directory (bridge events) and from replies,
  * never from what was sent (D5, last-writer-wins).
@@ -28,9 +28,6 @@ export interface NodeConfigProps {
   /** Node directory to read from; default the app-wide one. */
   directory?: NodeDirectory;
 }
-
-/** Ids of the panel's sections. */
-export type NodeConfigSectionId = 'ports' | 'network' | 'device' | 'advanced';
 
 /** What a section works with. */
 export interface NodeContext {
@@ -103,7 +100,7 @@ export interface NodeDescription {
   refresh: () => Promise<void>;
 }
 
-/** Injection key of the panel-wide description. */
+/** Injection key of the card-wide description. */
 export const NODE_DESCRIPTION_KEY: InjectionKey<NodeDescription> = Symbol('artnet-device-description');
 
 /** True when `value` has the fields the sections rely on (guards against malformed bridge answers). */
@@ -176,14 +173,14 @@ export function useNodeDescription(ctx: NodeContext): NodeDescription {
   return { description, loading, error, address, pixelmapperNode, refresh: () => load(true) };
 }
 
-/** Provides one description for all sections of a panel. */
+/** Provides one description for all sections and port blocks of a card. */
 export function provideNodeDescription(ctx: NodeContext): NodeDescription {
   const shared = useNodeDescription(ctx);
   provide(NODE_DESCRIPTION_KEY, shared);
   return shared;
 }
 
-/** The panel's description, or an own one when a section is mounted alone. */
+/** The card's description, or an own one when a section is mounted alone. */
 export function useSharedNodeDescription(ctx: NodeContext): NodeDescription {
   return inject(NODE_DESCRIPTION_KEY, null) ?? useNodeDescription(ctx);
 }

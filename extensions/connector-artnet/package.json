@@ -1,6 +1,6 @@
 {
   "name": "@pixelmapper/ext-connector-artnet",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Art-Net output through the Art-Net bridge: devices found by ArtPoll, or a device IP as a manual target.",
   "private": true,
   "type": "module",

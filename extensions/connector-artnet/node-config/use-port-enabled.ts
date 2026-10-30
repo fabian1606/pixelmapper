@@ -1,7 +1,7 @@
 /**
  * The Pixelmapper Node's RDM `PORTn_ENABLED` (pids.toml 0x8101–0x8104) for
  * the port mode “off” (plan M7.3): Art-Net cannot switch output ports off
- * (ArtInput only affects inputs, contract §5), so the Ports section reads
+ * (ArtInput only affects inputs, contract §5), so the card's port blocks read
  * these PIDs, writes them, and follows queued messages. The value shown is
  * always the node's answer (D5): a write is followed by a GET. They are also
  * re-read every 45 s while shown and whenever `rereadOn` changes (the node

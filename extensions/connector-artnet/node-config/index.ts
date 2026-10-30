@@ -1,17 +1,14 @@
 /**
- * Node configuration (plan D8, M7.3): the sections of an Art-Net node's
- * connector card — Ports, Network, Device, Advanced — and the panel that
- * stacks them. Every section takes the node's `nodeId` (plus optional
- * `backend` / `directory`, default the app-wide ones) and reads the live
- * node from the node directory. The pure rules behind them are exported
- * for reuse and tests.
+ * Node configuration (plan D8, M7.3): the node-level sections of an
+ * Art-Net card — Network, Device, Advanced — the shared plumbing and the
+ * pure rules (ports, network, device). The port settings themselves live
+ * in the card's port blocks (`card/`, WP13). Every section takes the
+ * node's `nodeId` (plus optional `backend` / `directory`, default the
+ * app-wide ones) and reads the live node from the node directory.
  */
-export { default as NodeConfigPanel } from './NodeConfigPanel.vue';
-export { default as NodePortsSection } from './NodePortsSection.vue';
 export { default as NodeNetworkSection } from './NodeNetworkSection.vue';
 export { default as NodeDeviceSection } from './NodeDeviceSection.vue';
 export { default as NodeAdvancedSection } from './NodeAdvancedSection.vue';
-export { default as NodePortFailsafe } from './NodePortFailsafe.vue';
 export {
   NODE_DESCRIPTION_KEY,
   isDeviceDescription,
@@ -22,7 +19,6 @@ export {
   useSharedNodeDescription,
   type CommandRunner,
   type NodeConfigProps,
-  type NodeConfigSectionId,
   type NodeContext,
   type NodeDescription,
 } from './use-node-context';

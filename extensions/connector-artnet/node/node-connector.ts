@@ -225,8 +225,8 @@ export class ArtNetNodeConnector extends ConnectorBase {
 
   // ── Internals ────────────────────────────────
 
-  /** Shared backend/directory unless injected. */
-  private get deps(): NodeConnectorDeps {
+  /** Backend and node directory this connector talks to: the shared ones unless injected (the card uses the same). */
+  get deps(): NodeConnectorDeps {
     return this.injected ?? { backend: getArtNetBackend(), directory: getNodeDirectory(), retain: retainArtNetDiscovery };
   }
 

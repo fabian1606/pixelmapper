@@ -4,7 +4,7 @@
  * one Pixelmapper Node, and a fake RDM responder for the node's UID
  * (parameter data by PID, description from pids.toml). Not used at runtime.
  */
-import { computed, defineComponent, h, type Component } from 'vue';
+import { computed, defineComponent, h, shallowRef, type Component } from 'vue';
 import type { PmInputName, SharedGlobals } from '@pixelmapper/extension-api';
 import { BridgeCommandError } from '../../bridge/backend';
 import { NodeDirectory } from '../../bridge/node-directory';
@@ -57,7 +57,14 @@ const STUBS: Partial<Record<PmInputName, Component>> = { 'pm.numberInput': Numbe
 export function installHost(): void {
   globalThis.__PIXELMAPPER_SHARED__ = {
     vue: {}, pinia: {},
-    api: { useReplaceable: (name: PmInputName) => computed(() => STUBS[name]) } as unknown as SharedGlobals['api'],
+    api: {
+      useReplaceable: (name: PmInputName) => computed(() => STUBS[name]),
+      // What the card and the connector read besides the `pm.*` inputs.
+      useScope: () => shallowRef({ fixtures: [] }),
+      listFixtures: () => [],
+      getFixture: () => undefined,
+      connectors: { persist: () => {} },
+    } as unknown as SharedGlobals['api'],
   };
 }
 
