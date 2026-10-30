@@ -3,7 +3,7 @@
  * Advanced settings of one output port, collapsed inside its card block
  * (WP13; moved from the former node-config port row, plan D8/M7.3): merge
  * HTP/LTP, output style, and on the Pixelmapper Node the port's own PIDs —
- * DMX break, mark-after-break, refresh rate and background discovery —
+ * DMX break, mark-after-break, refresh rate, background discovery and the XB proxy for stock tubes —
  * through the generic RDM parameter form. Writes go through ArtAddress and
  * RDM; the values shown are the node's answers (D5).
  */

@@ -124,9 +124,9 @@ describe('node port PIDs (pids.toml)', () => {
     expect(nodePortNumber({ bind: 3, index: 0 })).toBe(3);
     expect(nodePortNumber({ bind: 5, index: 0 })).toBeNull();
     expect(nodePortNumber({ bind: 1, index: 1 })).toBeNull();
-    expect(nodePortPids(1)).toEqual({ enabled: 0x8101, settings: [0x8110, 0x8114, 0x8118, 0x8120] });
-    expect(nodePortPids(4)).toEqual({ enabled: 0x8104, settings: [0x8113, 0x8117, 0x811b, 0x8123] });
-    expect(NODE_PORT_PIDS).toHaveLength(20);
+    expect(nodePortPids(1)).toEqual({ enabled: 0x8101, settings: [0x8110, 0x8114, 0x8118, 0x8120, 0x8160] });
+    expect(nodePortPids(4)).toEqual({ enabled: 0x8104, settings: [0x8113, 0x8117, 0x811b, 0x8123, 0x8163] });
+    expect(NODE_PORT_PIDS).toHaveLength(24);
     expect(NODE_PORT_PIDS).not.toContain(0x8124); // RDM_BG_DISCOVERY_INTERVAL is node-wide
   });
 });

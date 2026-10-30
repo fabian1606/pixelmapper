@@ -232,6 +232,8 @@ export const NODE_PORT_PID_BASE = {
   dmxRate: 0x8118,
   /** PORTn_RDM_BG_DISCOVERY, bool. */
   rdmBgDiscovery: 0x8120,
+  /** PORTn_XB_ENABLED, bool: XB-R1 proxy for stock tubes (contract §6.5). */
+  xbEnabled: 0x8160,
 } as const;
 
 /** Port number 1–4 of a Pixelmapper Node port (one port per BindIndex, contract §3), else null. */
@@ -239,10 +241,10 @@ export function nodePortNumber(port: PortRef): number | null {
   return port.index === 0 && port.bind >= 1 && port.bind <= NODE_PORT_COUNT ? port.bind : null;
 }
 
-/** `PORTn_ENABLED` and the further per-port PIDs (break, MAB, rate, background discovery) of port `n`. */
+/** `PORTn_ENABLED` and the further per-port PIDs (break, MAB, rate, background discovery, XB) of port `n`. */
 export function nodePortPids(n: number): { enabled: number; settings: number[] } {
   const b = NODE_PORT_PID_BASE;
-  return { enabled: b.enabled + n - 1, settings: [b.dmxBreak, b.dmxMab, b.dmxRate, b.rdmBgDiscovery].map(pid => pid + n - 1) };
+  return { enabled: b.enabled + n - 1, settings: [b.dmxBreak, b.dmxMab, b.dmxRate, b.rdmBgDiscovery, b.xbEnabled].map(pid => pid + n - 1) };
 }
 
 /** Every per-port PID of the node (left out of the Advanced section, which shows the rest). */

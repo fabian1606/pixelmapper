@@ -157,8 +157,8 @@ export const TUBE_BOOTLOADER_PIDS: ReadonlySet<number> = new Set([0x8000, 0x8010
  */
 export const NODE_FLOW_PIDS: ReadonlySet<number> = new Set([0x8140, 0x8142, 0x8181, 0x8182, 0x8183]);
 
-/** pids.toml PIDs of type `bool`: PORTn_ENABLED, PORTn_RDM_BG_DISCOVERY, PANEL_LOCK. */
-const NODE_BOOL_PIDS = [0x8101, 0x8102, 0x8103, 0x8104, 0x8120, 0x8121, 0x8122, 0x8123, 0x8132];
+/** pids.toml PIDs of type `bool`: PORTn_ENABLED, PORTn_RDM_BG_DISCOVERY, PANEL_LOCK, PORTn_XB_ENABLED. */
+const NODE_BOOL_PIDS = [0x8101, 0x8102, 0x8103, 0x8104, 0x8120, 0x8121, 0x8122, 0x8123, 0x8132, 0x8160, 0x8161, 0x8162, 0x8163];
 
 /** Overrides of node PIDs (pids.toml), by PID. */
 const NODE_OVERRIDES: ReadonlyMap<number, ParameterOverride> = new Map<number, ParameterOverride>([
