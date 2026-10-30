@@ -4,8 +4,9 @@
  *
  * They wrap the commands in `live-widget-commands.ts` so an agent can build
  * a performer control page for an effect (sliders bound to modifier params
- * via `effect-param` mappings, buttons for presets / global functions or
- * bool / trigger params, xy pads for point params).
+ * via `effect-param` mappings, xy pads for point params, buttons running a
+ * script of actions for presets / global functions or bool / trigger params;
+ * see `live-button-actions.ts`).
  *
  * Grid: a page is `columns` cells wide (default 60); cells are square, so
  * the visible height is `rows = floor(columns · aspectRatioH / aspectRatioW)`
@@ -42,6 +43,19 @@ import {
   mappingSummary,
   toLiveMapping,
 } from './live-mapping';
+import {
+  BUTTON_ACTIONS_DOC,
+  ButtonActionInputSchema,
+  ButtonAppearanceSchema,
+  ButtonInputsSchema,
+  actionsSummary,
+  buttonActionFindings,
+  fromButtonAction,
+  mappingToButtonAction,
+  toAppearance,
+  toButtonActions,
+  toInputs,
+} from './live-button-actions';
 
 // ── Shared schemas ──────────────────────────────
 
@@ -73,6 +87,7 @@ const MAPPING_DOC = [
   '- preset { presetId }, page-switch { targetPageId }, global-function { function: strobe|blind|blackout|speed, config? }, position-recall { positionId }: buttons only.',
   '- none: no action (color, label, beat, fixture-preview widgets ignore mappings).',
   'A mapping (or effect-param param type) a widget type cannot drive is stored but reported as a warning (mapping-ignored-by-widget).',
+  BUTTON_ACTIONS_DOC,
 ].join('\n');
 
 /** Widget view returned by `live.listPages`. */
@@ -85,8 +100,11 @@ const LiveWidgetInfoSchema = z.object({
   gridY: z.number(),
   gridW: z.number(),
   gridH: z.number(),
-  mapping: z.record(z.string(), z.unknown()).describe('Mapping in the input shape of live.addWidget (effect-param uses modifierId).'),
-  mappingSummary: z.string().describe('One-line summary, e.g. "effect-param: modifier m1 → speed".'),
+  mapping: z.record(z.string(), z.unknown()).optional().describe('Mapping in the input shape of live.addWidget (effect-param uses modifierId). Not for buttons (they use actions).'),
+  actions: z.array(z.record(z.string(), z.unknown())).optional().describe('Button script in the input shape of live.addWidget `actions` (buttons only).'),
+  appearance: z.record(z.string(), z.unknown()).optional().describe('Button look (buttons only, when set).'),
+  inputs: z.record(z.string(), z.unknown()).optional().describe('Keyboard / MIDI inputs (buttons only, when set).'),
+  mappingSummary: z.string().describe('One-line summary, e.g. "effect-param: modifier m1 → speed"; buttons: "<trigger> → <action>" per action, joined by "; ".'),
 });
 
 /** Page view returned by `live.listPages`. */
@@ -163,7 +181,7 @@ function belowPageFinding(page: LivePage, widget: LiveWidget): Finding[] {
   }];
 }
 
-/** Postconditions shared by addWidget/updateWidget: widget exists, mapping valid. */
+/** Postconditions shared by addWidget/updateWidget: widget exists, mapping (or button script) valid. */
 function widgetFindings(read: CoreReadApi, pageId: string, widgetId: string): Finding[] {
   const page = findPage(read, pageId);
   const widget = page?.widgets.find(w => w.id === widgetId);
@@ -173,14 +191,47 @@ function widgetFindings(read: CoreReadApi, pageId: string, widgetId: string): Fi
   if (!(LIVE_WIDGET_TYPES as readonly string[]).includes(widget.type)) {
     return [{ level: 'error', code: 'invalid-widget-type', message: `unknown widget type "${widget.type}"`, entityIds: [`liveWidget:${widgetId}`] }];
   }
-  return [...mappingFindings(read, widget.type, widget.mapping, widget.id), ...belowPageFinding(page, widget)];
+  const control = widget.type === 'button'
+    ? buttonActionFindings(read, widget.id, widget.actions)
+    : mappingFindings(read, widget.type, widget.mapping, widget.id);
+  return [...control, ...belowPageFinding(page, widget)];
+}
+
+/** Button-only fields of the add / update inputs. */
+interface ButtonFieldsInput {
+  mapping?: z.infer<typeof LiveMappingInputSchema>;
+  actions?: z.infer<typeof ButtonActionInputSchema>[];
+  appearance?: z.infer<typeof ButtonAppearanceSchema> | null;
+  inputs?: z.infer<typeof ButtonInputsSchema> | null;
+}
+
+/**
+ * Button fields to store from an add / update input: `actions` (or one
+ * action translated from `mapping`), `appearance` and `inputs` (`null`
+ * clears). Throws when both `mapping` and `actions` are given, or when a
+ * non-button widget gets button-only fields.
+ */
+function buttonPatch(read: CoreReadApi, type: string, input: ButtonFieldsInput): Partial<Pick<LiveWidget, 'actions' | 'appearance' | 'inputs'>> {
+  const out: Partial<Pick<LiveWidget, 'actions' | 'appearance' | 'inputs'>> = {};
+  if (type !== 'button') {
+    const extra = (['actions', 'appearance', 'inputs'] as const).filter(k => input[k] !== undefined);
+    if (extra.length) throw new Error(`${extra.join(', ')} ${extra.length > 1 ? 'are' : 'is'} for button widgets only (a ${type} widget uses \`mapping\`)`);
+    return out;
+  }
+  if (input.mapping && input.actions) throw new Error('pass either `mapping` (one action) or `actions` (the whole script) for a button, not both');
+  if (input.actions) out.actions = toButtonActions(read, input.actions);
+  else if (input.mapping) out.actions = [mappingToButtonAction(read, toLiveMapping(read, input.mapping))];
+  if (input.appearance !== undefined) out.appearance = input.appearance ? toAppearance(input.appearance) : undefined;
+  if (input.inputs !== undefined) out.inputs = input.inputs ? toInputs(input.inputs) : undefined;
+  return out;
 }
 
 // ── Views ───────────────────────────────────────
 
 /**
- * Agent-facing view of a widget: the mapping in the input shape of
- * `live.addWidget` (`modifierId`, bare param key) plus a one-line summary.
+ * Agent-facing view of a widget: the mapping (buttons: the action script,
+ * appearance, inputs) in the input shape of `live.addWidget` (`modifierId`,
+ * bare param key) plus a one-line summary.
  */
 export function liveWidgetView(w: LiveWidget): z.infer<typeof LiveWidgetInfoSchema> {
   return {
@@ -192,8 +243,14 @@ export function liveWidgetView(w: LiveWidget): z.infer<typeof LiveWidgetInfoSche
     gridY: w.gridY,
     gridW: w.gridW,
     gridH: w.gridH,
-    mapping: fromLiveMapping(w.mapping),
-    mappingSummary: mappingSummary(w.mapping),
+    ...(w.type === 'button'
+      ? {
+          actions: (w.actions ?? []).map(fromButtonAction),
+          ...(w.appearance ? { appearance: { ...w.appearance } } : {}),
+          ...(w.inputs ? { inputs: JSON.parse(JSON.stringify(w.inputs)) as Record<string, unknown> } : {}),
+          mappingSummary: actionsSummary(w.actions),
+        }
+      : { mapping: fromLiveMapping(w.mapping), mappingSummary: mappingSummary(w.mapping) }),
   };
 }
 
@@ -217,9 +274,9 @@ export const liveListPages = defineCoreOperation({
   id: 'live.listPages',
   kind: 'query',
   description: [
-    'List live control pages with their widgets (id, type, label, color, grid position/size, mapping).',
+    'List live control pages with their widgets (id, type, label, color, grid position/size, mapping; buttons: actions, appearance, inputs).',
     GRID_DOC,
-    'Mappings are returned in the input shape of live.addWidget plus a one-line mappingSummary.',
+    'Mappings and button actions are returned in the input shape of live.addWidget plus a one-line mappingSummary.',
   ].join('\n'),
   input: z.object({ pageId: z.string().optional().describe('Only this page.') }),
   output: z.object({ pages: z.array(LivePageInfoSchema) }),
@@ -281,7 +338,7 @@ export const liveAddWidget = defineCoreOperation({
     GRID_DOC,
     'Omit gridX/gridY to auto-place at the first free spot (rows top→bottom, cells left→right, no overlap; below all widgets when the page is full). Omitted gridW/gridH use the default size.',
     MAPPING_DOC,
-    'Errors (rolled back): unknown page, widget wider than the page, effect-param to a missing modifier/param, missing fixture/group/page target.',
+    'Errors (rolled back): unknown page, widget wider than the page, effect-param to a missing modifier/param, missing fixture/group/page/preset target.',
   ].join('\n'),
   input: z.object({
     pageId: z.string().describe('Target page (live.listPages / live.addPage).'),
@@ -292,7 +349,10 @@ export const liveAddWidget = defineCoreOperation({
     gridW: GridSize.optional().describe('Width in cells (default per type).'),
     gridH: GridSize.optional().describe('Height in cells (default per type).'),
     color: HexColor.optional().describe('Widget color (#rrggbb), e.g. the button fill.'),
-    mapping: LiveMappingInputSchema.optional().describe('What the widget controls (default none).'),
+    mapping: LiveMappingInputSchema.optional().describe('What the widget controls (default none). On a button: shortcut for one action with a fitting trigger.'),
+    actions: z.array(ButtonActionInputSchema).min(1).optional().describe('Button script (buttons only; instead of mapping).'),
+    appearance: ButtonAppearanceSchema.optional().describe('Button look (buttons only).'),
+    inputs: ButtonInputsSchema.optional().describe('Keyboard / MIDI that press the button (buttons only).'),
   }),
   output: z.object({ widgetId: z.string(), gridX: z.number(), gridY: z.number(), gridW: z.number(), gridH: z.number() }),
   produces: ['live.addWidget'],
@@ -301,7 +361,21 @@ export const liveAddWidget = defineCoreOperation({
     { input: { pageId: 'page-1', type: 'slider', label: 'Count', gridX: 2, gridY: 0, mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'count' } }, note: 'Slider driving the plugin param "count".' },
     { input: { pageId: 'page-1', type: 'button', label: 'Strobe', color: '#ffffff', mapping: { type: 'global-function', function: 'strobe' } } },
     { input: { pageId: 'page-1', type: 'xy', label: 'Center', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'center' } }, note: 'XY pad driving the point param "center" (x/y 0–1).' },
-    { input: { pageId: 'page-1', type: 'button', label: 'Invert', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'invert', behavior: 'hold' } }, note: 'Button setting the bool param "invert" while held.' },
+    { input: { pageId: 'page-1', type: 'button', label: 'Invert', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'invert', behavior: 'hold' } }, note: 'Button setting the bool param "invert" while held (stored as one "hold" action).' },
+    { input: { pageId: 'page-1', type: 'button', label: 'Hit', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'hit' }, inputs: { key: 'Space' } }, note: 'Button pressing / releasing the trigger param "hit" (one "hold" action), also played with the space bar.' },
+    {
+      input: {
+        pageId: 'page-1',
+        type: 'button',
+        label: 'Drop',
+        actions: [
+          { trigger: 'press', action: { type: 'preset', presetId: 'preset-drop' } },
+          { trigger: 'long', action: { type: 'global-function', function: 'stop-all' }, hold: { mode: 'beats', beats: 2 } },
+        ],
+        appearance: { active: 'pulse' },
+      },
+      note: 'Scripted button: press switches the preset, holding 2 beats stops everything.',
+    },
   ],
   run(ctx, input) {
     const page = findPage(ctx.read, input.pageId);
@@ -316,7 +390,9 @@ export const liveAddWidget = defineCoreOperation({
     const widget = defaultLiveWidget(input.type, spot.x, spot.y, [w, h]);
     if (input.label !== undefined) widget.label = input.label;
     if (input.color !== undefined) widget.color = input.color;
-    if (input.mapping) widget.mapping = toLiveMapping(ctx.read, input.mapping);
+    // Buttons store a script of actions; the other widgets one mapping.
+    Object.assign(widget, buttonPatch(ctx.read, input.type, input));
+    if (input.mapping && input.type !== 'button') widget.mapping = toLiveMapping(ctx.read, input.mapping);
     return {
       kind: 'mutation',
       commands: [new AddLiveWidgetCommand(page.id, widget)],
@@ -331,7 +407,7 @@ export const liveUpdateWidget = defineCoreOperation({
   id: 'live.updateWidget',
   kind: 'mutation',
   description: [
-    'Update a widget\'s label, color, grid position/size and/or mapping; omitted fields stay unchanged, `null` clears label/color, `mapping` replaces the whole mapping.',
+    'Update a widget\'s label, color, grid position/size and/or mapping (buttons: actions, appearance, inputs); omitted fields stay unchanged, `null` clears label/color/appearance/inputs, `mapping` replaces the whole mapping (on a button: the whole script, with one action), `actions` the whole script.',
     GRID_DOC,
     MAPPING_DOC,
   ].join('\n'),
@@ -344,9 +420,12 @@ export const liveUpdateWidget = defineCoreOperation({
     gridY: GridCoord.optional(),
     gridW: GridSize.optional(),
     gridH: GridSize.optional(),
-    mapping: LiveMappingInputSchema.optional().describe('Replacement mapping.'),
+    mapping: LiveMappingInputSchema.optional().describe('Replacement mapping (on a button: replaces the script with one action).'),
+    actions: z.array(ButtonActionInputSchema).min(1).optional().describe('Replacement button script (buttons only).'),
+    appearance: ButtonAppearanceSchema.nullable().optional().describe('Replacement button look; null resets to the default (buttons only).'),
+    inputs: ButtonInputsSchema.nullable().optional().describe('Replacement keyboard / MIDI inputs; null removes them (buttons only).'),
   }),
-  output: z.object({ widgetId: z.string(), changed: z.array(z.string()).describe('Changed field groups: "grid", "label", "color", "mapping".') }),
+  output: z.object({ widgetId: z.string(), changed: z.array(z.string()).describe('Changed field groups: "grid", "label", "color", "mapping", "actions", "appearance", "inputs".') }),
   produces: ['live.moveWidget', 'live.updateMapping'],
   examples: [
     { input: { pageId: 'page-1', widgetId: 'w-1', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'strength' } }, note: 'Rebind a slider to the strength.' },
@@ -370,8 +449,8 @@ export const liveUpdateWidget = defineCoreOperation({
       changed.push('grid');
     }
 
-    // Label / color / mapping: one mapping command with the given keys.
-    const patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color'>> = {};
+    // Label / color / mapping / button fields: one mapping command with the given keys.
+    const patch: Partial<Pick<LiveWidget, 'mapping' | 'label' | 'color' | 'actions' | 'appearance' | 'inputs'>> = {};
     if (input.label !== undefined) {
       patch.label = input.label ?? undefined;
       changed.push('label');
@@ -380,13 +459,20 @@ export const liveUpdateWidget = defineCoreOperation({
       patch.color = input.color ?? undefined;
       changed.push('color');
     }
-    if (input.mapping) {
+    if (input.mapping && widget.type !== 'button') {
       patch.mapping = toLiveMapping(ctx.read, input.mapping);
       changed.push('mapping');
     }
+    // Buttons: `mapping` / `actions` replace the script; appearance / inputs.
+    const buttonFields = buttonPatch(ctx.read, widget.type, input);
+    for (const key of ['actions', 'appearance', 'inputs'] as const) {
+      if (!(key in buttonFields)) continue;
+      Object.assign(patch, { [key]: buttonFields[key] });
+      changed.push(key);
+    }
     if (Object.keys(patch).length) commands.push(new UpdateWidgetMappingCommand(page.id, widget.id, patch));
 
-    if (!changed.length) throw new Error('nothing to update: pass label, color, gridX/gridY/gridW/gridH or mapping');
+    if (!changed.length) throw new Error('nothing to update: pass label, color, gridX/gridY/gridW/gridH, mapping or (buttons) actions/appearance/inputs');
     return { kind: 'mutation', commands, value: { widgetId: widget.id, changed } };
   },
   verify: (ctx, input) => widgetFindings(ctx.read, input.pageId, input.widgetId),

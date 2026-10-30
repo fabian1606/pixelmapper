@@ -1169,7 +1169,13 @@
           "name": "mapping",
           "type": "Record<string, Json>",
           "optional": false,
-          "doc": "Mapping record (shape depends on `mapping.type`)."
+          "doc": "Mapping record of sliders (shape depends on `mapping.type`)."
+        },
+        {
+          "name": "actions",
+          "type": "Record<string, Json>[]",
+          "optional": true,
+          "doc": "Button script: `{ id, trigger, action, duration?, hold? }` per step (buttons only)."
         },
         {
           "name": "extensionData",
@@ -2449,7 +2455,7 @@
       "id": "live.listPages",
       "kind": "query",
       "namespace": "live",
-      "summary": "List live control pages with their widgets (id, type, label, color, grid position/size, mapping)."
+      "summary": "List live control pages with their widgets (id, type, label, color, grid position/size, mapping; buttons: actions, appearance, inputs)."
     },
     {
       "id": "live.removeWidget",
@@ -2461,7 +2467,7 @@
       "id": "live.updateWidget",
       "kind": "mutation",
       "namespace": "live",
-      "summary": "Update a widget's label, color, grid position/size and/or mapping; omitted fields stay unchanged, `null` clears label/color, `mapping` replaces the whole mapping."
+      "summary": "Update a widget's label, color, grid position/size and/or mapping (buttons: actions, appearance, inputs); omitted fields stay unchanged, `null` clears label/color/appearance/inputs, `mapping` replaces the whole mapping (on a button: the whole script, with one action), `actions` the whole script."
     },
     {
       "id": "modifiers.add",
