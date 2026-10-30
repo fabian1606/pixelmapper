@@ -67,6 +67,7 @@ bun run mcp help
 | `PIXELMAPPER_MCP_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000,tauri://localhost,http://tauri.localhost` | Allowed app origins (comma-separated; `*` disables the check) |
 | `PIXELMAPPER_MCP_TOKEN_FILE` | `~/.pixelmapper/mcp-token` | Pairing token file |
 | `PIXELMAPPER_MCP_TOOL_CACHE` | `~/.pixelmapper/mcp-tools.json` | Last-known tool list (served while the app is closed) |
+| `PIXELMAPPER_MCP_MAX_OUTPUT_CHARS` | `40000` | Text budget per tool result. Larger results are cut by the bridge with an explicit `[output truncated …]` notice (never silently); JSON over 8 000 characters is sent compact |
 | `PIXELMAPPER_MCP_CALL_TIMEOUT_MS` | `60000` | Per-call timeout |
 | `PIXELMAPPER_MCP_APP_WAIT_MS` | `8000` | How long a call waits for a connected app (start-up, relay handshake, app reconnect) before failing with `no_app` |
 | `PIXELMAPPER_SKILLS_DIR` | `<repo>/docs/ai/skills` | Root scanned for MCP prompts (`**/prompts/*.md`) |
