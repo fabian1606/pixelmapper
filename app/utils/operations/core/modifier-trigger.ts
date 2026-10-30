@@ -53,7 +53,7 @@ export const modifiersTrigger = defineCoreOperation({
     'Press, release or click a trigger param of a modifier like a performer on the card button / a live button: momentary input, NO undo step, not rolled back, skipped on dryRun.',
     'action: "press" (held until "release"), "release", or "click" (press + release; `clicks` > 1 sends a multi-click burst within the plugin\'s multi-click window, so the plugin sees clicks = n). On a held trigger the first click\'s press is a no-op, so the hold counts as the first click.',
     'Returns engineTimeMs: the engine-clock time of the edge(s), the same clock as the plugin\'s ctx.timeMs / pressedAt / releasedAt. Follow with a live observe to verify hold, release or double-click behavior.',
-    'Never write trigger timestamps with modifiers.update; use this op. Errors when the modifier is unknown or paramKey is not a trigger param.',
+    'Address the modifier with `modifierId` (alias `id`). Never write trigger timestamps with modifiers.update; use this op. Errors when the modifier is unknown or paramKey is not a trigger param.',
   ].join('\n'),
   input: z.object({
     modifierId: ModifierIdSchema,

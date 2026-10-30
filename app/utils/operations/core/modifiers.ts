@@ -36,7 +36,7 @@ export const ClientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'use 1�
 
 /** Modifier id list input (`modifierIds`; a single `modifierId` / `id` is accepted as alias). */
 const ModifierIdListSchema = z.array(ModifierIdSchema, {
-  error: iss => (iss.input === undefined ? 'required: pass the modifier ids as "modifierIds" (a single "modifierId" or "id" is accepted as alias)' : undefined),
+  error: iss => (iss.input === undefined ? 'required: pass `modifierIds` (or a single `modifierId` / `id` as alias): the modifier instance ids from modifiers.list' : undefined),
 }).min(1);
 
 /** One `SetModifiersCommand` from the current list to `after`. */
@@ -107,7 +107,7 @@ const FIELD_DOCS = [
   'targets: { fixtureIds?, groupIds?, signature?, channelTypes? } — groups expand to their fixtures; omit ids to target every fixture offering the signature. signature: rgb (color), panTilt (movement), scalar (single channels such as DIMMER).',
   'spread (the card\'s "Spread" dropdown): { type: "same" } all fixtures equal | { type: "spatial", mode?: linear|radial|conical, direction?, origin?: {x,y}, end?: {x,y}, reverse? } a gradient across the room in normalized world coords 0–1 (x left→right, y top→bottom) | { type: "order", direction?, ranks?: { [fixtureId]: rank 0.. } or fixtureOrder?: [ids in run order], reverse? } fixture by fixture | { type: "within", offset?: none|order } over the heads/pixels inside each fixture.',
   'Direction: chases and gradients run LEFT→RIGHT along x by default (fixtures with the same x move together; top→bottom when all targets share one x). Choose another with direction: "left-to-right" | "right-to-left" | "top-to-bottom" | "bottom-to-top", or exact origin/end, fixtureOrder/ranks; reverse flips it.',
-  'speed: { mode: "beat", value: beats per cycle (1 = one beat, 4 = one bar), beatOffset? } | { mode: "time", value: seconds per cycle } | { mode: "infinite" } (frozen). strength 0–1.',
+  'speed: { mode: "beat", value: beats per cycle (1 = one beat, 4 = one bar), beatOffset? } | { mode: "time", value: seconds per cycle } | { mode: "infinite" } (frozen). Every speed key is optional and merged onto the current speed (add: the recipe\'s): { value: 2 } keeps the mode, { mode: "time" } keeps the stored seconds; value is invalid in infinite mode. strength 0–1.',
   BLEND_DOCS,
   'params: partial values by key, validated against the plugin\'s param schema (plugins.get lists keys, types, ranges and enum options).',
 ].join('\n');
@@ -208,7 +208,7 @@ export const modifiersUpdate = defineCoreOperation({
   id: 'modifiers.update',
   kind: 'mutation',
   description: [
-    'Change fields of an existing modifier; omitted fields stay. params are merged by key (only the given keys change); speed merges too (omit value to keep it).',
+    'Change fields of an existing modifier (`modifierId`, alias `id`); omitted fields stay. params merge by key; speed merges too (any subset of mode / value / beatOffset, e.g. { value: 2 } keeps the mode).',
     'targets replace the target fixtures when fixtureIds/groupIds are given. spread switches like the card\'s dropdown: other distribution fields (handle, ranks) are kept unless given. To change the plugin, remove and add.',
     FIELD_DOCS,
   ].join('\n'),
@@ -217,6 +217,7 @@ export const modifiersUpdate = defineCoreOperation({
   produces: ['SetModifiers', 'SetChannelValues'],
   examples: [
     { input: { modifierId: 'mod-1', params: { invert: true }, speed: { mode: 'beat', value: 2 } } },
+    { input: { modifierId: 'mod-1', speed: { value: 8 } }, note: 'Slower: 8 per cycle in the current mode (beats or seconds).' },
     { input: { modifierId: 'mod-1', spread: { type: 'spatial', mode: 'radial' } }, note: 'Radial from the targets\' center.' },
     { input: { modifierId: 'mod-1', targets: { groupIds: ['left-wall'] } } },
     { input: { modifierId: 'mod-1', color: '#ff0000' }, note: 'Recolor a chase: sets the targets\' base color.' },
@@ -240,7 +241,7 @@ export const modifiersUpdate = defineCoreOperation({
 export const modifiersRemove = defineCoreOperation({
   id: 'modifiers.remove',
   kind: 'mutation',
-  description: 'Remove modifiers from the stack by id (the whole instance, for all its target fixtures). Unknown ids fail the operation.',
+  description: 'Remove modifiers from the stack by id (the whole instance, for all its target fixtures). Pass `modifierIds` (a single `modifierId` or `id` is accepted as alias; several keys must name the same ids). Unknown ids fail the operation.',
   input: z.object({ modifierIds: ModifierIdListSchema.describe('Ids to remove. Alias: a single "modifierId" or "id".') }),
   output: z.object({ removed: z.array(z.string()) }),
   produces: ['SetModifiers'],
@@ -290,6 +291,7 @@ export const modifiersApplyRecipe = defineCoreOperation({
   description: [
     'Apply one of the plugin\'s recipes (named complete looks, see plugins.get) to an existing modifier, like clicking it in the card\'s preset bar.',
     'Replaces all params, and the speed / spread / strength fields the recipe sets; targets, blend and the remaining fields stay. When the recipe changes the spread mode, its handle and order are placed on the modifier\'s targets.',
+    'Address the modifier with `modifierId` (alias `id`).',
   ].join('\n'),
   input: z.object({
     modifierId: ModifierIdSchema,

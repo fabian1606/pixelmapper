@@ -121,7 +121,7 @@ describe('modifiers.trigger', () => {
       [{ modifierId: 'fl-1', paramKey: 'boom', action: 'press' }, /no param "boom" \(trigger params: hit\)/],
       [{ modifierId: 'fl-1', paramKey: 'level', action: 'press' }, /is a number param, not a trigger/],
       [{ modifierId: 'fl-1', paramKey: 'hit', action: 'press', clicks: 2 }, /clicks is only valid with action "click"/],
-      [{ paramKey: 'hit', action: 'press' }, /modifierId: required: pass the modifier id as "modifierId"/],
+      [{ paramKey: 'hit', action: 'press' }, /modifierId: required: pass `modifierId` \(or its alias `id`\)/],
     ];
     for (const [input, message] of cases) {
       const res = await apply({ label: 'Bad', ops: [{ op: 'modifiers.trigger', input }] });
@@ -161,6 +161,6 @@ describe('modifierId alias', () => {
   it('names the canonical key when the id is missing', async () => {
     const res = await apply({ label: 'Missing', ops: [{ op: 'modifiers.applyRecipe', input: { recipe: 'x' } }] });
     expect(res.findings[0]).toMatchObject({ level: 'error', code: 'invalid-input' });
-    expect(res.findings[0]!.message).toContain('modifierId: required: pass the modifier id as "modifierId" ("id" is accepted as alias');
+    expect(res.findings[0]!.message).toContain('modifierId: required: pass `modifierId` (or its alias `id`)');
   });
 });

@@ -33,7 +33,9 @@ export async function runQuery(deps: InspectDeps, id: string, input: unknown): P
   }
   if (def.kind !== 'query') throw new Error(`"${id}" is a ${def.kind}; run it with the apply tool.`);
   // Accept key aliases (`id` for `modifierId`) before validation.
-  const parsed = def.input.safeParse(normalizeInputAliases(def.input, input ?? {}));
+  const aliased = normalizeInputAliases(def.input, input ?? {});
+  if (!aliased.ok) throw new Error(`${id}: ${aliased.message}`);
+  const parsed = def.input.safeParse(aliased.input);
   if (!parsed.success) {
     throw new Error(`${id}: ${parsed.error.issues.map(i => `${i.path.map(String).join('.') || '(input)'}: ${i.message}`).join('; ')}`);
   }
