@@ -432,8 +432,11 @@ export const useEngineStore = defineStore('engine', () => {
 
   // ── Binary packet cache + revision counters ───────────────────────────────
 
-  let layoutPacket:   Uint8Array = new Uint8Array(0);
-  let channelsPacket: Uint8Array = new Uint8Array(0);
+  // Layout/channels start as valid empty packets (zero fixtures): a dispatch
+  // before the first rebuild must never send a 0-byte payload, which the
+  // engine rejects as malformed.
+  let layoutPacket:   Uint8Array = buildLayoutBin([]);
+  let channelsPacket: Uint8Array = buildChannelsBin([]);
   let modifiersPacket: Uint8Array = new Uint8Array(0);
   /** Plugin table (index → hash) of the current modifiers packet. */
   let modifierPlugins: string[] = [];
@@ -640,8 +643,11 @@ export const useEngineStore = defineStore('engine', () => {
   let lastDispatchedChannels = -1;
   let lastDispatchedEffects  = -1;
   /** Cheap fingerprint of layout-relevant fixture data — used to skip buildLayoutBin
-   *  when only channel values changed (the common case during preset/flash transitions). */
-  let lastLayoutFingerprint = '';
+   *  when only channel values changed (the common case during preset/flash transitions).
+   *  `null` = no layout packet built yet: an empty project's fingerprint is
+   *  `''`, so a `''` start value skipped its first build and the 0-byte
+   *  placeholder was dispatched (engine: "rejected packet 0x14"). */
+  let lastLayoutFingerprint: string | null = null;
 
   /**
    * Rebuild all three binary packets (layout / channels / effects) from current

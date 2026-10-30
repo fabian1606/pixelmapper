@@ -377,3 +377,16 @@ fn abi_1_3_fills_z_room_coordinates_and_world_slots() {
     assert!((st.last_samples[2].0[sample::Z] - 0.2).abs() < 1e-6);
     assert_eq!(st.last_samples[0].0[sample::RESERVED_19], 0.0);
 }
+
+// ── Empty layout ─────────────────────────────────
+
+/// A project without fixtures sends a valid layout (`metersPerUnit`, count 0):
+/// accepted with 0 fixtures. Only a truncated payload (e.g. 0 bytes) is
+/// rejected — the startup "rejected packet 0x14" came from such a payload.
+#[test]
+fn empty_layout_is_accepted_and_truncated_payload_rejected() {
+    let (mut e, _) = engine(vec![0.0]);
+    assert_eq!(e.dispatch_bin(0x14, &layout(&[])), 0);
+    assert_eq!(e.dispatch_bin(0x14, &[]), -1);
+    assert_eq!(e.dispatch_bin(0x14, &12.0f32.to_le_bytes()), -1);
+}
