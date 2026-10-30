@@ -39,7 +39,8 @@ const sameId = (a: string | number, b: string | number) => String(a) === String(
 
 /**
  * Resolves a selector: `'all'`, `'selection'`, fixture/group ids, or a
- * filter object (ids / groupIds / kind / signature / name substring).
+ * filter object (ids or fixtureIds / groupIds / kind / signature /
+ * channelTypes / name substring). Id sets union; the other keys narrow.
  */
 export function resolveTargets(targets: ObserveTargets, src: TargetSources): ResolvedTargets {
   const unknown: Array<string | number> = [];
@@ -69,8 +70,10 @@ export function resolveTargets(targets: ObserveTargets, src: TargetSources): Res
     targets.forEach(addId);
   }
   else {
-    const hasSet = !!(targets.ids?.length || targets.groupIds?.length);
-    targets.ids?.forEach(addId);
+    // `fixtureIds` (modifiers.add vocabulary) is an alias of `ids`; null = all.
+    const ids = [...(targets.ids ?? []), ...(targets.fixtureIds ?? [])];
+    const hasSet = !!(ids.length || targets.groupIds?.length);
+    ids.forEach(addId);
     for (const gid of targets.groupIds ?? []) {
       const g = src.groups.find(x => sameId(x.id, gid));
       if (g) addGroup(g);
@@ -83,7 +86,8 @@ export function resolveTargets(targets: ObserveTargets, src: TargetSources): Res
       const info = fixtureInfo(f);
       const ok = (!targets.kind || info.kind === targets.kind || info.oflKey === targets.kind)
         && (!targets.signature || info.signatures.includes(targets.signature as Signature))
-        && (!targets.name || f.name.toLowerCase().includes(targets.name.toLowerCase()));
+        && (!targets.name || f.name.toLowerCase().includes(targets.name.toLowerCase()))
+        && (!targets.channelTypes?.length || f.channels.some(c => targets.channelTypes!.includes(c.type)));
       if (!ok) wanted.delete(String(f.id));
     }
   }

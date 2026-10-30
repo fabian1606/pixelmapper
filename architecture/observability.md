@@ -33,9 +33,14 @@ request ─► resolveTargets ─► capture (preview | live) ─► Trace
   window is capped at 3600 frames.
 - **fps:** default 30.
 - **Targets:** `'all'`, `'selection'`, ids (fixture **or** group ids) or a
-  filter `{ ids, groupIds, kind, signature, name }`. Named groups additionally
-  get their own features under `json.groups[<id>]`. Unknown ids produce
-  `observe-unknown-target` warnings.
+  filter `{ ids | fixtureIds, groupIds, kind, signature, channelTypes, name }`
+  — the `fixtures.find` keys plus the `modifiers.add` targets vocabulary, so
+  a modifier's `targets` can be passed as they are (`fixtureIds: null` = all;
+  `channelTypes` keeps fixtures with any of those channel types). Id sets
+  union, the other keys narrow. Unknown keys are an `invalid-input` error
+  naming the key (they used to be ignored, silently observing everything).
+  Named groups additionally get their own features under
+  `json.groups[<id>]`. Unknown ids produce `observe-unknown-target` warnings.
 - **mirror:** optional `{ x?, y? }`: world x of the vertical / world y of the
   horizontal mirror line for `group.mirror`. Default: the center of the
   engine's room box (bounding box of every head in the layout — the same line

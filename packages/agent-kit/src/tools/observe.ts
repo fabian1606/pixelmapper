@@ -12,7 +12,7 @@ export function createObserveTool(): ToolDefinition {
     description: [
       'See what the lights actually do. Returns a compact text report (range, color, temporal period / beat lock, spatial pattern such as chase direction or radiating from a point) plus feature JSON.',
       'mode "live": capture the running output over `window` (default 2 s from now). mode "preview": render a modifier (`modifierId`) or a plugin (`plugin: { ref, params }`) headlessly on the real fixture positions — deterministic, can look ahead; default when modifierId/plugin is set.',
-      'targets: "all", "selection", fixture/group ids, or a filter { ids, groupIds, kind, signature, name }. detail: "group" (default), "fixture", "raw".',
+      'targets: "all", "selection", fixture/group ids, or a filter { ids | fixtureIds, groupIds, kind, signature, channelTypes, name } (a modifier\'s targets can be passed as they are; unknown keys are an error). detail: "group" (default), "fixture" (every fixture line), "raw" (+ per-frame values per fixture and head).',
       '`expect`: assertions on the feature JSON (same shape as in `apply`), e.g. { "path": "groups.*.temporal.hz", "within": [0.9, 1.1] }. Use it after `apply` to verify the intent.',
     ].join('\n'),
     inputSchema: toolInputSchema(ObserveRequestSchema),
