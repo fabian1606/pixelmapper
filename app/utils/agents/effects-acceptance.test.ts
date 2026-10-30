@@ -337,6 +337,9 @@ register(new BlackoutFlash());
     await observeOk({ mode: 'preview', modifierId: 'ai-flash', targets, expect: [{ path: 'group.range.max', within: [0.18, 0.22] }] });
     // Held (pressed at preview t = 0) → blackout.
     await observeOk({ mode: 'preview', modifierId: 'ai-flash', plugin: withHit({ pressed: true, pressedAt: 0, clicks: 1 }), targets, expect: [{ path: 'group.range.max', lte: 0.02 }] });
+    // A frozen trigger state is an intended hold: stuck-0 is info, not a warning (even without expect).
+    const held = jsonOf<{ findings?: Array<{ code: string; level: string }> }>(await run('observe', { mode: 'preview', modifierId: 'ai-flash', plugin: withHit({ pressed: true, pressedAt: 0, clicks: 1 }), targets }));
+    expect(held.findings?.filter(f => f.code === 'observe-stuck').map(f => f.level)).toEqual(['info']);
     // Released at t = 0 → flash at full, decaying to the idle level within the window.
     const flash = await observeOk({
       mode: 'preview', modifierId: 'ai-flash', plugin: withHit({ pressed: false, pressedAt: 0, releasedAt: 0, clicks: 1 }), targets, window: { duration: '1s' },

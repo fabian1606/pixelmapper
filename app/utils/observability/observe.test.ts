@@ -108,6 +108,20 @@ describe.skipIf(!ready)('observe (preview, real engine)', () => {
     expect(report.findings?.some(f => f.code === 'observe-constant-output')).toBe(true);
   });
 
+  it('stuck output warns, but only info for snapshot windows or passing expectations', async () => {
+    scene(4);
+    const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ, strength: 0 });
+    const level = async (req: Partial<Parameters<typeof observe>[0]>) => {
+      const report = await observe({ targets: 'all', modifierId: m.id, ...req }, { plugins });
+      return report.findings?.find(f => f.code === 'observe-stuck')?.level;
+    };
+    expect(await level({})).toBe('warning');
+    expect(await level({ window: { duration: '100ms' } })).toBe('info');
+    expect(await level({ expect: [{ path: 'group.range.min', gte: 0.99 }] })).toBe('info');
+    // A failing expectation keeps the warning.
+    expect(await level({ expect: [{ path: 'group.range.min', lt: 0.5 }] })).toBe('warning');
+  });
+
   it('zero targets → finding, no crash', async () => {
     scene(4);
     const m = addModifier(BUILTIN_ALIASES.waveform, { speed: ONE_HZ });

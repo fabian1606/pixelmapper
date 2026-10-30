@@ -185,12 +185,25 @@ Typical expectations:
 | `modifier-not-found`, `plugin-not-found` | error | unknown `modifierId` / plugin ref |
 | `observe-failed` | error | capture threw (core/wasm not loadable) |
 | `observe-zero-targets` | warning | no samples |
-| `observe-stuck` | warning | fixtures stuck at 0 or 1 (`entityIds: fixture:<id>`) |
+| `observe-stuck` | warning (info when intended) | fixtures stuck at 0 or 1 (`entityIds: fixture:<id>`) |
 | `observe-unknown-target` | warning | selector id matched nothing |
 | `observe-constant-output` | info | every sample constant |
 | `observe-unavailable-values` | info | NaN values |
 | `observe-note` | info | capture notes (fallbacks, untargeted fixtures, plugin traps) |
 | `observe-sim-unavailable` | info | `mode: 'sim'` requested |
+
+**Intended holds.** A constant or stuck output is only suspicious when the
+request was looking for motion. `observe-stuck` is downgraded to `info`
+(message ends with `Expected here: <reason>.`) when the hold is intended:
+
+1. a snapshot window shorter than 0.5 s (flash / blackout checks);
+2. a preview that freezes a trigger state via `plugin.params` (a held
+   blinder or blackout is constant by design);
+3. the request has expectations and all of them pass (the caller asserted
+   the state it wanted).
+
+The `issues` in the JSON and on the report's issues line are unchanged;
+`observe-constant-output` is always `info` and not printed in the text.
 
 ## Report text
 
