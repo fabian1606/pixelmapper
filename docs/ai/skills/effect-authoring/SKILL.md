@@ -7,16 +7,16 @@ description: Create or modify lighting effects in Pixelmapper — spatial modifi
 
 You build an effect as a **modifier plugin** (AssemblyScript `modifier.ts` + `manifest.json`), add it to the project, prove it does what was asked, and ship the **controls** with it. The result must look good immediately, be adjustable the way a lighting designer thinks, and be undoable in one step.
 
-**Tools.** Over MCP you have `inspect`, `operations`, `describe`, `apply`, `observe`. In Claude Code with the repo, the same tools are available when the `pixelmapper-mcp` server is connected; the repo additionally gives you `architecture/guides/*`, `docs/ai/plugin-sdk.d.ts` and the built-in plugins under `plugins/`. Without a connected app you can still write and test a plugin in the repo (see *Repo-only mode*).
+**Tools.** Over MCP you have `inspect`, `operations`, `describe`, `apply`, `observe` (plus `pixelmapper_status` for the connection). They come from the MCP server registered as `pixelmapper` (the `pixelmapper-mcp` CLI; in Claude Code they show up as `mcp__pixelmapper__inspect` etc.) and run inside the open app. Query operations (`project.digest`, `*.list`, `*.get`, `fixtures.find`) run through `inspect { "selector": { "op": …, "input": … } }`; mutations and `plugins.build` through `apply`; `describe` gives any operation's input schema. In Claude Code the repo additionally gives you `architecture/guides/*`, `docs/ai/plugin-sdk.d.ts` and the built-in plugins under `plugins/`. Without a connected app you can still write and test a plugin in the repo (see *Repo-only mode*).
 
-**Reference files** (read on demand; over MCP: `describe` with the topic id):
+**Reference files** (read on demand; over MCP: `describe { "id": "<topic id>" }`; `describe { "id": "guide:" }` lists all topics):
 
 | File | Topic id | Read when |
 |---|---|---|
-| [patterns.md](patterns.md) | `guide:effect-authoring/patterns.md` | writing `render` — recipes for distance fields, runners, mirror, contour loops, collisions, triggers, beat sync |
-| [ui-rules.md](ui-rules.md) | `guide:effect-authoring/ui-rules.md` | writing `params`, `presets`, canvas handles, the live page |
-| [verification.md](verification.md) | `guide:effect-authoring/verification.md` | writing `expect` lists and reacting to failed expectations |
-| [examples/](examples/README.md) | `plugins.get` `@pixelmapper/corner-wave`, `@pixelmapper/mirror-runner` | you want a complete, tested reference |
+| [patterns.md](patterns.md) | `guide:effect-authoring/patterns` | writing `render` — recipes for distance fields, runners, mirror, contour loops, collisions, triggers, beat sync |
+| [ui-rules.md](ui-rules.md) | `guide:effect-authoring/ui-rules` | writing `params`, `presets`, canvas handles, the live page |
+| [verification.md](verification.md) | `guide:effect-authoring/verification` | writing `expect` lists and reacting to failed expectations |
+| [examples/](examples/README.md) | `guide:effect-authoring/examples/README`; code via `plugins.get` `@pixelmapper/corner-wave`, `@pixelmapper/mirror-runner` | you want a complete, tested reference |
 | plugin authoring guide | `guide:plugin-authoring` | manifest fields, param types, validation rules |
 | modifier design principles | `guide:modifier-design` | any doubt about controls |
 | SDK declarations | `guide:plugin-sdk` | exact helper signatures |
@@ -35,14 +35,14 @@ You build an effect as a **modifier plugin** (AssemblyScript `modifier.ts` + `ma
 ### 1. Inspect the project
 
 ```json
-inspect { "selector": "project" }                       // = project.digest: bpm, fixtures (x/y/z, heads, signatures, kind), groups, modifiers, live pages
+inspect { "selector": "project" }                       // = project.digest: bpm, fixtures (id, name, kind, x/y/z, heads, signatures, groupIds), groups, modifiers, live pages
 inspect { "selector": { "op": "fixtures.find", "input": { "signature": "rgb" } } }
 inspect { "selector": { "op": "plugins.list", "input": {} } }
 ```
 
 Derive and write down:
 - **Targets**: which fixtures/groups (by kind, name, group). Color effects need `rgb`; dimmer-like effects `scalar`.
-- **Room box**: min/max of the targets' `x`/`y` in the digest (world). Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
+- **Room box**: the engine's room box (what `Sample.u/v` span) is the bounding box of **every head of every fixture in the layout**, not only the targets. The digest's `x`/`y` are fixture positions (a tube's center), so for tubes add the head offsets from `fixtures.get` (`detail.beams`). Corners, center and the mirror line come from it. Inset corner points ~5 % so the handles are grabbable.
 - **Pixel layout**: `heads` > 1 means tubes/bars with pixels (`Sample.headIndex` 0..headCount−1 along the fixture); `fixtures.get` shows the head offsets and rotation. Single-head fixtures make a point cloud.
 - **Order / contour**: for loops around the room, the order of fixtures along the outline (see patterns.md *Path along ranks*).
 - **Existing stack**: an `override` layer on top hides what is below; place the effect accordingly (`index`).
@@ -56,11 +56,11 @@ Before coding, write 2–5 lines: the look in stage terms ("cyan fronts roll fro
 
 ### 3. Write manifest + modifier.ts
 
-- Start from the closest reference: `plugins.get { "plugin": "@pixelmapper/corner-wave" }` (spatial points, palette) or `@pixelmapper/mirror-runner` (pixels along tubes, mirror) or a built-in (`waveform`, `noise`, `sequencer`, `colorAdjust`). Their manifests are complete, validated and golden-tested.
+- Start from the closest reference: `inspect { "selector": { "op": "plugins.get", "input": { "plugin": "@pixelmapper/corner-wave" } } }` (spatial points, palette) or `@pixelmapper/mirror-runner` (pixels along tubes, mirror) or a built-in (`waveform`, `noise`, `sequencer`, `colorAdjust`). Their manifests are complete, validated and golden-tested.
 - Use the SDK pattern helpers instead of re-deriving math ([patterns.md](patterns.md)).
 - Params, labels, ranges, defaults, recipes, canvas handles: follow [ui-rules.md](ui-rules.md).
 - Alias `@ai/<kebab-name>` unless the user names a scope; bump `version` when you rebuild a changed plugin (the highest version wins when you reference it by alias).
-- AssemblyScript pitfalls: annotate float locals (`const f: f32 = …`; a literal like `1.0 - x` can infer `f64` and fail with *AS200*), use `Mathf`, no closures / `any` / union types, cast ints (`<f32>s.headIndex`). Param slots: `color` 3, `point` 2, `gradient` 33, `curve` 128, `trigger` 4, others 1 — `i` in `p.get(i)` is the slot index, not the param index.
+- AssemblyScript pitfalls: annotate float locals (`const f: f32 = …`; a literal like `1.0 - x` can infer `f64` and fail with *AS200*), use `Mathf`, no closures / `any` / union types, cast ints (`<f32>s.headIndex`). Param slots: `color` 3, `point` 2, `gradient` 33, `curve` 128, `steps` 18, `trigger` 4, others 1 — `i` in `p.get(i)` is the slot index, not the param index.
 
 ### 4. Build until it validates
 
@@ -68,11 +68,11 @@ Before coding, write 2–5 lines: the look in stage terms ("cyan fronts roll fro
 apply { "label": "Build Corner Wave", "ops": [{ "op": "plugins.build", "input": { "manifest": { … }, "source": "…modifier.ts…" } }] }
 ```
 
-Read the build result (`results[0].value` of the apply result; `expect` paths address op values directly as `results.0.…`): `ok`, `hash`, `diagnostics` (stage `manifest` | `compile` | `validate` with messages), `validation.metrics` (`medianFrameMs`, `outputMin`, `outputMax`). Fix and rebuild until `ok: true` with no error diagnostics. Build **alone** in its own `apply` (an error finding rolls back the whole batch; `plugins.build` is an action outside history, so it never costs an undo step). Note the `hash`.
+Read the build result (`results[0].value` of the apply result; `expect` paths address op values directly as `results.0.…`): `ok`, `hash`, `diagnostics` (stage `manifest` | `compile` | `validate` with messages), `validation.metrics` (`medianFrameMs`, `outputMin`, `outputMax`). Fix and rebuild until `ok: true` with no error diagnostics. Build **alone** in its own `apply` (an error finding rolls back the whole batch; `plugins.build` is an action outside history, so it never costs an undo step; it is also skipped in a `dryRun`). Note the `hash`.
 
 Common validation failures: output out of range (clamp; check `scale` vs `absolute`), NaN (division by a param that can be 0), "state across frames" (you stored something in `render`), budget (loops per sample; precompute in `prepare`).
 
-Optionally preview before adding: `observe { "mode": "preview", "plugin": { "ref": "<hash>", "params": { … } }, "targets": { "groupIds": [ … ] }, "window": { "duration": "4s" }, "expect": [ … ] }`.
+Optionally preview before adding: `observe { "mode": "preview", "plugin": { "ref": "<hash>", "params": { … } }, "targets": { "groupIds": [ … ] }, "window": { "duration": "4s" }, "expect": [ … ] }`. Such a bare preview uses the manifest defaults (no recipe, speed 1 beat per cycle, blend `add`); the real check is step 6 on the added instance.
 
 ### 5. Add the effect and its controls — one batch
 
@@ -109,11 +109,12 @@ apply {
 ### 6. Observe against your expectations
 
 ```json
-observe { "mode": "preview", "modifierId": "ai-corner-wave", "targets": "all", "window": { "duration": "8 beats" },
-          "expect": [ { "path": "group.temporal.kind", "eq": "periodic" }, { "path": "group.radial.r", "gte": 0.7 } ] }
+observe { "mode": "preview", "modifierId": "ai-corner-wave", "targets": { "groupIds": ["g-tubes"] }, "window": { "duration": "8 beats" },
+          "expect": [ { "path": "group.temporal.kind", "eq": "periodic" }, { "path": "group.radial.r", "gte": 0.7 },
+                      { "path": "fixtures.*.range.max", "gt": 0.2 }, { "path": "group.issues", "oneOf": [[], ["clamped"]] } ] }
 ```
 
-`preview` renders the instance headlessly on the real fixture positions (deterministic, fast); `live` captures what the app really outputs (use it last, it includes the rest of the stack and overrides). Read the text report, not only pass/fail. On a failure, follow the reaction table in [verification.md](verification.md) — fix params with `modifiers.update`, or fix the code, rebuild, and swap the plugin (`modifiers.remove` + `modifiers.add` with the new hash, same `id`, in one batch). Never stop at a failing expectation without saying so.
+`preview` renders the instance headlessly through the real engine core on the real fixture positions (deterministic, fast, only this layer); `live` captures what the app really outputs (use it last, it includes the rest of the stack and overrides; per fixture, first head only). Trigger effects: see *Triggers* in verification.md — a preview can freeze a pressed/released state, but no tool presses a button live. Read the text report, not only pass/fail. On a failure, follow the reaction table in [verification.md](verification.md) — fix params with `modifiers.update`, or fix the code, rebuild, and swap the plugin (`modifiers.remove` + `modifiers.add` with the new hash, same `id`, in one batch). Never stop at a failing expectation without saying so.
 
 ### 7. Report
 
@@ -126,10 +127,10 @@ Tell the user, briefly:
 
 ## Changing an existing effect
 
-1. `modifiers.list` → find the instance, its plugin hash, params, spread, speed.
-2. `plugins.get { "plugin": "<hash>" }` → manifest + source.
+1. `inspect { "selector": { "op": "modifiers.list", "input": {} } }` → find the instance, its plugin hash, params, spread, speed.
+2. `plugins.get { "plugin": "<hash>" }` (via `inspect`) → manifest + source.
 3. Param-only change: `modifiers.update` (params merge by key) or `modifiers.applyRecipe`.
-4. Behavior change: edit source, bump `version`, `plugins.build`, then in one batch `modifiers.remove` the old instance and `modifiers.add` the new hash with the same `id`, params, spread, speed, targets, then re-add the live widgets (they referenced the old id; `live.listPages` shows them).
+4. Behavior change: edit source, bump `version`, `plugins.build`, then in one batch `modifiers.remove` the old instance and `modifiers.add` the new hash with the same `id`, params, spread, speed, targets, then re-add the live widgets if you removed the page (widgets map by modifier id; `live.listPages` shows them — keeping the same `id` keeps them working).
 5. Observe again; report.
 
 ## Repo-only mode (Claude Code, no app connected)

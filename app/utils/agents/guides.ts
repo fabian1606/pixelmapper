@@ -67,7 +67,8 @@ export function createGuideProvider(
   return {
     list: (): GuideSummary[] => [...topics].map(([id, t]) => ({ id, title: t.title })),
     async get(id) {
-      const topic = topics.get(id);
+      // Skill topics are also accepted with their file suffix (`guide:a/b.md`).
+      const topic = topics.get(id) ?? topics.get(id.replace(/\.md$/, ''));
       if (!topic) return null;
       try {
         return await topic.load();

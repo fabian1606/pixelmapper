@@ -39,7 +39,7 @@ Every param must pass this test: *"<Label> changes <what the user sees>."* If yo
 - Size defaults relative to a typical rig: spacing 0.2–0.3 of the stage, width ~40 % of the spacing, softness 0.5–0.7, tails 0.3 of a tube.
 - Colors: two saturated, contrasting hues for palettes (cyan/magenta, white/amber, blue/teal); collision accents white.
 - Canvas points: defaults are static world coordinates, so **set them on add** to the targets' room box (from the digest, inset ~5 %) via `modifiers.add` `params`. Recipes keep dragged points unless they name them, so recipes should normally *not* set points.
-- Speed: set it in every recipe (`"speed": { "mode": "beat", "beatValue": 4 }`) and again in `modifiers.add` if the user asked for a tempo.
+- Speed: set it in every recipe (manifest form: `"speed": { "mode": "beat", "beatValue": 4 }` or `{ "mode": "time", "timeMs": 2000 }`) and again in `modifiers.add` if the user asked for a tempo (operation form: `"speed": { "mode": "beat", "value": 4 }`, time mode `value` in seconds).
 
 ## Tiers, `when`, groups
 
@@ -76,17 +76,17 @@ Build a page when the user will **perform** the effect (a show, "controls", "but
 | Control | Widget | Mapping |
 |---|---|---|
 | momentary action (`trigger` param) | `button` | `effect-param` → the trigger key (press / release / multi-click reach the effect) |
-| amount (`number`/`int`) | `slider` | `effect-param` → the param key (0–1 maps onto min–max) |
+| amount (`number`/`int`) | `slider` | `effect-param` → the param key (`"spacing"` or `"params.spacing"`; 0–1 maps onto min–max) |
 | on/off (`bool`) | `button` | `effect-param` → the key, `behavior: "latch"` (toggle, default) or `"hold"` (on while held) |
 | a position (`point` param) | `xy` pad | `effect-param` → the point key (pad x/y 0–1 → the point's x/y); keep the canvas handle too |
 | overall level | `slider` | `effect-param` → `strength` |
-| tempo | `slider` (time-mode effects) or a `beat` widget (beat-synced) | `effect-param` → `speed` (cycle time 50 ms – 5 s) |
-| global blackout / strobe / blinder | `button` | `global-function` (`blackout`, `strobe`, `blind`) |
-| context | `label`, `fixture-preview` | none |
+| tempo | `slider` for time-mode effects; for beat-synced effects the project BPM (a `beat` widget shows / taps it) | slider: `effect-param` → `speed` (sets the time-mode cycle ≈ 0.1–5 s; no effect on a beat-mode instance). `beat`: no mapping |
+| global blackout / strobe / blinder | `button` | `{ "type": "global-function", "function": "blackout" }` (`strobe`, `blind`; optional `config`) |
+| context | `label`, `fixture-preview` | none (`color`, `label`, `beat`, `fixture-preview` ignore mappings) |
 
 - **What no live control drives:** `effect-param` cannot drive `color`, `gradient`, `enum` or `curve` params. Colors/palettes and enums live on the card and in recipes. Points are dragged on the canvas; add an `xy` pad only when a performer needs to move a point live. If a performer must switch looks live, use recipes on the card or two instances with sliders on `strength`.
 - Layout: let `live.addWidget` auto-place (omit `gridX`/`gridY`); add widgets in reading order — triggers first (big buttons: `gridW`/`gridH` 6×6), then sliders, then labels. Give every widget a `label` (English, 1–2 words) and buttons a `color` hinting the effect.
-- Add the page in the **same `apply` batch** as the modifier, with your own ids (`modifiers.add` `id`, `live.addPage` `id`), so one undo removes everything.
+- Add the page in the **same `apply` batch** as the modifier, with your own ids (`modifiers.add` `id`, `live.addPage` `id`), so one undo removes everything. A widget: `live.addWidget { "pageId", "type", "label", "color": "#rrggbb", "gridW", "gridH", "mapping": { "type": "effect-param", "modifierId", "paramKey", "behavior"? } }`.
 - `live.addWidget` warns (`mapping-ignored-by-widget`) when the widget cannot drive the mapping — treat that warning as an error and fix the widget type.
 
 ## Custom panel (`ui.ts`) — last resort

@@ -18,7 +18,7 @@ Acceptance effect 0: wave fronts from up to four draggable points.
 - One soft band per front: `pulse(fract(d / spacing − timePhase), 0.5, width, softness)`; Inward flips the sign.
 - Every front keeps its palette color: `u = fract(floor(pos) × 0.25)` into `sampleGradient`.
 - `absolute` rgb (dark between fronts), `distribution.modes: ["none"]` (own geometry), recipes *Corners*, *Implode*, *Ripple*.
-- On add, set A–D to the targets' room corners: `"params": { "a": { "x": minX, "y": minY }, … }`.
+- On add, set A–D to the room corners (bounding box of all heads, inset ~5 %): `"params": { "a": { "x": minX, "y": minY }, … }`.
 
 ## Mirror Runner — `@pixelmapper/mirror-runner`
 
@@ -26,7 +26,7 @@ Acceptance effect 0: wave fronts from up to four draggable points.
 
 Acceptance effect 1: mirrored ping-pong runner on LED tubes.
 
-- Position along the tube from the head index, flipped on the far half of the room by room coordinates (`s.u > 0.5` / `s.v > 0.5`) and by `Reverse`.
+- Position along the tube from the head index, flipped per pixel on the far half of the room by room coordinates (`s.u > 0.5` / `s.v > 0.5`) and by `Reverse`. A true mirror image for tubes running across the mirror line; tubes on opposite side walls mirror only when patched in opposite directions (a loop around the room) — check `group.mirror.x.r`.
 - The tail is a time delay since the runner passed the pixel, so it folds back at the bounce; closed-form, no state.
 - `scale` output (keeps the tubes' programmed color), three params (*Tail*, *Mirror*, *Reverse*), recipes *Runner*, *Comet*, *Spark*; speed is the host's ("per round trip").
 

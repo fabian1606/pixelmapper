@@ -1,6 +1,6 @@
 # Effect patterns
 
-Short AssemblyScript recipes built on `@pixelmapper/plugin-sdk` helpers. Each one is a pure function of `ctx` (time), `s` (the sample) and params. Copy the idea, not the slot numbers: compute your slots from your own manifest (`color` 3, `point` 2, `gradient` 33, `curve` 128, `trigger` 4, everything else 1).
+Short AssemblyScript recipes built on `@pixelmapper/plugin-sdk` helpers. Each one is a pure function of `ctx` (time), `s` (the sample) and params. Copy the idea, not the slot numbers: compute your slots from your own manifest (`color` 3, `point` 2, `gradient` 33, `curve` 128, `steps` 18, `trigger` 4, everything else 1).
 
 Helpers used below (all in the SDK): `dist2`, `dist3`, `minDistToPoints`, `nearestPointIndex`, `pulse`, `pingPong`, `mirror`, `ease` + `EASE_*`, `crossingTimeLine`, `crossingTimeLoop`, `crossingCount`, `envelope`, `triggerPressed`, `triggerMsSincePress`, `triggerMsSinceRelease`, `triggerClicks`, `fract`, `clamp`, `lerp`, `smoothstep` (no clamping: clamp first), `sampleGradient`, `hash01`.
 
@@ -66,7 +66,7 @@ render(ctx: Frame, s: Sample, out: Out): void {
 - Head without tail: `pulse(p, pingPong(ctx.timePhase), width, softness)`.
 - Mirror at a dragged line: a `point` param with a canvas handle and `s.x > px` (world) instead of `s.u > 0.5`.
 - A whole-room runner (not per tube): use `mirror(s.u, 0.5) * 2` (0 at the center line, 1 at the walls) as the position.
-- Tube direction: assumes all tubes are patched the same way; say so in the description.
+- Tube direction: the per-pixel flip gives a true left/right mirror image for tubes running **along x** (across the line). Tubes running along y on opposite side walls only mirror when they are patched in **opposite** directions (as a loop around the room); patched the same way, they run against each other (`group.mirror.x.r` stays low). Say in the description which patching it assumes, keep `Reverse`, and ask the user when the digest cannot tell.
 
 Full reference: `plugins/mirror-runner` (examples/mirror-runner).
 

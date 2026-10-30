@@ -26,9 +26,9 @@ describe('effect-authoring skill', () => {
     expect(controls?.arguments.map(a => a.name)).toEqual(['modifierId', 'wishes']);
     const text = renderPrompt(create!, { description: 'a wave from the four corners' });
     expect(text).toContain('a wave from the four corners');
-    expect(text).toContain('guide:effect-authoring/SKILL.md');
+    expect(text).toContain('guide:effect-authoring/SKILL');
     expect(text).not.toMatch(/\{\{/);
-    expect(renderPrompt(controls!, {})).toContain('guide:effect-authoring/ui-rules.md');
+    expect(renderPrompt(controls!, {})).toContain('guide:effect-authoring/ui-rules');
   });
 
   it('SKILL.md has the Claude Code frontmatter and links its reference files', () => {

@@ -17,16 +17,16 @@ Targets (optional): {{targets}}
 
 Follow the Pixelmapper effect-authoring skill. Load it first with the `describe` tool:
 
-1. `describe { "id": "guide:effect-authoring/SKILL.md" }` — the workflow (required).
-2. While writing `render`: `guide:effect-authoring/patterns.md`. While writing params, recipes, canvas handles and the live page: `guide:effect-authoring/ui-rules.md`. For `expect` lists: `guide:effect-authoring/verification.md`. Exact SDK signatures: `guide:plugin-sdk`; manifest rules: `guide:plugin-authoring`.
-3. Complete references: `plugins.get` for `@pixelmapper/corner-wave` and `@pixelmapper/mirror-runner`.
+1. `describe { "id": "guide:effect-authoring/SKILL" }` — the workflow (required).
+2. While writing `render`: `guide:effect-authoring/patterns`. While writing params, recipes, canvas handles and the live page: `guide:effect-authoring/ui-rules`. For `expect` lists: `guide:effect-authoring/verification`. Exact SDK signatures: `guide:plugin-sdk`; manifest rules: `guide:plugin-authoring`.
+3. Complete references: `inspect { "selector": { "op": "plugins.get", "input": { "plugin": "@pixelmapper/corner-wave" } } }` (and `@pixelmapper/mirror-runner`).
 
 Then work through the workflow end to end:
 - inspect the project (digest, targets, room box, pixel layout, stack, BPM);
 - state the intended look, the controls and the expectations in a few lines;
 - write manifest + `modifier.ts`, `plugins.build` in its own `apply` until it validates;
 - add the effect **and** its controls in one `apply` batch (own ids for the modifier and the page);
-- `observe` (preview, then live) with your expectations and fix what fails;
+- `observe` (preview of the added instance, then live) with your expectations and fix what fails; say what could not be verified (e.g. pressing a live button);
 - report what changed, the controls, what was verified, your assumptions, and that one Undo reverts it.
 
 Remember: `render` must be pure; distances to canvas points use world `s.x/s.y` with aspect 1, room layouts use `s.u/s.v` with `ctx.worldAspect`; all user-facing text in English.
