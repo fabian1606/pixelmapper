@@ -204,6 +204,16 @@ GROUP 8 fixtures · scalar · sources: @pixelmapper/waveform@sha256:3a9…(scale
 EXPECT   ✓ group.spatial.kind = "chase" · ✗ …
 ```
 
+Window bounds use one decimal, or two to three when the window is short
+or its bounds need them (`1.05–1.15s`). The first `GROUP` block is always
+the aggregate `group` (what `group.*` expectations test; titled
+`GROUP combined ·` when named groups follow); per-group blocks follow when
+the request names several groups or one that covers only part of the
+samples. The spatial line ends with `mirror x r 1.00 @ .50 · y r -0.13 @ .50`
+(Pearson r, then the line position) for moving groups; an `order` line
+shows a non-`none` onset order (`forward along spread r 0.98 · f1.0 → f4.11
+· span 1.2s · 48/48 onsets`).
+
 `FIXTURE` lines list outliers only (constant/stuck/dark/different from the
 group); `detail: 'fixture'` lists every fixture. Up to four non-trivial
 findings follow as `WARNING`/`INFO` lines.
