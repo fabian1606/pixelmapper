@@ -7,7 +7,7 @@ import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
 import SyncStatusIndicator from '~/components/sync/SyncStatusIndicator.vue';
 import PmToolbar from '~/components/primitives/PmToolbar.vue';
-import SettingsDialog from '~/components/settings/SettingsDialog.vue';
+import { openSettings } from '~/composables/use-settings-dialog';
 import { useAsTitleBar, useWindowChrome } from '~/composables/use-window-chrome';
 import { hasNativeMenu, runMenuCommand } from '~/composables/app-menu/use-app-menu';
 
@@ -21,7 +21,6 @@ const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
 
 const beatOverlayOpen = ref(false);
 /** App settings dialog (External agents, …). */
-const settingsOpen = ref(false);
 const beatActive = ref(false);
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -129,11 +128,10 @@ const tabs = computed(() => projectId.value ? [
       <button
         class="flex items-center justify-center w-8 h-8 rounded-md transition-colors text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
         title="Settings"
-        @click="settingsOpen = true"
+        @click="openSettings()"
       >
         <Settings :size="16" />
       </button>
-      <SettingsDialog v-model:open="settingsOpen" />
     </div>
     <div
       v-if="projectLoading"

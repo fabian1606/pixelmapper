@@ -4,13 +4,16 @@
  * project-only items. Call once, from `app.vue`.
  */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { getAccountPolicy, getAppShell } from '#platform';
+import { getAccountPolicy, getAppShell, getMcpSetupInfo } from '#platform';
 import { getProjectStore } from '~/utils/persistence/project-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { triggerSaveSnapshot } from '~/components/engine/composables/use-history';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { exportProjectFile, openProjectFile } from '~/utils/persistence/project-file';
 import { runAppCommand, WEB_SHORTCUTS, type AppCommandContext } from './app-commands';
+import { openSettings } from '~/composables/use-settings-dialog';
+import { notify } from '~/composables/use-notifications';
+import { claudeCodeCommand, claudeDesktopConfig } from '~/utils/agents/mcp-setup';
 import { clearRecentProjects, loadRecentProjects, recentProjects, recordProjectOpened, syncRecentNames } from './recent-projects';
 
 /** Label for a recent project whose name is not known yet. */
@@ -73,6 +76,19 @@ export function useAppMenu(): void {
       await exportProjectFile(shell, snapshot, name);
     },
     clearRecent: clearRecentProjects,
+    openSettings,
+    async copyMcpSetup(client) {
+      const { cliPath } = await getMcpSetupInfo();
+      const text = client === 'claude-code' ? claudeCodeCommand(cliPath) : claudeDesktopConfig(cliPath);
+      const what = client === 'claude-code' ? 'Claude Code command' : 'Claude Desktop config';
+      try {
+        await navigator.clipboard.writeText(text);
+        notify({ title: `Copied ${what}`, description: cliPath ? undefined : 'Replace <repo> with your Pixelmapper checkout.' }, 4000);
+      } catch (error) {
+        console.warn('[mcp] clipboard write failed', error);
+        notify({ title: `Could not copy the ${what}`, description: 'Open MCP → MCP Server Setup… and copy it there.', variant: 'warning' });
+      }
+    },
   };
 
   activeCtx = ctx;

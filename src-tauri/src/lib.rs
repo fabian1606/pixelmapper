@@ -6,6 +6,7 @@
 
 mod files;
 mod lifecycle;
+mod mcp;
 mod menu;
 mod net;
 mod udp;
@@ -32,6 +33,7 @@ pub fn run() {
             net::http_get_bytes,
             net::resource_read,
             lifecycle::app_quit_ready,
+            mcp::mcp_setup_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Pixelmapper desktop app")

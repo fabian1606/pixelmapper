@@ -12,6 +12,7 @@ import { createWebMidi } from './midi';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { WEB_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
 import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
+import { UNKNOWN_MCP_SETUP, type McpSetupInfo } from '../../utils/agents/mcp-setup';
 
 /** Creates the web platform for the current browser. */
 export function createWebPlatform(): Platform {
@@ -48,4 +49,9 @@ export { createWebFixtureLibrary as getFixtureLibrary } from './fixture-library'
 /** MCP bridge to `pixelmapper-mcp` (ADR 0002 B8); the hello reports platform `web`. */
 export function getAgentBridge(): AgentBridge {
   return getSharedAgentBridge('web');
+}
+
+/** The browser cannot read the local token file or CLI path; the user pastes the token. */
+export function getMcpSetupInfo(): Promise<McpSetupInfo> {
+  return Promise.resolve({ ...UNKNOWN_MCP_SETUP });
 }

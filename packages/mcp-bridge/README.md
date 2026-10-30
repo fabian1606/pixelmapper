@@ -46,7 +46,7 @@ Claude Code and Claude Desktop can run at the same time. The first process owns 
    ```bash
    bun run mcp token        # from the repo root
    ```
-2. In Pixelmapper, open **Settings** (gear icon in the header) **→ External agents**, turn it on and paste the token. The status line shows *Connected* once the app is paired (*Waiting for pixelmapper-mcp* while no MCP client has started the CLI).
+2. In Pixelmapper, open **Settings → MCP Server** (gear icon in the header, ⌘, or the desktop menu **MCP → MCP Server Setup…**), turn it on and paste the token (the desktop app offers **Use it** with the token found on this computer). The status line shows *Connected* once the app is paired (*Waiting for pixelmapper-mcp* while no MCP client has started the CLI).
 3. In Claude, call the `pixelmapper_status` tool or simply ask it to inspect the project.
 
 Only one Pixelmapper window is connected at a time. The most recently enabled window wins.

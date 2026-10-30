@@ -9,6 +9,8 @@ import ReplacementChoiceDialog from '~/components/extension-host/ReplacementChoi
 import ToastStack from '~/components/ToastStack.vue';
 import WindowDragStrip from '~/components/WindowDragStrip.vue';
 import { useAppMenu } from '~/composables/app-menu/use-app-menu';
+import SettingsDialog from '~/components/settings/SettingsDialog.vue';
+import { settingsOpen } from '~/composables/use-settings-dialog';
 
 const engineStore = useEngineStore();
 
@@ -52,6 +54,8 @@ onBeforeUnmount(() => {
     <GlobalContextMenu />
     <ReplacementChoiceDialog />
     <ToastStack />
+    <!-- One Settings dialog for the header button, the desktop menu and ⌘, -->
+    <SettingsDialog v-model:open="settingsOpen" />
     <WindowDragStrip />
   </div>
 </template>

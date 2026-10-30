@@ -8,11 +8,13 @@
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebPlatform } from '../web';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import { createTauriUdp } from './udp';
 import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
 import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
+import { UNKNOWN_MCP_SETUP, type McpSetupInfo } from '../../utils/agents/mcp-setup';
 
 /**
  * Width reserved for the macOS traffic lights (positioned in tauri.conf.json):
@@ -85,4 +87,17 @@ export { createBundledFixtureLibrary as getFixtureLibrary } from './fixture-libr
  */
 export function getAgentBridge(): AgentBridge {
   return getSharedAgentBridge('tauri');
+}
+
+/**
+ * Token file, token and CLI path from the native side (`src-tauri/src/mcp.rs`):
+ * the desktop app can pair itself without copy/paste.
+ */
+export async function getMcpSetupInfo(): Promise<McpSetupInfo> {
+  try {
+    return await invoke<McpSetupInfo>('mcp_setup_info');
+  } catch (error) {
+    console.warn('[mcp] setup info unavailable', error);
+    return { ...UNKNOWN_MCP_SETUP };
+  }
 }
