@@ -16,9 +16,13 @@
  * 6. `dryRun` computes diff/findings/expectations, then undoes everything.
  */
 import {
+  APPLY_ENVELOPE,
   ApplyRequestSchema,
   actorKind,
   evaluateExpectations,
+  normalizeApplyRequest,
+  summarizeInputSchema,
+  toJsonSchema,
   type Actor,
   type ApplyRequest,
   type ApplyResult,
@@ -29,6 +33,7 @@ import {
   type OperationContext,
   type OperationResult,
 } from '@pixelmapper/agent-kit';
+import type { z } from 'zod';
 import { CompositeCommand } from '~/components/engine/commands/composite-command';
 import { useHistory, type Command } from '~/components/engine/composables/use-history';
 import { eventLog, logEvent } from '~/utils/observability/event-log';
@@ -67,6 +72,18 @@ function issuesText(issues: readonly { path: PropertyKey[]; message: string }[])
   return issues.map(i => `${i.path.length ? i.path.map(String).join('.') : '(input)'}: ${i.message}`).join('; ');
 }
 
+/**
+ * Invalid-input message with the expected shape: the Zod issues, the
+ * operation's input summary (required keys) and the envelope hint.
+ */
+export function invalidInputMessage(id: string, schema: z.ZodType, input: unknown, issues: string): string {
+  const expected = summarizeInputSchema(toJsonSchema(schema, 'input'));
+  const head = input === undefined
+    ? `${id}: the op entry has no \`input\`. Op entries are { "op": "${id}", "input": { … } }`
+    : `${id}: ${issues}`;
+  return `${head}. Expected input (? = optional): ${expected}. Entry shape: { "op": "${id}", "input": ${expected} }; see describe { "id": "${id}" }.`;
+}
+
 /** Undo label: agent changes are prefixed with `AI:`. */
 export function undoLabel(label: string, actor: Actor): string {
   return actorKind(actor) === 'agent' && !label.startsWith('AI:') ? `AI: ${label}` : label;
@@ -100,11 +117,17 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
   const events = (): EventRef[] => eventLog.list({ sinceId: firstEventId })
     .map(e => ({ id: e.id, kind: e.kind, code: e.code, message: e.message }));
 
-  const parsed = ApplyRequestSchema.safeParse(request);
+  // Lenient envelope (`{ op, moves }` → `{ op, input: { moves } }`); notes become info findings.
+  const normalized = normalizeApplyRequest(request);
+  findings.push(...normalized.findings);
+  if (normalized.findings.some(f => f.level === 'error')) {
+    return { committed: false, diff: [], affected: [], results, events: [], findings };
+  }
+  const parsed = ApplyRequestSchema.safeParse(normalized.request);
   if (!parsed.success) {
     return {
       committed: false, diff: [], affected: [], results, events: [],
-      findings: [{ level: 'error', code: 'invalid-request', message: issuesText(parsed.error.issues) }],
+      findings: [...findings, { level: 'error', code: 'invalid-request', message: `${issuesText(parsed.error.issues)}. Expected ${APPLY_ENVELOPE}.` }],
     };
   }
   const { ops, label, dryRun = false, expect } = parsed.data;
@@ -119,7 +142,7 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
     // Accept key aliases (`id` for `modifierId`) before validation.
     const valid = def.input.safeParse(normalizeInputAliases(def.input, input));
     if (!valid.success) {
-      throw new AbortBatch([{ level: 'error', code: 'invalid-input', message: `${id}: ${issuesText(valid.error.issues)}`, opIndex }]);
+      throw new AbortBatch([{ level: 'error', code: 'invalid-input', message: invalidInputMessage(id, def.input, input, issuesText(valid.error.issues)), opIndex }]);
     }
     try {
       const result = await def.run(ctx, valid.data);

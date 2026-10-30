@@ -16,7 +16,7 @@ import { currentEngineClockMs, setEffectTrigger } from '~/composables/live-ops/e
 import { getManifest } from '~/utils/plugins/plugin-store';
 import { defineCoreOperation } from '../define';
 import type { CoreReadApi } from '../read-api';
-import { ModifierIdSchema, modifierNotFound } from './shared';
+import { ModifierIdSchema, requireModifier } from './shared';
 
 // ── Helpers ─────────────────────────────────────
 
@@ -29,12 +29,11 @@ function bareParamKey(key: string): string {
 }
 
 /**
- * Checks that `modifierId` exists and `key` is one of its plugin's trigger
+ * Checks that `modifierId` names exactly one instance (see `requireModifier`) and `key` is one of its plugin's trigger
  * params; throws a readable error (naming the trigger keys) otherwise.
  */
 function requireTriggerParam(read: CoreReadApi, modifierId: string, key: string): void {
-  const modifier = read.modifier(modifierId);
-  if (!modifier) throw new Error(modifierNotFound(modifierId));
+  const modifier = requireModifier(read, modifierId);
   const manifest = getManifest(modifier.plugin);
   if (!manifest) throw new Error(`the plugin of modifier "${modifierId}" is not loaded; its param types are unknown`);
   const triggers = manifest.params.filter(p => p.type === 'trigger').map(p => p.key);

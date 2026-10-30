@@ -1,7 +1,7 @@
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { ModifierInstance } from '~/utils/engine/types';
 import type { Preset } from '~/utils/engine/preset-types';
-import { cloneModifier } from '~/utils/engine/modifiers';
+import { cloneModifier, newModifierId } from '~/utils/engine/modifiers';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import type { RGB } from '~/utils/live/color-utils';
 import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
@@ -25,13 +25,16 @@ export function resetFixtureChannels(fixtures: Fixture[]): void {
 // ─── Effect reconstruction ────────────────────────────────────────────────────
 
 /**
- * Recreates a live modifier from a preset/pinned snapshot (deep copy; a new
- * id when the snapshot has none). Returns null for unknown plugins.
+ * Recreates a live modifier from a preset/pinned snapshot (deep copy). It
+ * keeps the snapshot's id (so the preset diff matches it to its saved
+ * counterpart) unless the snapshot has none or the id is in `takenIds`
+ * (already used by a live instance): then it gets a fresh id, so two live
+ * instances never share one. Returns null for unknown plugins.
  */
-export function reconstructEffect(snap: ModifierInstance): ModifierInstance | null {
+export function reconstructEffect(snap: ModifierInstance, takenIds?: ReadonlySet<string>): ModifierInstance | null {
   if (!snap?.plugin || !getManifest(snap.plugin)) return null;
   const m = cloneModifier(snap);
-  if (!m.id) m.id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
+  if (!m.id || takenIds?.has(m.id)) m.id = newModifierId();
   m.targetFixtureIds = [...(snap.targetFixtureIds ?? [])];
   return m;
 }
@@ -208,6 +211,11 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Mod
 
   clearPresetEffects(preset, effects);
 
+  // Ids already live: effects the preset does not touch survive the clear and
+  // may share a snapshot's id (presets captured from the same session keep
+  // the live ids), and a resolved preset can hold one id in two categories.
+  const takenIds = new Set(effects.map(e => e.id));
+
   for (const category of preset.categories) {
     for (const fixtureId of category.fixtureIds) {
       const fixture = fixtureMap.get(fixtureId);
@@ -228,9 +236,10 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Mod
     }
 
     for (const modSnap of category.modifiers) {
-      const eff = reconstructEffect(modSnap);
+      const eff = reconstructEffect(modSnap, takenIds);
       if (eff) {
         eff.targetFixtureIds = [...category.fixtureIds];
+        takenIds.add(eff.id);
         effects.push(eff);
       }
     }

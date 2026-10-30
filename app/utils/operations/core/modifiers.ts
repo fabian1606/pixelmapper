@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { useEngineStore } from '~/stores/engine-store';
-import { cloneModifiers, modifierName } from '~/utils/engine/modifiers';
+import { cloneModifiers, duplicateModifierIds, modifierName } from '~/utils/engine/modifiers';
 import { activePreset } from '~/utils/engine/recipes';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { getManifest } from '~/utils/plugins/plugin-store';
@@ -26,7 +26,7 @@ import { buildInstance, instanceFindings, InstanceFieldsSchema, patchInstance, t
 import { modifiersTrigger } from './modifier-trigger';
 import { distributionToSpread, speedView, SpeedViewSchema, SpreadViewSchema } from './modifier-spread';
 import { PluginRefSchema, requirePlugin } from './plugin-ref';
-import { FixtureIdSchema, ModifierIdSchema, modifierNotFound, SignatureSchema } from './shared';
+import { FixtureIdSchema, modifierAmbiguous, ModifierIdSchema, requireModifier, SignatureSchema } from './shared';
 
 // ── Helpers ─────────────────────────────────────
 
@@ -75,6 +75,18 @@ const ModifierViewSchema = z.object({
   speed: SpeedViewSchema,
 });
 
+/** A modifier id several instances share (see `duplicateIdWarnings`). */
+const DuplicateIdSchema = z.object({ id: z.string(), count: z.number().int().describe('Number of instances sharing the id.') });
+
+/**
+ * Readable warnings for ids several instances share: the agent sees them in
+ * the `modifiers.list` output (ops addressing such an id fail as ambiguous).
+ */
+function duplicateIdWarnings(duplicates: Map<string, number>): string[] {
+  return [...duplicates].map(([id, count]) =>
+    `modifier id "${id}" is shared by ${count} instances (inconsistent stack): ops addressing "${id}" fail as ambiguous until the project is reloaded (the load repair gives the duplicates fresh ids) or the instances are removed and re-added`);
+}
+
 /** View of one instance. */
 function modifierView(read: CoreReadApi, m: ModifierInstance, index: number): z.infer<typeof ModifierViewSchema> {
   const manifest = getManifest(m.plugin);
@@ -114,20 +126,36 @@ export const modifiersList = defineCoreOperation({
     'List the modifier stack in order (index 0 = bottom, evaluated first; the last entry is on top).',
     'Each entry: id, plugin (hash, alias, display name), recipe (matching recipe id or null = custom), signature, targets (fixture ids, null = all; channel types), params, spread (same | spatial with origin/end in normalized world 0–1 | order with effective ranks by fixture id, 0 = first | within), strength 0–1, blend mode and speed (beat: beats per cycle; time: seconds per cycle).',
     'Optional filters: plugin (alias/hash) and fixtureId (modifiers targeting that fixture).',
+    'If several instances share one id, the output also has duplicateIds ({ id, count }) and warnings; ops addressing such an id fail as ambiguous.',
   ].join('\n'),
   input: z.object({
     plugin: PluginRefSchema.optional(),
     fixtureId: FixtureIdSchema.optional().describe('Only modifiers that target this fixture.'),
   }),
-  output: z.object({ modifiers: z.array(ModifierViewSchema) }),
+  output: z.object({
+    warnings: z.array(z.string()).optional().describe('Present only when the stack is inconsistent (duplicate ids).'),
+    duplicateIds: z.array(DuplicateIdSchema).optional().describe('Ids shared by several instances (whole stack, ignoring filters).'),
+    modifiers: z.array(ModifierViewSchema),
+  }),
   examples: [{ input: {}, note: 'The whole stack.' }, { input: { fixtureId: 'fx-1' }, note: 'Modifiers acting on one fixture.' }],
   async run(ctx, input) {
     const hash = input.plugin ? (await requirePlugin(input.plugin)).hash : null;
-    const views = ctx.read.modifiers()
+    const all = ctx.read.modifiers();
+    const views = all
       .map((m, i) => modifierView(ctx.read, m, i))
       .filter(v => !hash || v.plugin.hash === hash)
       .filter(v => input.fixtureId === undefined || !v.targets.fixtureIds || v.targets.fixtureIds.map(String).includes(String(input.fixtureId)));
-    return { kind: 'query', value: { modifiers: views } };
+    // Duplicate ids are checked on the whole stack, independent of the filters.
+    const duplicates = duplicateModifierIds(all);
+    if (duplicates.size === 0) return { kind: 'query', value: { modifiers: views } };
+    return {
+      kind: 'query',
+      value: {
+        warnings: duplicateIdWarnings(duplicates),
+        duplicateIds: [...duplicates].map(([id, count]) => ({ id, count })),
+        modifiers: views,
+      },
+    };
   },
 });
 
@@ -187,8 +215,7 @@ export const modifiersUpdate = defineCoreOperation({
     { input: { modifierId: 'mod-1', targets: { groupIds: ['left-wall'] } } },
   ],
   run(ctx, input) {
-    const current = ctx.read.modifier(input.modifierId);
-    if (!current) throw new Error(modifierNotFound(input.modifierId));
+    const current = requireModifier(ctx.read, input.modifierId);
     const next = patchInstance(ctx.read, current, input);
     const after = cloneModifiers(useEngineStore().modifiers).map(m => (m.id === next.id ? next : m));
     return { kind: 'mutation', commands: [setModifiers(after, `Update ${pluginName(current.plugin)}`)], value: { modifierId: current.id } };
@@ -207,7 +234,7 @@ export const modifiersRemove = defineCoreOperation({
   examples: [{ input: { modifierIds: ['mod-1'] } }],
   run(ctx, input) {
     const ids = new Set(input.modifierIds);
-    for (const id of ids) if (!ctx.read.modifier(id)) throw new Error(modifierNotFound(id));
+    for (const id of ids) requireModifier(ctx.read, id);
     const after = cloneModifiers(useEngineStore().modifiers).filter(m => !ids.has(m.id));
     const label = ids.size === 1 ? 'Remove Modifier' : `Remove ${ids.size} Modifiers`;
     return { kind: 'mutation', commands: [setModifiers(after, label)], value: { removed: [...ids] } };
@@ -228,6 +255,9 @@ export const modifiersReorder = defineCoreOperation({
   examples: [{ input: { order: ['mod-2', 'mod-1'] }, note: 'Swap a two-layer stack.' }],
   run(_ctx, input) {
     const current = cloneModifiers(useEngineStore().modifiers);
+    // A shared id cannot name one stack position: refuse instead of dropping an instance.
+    const [ambiguous] = duplicateModifierIds(current);
+    if (ambiguous) throw new Error(modifierAmbiguous(ambiguous[0], ambiguous[1]));
     const byId = new Map(current.map(m => [m.id, m]));
     const unique = new Set(input.order);
     if (unique.size !== input.order.length) throw new Error('order lists an id more than once');
@@ -256,8 +286,7 @@ export const modifiersApplyRecipe = defineCoreOperation({
   produces: ['SetModifiers'],
   examples: [{ input: { modifierId: 'mod-1', recipe: 'ping-pong' } }],
   run(ctx, input) {
-    const current = ctx.read.modifier(input.modifierId);
-    if (!current) throw new Error(modifierNotFound(input.modifierId));
+    const current = requireModifier(ctx.read, input.modifierId);
     const { instance: next, recipeId: recipe } = withRecipe(ctx.read, current, input.recipe);
     const after = cloneModifiers(useEngineStore().modifiers).map(m => (m.id === next.id ? next : m));
     return { kind: 'mutation', commands: [setModifiers(after, `Apply Recipe ${input.recipe}`)], value: { modifierId: current.id, recipe } };

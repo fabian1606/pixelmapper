@@ -2,7 +2,7 @@
  * Shared helpers of the agent tools: input validation and MCP-friendly
  * result content (`text` for the model, `json` for exact values).
  */
-import type { z } from 'zod';
+import { z } from 'zod';
 import { toJsonSchema } from '../json-schema';
 import type { ToolContent, ToolDescriptor, ToolOutput } from './types';
 
@@ -18,18 +18,55 @@ export function toolInputSchema(schema: z.ZodType): ToolDescriptor['inputSchema'
 
 // ── Validation ──────────────────────────────────
 
-/** Parses `input`; on failure returns an `isError` output listing the issues. */
+/** True for plain objects (not arrays / null). */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Renames alias keys to their canonical key when the canonical key is
+ * absent (`{ selector: "x" }` → `{ id: "x" }` for `describe`). Other inputs
+ * are returned as is.
+ */
+export function applyKeyAliases(input: unknown, aliases: Record<string, string>): unknown {
+  if (!isRecord(input)) return input;
+  const out: Record<string, unknown> = { ...input };
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    if (alias in out && !(canonical in out)) {
+      out[canonical] = out[alias];
+      delete out[alias];
+    }
+  }
+  return out;
+}
+
+/** "Expected keys: id (required), detail" of an object schema; empty for other schemas. */
+function expectedKeysHint(schema: z.ZodType, input: unknown): string {
+  if (!(schema instanceof z.ZodObject)) return '';
+  const shape = schema.shape as Record<string, z.ZodType>;
+  const keys = Object.entries(shape).map(([k, v]) => (v.safeParse(undefined).success ? k : `${k} (required)`));
+  const unknown = isRecord(input) ? Object.keys(input).filter(k => !(k in shape)) : [];
+  const head = unknown.length ? `Unknown key(s): ${unknown.join(', ')}. ` : '';
+  return `\n${head}Expected keys: ${keys.join(', ')}.`;
+}
+
+/**
+ * Parses `input` (after renaming `aliases`); on failure returns an
+ * `isError` output listing the issues, unknown keys and the expected keys.
+ */
 export function parseInput<T extends z.ZodType>(
   tool: string,
   schema: T,
   input: unknown,
+  aliases: Record<string, string> = {},
 ): { ok: true; value: z.output<T> } | { ok: false; output: ToolOutput } {
-  const parsed = schema.safeParse(input ?? {});
+  const raw = applyKeyAliases(input ?? {}, aliases);
+  const parsed = schema.safeParse(raw);
   if (parsed.success) return { ok: true, value: parsed.data };
   const issues = parsed.error.issues
     .map(i => `- ${i.path.length ? i.path.map(String).join('.') : '(input)'}: ${i.message}`)
     .join('\n');
-  return { ok: false, output: errorOutput(`Invalid input for "${tool}":\n${issues}`) };
+  return { ok: false, output: errorOutput(`Invalid input for "${tool}":\n${issues}${expectedKeysHint(schema, raw)}`) };
 }
 
 // ── Content ─────────────────────────────────────

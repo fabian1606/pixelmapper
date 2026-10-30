@@ -2,6 +2,7 @@
  * `apply` tool: run a batch of operations as one undoable transaction.
  */
 import { ApplyRequestSchema, type ApplyResult } from '../apply';
+import { normalizeApplyRequest } from '../envelope';
 import type { ExpectationResult } from '../expectation';
 import type { Finding } from '../finding';
 import { errorOutput, messageOf, parseInput, textAndJson, toolInputSchema } from './shared';
@@ -56,21 +57,29 @@ export function createApplyTool(): ToolDefinition {
   return {
     name: 'apply',
     description: [
-      'Change the project: run a batch of operations (`ops: [{ op, input }]`) as ONE transaction and one undo step labelled "AI: <label>" in the app.',
+      'Change the project: run a batch of operations as ONE transaction and one undo step labelled "AI: <label>" in the app.',
+      'Call shape — each op entry is { "op": "<operation id>", "input": { …that operation\'s input… } }; the operation\'s keys go INSIDE "input":',
+      '{ "label": "Move bar", "ops": [ { "op": "fixtures.move", "input": { "moves": [ { "fixtureId": "fx-1", "x": 0.25, "y": 0.5 } ] } } ], "dryRun": true }',
+      '`describe { "id": "<operation id>" }` shows each operation\'s input and a ready-to-copy call. (Input keys placed next to "op" are folded into "input" with an info note.)',
       'Later ops see the effects of earlier ones. Any error (unknown op, invalid input, failed verification) rolls the whole batch back.',
       'Use `dryRun: true` first for non-trivial changes: same diff, findings and expectations, then the state is restored.',
       '`expect`: assertions evaluated after the batch on { state, diff, results } (state = bpm, fixtures, groups, modifiers, livePages, selection; results = per-op output values). Each: { path, eq|ne|gt|gte|lt|lte|within|oneOf|contains|exists }, `*` fans out, e.g. { "path": "results.0.id", "exists": true }.',
       'Result: committed flag, semantic diff, findings (errors/warnings with hints), expectation results. Then use `observe` to check how the change actually looks.',
-      'Get input schemas with `describe` first. Coordinates are normalized 0–1 world space.',
+      'Coordinates are normalized 0–1 world space.',
     ].join('\n'),
     inputSchema: toolInputSchema(ApplyRequestSchema),
     annotations: { readOnlyHint: false, destructiveHint: false, title: 'Apply operations' },
     async run(host, input, ctx) {
-      const parsed = parseInput('apply', ApplyRequestSchema, input);
+      // Lenient envelope: fold input keys placed next to `op` into `input`.
+      const normalized = normalizeApplyRequest(input);
+      const envelopeErrors = normalized.findings.filter(f => f.level === 'error');
+      if (envelopeErrors.length) return errorOutput(envelopeErrors.map(f => f.message).join('\n'));
+      const parsed = parseInput('apply', ApplyRequestSchema, normalized.request);
       if (!parsed.ok) return parsed.output;
       const request = parsed.value;
       try {
-        const result = await host.apply(request, { actor: ctx.actor, signal: ctx.signal });
+        const applied = await host.apply(request, { actor: ctx.actor, signal: ctx.signal });
+        const result = normalized.findings.length ? { ...applied, findings: [...normalized.findings, ...applied.findings] } : applied;
         const failedExpectation = result.expectations?.some(e => !e.pass) ?? false;
         const failed = result.findings.some(f => f.level === 'error') || failedExpectation;
         return textAndJson(summarizeApply(result, request.dryRun ?? false, request.label), result, failed);

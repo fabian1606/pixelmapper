@@ -7,6 +7,7 @@ export * from './finding';
 export * from './expectation';
 export * from './operation';
 export * from './apply';
+export * from './envelope';
 export * from './observe';
 export * from './screenshot';
 export * from './host';

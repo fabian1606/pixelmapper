@@ -2392,6 +2392,12 @@
       "summary": "Write namespaced extension data (JSON) on the project, a fixture or a live widget: data[extensionId][key] = value. `value: null` deletes the key."
     },
     {
+      "id": "fixtures.arrange",
+      "kind": "mutation",
+      "namespace": "fixtures",
+      "summary": "Arrange many fixtures on a shape in one op: grid (rows × cols in a rectangle), line (from → to), circle / arc (center, radius, start/end angle), distribute (even spacing along x or y) or align (left/right/top/bottom/centerX/centerY). Optionally rotates them along / across the shape."
+    },
+    {
       "id": "fixtures.find",
       "kind": "query",
       "namespace": "fixtures",

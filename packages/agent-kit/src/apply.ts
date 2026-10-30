@@ -37,9 +37,9 @@ export interface ApplyRequest {
 /** Zod schema of an apply request. */
 export const ApplyRequestSchema = z.object({
   ops: z.array(z.object({
-    op: z.string().describe('Operation id, e.g. "modifiers.add". See the `operations` / `describe` tools.'),
-    input: z.unknown().describe('Input of the operation (see its JSON schema).'),
-  })).min(1),
+    op: z.string().describe('Operation id, e.g. "fixtures.move". See the `operations` / `describe` tools.'),
+    input: z.unknown().describe('The operation\'s input object: ALL of the operation\'s keys go here, e.g. { "moves": [ … ] } for fixtures.move (see `describe { "id": "<op>" }`).'),
+  })).min(1).describe('Op entries { "op": "<id>", "input": { … } }, run in order.'),
   label: z.string().min(1).describe('Short undo label, e.g. "Add rainbow wave".'),
   dryRun: z.boolean().optional(),
   expect: z.array(ExpectationSchema).optional(),

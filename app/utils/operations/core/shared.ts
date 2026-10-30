@@ -2,6 +2,8 @@
  * Zod building blocks shared by the core operations.
  */
 import { z } from 'zod';
+import type { ModifierInstance } from '~/utils/engine/types';
+import type { CoreReadApi } from '../read-api';
 
 /** Fixture / node id (string ids; numeric legacy ids are accepted). */
 export const FixtureIdSchema = z.union([z.string(), z.number()]).describe('Fixture or scene node id.');
@@ -47,4 +49,24 @@ export const ModifierIdSchema = z.string({
 /** Readable "modifier not found" message. */
 export function modifierNotFound(id: string): string {
   return `modifier "${id}" not found (use modifiers.list to list ids)`;
+}
+
+/**
+ * Readable "ambiguous modifier id" message: `count` instances share `id`,
+ * so an op addressing it cannot tell which one is meant.
+ */
+export function modifierAmbiguous(id: string, count: number): string {
+  return `modifier id "${id}" is ambiguous: ${count} instances share it; the stack is inconsistent (reload the project to give the duplicates fresh ids, or remove and re-add the modifier), then use modifiers.list for the current ids`;
+}
+
+/**
+ * Resolves the one modifier instance with `id`; throws `modifierNotFound`
+ * when none and `modifierAmbiguous` when several instances share the id.
+ * Every `modifiers.*` op addressing an instance goes through here.
+ */
+export function requireModifier(read: CoreReadApi, id: string): ModifierInstance {
+  const matches = read.modifiers().filter(m => m.id === id);
+  if (matches.length === 0) throw new Error(modifierNotFound(id));
+  if (matches.length > 1) throw new Error(modifierAmbiguous(id, matches.length));
+  return matches[0]!;
 }

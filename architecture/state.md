@@ -82,6 +82,7 @@ Presets store a snapshot of channel states (and modifier effects) for specific f
 - **Selective application**: Each preset stores `fixtureIds` indicating which fixtures it covers. Loading a preset does not affect fixtures not listed in it.
 - **Diffing**: The engine compares live programmer state against a preset's snapshot (filtered by `fixtureIds`) to detect unsaved changes. Editing a non-preset fixture doesn't mark the preset as modified.
 - **Save / delete / overwrite** go through the command system (`preset-commands.ts`), so they are fully undoable.
+- **Modifier ids**: applying a preset recreates its modifier snapshots with their saved ids (so the diff matches them), except when an id is already live (a surviving instance outside the preset, or the same id in two categories of a resolved preset): then the copy gets a fresh id (`reconstructEffect(snap, takenIds)` in `preset-apply.ts`). Pinned modifiers and card splits always get fresh ids. Two live instances must never share an id; `deserializeProject` repairs older projects in place (`dedupeModifierIds`: the first occurrence keeps its id, so live widget mappings stay on it).
 
 ### Active preset — single source of truth
 

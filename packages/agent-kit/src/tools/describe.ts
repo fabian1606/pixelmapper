@@ -3,14 +3,18 @@
  * examples) or a guide topic (`guide:<topic>`).
  */
 import { z } from 'zod';
+import { exampleCall, exampleCallText, summarizeInputSchema } from '../envelope';
 import type { AgentHost } from '../host';
 import { errorOutput, parseInput, text, textAndJson, toolInputSchema } from './shared';
 import type { ToolDefinition, ToolOutput } from './types';
 
 /** Input schema of `describe`. */
 export const DescribeInputSchema = z.object({
-  id: z.string().min(1).describe('Operation id (e.g. "modifiers.add") or guide topic ("guide:plugin-authoring"; "guide:" lists all topics).'),
+  id: z.string().min(1).describe('Operation id (e.g. "modifiers.add") or guide topic ("guide:plugin-authoring"; "guide:" lists all topics). Aliases: "op", "selector", "operation".'),
 });
+
+/** Keys accepted instead of `id` (agents mix up the tools' key names). */
+const ID_ALIASES = { op: 'id', selector: 'id', operation: 'id', name: 'id' };
 
 /** Prefix of guide topic ids. */
 export const GUIDE_PREFIX = 'guide:';
@@ -47,13 +51,14 @@ export function createDescribeTool(): ToolDefinition {
   return {
     name: 'describe',
     description: [
-      'Everything needed to call an operation: full description (units, coordinate spaces), JSON input/output schema and examples. Call it before using an operation in `apply` for the first time.',
+      'Everything needed to call an operation: full description (units, coordinate spaces), input summary, JSON input/output schema, examples and a ready-to-copy `apply` call. Input: { "id": "<operation id>" }, e.g. { "id": "fixtures.move" }.',
+      'Describe an operation before its first use in `apply`. The returned example call shows the envelope: apply { "label", "ops": [ { "op": "<id>", "input": { …the operation\'s input… } } ] }.',
       'Also serves guides: id "guide:" lists topics, e.g. "guide:plugin-authoring" (write content plugins for plugins.build), "guide:modifier-design", "guide:plugin-sdk" (SDK type definitions).',
     ].join('\n'),
     inputSchema: toolInputSchema(DescribeInputSchema),
     annotations: { readOnlyHint: true, title: 'Describe operation or guide' },
     async run(host, input) {
-      const parsed = parseInput('describe', DescribeInputSchema, input);
+      const parsed = parseInput('describe', DescribeInputSchema, input, ID_ALIASES);
       if (!parsed.ok) return parsed.output;
       const { id } = parsed.value;
       if (id.startsWith(GUIDE_PREFIX)) return describeGuide(host, id);
@@ -62,7 +67,16 @@ export function createDescribeTool(): ToolDefinition {
         const similar = similarOperations(host, id);
         return errorOutput(`Unknown operation "${id}".${similar.length ? ` Did you mean: ${similar.join(', ')}?` : ' Use `operations` to list ids.'}`);
       }
-      return textAndJson(`${description.id} (${description.kind})\n\n${description.description}`, description);
+      const lines = [
+        `${description.id} (${description.kind})`,
+        '',
+        description.description,
+        '',
+        `Input (? = optional): ${summarizeInputSchema(description.inputSchema)}`,
+        '',
+        exampleCallText(description),
+      ];
+      return textAndJson(lines.join('\n'), { ...description, exampleCall: exampleCall(description) });
     },
   };
 }
