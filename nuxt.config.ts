@@ -118,6 +118,12 @@ export default defineNuxtConfig({
         'reka-ui',
         'semver',
         'tailwind-merge',
+        // Agent layer (agent-kit tools, loaded by the MCP bridge plugin at boot).
+        'zod',
+        // In-browser plugin toolchain (plugins.build, New modifier from code).
+        'sucrase',
+        'assemblyscript/asc',
+        'binaryen',
         ...(IS_TAURI ? ['@tauri-apps/api/core', '@tauri-apps/api/event', '@tauri-apps/api/window'] : []),
       ],
     },
