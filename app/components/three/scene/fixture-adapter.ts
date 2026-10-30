@@ -5,8 +5,21 @@ import { buildBeamPhotometry, type BeamPhotometry } from '~/utils/engine/core/ph
 import { WORLD_WIDTH, WORLD_HEIGHT, FIXTURE_RADIUS, STAGE_SIZE_METERS } from '~/utils/engine/constants';
 import { PIXELS_PER_METER, kindToWorld } from '~/utils/kinds/kind-host';
 import { resolveCssColor } from '~/utils/kinds/kind-canvas';
+import {
+  DEFAULT_PAN_RANGE_DEG,
+  DEFAULT_TILT_RANGE_DEG,
+  motionRangeFromChannels,
+  type MotionRange,
+} from '~/utils/engine/core/motion-range';
+import { movingHeadDims, type MovingHeadDims } from './moving-head-geometry';
 
 const DEG2RAD = Math.PI / 180;
+/** Height of a regular fixture's body box, meters. */
+const BODY_HEIGHT_M = 0.18;
+/** Lift of the emitting segments above the body's top face (avoids z-fighting). */
+const SEGMENT_LIFT_M = 0.002;
+/** Share of a head's slot its segment covers (gap between neighbors). */
+const SEGMENT_FILL = 0.9;
 
 /**
  * Full fixture footprint in meters — the 3D equivalent of the 2D canvas's
@@ -86,6 +99,12 @@ export interface BodyModel {
   size: Vector3;
   /** Kind fixtures get a small pivot box; their body is drawn from primitives. */
   compact: boolean;
+  /**
+   * Box center in the fixture's local frame (default: the origin). Moving
+   * heads use it to sit their base box on the mounting plane. `position`
+   * stays the fixture origin so gizmo/projection anchors are unaffected.
+   */
+  localOffset?: Vector3;
 }
 
 /** Beam-capable fixture (moving head / spot / PAR with lens data). */
@@ -97,20 +116,28 @@ export interface BeamModel {
   panFineIdx: number;
   tiltIdx: number;
   tiltFineIdx: number;
-  /** Full pan/tilt travel in degrees (DMX 0 → -range/2, DMX max → +range/2). */
-  panRangeDeg: number;
-  tiltRangeDeg: number;
+  /** Pan/tilt travel [DMX 0, DMX max] in degrees, centered by the renderer (motion-range.ts). */
+  panRange: [number, number];
+  tiltRange: [number, number];
   /** DMX index scaling the cone angle between beamAngleMin/MaxDeg, -1 = fixed min. */
   zoomIdx: number;
   beamAngleMinDeg: number;
   beamAngleMaxDeg: number;
   /**
-   * False when the fixture has no TILT channel: the cone then points UP
-   * (uplight convention — a fixture sitting on the floor stays visible)
-   * instead of straight down into the floor plane.
+   * False when the fixture has no positional TILT channel. Every cone points
+   * along the fixture's local +Y (away from the mounting plane) in its
+   * neutral pose; the fixture's Tilt field reorients it (180° = hanging).
    */
   hasTilt: boolean;
-  /** Photometry descriptor across all channels of the fixture. */
+  /**
+   * Draw the small spot head box at the cone origin. False for the per-head
+   * cones of multi-head fixtures (LED bars) — their body box is the housing —
+   * and for moving heads, which get the full model instead.
+   */
+  showHead: boolean;
+  /** Procedural moving-head model (base/yoke/head); null for plain cones. */
+  movingHead: MovingHeadDims | null;
+  /** Photometry descriptor: the whole fixture, or one head of a multi-head fixture. */
   photometry: BeamPhotometry;
 }
 
@@ -150,20 +177,27 @@ export interface SvgPlaneModel {
   svgData: string;
 }
 
+/** One head's slot on the emitting (top) face of a multi-head fixture. */
+export interface SegmentModel {
+  fixtureId: string | number;
+  /** Quad center in world meters (on the body's top face). */
+  position: Vector3;
+  euler: Euler;
+  /** Quad extents in meters along the fixture's local X / Z. */
+  width: number;
+  depth: number;
+  /** Photometry of the head this slot shows. */
+  photometry: BeamPhotometry;
+}
+
 export interface SceneModel {
   pixels: PixelModel;
+  segments: SegmentModel[];
   bodies: BodyModel[];
   beams: BeamModel[];
   polylines: PolylineModel[];
   shapes: ShapeModel[];
   svgPlanes: SvgPlaneModel[];
-}
-
-/** Parses OFL angle strings like "540deg" / "-270deg". */
-function parseDeg(s: string | undefined): number | null {
-  if (!s) return null;
-  const m = /-?\d+(\.\d+)?/.exec(s);
-  return m ? parseFloat(m[0]) : null;
 }
 
 function channelDmxIdx(f: Fixture, types: string[]): { idx: number; fineIdx: number } {
@@ -181,18 +215,14 @@ function channelDmxIdx(f: Fixture, types: string[]): { idx: number; fineIdx: num
   return { idx: -1, fineIdx: -1 };
 }
 
-/** Pan/tilt travel range in degrees from the channel's OFL capabilities. */
-function capabilityRangeDeg(f: Fixture, type: 'PAN' | 'TILT', fallback: number): number {
-  const ch = f.channels.find(c => c.type === type && !c.isFine);
-  const caps = ch?.oflCapabilities;
-  if (caps) {
-    for (const cap of caps as Array<Record<string, unknown>>) {
-      const a0 = parseDeg(cap.angleStart as string | undefined);
-      const a1 = parseDeg(cap.angleEnd as string | undefined);
-      if (a0 !== null && a1 !== null && a1 !== a0) return Math.abs(a1 - a0);
-    }
-  }
-  return fallback;
+/**
+ * Pan/tilt travel: persisted range first, then the in-session OFL
+ * capabilities (fixtures created before the range was persisted), then
+ * the typical 540°/270°.
+ */
+function resolveMotionRange(f: Fixture): Required<Pick<MotionRange, 'pan' | 'tilt'>> & MotionRange {
+  const r = f.motionRange ?? motionRangeFromChannels(f.channels) ?? {};
+  return { ...r, pan: r.pan ?? DEFAULT_PAN_RANGE_DEG, tilt: r.tilt ?? DEFAULT_TILT_RANGE_DEG };
 }
 
 interface RawPixel {
@@ -213,6 +243,7 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
   const polylines: PolylineModel[] = [];
   const shapes: ShapeModel[] = [];
   const svgPlanes: SvgPlaneModel[] = [];
+  const segments: SegmentModel[] = [];
 
   for (const f of fixtures) {
     const pos = fixtureWorldPosition(f);
@@ -308,6 +339,18 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
     const pixelDiameter = f.beams.length > 1
       ? Math.max(0.02, Math.min(slotW, slotH) * 0.8)
       : Math.min(fp.x, fp.y);
+    // Positional pan/tilt channels (endless-rotation channels have no pose).
+    const motion = resolveMotionRange(f);
+    const pan = motion.panContinuous ? { idx: -1, fineIdx: -1 } : channelDmxIdx(f, ['PAN']);
+    const tilt = motion.tiltContinuous ? { idx: -1, fineIdx: -1 } : channelDmxIdx(f, ['TILT']);
+    // Single-head pan/tilt fixture → full moving-head model; its lens shows
+    // the color, so no static pixel dot at the origin.
+    const movingHead = f.beams.length === 1 && (pan.idx >= 0 || tilt.idx >= 0)
+      ? movingHeadDims(f.dimensionsMm, fp.x)
+      : null;
+
+    // Per-head world positions — reused for the per-head beam cones below.
+    const headPositions: Vector3[] = [];
     for (const b of f.beams) {
       const offset = new Vector3(
         b.localX * fp.x,
@@ -316,23 +359,49 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
         (b.localZ || 0) * fp.x,
         b.localY * fp.y,
       ).applyEuler(euler);
-      rawPixels.push({
+      headPositions.push(pos.clone().add(offset));
+      const photometry = buildBeamPhotometry(f, String(b.id));
+      if (!movingHead) rawPixels.push({
         x: pos.x + offset.x,
         y: pos.y + offset.y,
         z: pos.z + offset.z,
         size: pixelDiameter,
-        photometry: buildBeamPhotometry(f, String(b.id)),
+        photometry,
         fixtureId: f.id,
       });
+
+      // Emitting face: the head's slot on top of the body box, slightly
+      // inset so neighboring segments stay distinguishable.
+      if (f.beams.length > 1) {
+        const top = new Vector3(b.localX * fp.x, BODY_HEIGHT_M / 2 + SEGMENT_LIFT_M, b.localY * fp.y).applyEuler(euler);
+        segments.push({
+          fixtureId: f.id,
+          position: pos.clone().add(top),
+          euler,
+          width: Math.min(slotW, fp.x) * SEGMENT_FILL,
+          depth: Math.min(slotH, fp.y) * SEGMENT_FILL,
+          photometry,
+        });
+      }
     }
 
-    bodies.push({
-      fixtureId: f.id,
-      position: pos.clone(),
-      euler,
-      size: new Vector3(Math.max(0.15, fp.x), 0.18, Math.max(0.15, fp.y)),
-      compact: false,
-    });
+    bodies.push(movingHead
+      ? {
+          // The base box is the moving head's selection body.
+          fixtureId: f.id,
+          position: pos.clone(),
+          euler,
+          size: new Vector3(movingHead.width, movingHead.baseHeight, movingHead.depth),
+          compact: false,
+          localOffset: new Vector3(0, movingHead.baseHeight / 2, 0),
+        }
+      : {
+          fixtureId: f.id,
+          position: pos.clone(),
+          euler,
+          size: new Vector3(Math.max(0.15, fp.x), BODY_HEIGHT_M, Math.max(0.15, fp.y)),
+          compact: false,
+        });
 
     // SVG artwork as a textured plane at the footprint — the dots on top
     // convey the DMX state, exactly like the 2D renderer's element fills.
@@ -351,27 +420,37 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
     // Beam cones: moving heads (pan/tilt), lens-bearing fixtures, and any
     // simple single-head fixture (PARs, spots, generic RGB) — only matrix/
     // multi-head panels (>2 beams) stay cone-less.
-    const pan = channelDmxIdx(f, ['PAN', 'PAN_CONTINUOUS']);
-    const tilt = channelDmxIdx(f, ['TILT', 'TILT_CONTINUOUS']);
     const lens = f.lensDegreesMinMax ?? f.definition?.physical?.lens?.degreesMinMax;
     if (pan.idx >= 0 || tilt.idx >= 0 || lens || f.beams.length <= 2) {
       const zoom = channelDmxIdx(f, ['ZOOM', 'BEAM_ANGLE']);
-      beams.push({
+      const shared = {
         fixtureId: f.id,
-        position: pos.clone(),
         euler,
         panIdx: pan.idx,
         panFineIdx: pan.fineIdx,
         tiltIdx: tilt.idx,
         tiltFineIdx: tilt.fineIdx,
-        panRangeDeg: capabilityRangeDeg(f, 'PAN', 540),
-        tiltRangeDeg: capabilityRangeDeg(f, 'TILT', 270),
+        panRange: motion.pan,
+        tiltRange: motion.tilt,
         zoomIdx: zoom.idx,
         beamAngleMinDeg: lens?.[0] ?? 25,
         beamAngleMaxDeg: lens?.[1] ?? lens?.[0] ?? 25,
         hasTilt: tilt.idx >= 0,
-        photometry: buildBeamPhotometry(f),
-      });
+      };
+      if (f.beams.length > 1) {
+        // Multi-head (LED bars, multi-head moving bars): one cone per head at
+        // its own position and color — a single fixture-center cone would
+        // swallow the heads into one spot.
+        f.beams.forEach((b, i) => beams.push({
+          ...shared,
+          position: headPositions[i]!,
+          showHead: false,
+          movingHead: null,
+          photometry: buildBeamPhotometry(f, String(b.id)),
+        }));
+      } else {
+        beams.push({ ...shared, position: pos.clone(), showHead: !movingHead, movingHead, photometry: buildBeamPhotometry(f) });
+      }
     }
   }
 
@@ -394,6 +473,7 @@ export function buildSceneModel(fixtures: Fixture[]): SceneModel {
 
   return {
     pixels: { count, positions, sizes, photometry, pixelFixture },
+    segments,
     bodies,
     beams,
     polylines,

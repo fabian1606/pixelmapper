@@ -2,13 +2,17 @@
  * Web platform (ADR 0003): what the browser can do on its own.
  *
  * Serial and MIDI where the browser supports them; Art-Net goes through
- * `pmnet-bridge serve` over WebSocket. The Tauri platform starts from this one and
- * replaces capabilities with native implementations (ADR 0003 D4).
+ * `pmnet-bridge serve` over WebSocket; no native HTTP and no bundled
+ * resources. The Tauri platform starts from this one and replaces
+ * capabilities with native implementations (ADR 0003 D4).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebSerial } from './serial';
 import { createWebMidi } from './midi';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
+import { WEB_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
+import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
+import { UNKNOWN_MCP_SETUP, type McpSetupInfo } from '../../utils/agents/mcp-setup';
 
 /** Creates the web platform for the current browser. */
 export function createWebPlatform(): Platform {
@@ -18,6 +22,9 @@ export function createWebPlatform(): Platform {
     midi: createWebMidi(),
     // Browsers reach the Art-Net bridge over WebSocket (`pmnet-bridge serve`).
     artnetBridge: null,
+    // The browser has neither CORS-free HTTP nor bundled files.
+    http: null,
+    resources: null,
   };
 }
 
@@ -29,5 +36,23 @@ export function getWindowChrome(): WindowChrome {
   return NO_WINDOW_CHROME;
 }
 
+/** Account mandatory; logout clears the local cache (ADR 0004 D3, D16). */
+export function getAccountPolicy(): AccountPolicy {
+  return WEB_ACCOUNT_POLICY;
+}
+
 /** No menu bar; project files via download / file input. */
 export { createWebAppShell as getAppShell } from './app-shell';
+
+/** OFL library from the Nitro routes `/api/fixtures` (ADR 0004 D18). */
+export { createWebFixtureLibrary as getFixtureLibrary } from './fixture-library';
+
+/** MCP bridge to `pixelmapper-mcp` (ADR 0002 B8); the hello reports platform `web`. */
+export function getAgentBridge(): AgentBridge {
+  return getSharedAgentBridge('web');
+}
+
+/** The browser cannot read the local token file or CLI path; the user pastes the token. */
+export function getMcpSetupInfo(): Promise<McpSetupInfo> {
+  return Promise.resolve({ ...UNKNOWN_MCP_SETUP });
+}

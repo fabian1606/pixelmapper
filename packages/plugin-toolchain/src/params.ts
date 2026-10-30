@@ -5,7 +5,8 @@
  * The params block is the concatenation of every param's f32 slots in
  * manifest order: number/int/angle 1, bool 1 (0/1), enum 1 (index),
  * color 3 (r,g,b), point 2 (x,y), curve 128 (LUT over the curve's domain, 0–1),
- * gradient 33 (count, (pos,r,g,b)×8), steps 18 (groups, steps, mask[16]).
+ * gradient 33 (count, (pos,r,g,b)×8), steps 18 (groups, steps, mask[16]),
+ * trigger 4 (pressed, pressedAt, releasedAt, clicks; times in engine-clock ms).
  */
 import {
   PARAM_WIRE_SLOTS,
@@ -13,6 +14,7 @@ import {
   type GradientValue,
   type ParamDef,
   type StepsValue,
+  type TriggerValue,
   type ParamSchema,
   type ParamValue,
   type RgbColor,
@@ -21,9 +23,11 @@ import {
 
 import { CURVE_LUT_SIZE, sampleCurveLut } from './curve-shapes';
 import { writeGradient, writeSteps } from './param-structs';
+import { writeTrigger } from './trigger';
 
 export { CURVE_LUT_SIZE, evaluateCurve, sampleCurveLut } from './curve-shapes';
 export { evaluatePoints, sampleCurve } from './curve-points';
+export { checkTrigger, DEFAULT_MULTI_CLICK_MS, multiClickMsOf, TRIGGER_IDLE, TRIGGER_NEVER_MS, triggerEdge, writeTrigger } from './trigger';
 
 /** Context of an encoding (plan §1.5). */
 export interface EncodeContext {
@@ -79,6 +83,9 @@ function writeParam(buf: Float32Array, offset: number, def: ParamDef, value: Par
     case 'steps':
       writeSteps(buf, offset, v as StepsValue);
       return offset + PARAM_WIRE_SLOTS.steps;
+    case 'trigger':
+      writeTrigger(buf, offset, v as TriggerValue);
+      return offset + PARAM_WIRE_SLOTS.trigger;
     case 'curve':
       // LUT over the param's domain (cycle: x = i/127, signed: x = −1 + 2i/127), clamped to 0–1.
       buf.set(sampleCurveLut(v as CurveValue, CURVE_LUT_SIZE, { ticks: ctx.ticks ?? 0 }, def.domain ?? 'cycle'), offset);

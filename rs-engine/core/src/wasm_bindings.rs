@@ -4,6 +4,12 @@ use wasm_bindgen::prelude::*;
 use crate::engine::EffectEngine;
 use crate::runtime_js::JsModifierRuntime;
 
+/// Host ABI version of this build (see `crate::ENGINE_ABI_VERSION`).
+#[wasm_bindgen]
+pub fn engine_abi_version() -> u32 {
+    crate::ENGINE_ABI_VERSION
+}
+
 /// The engine as used by the browser worker.
 #[wasm_bindgen]
 pub struct WasmEngine {
@@ -58,6 +64,16 @@ impl WasmEngine {
     pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32> {
         let mut out = Vec::with_capacity(requests.len() / 2 * 3);
         self.engine.read_signatures(requests, &mut out);
+        out
+    }
+
+    /// Per-head signature tuples (observation): `requests` are flat
+    /// `(group index, head index, signature id, channel type id or 255)`
+    /// quads; returns 3 f32 per request (NaN = unavailable).
+    #[wasm_bindgen]
+    pub fn read_head_signatures(&self, requests: &[u32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(requests.len() / 4 * 3);
+        self.engine.read_head_signatures(requests, &mut out);
         out
     }
 

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pixelmapper": {
+      "command": "bun",
+      "args": ["run", "packages/mcp-bridge/src/cli.ts"]
+    }
+  }
+}

@@ -24,7 +24,8 @@ describe('placeNewFixtures', () => {
     expect(added.map(f => f.startAddress)).toEqual([24, 28, 32]);
     expect(added.map(f => f.fixturePosition)).toEqual([{ x: 0.5, y: 0.5 }, { x: 0.52, y: 0.52 }, { x: 0.54, y: 0.54 }]);
     expect(new Set(added.map(f => f.id)).size).toBe(3);
-    expect(added.every(f => /^ofl-\d+$/.test(String(f.id)))).toBe(true);
+    // UUID ids (ADR 0004 D6).
+    expect(added.every(f => /^ofl-[0-9a-f-]{36}$/.test(String(f.id)))).toBe(true);
   });
 
   it('keeps explicit start addresses and appends the rest after them', () => {

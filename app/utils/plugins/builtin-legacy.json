@@ -1854,5 +1854,421 @@
         "description": "Color channels flicker independently (colorful)."
       }
     ]
+  },
+  {
+    "hash": "sha256:456d51310d2fe975531ff76cc6e0fbae6bd9cf5fd47e5fea587e2f97ba82274b",
+    "alias": "@pixelmapper/color-adjust",
+    "version": "2.1.0",
+    "params": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "options": [
+          "palette",
+          "shift"
+        ],
+        "optionLabels": [
+          "Palette",
+          "Shift"
+        ],
+        "label": "Mode",
+        "tier": "primary",
+        "description": "Palette: colors from a gradient. Shift: swing the fixtures' own hue.",
+        "default": "shift"
+      },
+      {
+        "key": "palette",
+        "type": "gradient",
+        "label": "Palette",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "default": {
+          "stops": [
+            {
+              "pos": 0,
+              "color": {
+                "r": 1,
+                "g": 0,
+                "b": 0
+              }
+            },
+            {
+              "pos": 0.5,
+              "color": {
+                "r": 0,
+                "g": 0,
+                "b": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "key": "arrange",
+        "type": "enum",
+        "options": [
+          "gradient",
+          "alternate"
+        ],
+        "optionLabels": [
+          "Gradient",
+          "Alternate"
+        ],
+        "label": "Arrange",
+        "tier": "primary",
+        "when": {
+          "mode": "palette"
+        },
+        "optionDistribution": {
+          "alternate": {
+            "scope": "across",
+            "mode": "order"
+          }
+        },
+        "description": "Gradient: colors follow the distribution. Alternate: neighbours in the order get the next color (switches the spread to Fixture by fixture).",
+        "default": "gradient"
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Transition",
+        "tier": "primary",
+        "when": {
+          "mode": "palette",
+          "arrange": "gradient"
+        },
+        "description": "Hard steps (0) to soft blends (1).",
+        "default": 0
+      },
+      {
+        "key": "hueShift",
+        "type": "number",
+        "min": -180,
+        "max": 180,
+        "default": 0,
+        "label": "Hue shift",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "hueRange",
+        "type": "number",
+        "min": 0,
+        "max": 180,
+        "default": 40,
+        "label": "Hue range",
+        "unit": "°",
+        "tier": "hidden"
+      },
+      {
+        "key": "saturation",
+        "type": "number",
+        "min": 0,
+        "max": 2,
+        "default": 1,
+        "label": "Saturation",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        }
+      },
+      {
+        "key": "satDip",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "White dip",
+        "tier": "primary",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "How far the profile's peak fades toward white.",
+        "default": 0
+      },
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "advanced",
+        "when": {
+          "mode": "shift"
+        },
+        "description": "Shape of the color swing across the fixtures.",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "wave",
+          "dot",
+          "bar",
+          "wedge",
+          "flash"
+        ],
+        "default": {
+          "shape": "wave",
+          "args": {}
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the colors are during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      }
+    ]
+  },
+  {
+    "hash": "sha256:244885290110355479c0836f48e35aaad906465b4ba5c4a385259bbd11acc219",
+    "alias": "@pixelmapper/noise",
+    "version": "3.4.0",
+    "params": [
+      {
+        "key": "rangeMin",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.6,
+        "label": "Lowest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "rangeMax",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "label": "Highest level",
+        "tier": "hidden"
+      },
+      {
+        "key": "frequency",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Frequency",
+        "tier": "primary",
+        "description": "How often it is bright: the share of values above half (0 = rarely, 1 = almost always; 0.5 = even).",
+        "default": 0.5
+      },
+      {
+        "key": "variation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Variation",
+        "tier": "primary",
+        "description": "On/off (0: above half goes to the highest level, below to the lowest) to soft levels (1).",
+        "default": 1
+      },
+      {
+        "key": "coherence",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "label": "Coherence",
+        "tier": "primary",
+        "description": "Independent (0) to soft patches (1): neighbours follow each other, evenly in every direction.",
+        "default": 0
+      },
+      {
+        "key": "sync",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Sync",
+        "tier": "primary",
+        "description": "Free timing (0) to everything stepping on the beat (1)."
+      },
+      {
+        "key": "hardness",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0.2,
+        "label": "Hardness",
+        "tier": "primary",
+        "description": "Soft blends (0) to hard jumps (1), also for the peaks."
+      },
+      {
+        "key": "colorVariation",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Color variation",
+        "tier": "advanced",
+        "description": "Color channels flicker independently (colorful)."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:7dd892a6a83e3ded51db840a42276768039673707f35c836fff0938231672046",
+    "alias": "@pixelmapper/sequencer",
+    "version": "3.0.0",
+    "params": [
+      {
+        "key": "steps",
+        "type": "steps",
+        "label": "Steps",
+        "tier": "primary",
+        "default": {
+          "groups": 2,
+          "steps": 2,
+          "cells": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      },
+      {
+        "key": "transition",
+        "type": "number",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "label": "Transition",
+        "tier": "primary",
+        "description": "Hard (0) ↔ soft: a crossfade over the whole step (1)."
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "default": false,
+        "label": "Invert",
+        "tier": "advanced"
+      }
+    ]
+  },
+  {
+    "hash": "sha256:5906660f915f700bb4809d14bc40fa63028d4bb8743d1dbae3e2c59f16d5265e",
+    "alias": "@pixelmapper/waveform",
+    "version": "2.1.0",
+    "params": [
+      {
+        "key": "profile",
+        "type": "curve",
+        "label": "Profile",
+        "tier": "primary",
+        "description": "What is lit around the moving position (x = distance along the distribution).",
+        "domain": "signed",
+        "axis": "fixtures",
+        "range": "unipolar",
+        "shapes": [
+          "dot",
+          "bar",
+          "wave",
+          "wedge",
+          "edge",
+          "flash"
+        ],
+        "default": {
+          "shape": "dot",
+          "args": {
+            "width": 0.15,
+            "softness": 0.5,
+            "repeat": 1,
+            "peak": 1,
+            "floor": 0
+          }
+        }
+      },
+      {
+        "key": "motion",
+        "type": "curve",
+        "label": "Motion",
+        "tier": "primary",
+        "description": "Where the profile is during one pass.",
+        "domain": "cycle",
+        "axis": "beats",
+        "shapes": [
+          "run",
+          "pingpong",
+          "step",
+          "hold",
+          "ease"
+        ],
+        "default": {
+          "shape": "run",
+          "args": {}
+        }
+      },
+      {
+        "key": "invert",
+        "type": "bool",
+        "label": "Invert",
+        "default": false,
+        "tier": "hidden",
+        "description": "Dark where the profile is lit."
+      }
+    ]
+  },
+  {
+    "hash": "sha256:b73ce304b6b8ee631596bc98f48c9437f388c6a6a72897d5627e582c9bf3750e",
+    "alias": "@pixelmapper/mirror-runner",
+    "version": "1.0.0",
+    "params": [
+      {
+        "key": "tail",
+        "type": "number",
+        "min": 0.02,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35,
+        "label": "Tail",
+        "tier": "primary",
+        "description": "Length of the fading trail behind the runner, as a fraction of the tube."
+      },
+      {
+        "key": "mirror",
+        "type": "enum",
+        "options": [
+          "leftRight",
+          "frontBack",
+          "off"
+        ],
+        "optionLabels": [
+          "Left/Right",
+          "Front/Back",
+          "Off"
+        ],
+        "default": "leftRight",
+        "label": "Mirror",
+        "tier": "primary",
+        "description": "Which halves of the room move as mirror images: left vs. right, front vs. back, or none."
+      },
+      {
+        "key": "reverse",
+        "type": "bool",
+        "default": false,
+        "label": "Reverse",
+        "tier": "primary",
+        "description": "Start at the other end of the tubes."
+      }
+    ]
   }
 ]

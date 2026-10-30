@@ -10,6 +10,7 @@ import { reactive, ref, shallowRef, type Ref } from 'vue';
 import { Watchdog } from '~/utils/plugins/watchdog';
 import type { ModifierInstance } from './types';
 import type { SignatureFrame } from '~/utils/extensions/live-hub';
+import { ENGINE_REBUILD_HINT, type EngineFailure } from './engine-abi';
 
 /** Events reported by the worker's plugin bridge. */
 export type PluginEvent =
@@ -26,6 +27,8 @@ export class EffectEngine {
 
   /** Latest DMX frame received from the worker. */
   public dmxBuffer: Uint8Array = new Uint8Array(512);
+  /** Wall-clock time (ms) of the latest frame; 0 before the first one. */
+  public lastFrameAt = 0;
 
   /** Resolves when the (first) worker WASM engine is ready. */
   public readonly ready: Promise<void>;
@@ -47,6 +50,16 @@ export class EffectEngine {
 
   /** Hashes suspended by the watchdog (cleared via `resumePlugins`). */
   public readonly suspendedPlugins = shallowRef<string[]>([]);
+
+  /**
+   * Fatal engine failure (WASM missing, failed to load, ABI mismatch): no
+   * frames are rendered while set. Live output readers must check it instead
+   * of reporting the (all-zero) DMX buffer as real output.
+   */
+  public readonly failure = shallowRef<EngineFailure | null>(null);
+
+  /** Called for every engine failure (fatal and non-fatal); the store shows a toast. */
+  public onFailure: ((failure: EngineFailure) => void) | null = null;
 
   private worker: Worker | null = null;
   private readyResolve!: () => void;
@@ -87,14 +100,38 @@ export class EffectEngine {
       else if (m.type === 'frame' && m.dmx && m.elapsedMs !== undefined) {
         this.watchdog?.beat();
         this.dmxBuffer = m.dmx;
+        this.lastFrameAt = Date.now();
         this.onFrame?.(m.dmx, m.elapsedMs, m.signatures);
+      }
+      else if (m.type === 'canvas.captured') {
+        this.settleCapture(e.data as { requestId: number; png?: ArrayBuffer; error?: string });
       }
       else if (m.type === 'plugin-error' || m.type === 'plugin-log') {
         this.onPluginEvent?.(e.data as PluginEvent);
       }
+      else if (m.type === 'engine-error') {
+        this.fail((e.data as { failure: EngineFailure }).failure);
+      }
     };
-    worker.onerror = e => console.error('[engine-worker] error:', e);
+    // A worker that fails to load at all (module import/link error, e.g. a
+    // missing or outdated `rs-engine-*` package) only reports here.
+    worker.onerror = (e) => {
+      console.error('[engine-worker] error:', e);
+      const detail = e.message ? `: ${e.message}` : '';
+      this.fail({ kind: 'load', message: `Engine worker failed to start${detail}. ${ENGINE_REBUILD_HINT}`, fatal: true });
+    };
     this.worker = worker;
+  }
+
+  /** Records a failure; fatal ones stop the watchdog (nothing renders to watch). */
+  private fail(failure: EngineFailure): void {
+    if (failure.fatal) {
+      if (this.failure.value?.fatal) return; // report the first fatal cause only
+      this.failure.value = failure;
+      this.watchdog?.stop();
+    }
+    console.error(`[engine] ${failure.kind} failure: ${failure.message}`);
+    this.onFailure?.(failure);
   }
 
   /**
@@ -257,6 +294,40 @@ export class EffectEngine {
 
   public setCanvasRemoteSelections(json: string): void {
     this.canvasPost('canvas.set_remote_selections', { json });
+  }
+
+  /** Pending editor-canvas captures by request id. */
+  private captures = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>();
+  private captureSeq = 0;
+
+  /**
+   * Captures the editor canvas (drawn in the worker) as a PNG blob — used by
+   * the agent `screenshot` tool. Rejects after `timeoutMs` or when the
+   * worker has no canvas.
+   */
+  public captureCanvas(timeoutMs = 3_000): Promise<Blob> {
+    if (!this.worker) return Promise.reject(new Error('engine worker is not running'));
+    const requestId = ++this.captureSeq;
+    return new Promise<Blob>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.captures.delete(requestId);
+        reject(new Error('editor canvas capture timed out'));
+      }, timeoutMs);
+      this.captures.set(requestId, {
+        resolve: (b) => { clearTimeout(timer); resolve(b); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      this.worker!.postMessage({ type: 'canvas.capture', requestId });
+    });
+  }
+
+  /** Resolves a capture answered by the worker. */
+  private settleCapture(m: { requestId: number; png?: ArrayBuffer; error?: string }): void {
+    const pending = this.captures.get(m.requestId);
+    if (!pending) return;
+    this.captures.delete(m.requestId);
+    if (m.png) pending.resolve(new Blob([m.png], { type: 'image/png' }));
+    else pending.reject(new Error(m.error ?? 'editor canvas capture failed'));
   }
 
   // ── Modifier list ─────────────────────────────

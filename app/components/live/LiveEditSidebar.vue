@@ -916,11 +916,11 @@ const MODE_LABELS: Record<SectionMode, string> = {
           />
         </div>
 
-        <!-- Mapping (buttons and sliders) -->
+        <!-- Mapping (buttons, sliders, xy pads) -->
         <MappingEditor
-          v-if="selectedButton.type === 'button' || selectedButton.type === 'slider'"
+          v-if="selectedButton.type === 'button' || selectedButton.type === 'slider' || selectedButton.type === 'xy'"
           :mapping="selectedButton.mapping"
-          :variant="selectedButton.type === 'slider' ? 'slider' : 'button'"
+          :variant="selectedButton.type === 'slider' ? 'slider' : selectedButton.type === 'xy' ? 'xy' : 'button'"
           @patch="(p: { mapping: LiveMapping }) => patchWidget(p)"
         />
 

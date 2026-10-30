@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OflFixture } from '~/utils/ofl/types';
 import { customFixtureKey, saveCustomFixture } from './custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { setDefinitionFetcher } from './resolve-definition';
 import { buildRdmDefinitionMatch, findFixtureDefinitionByRdm, setRdmLookupFetcher } from './rdm-lookup';
 import xbar500Json from './__fixtures__/xbar500-rdm.json';
@@ -62,8 +63,9 @@ async function fakeFetcher(url: string): Promise<unknown> {
 }
 
 describe('findFixtureDefinitionByRdm', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
+    await useFreshCustomFixtureLibrary();
     requested = [];
     routes = {
       [rdmUrl(100, 7)]: { keys: ['acme/pixel-par', 'acme/pixel-par-2'] },
@@ -82,7 +84,7 @@ describe('findFixtureDefinitionByRdm', () => {
   });
 
   it('matches a custom fixture by rdmManufacturerId + rdm.modelId', async () => {
-    const stored = saveCustomFixture(XBAR500);
+    const stored = (await saveCustomFixture(XBAR500))!;
     const match = await findFixtureDefinitionByRdm(XBAR_MANUFACTURER_ID, 1);
     expect(match).toMatchObject({
       key: customFixtureKey(stored),
@@ -95,7 +97,7 @@ describe('findFixtureDefinitionByRdm', () => {
   });
 
   it('maps RDM personalities to modes and counts the channels of each mode', async () => {
-    saveCustomFixture(XBAR500);
+    await saveCustomFixture(XBAR500);
     const match = await findFixtureDefinitionByRdm(XBAR_MANUFACTURER_ID, 1);
     expect(match?.modes).toEqual([
       { index: 0, name: '4x RGB (12 ch)', channelCount: 12, rdmPersonalityIndex: 1 },
@@ -107,12 +109,12 @@ describe('findFixtureDefinitionByRdm', () => {
   });
 
   it('prefers custom fixtures over OFL fixtures with the same RDM IDs', async () => {
-    const stored = saveCustomFixture({
+    const stored = (await saveCustomFixture({
       ...XBAR500,
       name: 'My Pixel Par',
       rdm: { modelId: 7 },
       pixelmapper: { rdmManufacturerId: 100 },
-    });
+    }))!;
     const match = await findFixtureDefinitionByRdm(100, 7);
     expect(match).toMatchObject({ key: customFixtureKey(stored), source: 'custom', name: 'My Pixel Par' });
     expect(requested).toEqual([]);
@@ -121,16 +123,16 @@ describe('findFixtureDefinitionByRdm', () => {
   it('takes the first matching custom fixture (newest first)', async () => {
     const now = vi.spyOn(Date, 'now');
     now.mockReturnValue(1000);
-    saveCustomFixture({ ...XBAR500, name: 'Older XBAR' });
+    await saveCustomFixture({ ...XBAR500, name: 'Older XBAR' });
     now.mockReturnValue(2000);
-    const newer = saveCustomFixture({ ...XBAR500, name: 'Newer XBAR' });
+    const newer = (await saveCustomFixture({ ...XBAR500, name: 'Newer XBAR' }))!;
     const match = await findFixtureDefinitionByRdm(XBAR_MANUFACTURER_ID, 1);
     expect(match).toMatchObject({ key: customFixtureKey(newer), name: 'Newer XBAR' });
   });
 
   it('falls back to the first OFL key from the route', async () => {
     // A custom fixture with other RDM IDs does not match.
-    saveCustomFixture(XBAR500);
+    await saveCustomFixture(XBAR500);
     const match = await findFixtureDefinitionByRdm(100, 7);
     expect(match).toEqual({
       key: 'acme/pixel-par',
@@ -157,7 +159,7 @@ describe('findFixtureDefinitionByRdm', () => {
   });
 
   it('returns null for invalid IDs without any request', async () => {
-    saveCustomFixture(XBAR500);
+    await saveCustomFixture(XBAR500);
     for (const [manufacturerId, modelId] of [[-1, 7], [100, 1.5], [0x10000, 7], [100, Number.NaN]] as const) {
       await expect(findFixtureDefinitionByRdm(manufacturerId, modelId)).resolves.toBeNull();
     }
@@ -185,7 +187,7 @@ describe('findFixtureDefinitionByRdm', () => {
 
   it('still returns a custom match when the OFL route is unavailable', async () => {
     routes = {};
-    saveCustomFixture(XBAR500);
+    await saveCustomFixture(XBAR500);
     await expect(findFixtureDefinitionByRdm(XBAR_MANUFACTURER_ID, 1)).resolves.toMatchObject({ source: 'custom' });
   });
 

@@ -7,6 +7,7 @@ import { MoveFixtureCommand } from '../commands/move-fixture-command';
 import { WORLD_WIDTH, WORLD_HEIGHT } from '~/utils/engine/constants';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { createAddFixturesCommand, selectionWithAdded } from '~/utils/engine/add-fixtures';
+import { newPrefixedId } from '~/utils/ids';
 
 export function useWorkspaceOperations(
   sceneNodes: Ref<SceneNode[]>,
@@ -14,8 +15,6 @@ export function useWorkspaceOperations(
   flatFixtures: ComputedRef<Fixture[]>
 ) {
   const history = useHistory();
-
-  let nextGroupId = 1;
 
   /**
    * Adds fixtures from the add dialog through the shared add path (plan
@@ -45,7 +44,7 @@ export function useWorkspaceOperations(
 
     if (nodesToGroup.length === 0) return;
 
-    const newGroup = new FixtureGroup(`group-${nextGroupId++}`, 'New Group');
+    const newGroup = new FixtureGroup(newPrefixedId('group'), 'New Group'); // UUID (ADR 0004 D6)
     const command = new GroupNodesCommand(sceneNodes.value, nodesToGroup, newGroup);
     history.execute(command);
     selectedIds.value = new Set([newGroup.id]);

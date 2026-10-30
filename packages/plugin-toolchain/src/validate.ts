@@ -2,8 +2,9 @@
  * Validation harness (ADR §6.7).
  *
  * Instantiates a plugin against a synthetic layout (64 fixtures × 1–8 heads),
- * renders 240 frames (4 s @ 60 fps) for several param variants and every
- * declared signature, and rejects: invalid manifest, forbidden imports,
+ * renders 240 frames (4 s @ 60 fps, `timePhase` sweeping 0–4 cycles) for
+ * several param variants, every declared signature and every distribution
+ * mode/scope the manifest offers (`validate-distribution.ts`), and rejects: invalid manifest, forbidden imports,
  * uninstrumented modules, traps/aborts/budget overruns, NaN/∞, outputs out of
  * range (`absolute`/`scale` [0, 1]; `bipolar` [−2, 2], amendments A13/A20), state across
  * frames (frame 120 after 0–119 ≠ frame 120 fresh), and > 2 ms median per
@@ -14,6 +15,7 @@ import { validateManifest } from './manifest';
 import { encodeParams } from './params';
 import { CTX, CTX_FIELDS, PluginInstance, PluginTrap, SAMPLE, SAMPLE_FIELDS, forbiddenImports } from './runtime';
 import type { ContentPluginManifest } from './types';
+import { applyDistribution, rigDistributions, writeDistributionFrame, type RigDistributionFrame } from './validate-distribution';
 
 /** Harness outcome. */
 export interface ValidationReport {
@@ -74,6 +76,8 @@ function paramVariants(schema: ParamSchema): { name: string; values: Record<stri
         case 'angle': out[p.key] = mode === 'min' ? 0 : mode === 'max' ? Math.PI * 2 : r() * Math.PI * 2; break;
         case 'point': out[p.key] = mode === 'rand' ? { x: r(), y: r() } : { x: mode === 'max' ? 1 : 0, y: mode === 'max' ? 1 : 0 }; break;
         case 'curve': out[p.key] = mode === 'rand' ? [{ x: 0, y: r() }, { x: 0.5, y: r() }, { x: 1, y: r() }] : p.default; break;
+        // Trigger (v1.3): idle, held since frame 0, released mid-run after a double click.
+        case 'trigger': out[p.key] = mode === 'min' ? { pressed: false } : mode === 'max' ? { pressed: true, pressedAt: 0, clicks: 1 } : { pressed: false, pressedAt: 1000, releasedAt: 1000 + r() * 1000, clicks: 2 }; break;
       }
     }
     return out;
@@ -86,20 +90,31 @@ function paramVariants(schema: ParamSchema): { name: string; values: Record<stri
   return variants;
 }
 
-/** Synthetic samples: 64 fixtures on an 8×8 grid with 1–8 heads each. */
-function syntheticSamples(): { samples: Float32Array; count: number } {
-  const heads: { x: number; y: number; g: number; h: number; hc: number }[] = [];
+/**
+ * Synthetic samples: 64 fixtures on an 8×8 grid with 1–8 heads each, at
+ * heights 0–0.25 (floor to ceiling, v1.3). The room is the grid's bounding
+ * box: `u`/`v` are 0–1 across it.
+ */
+function syntheticSamples(): { samples: Float32Array; count: number; worldAspect: number; worldDepth: number } {
+  const heads: { x: number; y: number; z: number; g: number; h: number; hc: number }[] = [];
   for (let g = 0; g < FIXTURES; g++) {
     const hc = 1 + (g % 8);
     for (let h = 0; h < hc; h++) {
-      heads.push({ x: ((g % 8) + 0.5 + (h - hc / 2) * 0.05) / 8, y: (Math.floor(g / 8) + 0.5) / 8, g, h, hc });
+      heads.push({ x: ((g % 8) + 0.5 + (h - hc / 2) * 0.05) / 8, y: (Math.floor(g / 8) + 0.5) / 8, z: (g % 3) * 0.125, g, h, hc });
     }
   }
+  const minX = Math.min(...heads.map(h => h.x));
+  const maxX = Math.max(...heads.map(h => h.x));
+  const minY = Math.min(...heads.map(h => h.y));
+  const maxY = Math.max(...heads.map(h => h.y));
   const samples = new Float32Array(heads.length * SAMPLE_FIELDS);
   heads.forEach((hd, i) => {
     const o = i * SAMPLE_FIELDS;
     samples[o + SAMPLE.x] = hd.x;
     samples[o + SAMPLE.y] = hd.y;
+    samples[o + SAMPLE.z] = hd.z;
+    samples[o + SAMPLE.u] = (hd.x - minX) / (maxX - minX);
+    samples[o + SAMPLE.v] = (hd.y - minY) / (maxY - minY);
     samples[o + SAMPLE.groupIndex] = hd.g;
     samples[o + SAMPLE.groupCount] = FIXTURES;
     samples[o + SAMPLE.headIndex] = hd.h;
@@ -111,12 +126,20 @@ function syntheticSamples(): { samples: Float32Array; count: number } {
     samples[o + SAMPLE.channelSeedLo] = (i * 7919) & 0xffff;
     samples[o + SAMPLE.channelSeedHi] = (i * 104729) & 0xffff;
   });
-  return { samples, count: heads.length };
+  return { samples, count: heads.length, worldAspect: (maxX - minX) / (maxY - minY), worldDepth: maxY - minY };
 }
 
-/** Writes frame `f` into ctx and the phase column of the samples. */
-function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: number, arity: number): void {
+/** Room slots of the frame (v1.3). */
+interface RigRoom { worldAspect: number; worldDepth: number }
+
+/**
+ * Writes frame `f` into ctx and the phase column of the samples. Like the
+ * engine, `timePhase` is the speed phase (1 cycle/s here) and the legacy
+ * `phase` is `timePhase − spatial`.
+ */
+function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: number, arity: number, room: RigRoom, dist: RigDistributionFrame): void {
   const t = (f * 1000) / 60;
+  const timePhase = t / 1000;
   ctx.fill(0);
   ctx[CTX.timeMs] = t;
   ctx[CTX.bpm] = 120;
@@ -126,9 +149,14 @@ function setFrame(ctx: Float32Array, samples: Float32Array, count: number, f: nu
   ctx[CTX.seedLo] = 0x1234;
   ctx[CTX.seedHi] = 0x5678;
   ctx[CTX.strength] = 1;
+  ctx[CTX.worldAspect] = room.worldAspect;
+  ctx[CTX.worldDepth] = room.worldDepth;
+  ctx[CTX.metersPerUnit] = 12;
+  ctx[CTX.timePhase] = timePhase;
+  writeDistributionFrame(ctx, dist);
   for (let i = 0; i < count; i++) {
     const o = i * SAMPLE_FIELDS;
-    samples[o + SAMPLE.phase] = t / 1000 - samples[o + SAMPLE.x]! * 0.5;
+    samples[o + SAMPLE.phase] = timePhase - samples[o + SAMPLE.spatial]!;
   }
 }
 
@@ -166,7 +194,7 @@ export async function validate(
   }
   if (errors.length > 0) return report();
 
-  const { samples, count } = syntheticSamples();
+  const { samples, count, ...room } = syntheticSamples();
   metrics.samples = count;
   const ctx = new Float32Array(CTX_FIELDS);
   const [lo, hi] = RANGE[manifest.output];
@@ -174,62 +202,67 @@ export async function validate(
   let constant = true;
   let first: number | null = null;
 
+  const distributions = rigDistributions(manifest);
   for (const signature of manifest.signatures as Signature[]) {
     const arity = SIGNATURE_ARITY[signature];
-    for (const variant of paramVariants(manifest.params)) {
-      const label = `${signature}/${variant.name}`;
-      let inst: PluginInstance;
-      try {
-        inst = await PluginInstance.create(module);
-        inst.prepare(encodeParams(manifest.params, variant.values));
-      }
-      catch (err) {
-        errors.push(`${label}: ${err instanceof PluginTrap ? err.message : String(err)}`);
-        continue;
-      }
-      const out = new Float32Array(count * arity);
-      let frame120: Float32Array | null = null;
-      for (let f = 0; f < frames; f++) {
-        setFrame(ctx, samples, count, f, arity);
-        const t0 = performance.now();
+    for (const dist of distributions) {
+      // Per-sample spatial/rank/distGroup stay fixed for the whole run of this distribution.
+      const distFrame = applyDistribution(dist, samples, count, FIXTURES);
+      for (const variant of paramVariants(manifest.params)) {
+        const label = `${signature}/${dist.name}/${variant.name}`;
+        let inst: PluginInstance;
         try {
-          inst.render(ctx, samples, count, out);
+          inst = await PluginInstance.create(module);
+          inst.prepare(encodeParams(manifest.params, variant.values));
         }
         catch (err) {
-          errors.push(`${label} frame ${f}: ${err instanceof PluginTrap ? err.message : String(err)}`);
-          break;
+          errors.push(`${label}: ${err instanceof PluginTrap ? err.message : String(err)}`);
+          continue;
         }
-        if (variant.name === 'defaults') times.push(performance.now() - t0);
-        let bad: string | null = null;
-        for (let i = 0; i < out.length; i++) {
-          const v = out[i]!;
-          if (!Number.isFinite(v)) { bad = `non-finite output ${v}`; break; }
-          if (v < lo - TOLERANCE || v > hi + TOLERANCE) { bad = `output ${v} outside [${lo}, ${hi}] for "${manifest.output}"`; break; }
-          if (v < metrics.outputMin) metrics.outputMin = v;
-          if (v > metrics.outputMax) metrics.outputMax = v;
-          if (first === null) first = v;
-          else if (v !== first) constant = false;
+        const out = new Float32Array(count * arity);
+        let frame120: Float32Array | null = null;
+        for (let f = 0; f < frames; f++) {
+          setFrame(ctx, samples, count, f, arity, room, distFrame);
+          const t0 = performance.now();
+          try {
+            inst.render(ctx, samples, count, out);
+          }
+          catch (err) {
+            errors.push(`${label} frame ${f}: ${err instanceof PluginTrap ? err.message : String(err)}`);
+            break;
+          }
+          if (variant.name === 'defaults') times.push(performance.now() - t0);
+          let bad: string | null = null;
+          for (let i = 0; i < out.length; i++) {
+            const v = out[i]!;
+            if (!Number.isFinite(v)) { bad = `non-finite output ${v}`; break; }
+            if (v < lo - TOLERANCE || v > hi + TOLERANCE) { bad = `output ${v} outside [${lo}, ${hi}] for "${manifest.output}"`; break; }
+            if (v < metrics.outputMin) metrics.outputMin = v;
+            if (v > metrics.outputMax) metrics.outputMax = v;
+            if (first === null) first = v;
+            else if (v !== first) constant = false;
+          }
+          if (bad) {
+            errors.push(`${label} frame ${f}: ${bad}`);
+            break;
+          }
+          if (f === Math.min(120, frames - 1)) frame120 = out.slice();
         }
-        if (bad) {
-          errors.push(`${label} frame ${f}: ${bad}`);
-          break;
-        }
-        if (f === Math.min(120, frames - 1)) frame120 = out.slice();
-      }
 
-      // Determinism: frame 120 after 0–119 vs. a fresh instance.
-      if (variant.name === 'defaults' && frame120) {
-        try {
-          const fresh = await PluginInstance.create(module);
-          fresh.prepare(encodeParams(manifest.params, variant.values));
-          setFrame(ctx, samples, count, Math.min(120, frames - 1), arity);
-          const again = fresh.render(ctx, samples, count);
-          const a = new Uint32Array(frame120.buffer);
-          const b = new Uint32Array(again.buffer);
-          if (a.some((v, i) => v !== b[i])) errors.push(`${label}: non-deterministic (output depends on previous frames)`);
-        }
-        catch (err) {
-          errors.push(`${label} determinism run: ${String(err)}`);
+        // Determinism: frame 120 after 0–119 vs. a fresh instance.
+        if (variant.name === 'defaults' && frame120) {
+          try {
+            const fresh = await PluginInstance.create(module);
+            fresh.prepare(encodeParams(manifest.params, variant.values));
+            setFrame(ctx, samples, count, Math.min(120, frames - 1), arity, room, distFrame);
+            const again = fresh.render(ctx, samples, count);
+            const a = new Uint32Array(frame120.buffer);
+            const b = new Uint32Array(again.buffer);
+            if (a.some((v, i) => v !== b[i])) errors.push(`${label}: non-deterministic (output depends on previous frames)`);
+          }
+          catch (err) {
+            errors.push(`${label} determinism run: ${String(err)}`);
+          }
         }
       }
     }

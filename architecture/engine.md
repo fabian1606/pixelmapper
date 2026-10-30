@@ -28,6 +28,12 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 
 `EffectEngine` (`app/utils/engine/engine.ts`) owns the worker: it caches every packet, plugin module and canvas message so a respawned worker is replayed to the same state, and bumps `generation` so `FixtureCanvas` re-transfers a fresh `OffscreenCanvas`.
 
+### Build location and handshake
+
+The WASM packages are built by `bun run build:wasm` (`scripts/build-wasm.ts`) into `rs-engine/core/pkg` and `rs-engine/canvas/pkg` and imported as `rs-engine-core` / `rs-engine-canvas` through an alias (`scripts/engine-packages.ts`, used by `nuxt.config.ts` and `vitest.config.ts`). They are **not** in `node_modules` and not in `package.json`: `bun install` deleted the builds there (black output after every install), and bare resolution in a worktree nested in the main checkout (`.claude/worktrees/*`) fell back to the parent's stale build. `dev`, `dev:nuxt` (and so `dev:tauri`), `build` and `generate` run `ensure:wasm` (`--if-stale`: rebuild when the output is missing or older than the crate sources). The Vite plugin `scripts/vite-project-guard.ts` refuses any module loaded from a `node_modules` outside the checkout.
+
+On start the worker checks the loaded modules (`app/utils/engine/engine-abi.ts`): `engine_abi_version()` must equal the host's `ENGINE_ABI_VERSION` (Rust: `rs-engine/core/src/lib.rs`; bump both on incompatible changes to the bindings or packet formats) and all `WasmEngine`/`WasmCanvas` methods the host calls must exist. Failures are posted as `engine-error` (`EngineFailure`: `load`, `abi` fatal; `render`, `dispatch` (packet returned -1) non-fatal, each reported once); a worker that fails to load at all surfaces through `worker.onerror`. `EffectEngine.failure` holds the fatal cause, the store shows a toast (`initEngine`), and live observations return `engine-unavailable` instead of measuring the all-zero buffer.
+
 ## rs-engine-core
 
 | Module | Role |
@@ -66,6 +72,8 @@ engine-store.ts                              WasmEngine (rs-engine-core)
 
 `read_signatures(requests)` returns the normalized tuple of each requested `(group index, signature)` after the last render — 3 f32 per request, NaN when the fixture lacks the channels. `scalar` reads the DIMMER channel (else the first channel), `rgb`/`panTilt` the first matching head. The worker attaches the tuples to frame messages only while extensions subscribe to `signature` live targets (see [extensions.md](extensions.md)).
 
+`read_head_signatures(requests)` is the per-head variant used by observation previews ([observability.md](observability.md)): flat `(group index, head index, signature id, channel type id or 255)` quads, 3 f32 each (NaN = unavailable); scalar reads the head's channel of the given type (255 = DIMMER, else the head's first channel).
+
 ### WASM bindings (`WasmEngine`)
 
 ```rust
@@ -75,7 +83,9 @@ pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32)                 // tempo chan
 pub fn reset_clock(&mut self, bpm: f32)                            // new clock epoch
 pub fn retry_disabled(&mut self)                                   // after plugin loads
 pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32>
+pub fn read_head_signatures(&self, requests: &[u32]) -> Vec<f32>
 pub fn get_dmx_view(&self) -> js_sys::Uint8Array                   // zero-copy
+pub fn engine_abi_version() -> u32                                  // free function: host handshake
 ```
 
 ## Plugin runtime
@@ -84,9 +94,9 @@ Plugins are content-addressed packages (`sha256:` over manifest ‖ wasm ‖ ui)
 
 Safety (ADR §6.7): modules may only import `env.memory`, `env.abort`, `pm.budget`, `pm.log`; the toolchain instruments every loop and call with a budget counter (`pm.budget`), so an infinite loop traps instead of hanging; memory is capped at 256 pages. Traps, aborts and budget overruns post `plugin-error` to the main thread (toast) and disable that instance only. A worker that stops producing frames altogether is killed by the watchdog (above).
 
-## ABI v1 / v1.1 / v1.2
+## ABI v1 … v1.3
 
-Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
+Exports: `pm_abi_version() → 103` (v1.3; major × 100 + minor — the host loads only this version), `pm_alloc(bytes) → ptr`, `pm_prepare(paramsPtr, count)`, `pm_render(ctxPtr, samplesPtr, count, outPtr)`.
 
 | `FrameCtx` (f32 index) | | `Sample` (f32 index) | |
 |---|---|---|---|
@@ -102,14 +112,19 @@ Exports: `pm_abi_version() → 1`, `pm_alloc(bytes) → ptr`, `pm_prepare(params
 | 10 | distGroupCount (v1.1) | 15 | distGroup (v1.1, −1 = none) |
 | 11 | spread (v1.2: 0 same, 1 spatial 2D, 2 fixture by fixture, 3 within) | | |
 | 12–15 | Spatial 2D handle origin x/y, end x/y (v1.2, normalized world) | | |
+| 16 | worldAspect (v1.3: room width / depth) | 16 | z (v1.3: height, world units) |
+| 17 | worldDepth (v1.3: room depth, world units) | 17, 18 | u, v (v1.3: 0–1 across the room) |
+| 18 | metersPerUnit (v1.3) | | |
+| 19 | reserved (0) | 19 | reserved (0) |
 
-v1.1 and v1.2 are additive: older plugins read only the slots they know. Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
+v1.1 and v1.2 were additive; v1.3 grew both buffers from 16 to 20 slots (breaking: plugins must be rebuilt). The *room* is the bounding box of all layout channel positions (`rs-engine/core/src/room.rs`, layout packet v3 carries `z` and `metersPerUnit`). Output: `count × arity` f32. Params: the manifest's params encoded in order (`PARAM_WIRE_SLOTS`: number/int/bool/enum/angle 1 slot, point 2, color 3, curve 128-entry LUT over its domain, gradient 33, steps 18, trigger 4 — `pressed, pressedAt, releasedAt, clicks` with engine-clock timestamps that the host stamps on press/release; curve shapes with "auto" args resolve against the instance's rank count). Authoring details: [guides/authoring-content-plugins.md](guides/authoring-content-plugins.md).
 
 ## Main-thread previews
 
 `app/utils/plugins/preview-pool.ts` runs the same plugins on the main thread:
 - the endless strip (`renderStrip`: 256 virtual pixels with continuous `spatial`), recipe thumbnails and the Add-menu thumbnails;
 - noise history traces (`renderTraces`);
+- the version-history effect preview (`renderPoints`: one sample per fixture / pixel at its layout position with fixture rank and head index, distribution per point as in the engine; `PreviewOptions.instanceKey` gives the preview its own pool slot so it never shares state with the modifier card's instance — release it with `releasePreview(key)`; seeds come from the point index, not the engine's fixture hash);
 - the canvas field overlay while dragging the distribution handle (`renderField`). It mirrors the engine's phase/seed computation and host mapping; a trapping plugin is marked broken there, the worker remains authoritative.
 
 ## engine-store.ts — packets and dispatch
@@ -130,7 +145,7 @@ A light rAF loop forwards changed packets to the worker (`subarray(5)` strips th
 
 ### Distribution
 
-`Distribution` (`@pixelmapper/extension-api`): `scope` (across / within), `mode`, the gradient handle `origin`/`end`, `reverse`, `order` (explicit `ranks`, drawn `line`, `mirror`, `snap`), `grouping`, `withinOffset`. The UI shows one "Spread" dropdown (All the same · Spatial 2D · Fixture by fixture · Within each fixture); the handle is edited on the canvas, the order with one Reassign session (click fixtures or draw a line).
+`Distribution` (`@pixelmapper/extension-api`): `scope` (across / within), `mode`, the gradient handle `origin`/`end`, `reverse`, `order` (explicit `ranks`, drawn `line`, `mirror`, `snap`), `grouping`, `withinOffset`. The UI shows one "Spread" dropdown (All the same · Spatial 2D · Fixture by fixture · Within each fixture); the handle is edited on the canvas, the order with one Reassign session (click fixtures or draw a line). Params with a canvas hint (`ui.canvas`: `point` / `radius`) get their own handles next to it, independent of the mode (`app/components/engine/canvas-hints/`).
 
 | Mode | `spatial` per sample |
 |------|----------------------|

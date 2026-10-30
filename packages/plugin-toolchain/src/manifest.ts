@@ -7,15 +7,17 @@ import type { ParamDef } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest } from './types';
 import { validateCurveParam } from './manifest-curve';
 import { validateManifestUx } from './manifest-ux';
+import { validateCanvasRefs, validateParamUi } from './manifest-canvas';
 import { checkGradient, checkSteps } from './param-structs';
+import { checkTrigger } from './trigger';
 
 /** Plugin ABI/SDK version this toolchain produces. */
-export const PLUGIN_API_VERSION = '1.2.0';
+export const PLUGIN_API_VERSION = '1.3.0';
 
 const SIGNATURES = ['scalar', 'rgb', 'panTilt'];
 const KINDS = ['modifier', 'shader', 'visual'];
 const OUTPUTS = ['bipolar', 'absolute', 'scale'];
-const PARAM_TYPES = ['number', 'int', 'bool', 'enum', 'color', 'angle', 'point', 'curve', 'gradient', 'steps'];
+const PARAM_TYPES = ['number', 'int', 'bool', 'enum', 'color', 'angle', 'point', 'curve', 'gradient', 'steps', 'trigger'];
 const UI_INPUTS = ['pm.fader', 'pm.numberInput', 'pm.colorInput', 'pm.xyInput', 'pm.select', 'pm.toggle', 'pm.curve', 'pm.angle', 'pm.tapTempo', 'pm.button', 'pm.gradient', 'pm.steps'];
 const ALIAS_RE = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
 const KEY_RE = /^[a-z][a-zA-Z0-9]*$/;
@@ -40,7 +42,8 @@ function validateParam(p: ParamDef, i: number, errors: string[], warnings: strin
     return;
   }
   if (typeof p.label !== 'string' || !p.label) errors.push(`${where}: label is required`);
-  if (p.ui !== undefined && !UI_INPUTS.includes(p.ui)) errors.push(`${where}: unknown ui "${p.ui}"`);
+  // `ui`: input name or object form with a canvas hint (manifest-canvas.ts).
+  validateParamUi(p, where, UI_INPUTS, errors);
 
   switch (p.type) {
     case 'number':
@@ -80,6 +83,12 @@ function validateParam(p: ParamDef, i: number, errors: string[], warnings: strin
       if (msg) errors.push(`${where}: default ${msg}`);
       break;
     }
+    case 'trigger': {
+      const msg = checkTrigger(p.default);
+      if (msg) errors.push(`${where}: default ${msg}`);
+      if (p.multiClickMs !== undefined && !(isNum(p.multiClickMs) && p.multiClickMs > 0 && p.multiClickMs <= 2000)) errors.push(`${where}: multiClickMs must be in (0, 2000]`);
+      break;
+    }
   }
 }
 
@@ -111,6 +120,7 @@ export function validateManifest(json: unknown): ManifestValidation {
       if (keys.has(p.key)) errors.push(`params[${i}]: duplicate key "${p.key}"`);
       keys.add(p.key);
     });
+    validateCanvasRefs(m.params, errors, warnings);
   }
 
   validateManifestUx(m, errors);

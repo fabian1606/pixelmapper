@@ -26,6 +26,7 @@ import { Fixture } from '~/utils/engine/core/fixture';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { OflFixture } from '~/utils/ofl/types';
 import { saveCustomFixture, customFixtureKey, getCustomFixtures } from '~/utils/fixture-definitions/custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { setDefinitionFetcher } from '~/utils/fixture-definitions/resolve-definition';
 import { setRdmLookupFetcher } from '~/utils/fixture-definitions/rdm-lookup';
 import xbar500 from '~/utils/fixture-definitions/__fixtures__/xbar500-custom.json';
@@ -75,12 +76,13 @@ beforeAll(() => {
   vi.stubGlobal('useSupabaseClient', () => ({}));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   setActivePinia(createPinia());
   resetRegistry();
   installSharedGlobals();
   localStorage.clear();
-  xbarKey = customFixtureKey(saveCustomFixture(XBAR));
+  await useFreshCustomFixtureLibrary();
+  xbarKey = customFixtureKey((await saveCustomFixture(XBAR))!);
   commands = createCoreCommandFactory('test-ext');
   setDefinitionFetcher(async (url) => {
     if (url === '/api/fixtures/acme/rgb-par') return OFL_RGB;
@@ -164,12 +166,12 @@ describe('commands.batch (M4.4)', () => {
     history.redo();
     expect(getFixture(add.fixtureIds[0]!)?.extensionData).toEqual({ 'test-ext': { link: { uid: 'uid-0' } } });
 
-    // Persisted as one 'Batch' change that replays (e.g. for a collaborator).
+    // Persisted as one 'Composite' change that replays (e.g. for a collaborator).
     const payload = (batch as SerializableCommand).toPayload();
-    expect((batch as SerializableCommand).commandType).toBe('Batch');
+    expect((batch as SerializableCommand).commandType).toBe('Composite');
     history.undo();
     const store = useEngineStore();
-    const replayed = commandFromPayload('Batch', payload, store.getReplayContext())!;
+    const replayed = commandFromPayload('Composite', payload, store.getReplayContext())!;
     replayed.execute();
     expect(scene()).toHaveLength(2);
     expect(getFixture(add.fixtureIds[1]!)?.extensionData).toEqual({ 'test-ext': { link: { uid: 'uid-1' } } });
@@ -394,7 +396,7 @@ describe('saveCustomFixtureDefinition (API 1.4)', () => {
   };
 
   it('stores a new custom fixture that the RDM lookup and addFixtures find', async () => {
-    const key = saveCustomFixtureDefinition(generated);
+    const key = await saveCustomFixtureDefinition(generated);
     expect(key).toMatch(/^custom\//);
     const match = await findFixtureDefinitionByRdm(0x1234, 9);
     expect(match).toMatchObject({ key, source: 'custom', modeByPersonality: { 1: 0, 2: 1 } });
@@ -403,11 +405,11 @@ describe('saveCustomFixtureDefinition (API 1.4)', () => {
     expect(getFixture(add.fixtureIds[0]!)?.channels).toHaveLength(2);
   });
 
-  it('never replaces an existing custom fixture and rejects invalid definitions', () => {
-    const first = saveCustomFixtureDefinition(generated);
-    const second = saveCustomFixtureDefinition(generated);
+  it('never replaces an existing custom fixture and rejects invalid definitions', async () => {
+    const first = await saveCustomFixtureDefinition(generated);
+    const second = await saveCustomFixtureDefinition(generated);
     expect(second).not.toBe(first);
     expect(getCustomFixtures().map(c => c.name)).toEqual(expect.arrayContaining(['Acme Bar (RDM)', 'Acme Bar (RDM) (2)']));
-    expect(() => saveCustomFixtureDefinition({ name: 'x' })).toThrow('modes');
+    await expect(saveCustomFixtureDefinition({ name: 'x' })).rejects.toThrow('modes');
   });
 });

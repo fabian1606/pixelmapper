@@ -9,6 +9,7 @@ import type { PmInputName } from './replaceables';
 import type { RgbColor, Vec2 } from './model';
 import type { CurveAxis, CurveDomain, CurveRange, CurveValue } from './curves';
 import type { DistributionPatch } from './distribution';
+import type { ParamUi } from './canvas-hints';
 
 /** One control point of a curve param. Both axes are normalized 0–1. */
 export interface CurvePoint {
@@ -30,8 +31,12 @@ export interface ParamBase<T extends string, V> {
   default: V;
   /** Optional longer description (shown as tooltip; read by AI). */
   description?: string;
-  /** Override the default `pm.*` input used to render this param. */
-  ui?: PmInputName;
+  /**
+   * Override the default `pm.*` input used to render this param (string), or
+   * the object form `{ input?, canvas?, … }` that also declares a canvas
+   * handle (see `canvas-hints.ts`).
+   */
+  ui?: ParamUi;
   /** Visual group name; params with the same group share a section. */
   group?: string;
   /**
@@ -130,6 +135,37 @@ export interface StepsValue {
  */
 export type StepsParam = ParamBase<'steps', StepsValue>;
 
+/**
+ * State of a momentary `trigger` param (ABI 1.3). The host records the
+ * edges; times are in engine-clock ms (the same clock as `Frame.timeMs`).
+ */
+export interface TriggerValue {
+  /** True while the button is held. */
+  pressed: boolean;
+  /** Engine-clock ms of the last press; absent = never pressed. */
+  pressedAt?: number;
+  /** Engine-clock ms of the last release; absent = never released. */
+  releasedAt?: number;
+  /** Presses in the current multi-click burst (1 = single, 2 = double, …; 0 = never pressed). */
+  clicks?: number;
+}
+
+/**
+ * Momentary input (hold / release / double-click), e.g. "hold = blackout,
+ * release = shock wave, double-click = flash". Not saved as a look: the host
+ * updates it on press/release (card button or a live `button` widget mapped
+ * via `effect-param`) without an undo step. Manifest default: `{ "pressed": false }`.
+ *
+ * Wire: 4 f32 — `pressed (0/1), pressedAt, releasedAt, clicks` with the
+ * times in engine-clock ms (−1e9 = never). `render` stays pure: the SDK's
+ * `triggerMsSincePress(params, slot, ctx)` etc. subtract them from
+ * `ctx.timeMs`. Default input: `pm.button`.
+ */
+export interface TriggerParam extends ParamBase<'trigger', TriggerValue> {
+  /** Max ms between a release and the next press that still counts as a multi-click. Default 350. */
+  multiClickMs?: number;
+}
+
 /** Any param definition. */
 export type ParamDef =
   | NumberParam
@@ -141,7 +177,8 @@ export type ParamDef =
   | PointParam
   | CurveParam
   | GradientParam
-  | StepsParam;
+  | StepsParam
+  | TriggerParam;
 
 /** Param type discriminator. */
 export type ParamType = ParamDef['type'];
@@ -150,7 +187,7 @@ export type ParamType = ParamDef['type'];
 export type ParamSchema = ParamDef[];
 
 /** Runtime value of any param. */
-export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue;
+export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue | TriggerValue;
 
 /** Number of f32 slots each param type occupies in the params block. */
 export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>> = {
@@ -164,6 +201,7 @@ export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>> = {
   curve: 128,
   gradient: 33,
   steps: 18,
+  trigger: 4,
 };
 
 /** Default `pm.*` input per param type (D13). */
@@ -178,4 +216,5 @@ export const PARAM_DEFAULT_INPUT: Readonly<Record<ParamType, PmInputName>> = {
   curve: 'pm.curve',
   gradient: 'pm.gradient',
   steps: 'pm.steps',
+  trigger: 'pm.button',
 };

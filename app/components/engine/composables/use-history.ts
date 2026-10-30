@@ -1,5 +1,7 @@
 import { ref, computed } from 'vue';
 import { isSerializable, type SerializableCommand } from '../commands/serializable-command';
+import { newUuid } from '~/utils/ids';
+import { logEvent, type Actor } from '~/utils/observability/event-log';
 
 export interface Command {
   description: string;
@@ -9,6 +11,41 @@ export interface Command {
    *  When present, undo() pushes this inverse to the DB so the change persists
    *  across reloads and syncs to other clients. */
   inverse?(): Command | null;
+}
+
+/** Options of `useHistory().execute`. */
+export interface ExecuteOptions {
+  /** Who caused the change (event log attribution). Default: the command's own `actor`, else `user`. */
+  actor?: Actor;
+  /**
+   * The command's effect is already in the state (transaction runners that
+   * executed the children incrementally): only record, log and persist it.
+   */
+  applied?: boolean;
+}
+
+// ─── Event log ───────────────────────────────────────────────────────────────
+
+/** Actor of an executed command: explicit option, the command's own `actor` field, or `user`. */
+function actorOf(command: Command, explicit?: Actor): Actor {
+  return explicit ?? (command as { actor?: Actor }).actor ?? 'user';
+}
+
+/** Logs a history step (`command.execute` / `.undo` / `.redo`) to the event log. */
+function logCommand(step: 'execute' | 'undo' | 'redo' | 'remote', command: Command, actor: Actor) {
+  try {
+    const groupId = (command as { id?: unknown }).id;
+    logEvent({
+      actor,
+      kind: `command.${step}`,
+      code: isSerializable(command) ? command.commandType : 'local',
+      message: command.description,
+      undoGroupId: typeof groupId === 'string' ? groupId : undefined,
+    });
+  }
+  catch (err) {
+    console.warn('[history] event log failed:', err);
+  }
 }
 
 // ─── Module-level singleton state ────────────────────────────────────────────
@@ -53,27 +90,13 @@ function notifyApplied(origin: HistoryOrigin, command: Command): void {
   }
 }
 
-export interface WalEntryForHooks {
-  id: string;
-  projectId: string;
-  commandType: string;
-  payload: unknown;
-  enqueuedAt: number;
-}
-
 const persistenceHooks = {
   /** Persist a single command. `changeId` is the client-generated idempotency key
-   *  (UUID) which must match the WAL entry written via `walAppend`. */
+   *  (UUID); the persist queue appends it to the outbox before sending it. */
   pushChange: null as ((commandType: string, payload: object, changeId: string) => Promise<number | undefined>) | null,
   saveSnapshot: null as (() => Promise<void>) | null,
   /** Called after any local mutation that may need to land in a snapshot. */
   markDirty: null as (() => void) | null,
-  /** Append a pending change to the IndexedDB WAL. Fire-and-forget — local
-   *  apply does not block on the write, but the entry IS durable before any
-   *  network call happens because the WAL write is queued first. */
-  walAppend: null as ((entry: WalEntryForHooks) => Promise<void>) | null,
-  /** Current project id — needed for WAL scoping. */
-  currentProjectId: null as (() => string | null) | null,
   /** Called for every persisted command (requires bookkeeping, ADR §5.8). */
   onPersist: null as ((commandType: string, payload: object) => void) | null,
 };
@@ -82,16 +105,24 @@ export function setPersistenceHooks(hooks: {
   pushChange: (commandType: string, payload: object, changeId: string) => Promise<number | undefined>;
   saveSnapshot: () => Promise<void>;
   markDirty?: () => void;
-  walAppend?: (entry: WalEntryForHooks) => Promise<void>;
-  currentProjectId?: () => string | null;
   onPersist?: (commandType: string, payload: object) => void;
 }) {
   persistenceHooks.pushChange = hooks.pushChange;
   persistenceHooks.saveSnapshot = hooks.saveSnapshot;
   persistenceHooks.markDirty = hooks.markDirty ?? null;
-  persistenceHooks.walAppend = hooks.walAppend ?? null;
-  persistenceHooks.currentProjectId = hooks.currentProjectId ?? null;
   persistenceHooks.onPersist = hooks.onPersist ?? null;
+}
+
+/**
+ * Drop the undo/redo stacks (project switch / close, and after a sync
+ * rebase). The stored commands capture before/after states of the old live
+ * state; undoing or redoing them after a rebase that merged a peer's edits
+ * would push those stale payloads and silently revert the peer's changes.
+ */
+export function clearHistory(): void {
+  past.value = [];
+  future.value = [];
+  version.value++;
 }
 
 export function triggerSaveSnapshot() {
@@ -99,7 +130,8 @@ export function triggerSaveSnapshot() {
 }
 
 /**
- * Single point of truth for: (1) WAL write, (2) server push, (3) snapshot-counter.
+ * Single point of truth for: (1) outbox write + server push (persist queue),
+ * (2) snapshot-counter.
  * All four call sites (persistChange, execute, undo-inverse, redo) funnel through here.
  */
 function persistOne(commandType: string, payload: object, label: string) {
@@ -110,23 +142,10 @@ function persistOne(commandType: string, payload: object, label: string) {
   catch (err) {
     console.warn(`[history] onPersist failed (${label}):`, err);
   }
-  const changeId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const changeId = newUuid();
 
-  // WAL FIRST — durable before any network call. The promise is not awaited so
-  // local apply stays synchronous, but the IDB transaction is already queued.
-  const projectId = persistenceHooks.currentProjectId?.() ?? '';
-  if (projectId && persistenceHooks.walAppend) {
-    persistenceHooks.walAppend({
-      id: changeId,
-      projectId,
-      commandType,
-      payload,
-      enqueuedAt: Date.now(),
-    }).catch(err => console.warn(`[history] WAL append failed (${label}):`, err));
-  }
-
+  // The persist queue appends the outbox row (durable) before any network
+  // call; local apply stays synchronous.
   persistenceHooks.pushChange(commandType, payload, changeId).then((seq) => {
     if (seq != null && seq > lastSeenSequenceNumber.value) lastSeenSequenceNumber.value = seq;
     commandsSinceSnapshot.value++;
@@ -154,8 +173,10 @@ export function useHistory() {
   const canRedo = computed(() => future.value.length > 0);
   const lastDescription = computed(() => past.value.at(-1)?.description ?? null);
 
-  function execute(command: Command) {
-    command.execute();
+  /** Executes (unless `opts.applied`) and records a command as one undo step. */
+  function execute(command: Command, opts: ExecuteOptions = {}) {
+    if (!opts.applied) command.execute();
+    logCommand('execute', command, actorOf(command, opts.actor));
     past.value.push(command);
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
@@ -168,8 +189,10 @@ export function useHistory() {
     notifyApplied('local', command);
   }
 
-  function executeRemote(command: Command) {
+  /** Applies a command that came from a collaborator (already persisted). */
+  function executeRemote(command: Command, opts: { actor?: Actor } = {}) {
     command.execute();
+    logCommand('remote', command, opts.actor ?? 'collaborator:remote');
     past.value.push(command);
     if (past.value.length > MAX_SIZE) past.value.shift();
     future.value = [];
@@ -178,10 +201,12 @@ export function useHistory() {
     notifyApplied('remote', command);
   }
 
-  function undo() {
+  /** Undoes the newest step; `opts.actor` = who undoes (default `user`). */
+  function undo(opts: { actor?: Actor } = {}) {
     const command = past.value.pop();
     if (!command) return;
     command.undo();
+    logCommand('undo', command, opts.actor ?? 'user');
     future.value.push(command);
     version.value++;
     persistenceHooks.markDirty?.();
@@ -199,10 +224,12 @@ export function useHistory() {
     notifyApplied('undo', command);
   }
 
-  function redo() {
+  /** Redoes the newest undone step; `opts.actor` = who redoes (default `user`). */
+  function redo(opts: { actor?: Actor } = {}) {
     const command = future.value.pop();
     if (!command) return;
     command.execute();
+    logCommand('redo', command, opts.actor ?? 'user');
     past.value.push(command);
     version.value++;
     persistenceHooks.markDirty?.();

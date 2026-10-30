@@ -2,14 +2,17 @@
  * Resolves fixture definition keys to OFL definitions and builds fixtures
  * from them (plan M4.1, M4.3).
  *
- * Custom fixtures come from the custom fixture accessor (synchronous, always
- * fresh); OFL fixtures are fetched from the Nitro route
- * `/api/fixtures/<manufacturer>/<fixture>` and cached for the session.
+ * Custom fixtures come from the custom fixture accessor (user records,
+ * read after the local list is loaded); OFL fixtures come from the
+ * platform's fixture library (`useFixtureLibrary`: Nitro routes on the web,
+ * the bundled offline copy in the desktop app, ADR 0004 D18) and are cached
+ * for the session.
  */
 import type { OflFixture } from '~/utils/ofl/types';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
-import { getCustomFixture } from './custom-fixtures';
+import { customFixturesReady, getCustomFixture } from './custom-fixtures';
+import { useFixtureLibrary } from '~/composables/use-fixture-library';
 import { parseDefinitionKey } from './definition-keys';
 
 /** A definition ready to build fixtures from. */
@@ -25,23 +28,31 @@ export interface ResolvedDefinition {
 /** Fetches JSON from a same-origin route. Replaceable in tests. */
 export type JsonFetcher = (url: string) => Promise<unknown>;
 
-/** Default fetcher: `fetch` + JSON, throwing on HTTP errors. */
-const defaultFetcher: JsonFetcher = async (url) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
-  return res.json();
-};
+/** Test override (URL-based, same routes as the web library); `null` = platform library. */
+let fetcher: JsonFetcher | null = null;
 
-let fetcher: JsonFetcher = defaultFetcher;
+/** Loads one OFL definition from the override or the platform library. */
+function loadOfl(manufacturer: string, fixture: string): Promise<OflFixture> {
+  if (fetcher) {
+    return fetcher(`/api/fixtures/${encodeURIComponent(manufacturer)}/${encodeURIComponent(fixture)}`).then(data => data as OflFixture);
+  }
+  return useFixtureLibrary().getFixture(manufacturer, fixture);
+}
+
+/** Loads the manufacturer list from the override or the platform library. */
+function loadManufacturers(): Promise<{ key: string; name: string }[]> {
+  if (fetcher) return fetcher('/api/fixtures?mode=manufacturers').then(list => list as { key: string; name: string }[]);
+  return useFixtureLibrary().listManufacturers();
+}
 
 /** Cached OFL definitions by key (promises, so parallel calls share one request). */
 const oflCache = new Map<string, Promise<OflFixture | null>>();
 /** Cached manufacturer key → display name map. */
 let manufacturerNames: Promise<Map<string, string>> | null = null;
 
-/** Replaces the JSON fetcher and clears the caches (tests). */
+/** Replaces the definition source by a JSON fetcher and clears the caches (tests). `null` = platform library. */
 export function setDefinitionFetcher(next: JsonFetcher | null): void {
-  fetcher = next ?? defaultFetcher;
+  fetcher = next;
   oflCache.clear();
   manufacturerNames = null;
 }
@@ -51,8 +62,9 @@ function fetchOflDefinition(manufacturer: string, fixture: string): Promise<OflF
   const key = `${manufacturer}/${fixture}`;
   let pending = oflCache.get(key);
   if (!pending) {
-    pending = fetcher(`/api/fixtures/${encodeURIComponent(manufacturer)}/${encodeURIComponent(fixture)}`)
-      .then(data => data as OflFixture)
+    // `Promise.resolve().then` also turns a synchronously throwing source into a rejection.
+    pending = Promise.resolve()
+      .then(() => loadOfl(manufacturer, fixture))
       .catch((err) => {
         console.warn(`[fixture-definitions] could not load "${key}":`, err);
         oflCache.delete(key);
@@ -65,8 +77,9 @@ function fetchOflDefinition(manufacturer: string, fixture: string): Promise<OflF
 
 /** Display name of an OFL manufacturer key (falls back to the key). */
 async function manufacturerName(key: string): Promise<string> {
-  manufacturerNames ??= fetcher('/api/fixtures?mode=manufacturers')
-    .then(list => new Map((list as { key: string; name: string }[]).map(m => [m.key, m.name])))
+  manufacturerNames ??= Promise.resolve()
+    .then(() => loadManufacturers())
+    .then(list => new Map(list.map(m => [m.key, m.name])))
     .catch((err) => {
       console.warn('[fixture-definitions] could not load manufacturer names:', err);
       manufacturerNames = null;
@@ -83,6 +96,7 @@ export async function resolveFixtureDefinition(key: string): Promise<ResolvedDef
   const parsed = parseDefinitionKey(key);
   if (!parsed) return null;
   if (parsed.source === 'custom') {
+    await customFixturesReady();
     const stored = getCustomFixture(parsed.id);
     return stored ? { key, definition: stored.ofl, manufacturer: '' } : null;
   }

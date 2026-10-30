@@ -8,7 +8,7 @@
  */
 import type { OflFixture } from '~/utils/ofl/types';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
-import { customFixtureKey, getCustomFixtures } from './custom-fixtures';
+import { customFixtureKey, customFixturesReady, getCustomFixtures } from './custom-fixtures';
 import type { StoredCustomFixture } from './custom-fixtures';
 import { isRdmId } from './ofl-rdm-index';
 import { resolveFixtureDefinition } from './resolve-definition';
@@ -156,6 +156,7 @@ export async function findFixtureDefinitionByRdm(
 ): Promise<RdmDefinitionMatch | null> {
   if (!isRdmId(manufacturerId) || !isRdmId(modelId)) return null;
 
+  await customFixturesReady();
   const custom = findCustomFixtureByRdm(manufacturerId, modelId);
   if (custom) return buildRdmDefinitionMatch(customFixtureKey(custom), 'custom', custom.ofl, '');
 

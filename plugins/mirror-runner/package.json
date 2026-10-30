@@ -1,0 +1,6 @@
+{
+  "name": "@pixelmapper/plugin-mirror-runner",
+  "version": "1.0.0",
+  "description": "Built-in content plugin (mirror-runner). Built by scripts/build-plugins.ts.",
+  "private": true
+}

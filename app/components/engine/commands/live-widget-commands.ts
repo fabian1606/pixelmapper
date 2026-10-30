@@ -106,6 +106,8 @@ export class RemoveLiveWidgetCommand implements SerializableCommand {
   readonly commandType = 'live.removeWidget';
   description = 'Remove Widget';
   private _removed: LiveWidget | null = null;
+  /** Position of the widget in the page's widget list before removal (undo restores the order). */
+  private _index: number | undefined = undefined;
 
   constructor(private pageId: string, private widgetId: string, removedSnapshot?: LiveWidget) {
     if (removedSnapshot) this._removed = JSON.parse(JSON.stringify(removedSnapshot));
@@ -113,15 +115,14 @@ export class RemoveLiveWidgetCommand implements SerializableCommand {
 
   execute() {
     const store = getLiveStore();
-    if (!this._removed) {
-      const page = store.pages.find((p: LivePage) => p.id === this.pageId);
-      const w = page?.widgets.find((x: LiveWidget) => x.id === this.widgetId);
-      if (w) this._removed = JSON.parse(JSON.stringify(w));
-    }
+    const page = store.pages.find((p: LivePage) => p.id === this.pageId);
+    const index = page?.widgets.findIndex((x: LiveWidget) => x.id === this.widgetId) ?? -1;
+    this._index = index >= 0 ? index : undefined;
+    if (!this._removed && index >= 0) this._removed = JSON.parse(JSON.stringify(page!.widgets[index]));
     store.removeWidget(this.pageId, this.widgetId);
   }
   undo() {
-    if (this._removed) getLiveStore().addWidget(this.pageId, JSON.parse(JSON.stringify(this._removed)));
+    if (this._removed) getLiveStore().addWidget(this.pageId, JSON.parse(JSON.stringify(this._removed)), this._index);
   }
   inverse(): Command | null {
     if (!this._removed) return null;

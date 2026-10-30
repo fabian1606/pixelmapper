@@ -26,8 +26,8 @@ import { generateDefinition, generateGenericDefinition, generatedDefinitionMatch
 export interface MatchingDeps {
   /** `findFixtureDefinitionByRdm`: custom fixtures first, then OFL; `null` when nothing matches. */
   findByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
-  /** `saveCustomFixtureDefinition`: stores a NEW custom fixture, returns its key; throws when invalid. */
-  saveDefinition(definition: Json): FixtureDefinitionKey;
+  /** `saveCustomFixtureDefinition`: stores a NEW custom fixture, resolves its key; throws/rejects when invalid. */
+  saveDefinition(definition: Json): FixtureDefinitionKey | Promise<FixtureDefinitionKey>;
 }
 
 /** The definition and mode to add a device with. */
@@ -144,8 +144,8 @@ export function createDeviceMatcher(deps: MatchingDeps = API_DEPS): DeviceMatche
   }
 
   /** Stores `definition` and returns its match. */
-  function store(definition: Json, via: DeviceMatch['via'], warnings: string[]): ResolvedDefinition {
-    const key = deps.saveDefinition(definition);
+  async function store(definition: Json, via: DeviceMatch['via'], warnings: string[]): Promise<ResolvedDefinition> {
+    const key = await deps.saveDefinition(definition);
     return { match: generatedDefinitionMatch(key, definition), via, warnings };
   }
 
@@ -157,7 +157,7 @@ export function createDeviceMatcher(deps: MatchingDeps = API_DEPS): DeviceMatche
     const warnings: string[] = [];
     if (description.slots.length > 0) {
       try {
-        return store(generateDefinition(description, manufacturerId), 'generated', warnings);
+        return await store(generateDefinition(description, manufacturerId), 'generated', warnings);
       }
       catch (err) {
         console.warn(`[artnet] generated fixture definition for ${description.uid} rejected:`, err);

@@ -6,7 +6,8 @@
 | **Date** | 2026-10-07 |
 | **Deciders** | Fabian Rafreider |
 | **Implementation plan** | [agent-system-implementation-plan.md](../agent-system-implementation-plan.md) |
-| **Builds on** | [ADR 0001 — Extension & Content-Plugin System](0001-extension-and-content-plugin-system.md) (fills its §9 "AI generation loop" out-of-scope item) |
+| **Builds on** | [ADR 0001 — Extension & Content-Plugin System](0001-extension-and-content-plugin-system.md) (fills its §9 "AI generation loop" out-of-scope item); [ADR 0003 — Platform Layer](0003-native-platform-layer.md) (amendments B5, B7, B8) |
+| **Amendments** | B1–B9, B11 (2026-10-16; B10 reserved for the plan A5.0 spike), B12 (2026-10-30, MCP-first slice), see end of document |
 
 This ADR is the **normative specification** of how AI agents (in-app and external) read, change and verify Pixelmapper state, and how agents author content plugins and extensions. It is written so that an implementing agent can work from it without further context. Where this document and ADR 0001 disagree, this document wins for the topics it covers; everything else stays as in ADR 0001.
 
@@ -377,5 +378,57 @@ evals/                         # scenarios + runner
 
 - Server-side agents and hosting the agent loop on a backend.
 - Shader/visual authoring agents (only the agent slots are reserved).
-- Tier B (Codex app-server sidecar) until the Tauri port exists.
+- ~~Tier B (Codex app-server sidecar) until the Tauri port exists.~~ In scope since B9.
 - Voice/realtime agents.
+
+---
+
+## Amendments
+
+Changes after ADR 0001 was fully implemented (incl. A1–A20) and the Tauri port started ([ADR 0003](0003-native-platform-layer.md)). Each names the affected decision; the [implementation plan](../agent-system-implementation-plan.md) follows these amendments.
+
+- **B1 — Starting point.** All `P*` prerequisites are done. The extension API already has `CoreCommandFactory` (ADR 0001 §5.8, A2, A9); D1 is implemented by making `ctx.commands` a view onto the operations registry without changing its signatures, plus `HostApi.operations` and `contributes.operations` (API 1.2.0, additive).
+- **B2 — Headless harness (D19).** The harness is extracted from `app/zero-extensions.smoke.test.ts`, which already runs the real core WASM and `WorkerPluginBridge` in the Vitest `node` environment. It runs under Vitest, not `bun test`. It uses a test platform (`app/platform/test/`, all ADR 0003 capabilities `null` or fakes).
+- **B3 — Modifier operations speak the UI vocabulary (§4.2).** Following ADR 0001 A20 (owner revisions R1/R2), `modifiers.add` / `modifiers.update` take plugin alias, recipe (`presets`), params, **spread** (`same`, `spatial` + handle, `order` + ranks, `within`), strength, blend mode and speed — the concepts the user sees on a modifier card — and translate them to `ModifierInstance.distribution` with the card helpers. `modifiers.applyRecipe` is added. The catalog also gains the wrapped factory methods `fixtures.setKindConfig` and `extensionData.set`; `rename` is `nodes.rename` (scene nodes, not only fixtures).
+- **B4 — Stage data is schema 4 (D6).** Schema v2 shipped without stage data and the project format is now version 3 with a migration pipeline. `project.stage` arrives as **schema 4** with `migrations/v4-stage.ts` (default audience `y+`).
+- **B5 — Observation is an engine capability (D8, §6.2).** `simulate`/`capture` are defined as an `ObservationEngine` contract resolved through `#platform`. Web: a second WASM worker. The native engine of ADR 0003 D7 sends output frames to native sinks without passing through JavaScript, so it MUST implement the same contract natively (wire tap and live capture inside the engine). The follow-up engine ADR of ADR 0003 D7 MUST include this contract. The wire decoder uses the Rust inverse mapping (`rgb_read`, `from_dmx16`, `remap_range`, `nearest_wheel_slot`) exported via wasm-bindgen instead of a TS copy.
+- **B6 — Spatial features follow the spread (§6.3).** Modifiers lay out by `spatial` / `rank` / `distGroup` (ABI v1.1/v1.2), not by raw position. The intent trace records these per sample. Spatial features are reported along the instance's spread (handle axis for Spatial 2D, rank order for Fixture by fixture, per fixture for Within). `sources` names alias and recipe.
+- **B7 — Model access per platform (D14, §7.3).** Sign in with ChatGPT is only usable from loopback origins (open-source flow). The **desktop app is the primary target** for ChatGPT sign-in; the web build supports it only when served on `127.0.0.1` (local run), otherwise BYOK. Three transport-shaped capabilities are added to the ADR 0003 `Platform` contract, all `null` on the web:
+  - `http` (requests and streams without CORS);
+  - `loopback` (one-shot `127.0.0.1` callback listener);
+  - `secrets` (OS keychain).
+
+  The provider uses them when present and browser APIs otherwise. Whether the web build can reach OpenAI's token endpoint and the Responses API from the browser (CORS) is decided by a spike (plan A5.0) and recorded as B10.
+- **B8 — MCP bridge per platform (D16).** The bridge transport is host-only code behind `#platform`; it is not part of the extension `Platform` contract.
+  - **Desktop:** `src-tauri` hosts a streamable-HTTP MCP server on `127.0.0.1` and forwards tool calls to the webview. No CLI is needed.
+  - **Web:** the `pixelmapper-mcp` Bun CLI with a WebSocket to the open tab.
+- **B9 — Agents replace the AI backend; extension authoring tiers (D17, D18, §8).**
+  - The in-app `fixture-definition` agent replaces `aiBackendService`. This answers ADR 0003's open point "AI backend as remote service or sidecar" with *neither*. The OCR path is decided during the port.
+  - In-repo extensions already hot-reload through the dev catalog layers (ADR 0001 A19), so `ext:dev` and hot-swap target **out-of-repo** extensions.
+  - The Extension Studio (Tier C) runs on both targets.
+  - **Tier B** (Codex app-server sidecar with the user's ChatGPT token, spawned by `src-tauri`) moves into scope now that the Tauri shell exists.
+- **B11 — Provider-agnostic by construction (D14, §7.3).** No local-model provider is built, but nothing may prevent one (Ollama, LM Studio, llama.cpp, WebLLM) from being added later as a single provider module:
+  - Providers are registered in a **provider registry** (`registerModelProvider`), not chosen from a hard-coded union. ChatGPT and BYOK are just the first entries. A provider's config schema covers a free endpoint URL.
+  - `ModelInfo` carries **capabilities**: `toolCalling`, `parallelToolCalls`, `contextWindow`, `structuredOutput`, `vision`, `streaming`. Agent graphs read capabilities instead of provider ids:
+    - the copilot sizes the project digest to `contextWindow`;
+    - it runs tools sequentially without `parallelToolCalls`;
+    - it refuses with a clear message without `toolCalling`.
+  - Graphs, tools, observation and the headless harness MUST NOT reference a concrete provider or vendor-specific request fields. Vendor specifics stay inside the provider module.
+  - The eval runner selects the provider and model by registry id and config (`--provider <id> --config <json>`), so every future provider can be evaluated against the same scenarios.
+- **B12 — MCP-first slice (D7, D8, D11, D16, §4.1, §5, §6; 2026-10-30).** The tool layer is built first and exposed over MCP. Claude Code / Claude Desktop act as the agent; the target is prompting spatial effects *with their controls* against the running app.
+  - **Ordering.** A0 (event log, composite) → A1 (registry, read API, transactions, core catalog subset) → A3.4–A3.6 (observe-lite, below) → A4 (tools) → A8.1/A8.2 (bridge) run before A2, A3.1–A3.3 and A5. The whole in-app agent runtime of A5 (providers, LangGraph, copilot UI) is **deferred**; the tools are host-agnostic (`packages/agent-kit/src/tools/`, `AgentHost`), so A5 reuses them unchanged (D16).
+  - **One transport for web and Tauri until A8.3.** `packages/mcp-bridge` (`pixelmapper-mcp`) is a Bun/Node stdio CLI and WebSocket hub on `ws://127.0.0.1:7778`. The app (browser tab or Tauri webview) connects as a client when "External agents" is enabled. Auth: Origin allow-list (`http://localhost:3000`, `tauri://localhost`, `http://tauri.localhost`) plus a pairing token (`~/.pixelmapper/mcp-token`). A second CLI process (e.g. Claude Code and Claude Desktop at once) connects to the first as a **relay** and takes over the port when the hub exits. The CLI forwards calls only; tools run in the app with actor `agent:mcp:<client>` and undo label `AI: <label>`. Contract: [mcp-bridge-protocol.md](../mcp-bridge-protocol.md). This narrows B8: the desktop app uses the same CLI until the in-process Rust server (A8.3) exists. The client is `getAgentBridge()` from `#platform` with one shared implementation (`app/utils/agents/agent-bridge.ts`).
+  - **Tool surface over MCP.** `inspect`, `operations`, `describe`, `apply`, `observe` (+ the CLI's local `pixelmapper_status`). `delegate` and `ask_user` are **omitted**: the external client is the agent and asks its user itself. Both return with A5. `describe` also serves guide topics (`guide:plugin-authoring`, `guide:modifier-design`, `guide:plugin-sdk`, `guide:<skill>/<file>`).
+  - **New operation kind `action` (§4.1).** Besides `query` and `mutation`, an `action` performs a side effect **outside** the project history: `plugins.build` (`{ manifest, source }` → hash, diagnostics, validation report; registers the package locally) and `plugins.publish`. Actions are not recorded in history, never rolled back and skipped on `dryRun`; they MUST be idempotent, which content addressing (`sha256:` package hash) guarantees.
+  - **Observe-lite (D8, §6).** Two modes instead of `sim`:
+    - `preview` renders **one** modifier instance per call through the real `rs-engine-core` WASM in a private headless engine (project layout, base values, only that instance; per-head readback via `read_head_signatures`). It is deterministic and can look ahead.
+    - `live` captures real output through `liveHub` `signature` targets, with a DMX-byte fallback.
+
+    `mode: 'sim'` is **not implemented** (info finding `observe-sim-unavailable`). There is no Rust intent trace (A3.2), no ObservationEngine contract (B5, A3.3), no wire decoder (A3.1) and no per-modifier contributions yet. Features: `range`, `color`, `temporal`, `spatial`, plus `radial` (lag vs. distance to points, e.g. canvas-hinted `point` params) and `mirror` (left↔right / front↔back symmetry). Text report and expectation JSON paths: [observability.md](../observability.md).
+  - **Agent-enabling capabilities (ADR 0001 surface).** Added so an AI can build effects a console cannot, declaratively and without Vue code:
+    - **ABI 1.3:** `Frame` gains `worldAspect`, `worldDepth`; `Sample` gains `z` and room coordinates `u`/`v` (20 slots each; no compatibility shim).
+    - **`trigger` param type:** momentary input (pressed, ms since press/release, click count) encoded by the host each frame; live buttons drive it via `effect-param` mappings.
+    - **Canvas hints:** `ui: { canvas: 'point' | 'radius' }` on params render draggable handles on the 2D canvas in any distribution mode.
+    - **SDK pattern helpers** (`plugin-sdk/assembly/{patterns,patterns-time,trigger}.ts`): distances with aspect, `minDistToPoints`, `pingPong`, `mirror`, `pulse`, `ease`, crossing times, `envelope`, trigger readers.
+  - **Effect-authoring skill.** One source, `docs/ai/skills/effect-authoring/` (workflow, patterns, UI rules, verification, reference plugins `plugins/corner-wave` and `plugins/mirror-runner` with goldens), served three ways: Claude Code skill (`.claude/skills/pixelmapper-effects` symlink), MCP prompts (`create-effect`, `add-controls`) and `describe` guide topics.
+  - **Acceptance.** Scenarios in `evals/effects/` (target effects 0–6) are run **manually** from Claude Code / Claude Desktop; the automated eval runner (A6) is deferred with A5. The automated acceptance test `app/utils/agents/effects-acceptance.test.ts` drives the same tool loop headlessly in Vitest (no model involved).

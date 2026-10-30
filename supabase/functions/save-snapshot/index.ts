@@ -1,43 +1,72 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { authenticate, callerRole } from '../_shared/auth.ts';
+import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
+import { edgeWaitUntil, pruneSnapshotsBestEffort, runAfterResponse } from '../_shared/snapshot-retention.ts';
+import { parseSaveSnapshot } from '../_shared/validate.ts';
+
+// Stores a full project snapshot at a sequence position.
+//
+// Request:  { projectId, snapshot, sequenceNumber, label? }
+//           label: optional, ≤ 200 chars, e.g. "before offline sync" (ADR 0004 D5)
+// Response: { id, sequence_number, label, created_at }
+// 400 for invalid input (non-UUID projectId, or a sequenceNumber above the
+// project's latest change); 403 unless the caller is owner or editor.
+//
+// Retention (migration 013): after a successful insert the project's
+// snapshots are thinned by `prune_project_snapshots` — in the background
+// (EdgeRuntime.waitUntil) and best effort: a failed prune is logged and
+// never affects the response.
 
 Deno.serve(async (req: Request) => {
-  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+  const early = preflight(req);
+  if (early) return early;
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return new Response('Unauthorized', { status: 401 });
+  const caller = await authenticate(req);
+  if (caller instanceof Response) return caller;
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
+  const body = await readJsonObject(req);
+  if (!body) return errorResponse('invalid JSON body', 400);
+  const parsed = parseSaveSnapshot(body);
+  if (!parsed.ok) return errorResponse(parsed.error, 400);
+  const { projectId, snapshot, sequenceNumber, label } = parsed.value;
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return new Response('Unauthorized', { status: 401 });
+  // Explicit check so viewers get 403 instead of an RLS error (500).
+  const access = await callerRole(caller, projectId);
+  if (access.error) return errorResponse(access.error, 500);
+  if (access.role !== 'owner' && access.role !== 'editor') return errorResponse('Forbidden', 403);
 
-  const { projectId, snapshot, sequenceNumber, label } = await req.json();
-  if (!projectId || !snapshot || sequenceNumber === undefined) {
-    return new Response(JSON.stringify({ error: 'projectId, snapshot, sequenceNumber required' }), { status: 400 });
+  // A snapshot claims to reflect every change up to `sequenceNumber`. A
+  // position beyond the log's head cannot be true, and load-project would
+  // then skip changes committed later below that number.
+  const { data: head, error: headError } = await caller.supabase
+    .from('project_changes')
+    .select('sequence_number')
+    .eq('project_id', projectId)
+    .order('sequence_number', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (headError) return errorResponse(headError.message, 500);
+  const latestSequence = head?.sequence_number ?? 0;
+  if (sequenceNumber > latestSequence) {
+    return errorResponse(`sequenceNumber ${sequenceNumber} is beyond the latest change (${latestSequence})`, 400);
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await caller.supabase
     .from('project_snapshots')
     .insert({
       project_id: projectId,
       snapshot,
       sequence_number: sequenceNumber,
-      created_by: user.id,
-      label: label ?? null,
+      created_by: caller.user.id,
+      label,
     })
-    .select('id, sequence_number, created_at')
+    .select('id, sequence_number, label, created_at')
     .single();
 
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
+  if (error) return errorResponse(error.message, 500);
 
-  return new Response(JSON.stringify(data), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  // Thin old snapshots after the response is sent (never throws).
+  await runAfterResponse(pruneSnapshotsBestEffort(caller.supabase, projectId), edgeWaitUntil());
+
+  return json(data);
 });

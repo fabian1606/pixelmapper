@@ -1,0 +1,559 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tool definitions > match the schema snapshot 1`] = `
+[
+  {
+    "annotations": {
+      "readOnlyHint": true,
+      "title": "Inspect project",
+    },
+    "description": "Read the current Pixelmapper project. Start every task here.
+Workflow: inspect → operations/describe → apply (with dryRun and expect) → observe the result.
+Input: { "selector": … } (always the key "selector"):
+- "project": compact digest (fixtures with normalized positions, groups, modifier stack, live pages, BPM).
+- "selection": what the user has selected in the app.
+- "events": recent event log (commands, undo/redo, operations, warnings) with actors; \`limit\` = newest N (default 50), \`filter\` { kind, actor, sinceId }.
+- { op, input }: run a query operation (see \`operations\`), e.g. { "selector": { "op": "fixtures.find", "input": { "name": "bar" } } }.
+- ["fixture:12", "modifier:abc", "group:g1", "livePage:p1", "liveWidget:w1", …] or plain fixture ids: details of those entities (live mappings use the live.addWidget vocabulary: modifierId, bare paramKey).
+detail: "summary" (default) or "full".
+Coordinates: normalized world space 0–1, x left→right, y top→bottom on the 2D canvas; z = height above the floor. The default 3D camera looks from the bottom edge, so "front" (audience side) is conventionally high y, "back" low y; the room center is (0.5, 0.5).
+Rotation: yaw in degrees, clockwise on the canvas; at 0° a multi-head fixture (LED bar, pixel strip) has head 0 on the left and its heads run toward +x (90° = top→bottom). To place many fixtures use fixtures.arrange (grid/line/circle/distribute/align, orient along/across).",
+    "inputSchema": {
+      "properties": {
+        "detail": {
+          "enum": [
+            "summary",
+            "full",
+          ],
+          "type": "string",
+        },
+        "filter": {
+          "description": ""events": filter.",
+          "properties": {
+            "actor": {
+              "description": "Exact actor, e.g. "user" or "agent:mcp:claude-code".",
+              "type": "string",
+            },
+            "kind": {
+              "description": "Kind or kind prefix, e.g. "command", "operation", "engine".",
+              "type": "string",
+            },
+            "sinceId": {
+              "description": "Only events newer than this id (cursor).",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "limit": {
+          "description": ""events": max entries (newest N, default 50).",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "selector": {
+          "anyOf": [
+            {
+              "const": "project",
+              "type": "string",
+            },
+            {
+              "const": "selection",
+              "type": "string",
+            },
+            {
+              "const": "events",
+              "type": "string",
+            },
+            {
+              "properties": {
+                "input": {},
+                "op": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "op",
+              ],
+              "type": "object",
+            },
+            {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+          ],
+          "description": ""project", "selection", "events", { op, input } for a query operation, or entity ids.",
+        },
+      },
+      "required": [
+        "selector",
+      ],
+      "type": "object",
+    },
+    "name": "inspect",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+      "title": "List operations",
+    },
+    "description": "List the operations you can run (id, kind, one-line summary).
+Kinds: "query" (read; run via \`inspect\` { op, input } or inside \`apply\`), "mutation" (undoable change; via \`apply\`), "action" (side effect outside the undo history, e.g. plugins.build; via \`apply\`, skipped on dryRun).
+Filter with \`search\` (substring over id + description), \`namespace\` (e.g. "modifiers", "live", "fixtures", "plugins") or \`kind\`.
+Next: \`describe { "id": "<operation id>" }\` for its input schema and a ready-to-copy call; then run it as
+apply { "label": "…", "ops": [ { "op": "<operation id>", "input": { …that operation's input… } } ], "dryRun"?: true, "expect"?: […] }.",
+    "inputSchema": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "query",
+            "mutation",
+            "action",
+          ],
+          "type": "string",
+        },
+        "namespace": {
+          "type": "string",
+        },
+        "search": {
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "operations",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+      "title": "Describe operation or guide",
+    },
+    "description": "Everything needed to call an operation: full description (units, coordinate spaces), input summary, JSON input/output schema, examples and a ready-to-copy \`apply\` call. Input: { "id": "<operation id>" }, e.g. { "id": "fixtures.move" }.
+Describe an operation before its first use in \`apply\`. The returned example call shows the envelope: apply { "label", "ops": [ { "op": "<id>", "input": { …the operation's input… } } ] }.
+Also serves guides: id "guide:" lists topics, e.g. "guide:plugin-authoring" (write content plugins for plugins.build), "guide:modifier-design", "guide:plugin-sdk" (SDK type definitions).",
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "description": "Operation id (e.g. "modifiers.add") or guide topic ("guide:plugin-authoring"; "guide:" lists all topics). Aliases: "op", "selector", "operation".",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "describe",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "readOnlyHint": false,
+      "title": "Apply operations",
+    },
+    "description": "Change the project: run a batch of operations as ONE transaction and one undo step labelled "AI: <label>" in the app.
+Call shape — each op entry is { "op": "<operation id>", "input": { …that operation's input… } }; the operation's keys go INSIDE "input":
+{ "label": "Move bar", "ops": [ { "op": "fixtures.move", "input": { "moves": [ { "fixtureId": "fx-1", "x": 0.25, "y": 0.5 } ] } } ], "dryRun": true }
+\`describe { "id": "<operation id>" }\` shows each operation's input and a ready-to-copy call. (Input keys placed next to "op" are folded into "input" with an info note.)
+Later ops see the effects of earlier ones. Any error (unknown op, invalid input, failed verification) rolls the whole batch back.
+Use \`dryRun: true\` first for non-trivial changes: same diff, findings and expectations, then the state is restored.
+\`expect\`: assertions evaluated after the batch on { state, diff, results } (state = bpm, fixtures, groups, modifiers (as in modifiers.list: blend, spread, speed.value), livePages, selection; results = per-op output values, so \`results.0.modifierId\`, not \`results.0.value.modifierId\`). Each: { path, eq|ne|gt|gte|lt|lte|within|oneOf|contains|exists }, \`*\` fans out, e.g. { "path": "results.0.id", "exists": true }.
+A failed \`expect\` assertion marks the call as an error but does NOT roll back (only op errors do): use dryRun + expect to check before committing.
+Result: committed flag, field-level diff ({ entity, field, from, to }; a new or removed entity is ONE "added"/"removed" entry with a one-line summary), affected entities as { entity, summary } (\`detail: "full"\` adds each complete view), findings (errors/warnings with hints), expectation results. Then use \`observe\` to check how the change actually looks.
+Coordinates are normalized 0–1 world space.",
+    "inputSchema": {
+      "properties": {
+        "detail": {
+          "description": ""summary" (default): affected entities as id + one-line summary; "full": also their complete post-state view.",
+          "enum": [
+            "summary",
+            "full",
+          ],
+          "type": "string",
+        },
+        "dryRun": {
+          "type": "boolean",
+        },
+        "expect": {
+          "items": {
+            "description": "Assertion over a JSON subject: path plus one comparator (eq, ne, gt, gte, lt, lte, within, oneOf, contains, exists).",
+            "properties": {
+              "contains": {},
+              "eq": {},
+              "exists": {
+                "type": "boolean",
+              },
+              "gt": {
+                "type": "number",
+              },
+              "gte": {
+                "type": "number",
+              },
+              "label": {
+                "type": "string",
+              },
+              "lt": {
+                "type": "number",
+              },
+              "lte": {
+                "type": "number",
+              },
+              "ne": {},
+              "oneOf": {
+                "items": {},
+                "type": "array",
+              },
+              "path": {
+                "description": "Dot path into the subject; \`*\` expands arrays/objects, numeric segments index arrays.",
+                "type": "string",
+              },
+              "quantifier": {
+                "enum": [
+                  "all",
+                  "any",
+                ],
+                "type": "string",
+              },
+              "within": {
+                "prefixItems": [
+                  {
+                    "type": "number",
+                  },
+                  {
+                    "type": "number",
+                  },
+                ],
+                "type": "array",
+              },
+            },
+            "required": [
+              "path",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "label": {
+          "description": "Short undo label, e.g. "Add rainbow wave".",
+          "minLength": 1,
+          "type": "string",
+        },
+        "ops": {
+          "description": "Op entries { "op": "<id>", "input": { … } }, run in order.",
+          "items": {
+            "properties": {
+              "input": {
+                "description": "The operation's input object: ALL of the operation's keys go here, e.g. { "moves": [ … ] } for fixtures.move (see \`describe { "id": "<op>" }\`).",
+              },
+              "op": {
+                "description": "Operation id, e.g. "fixtures.move". See the \`operations\` / \`describe\` tools.",
+                "type": "string",
+              },
+            },
+            "required": [
+              "op",
+              "input",
+            ],
+            "type": "object",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+      },
+      "required": [
+        "ops",
+        "label",
+      ],
+      "type": "object",
+    },
+    "name": "apply",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+      "title": "Observe output",
+    },
+    "description": "See what the lights actually do. Returns a compact text report (range, color, temporal period / beat lock, spatial pattern such as chase direction or radiating from a point) plus feature JSON.
+mode "live": capture the running output over \`window\` (default 2 s from now). mode "preview": render a modifier (\`modifierId\`) or a plugin (\`plugin: { ref, params }\`) headlessly on the real fixture positions — deterministic, can look ahead; default when modifierId/plugin is set.
+targets: "all", "selection", fixture/group ids, or a filter { ids | fixtureIds, groupIds, kind, signature, channelTypes, name } (a modifier's targets can be passed as they are; unknown keys are an error). detail: "group" (default), "fixture" (every fixture line), "raw" (+ per-frame values per fixture and head).
+\`expect\`: assertions on the feature JSON (same shape as in \`apply\`), e.g. { "path": "groups.*.temporal.hz", "within": [0.9, 1.1] }. Use it after \`apply\` to verify the intent.",
+    "inputSchema": {
+      "properties": {
+        "detail": {
+          "enum": [
+            "group",
+            "fixture",
+            "raw",
+          ],
+          "type": "string",
+        },
+        "expect": {
+          "items": {
+            "description": "Assertion over a JSON subject: path plus one comparator (eq, ne, gt, gte, lt, lte, within, oneOf, contains, exists).",
+            "properties": {
+              "contains": {},
+              "eq": {},
+              "exists": {
+                "type": "boolean",
+              },
+              "gt": {
+                "type": "number",
+              },
+              "gte": {
+                "type": "number",
+              },
+              "label": {
+                "type": "string",
+              },
+              "lt": {
+                "type": "number",
+              },
+              "lte": {
+                "type": "number",
+              },
+              "ne": {},
+              "oneOf": {
+                "items": {},
+                "type": "array",
+              },
+              "path": {
+                "description": "Dot path into the subject; \`*\` expands arrays/objects, numeric segments index arrays.",
+                "type": "string",
+              },
+              "quantifier": {
+                "enum": [
+                  "all",
+                  "any",
+                ],
+                "type": "string",
+              },
+              "within": {
+                "prefixItems": [
+                  {
+                    "type": "number",
+                  },
+                  {
+                    "type": "number",
+                  },
+                ],
+                "type": "array",
+              },
+            },
+            "required": [
+              "path",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "maximum": 120,
+          "type": "number",
+        },
+        "mirror": {
+          "description": "Mirror lines for group.mirror (world x of the vertical line, world y of the horizontal line); default the room center.",
+          "properties": {
+            "x": {
+              "type": "number",
+            },
+            "y": {
+              "type": "number",
+            },
+          },
+          "type": "object",
+        },
+        "mode": {
+          "enum": [
+            "live",
+            "preview",
+            "sim",
+          ],
+          "type": "string",
+        },
+        "modifierId": {
+          "type": "string",
+        },
+        "plugin": {
+          "properties": {
+            "params": {
+              "additionalProperties": {},
+              "propertyNames": {
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "ref": {
+              "type": "string",
+            },
+            "signature": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "ref",
+          ],
+          "type": "object",
+        },
+        "points": {
+          "items": {
+            "properties": {
+              "x": {
+                "type": "number",
+              },
+              "y": {
+                "type": "number",
+              },
+            },
+            "required": [
+              "x",
+              "y",
+            ],
+            "type": "object",
+          },
+          "maxItems": 16,
+          "type": "array",
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "const": "all",
+              "type": "string",
+            },
+            {
+              "const": "selection",
+              "type": "string",
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                  },
+                  {
+                    "type": "number",
+                  },
+                ],
+              },
+              "type": "array",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "channelTypes": {
+                  "description": "Only fixtures with at least one channel of these types (e.g. ["DIMMER"]).",
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "fixtureIds": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                          },
+                          {
+                            "type": "number",
+                          },
+                        ],
+                      },
+                      "type": "array",
+                    },
+                    {
+                      "type": "null",
+                    },
+                  ],
+                  "description": "Alias of ids (modifiers.add vocabulary); null = all fixtures.",
+                },
+                "groupIds": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                      },
+                      {
+                        "type": "number",
+                      },
+                    ],
+                  },
+                  "type": "array",
+                },
+                "ids": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                      },
+                      {
+                        "type": "number",
+                      },
+                    ],
+                  },
+                  "type": "array",
+                },
+                "kind": {
+                  "type": "string",
+                },
+                "name": {
+                  "type": "string",
+                },
+                "signature": {
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+          ],
+        },
+        "window": {
+          "properties": {
+            "duration": {
+              "anyOf": [
+                {
+                  "pattern": "^\\s*\\d+(\\.\\d+)?\\s*(ms|s|beats?)\\s*$",
+                  "type": "string",
+                },
+                {
+                  "minimum": 0,
+                  "type": "number",
+                },
+              ],
+              "description": "Duration: "2s", "500ms", "8 beats", or seconds as a number.",
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "pattern": "^\\s*\\d+(\\.\\d+)?\\s*(ms|s|beats?)\\s*$",
+                  "type": "string",
+                },
+                {
+                  "minimum": 0,
+                  "type": "number",
+                },
+              ],
+              "description": "Duration: "2s", "500ms", "8 beats", or seconds as a number.",
+            },
+          },
+          "required": [
+            "duration",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "targets",
+      ],
+      "type": "object",
+    },
+    "name": "observe",
+  },
+]
+`;

@@ -1,5 +1,6 @@
 import { triggerRef } from 'vue';
 import { registerLiveOp } from '~/stores/live-bus-store';
+import { modifierUpdateKey } from './coalesce-keys';
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import { migrateLegacyChanges, migrateModifiersDeep } from '~/utils/persistence/migrations/v3-distribution';
 
@@ -21,6 +22,9 @@ registerLiveOp<ModifierUpdatePayload>('modifier.update', {
   throttle: 'raf',
   merge: 'replace',
   persistent: true,
+  // Per modifier + touched fields: scrubs on different modifiers (or fields)
+  // within one settle window must not collapse into one (ADR 0004 D8).
+  coalesceKey: modifierUpdateKey,
   apply: ({ effectId, changes, paramChanges }, _userId, ctx) => {
     const modifier = ctx.engineStore.modifiers.find((m: any) => m.id === effectId);
     if (!modifier) return;

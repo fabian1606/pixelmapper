@@ -7,11 +7,15 @@ import {
   buildPackage,
   canonicalManifest,
   compile,
+  CTX,
+  CTX_FIELDS,
   encodeParams,
   hashPackage,
   instrument,
   PluginInstance,
   PluginTrap,
+  SAMPLE,
+  SAMPLE_FIELDS,
   transpileUi,
   validate,
   validateManifest,
@@ -77,11 +81,11 @@ describe('compile + instrument', () => {
     const { pkg } = await buildPackage(manifest(), { 'modifier.ts': GOOD });
     const inst = PluginInstance.createSync(new WebAssembly.Module(new Uint8Array(pkg!.wasm)));
     inst.prepare(encodeParams(manifest().params, { amount: 0.5 }));
-    const ctx = new Float32Array(16);
-    ctx[4] = 1;
-    const samples = new Float32Array(32);
-    samples[2] = 0.25; // phase → sin(π/2) = 1
-    samples[16 + 2] = 0.75;
+    const ctx = new Float32Array(CTX_FIELDS);
+    ctx[CTX.arity] = 1;
+    const samples = new Float32Array(2 * SAMPLE_FIELDS);
+    samples[SAMPLE.phase] = 0.25; // phase → sin(π/2) = 1
+    samples[SAMPLE_FIELDS + SAMPLE.phase] = 0.75;
     const out = inst.render(ctx, samples, 2);
     expect(out[0]).toBeCloseTo(0.5);
     expect(out[1]).toBeCloseTo(-0.5);
@@ -148,9 +152,9 @@ describe('validation harness', () => {
   it('turns an abort into a PluginTrap', async () => {
     const { pkg } = await buildPackage(manifest(), { 'modifier.ts': mod('if (s.x >= 0.0) abort("boom"); out.set(0, 0.0);') });
     const inst = PluginInstance.createSync(new WebAssembly.Module(new Uint8Array(pkg!.wasm)));
-    const ctx = new Float32Array(16);
-    ctx[4] = 1;
-    expect(() => inst.render(ctx, new Float32Array(16), 1)).toThrow(PluginTrap);
+    const ctx = new Float32Array(CTX_FIELDS);
+    ctx[CTX.arity] = 1;
+    expect(() => inst.render(ctx, new Float32Array(SAMPLE_FIELDS), 1)).toThrow(PluginTrap);
   }, 60_000);
 });
 

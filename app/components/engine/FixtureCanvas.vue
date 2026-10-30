@@ -6,6 +6,7 @@ import type { Camera } from './composables/use-camera';
 import type { EffectEngine } from '~/utils/engine/engine';
 import { useEngineStore } from '~/stores/engine-store';
 import { kindCanvasFields } from '~/utils/kinds/kind-canvas';
+import { registerEditorCanvas } from '~/utils/agents/screenshot/editor-canvas';
 
 import initWasm, { WasmCanvas } from 'rs-engine-canvas';
 import wasmUrl from 'rs-engine-canvas/rs_engine_canvas_bg.wasm?url';
@@ -183,11 +184,17 @@ async function initAndDraw() {
   startRafLoop();
 }
 
+// Agent `screenshot` view "canvas": capture frames from the worker while mounted.
+let unregisterCapture: (() => void) | null = null;
+
 onMounted(() => {
   initAndDraw();
+  if (effectEngine) unregisterCapture = registerEditorCanvas(() => effectEngine.captureCanvas());
 });
 
 onBeforeUnmount(() => {
+  unregisterCapture?.();
+  unregisterCapture = null;
   if (rafId !== null) {
     cancelAnimationFrame(rafId);
     rafId = null;

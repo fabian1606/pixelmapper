@@ -2,6 +2,82 @@
 // Bundled declarations of @pixelmapper/extension-api. Source: packages/extension-api/src/
 declare module '@pixelmapper/extension-api' {
   import type { Component, ComputedRef, DeepReadonly, MaybeRef, Ref, ShallowRef } from 'vue';
+  // ── packages/extension-api/src/canvas-hints.ts ──────────────────
+  /**
+   * Canvas hints (plan M4 "Canvas hints"): a param declares that it gets a
+   * draggable handle on the 2D canvas, so plugin authors (and the AI) get
+   * spatial controls without writing UI code.
+   *
+   * A hint lives in the param's `ui` field in object form:
+   *
+   * ```json
+   * { "key": "center", "type": "point", "default": { "x": 0.5, "y": 0.5 }, "label": "Center",
+   *   "ui": { "canvas": "point", "label": "C", "color": "#ff8800" } }
+   * { "key": "size", "type": "number", "min": 0.01, "max": 1, "default": 0.2, "label": "Size",
+   *   "ui": { "canvas": "radius", "anchor": "center" } }
+   * ```
+   *
+   * The string form of `ui` (`"pm.fader"`) still names the card input; the
+   * object form carries that as `input`. The card input stays available
+   * either way, so a hinted param is editable on the canvas and in the card.
+   *
+   * Coordinates: points are `{ x, y }` in normalized world space (x across the
+   * world width, y across the world height, each 0–1). A radius is measured in
+   * **normalized world-x units** (1 = the world width): the ring is a true
+   * circle on the canvas. The world is square, so world x/y are isotropic and
+   * a plugin compares the radius against `dist2(s.x, s.y, px, py, 1.0)`
+   * (`ctx.worldAspect` is only needed for room coordinates `Sample.u/v`).
+   */
+
+  /** Kinds of canvas handles a param can declare. */
+  export type CanvasHintKind = 'point' | 'radius';
+  /** Fields every canvas hint may carry. */
+  interface CanvasHintBase {
+      /** Short text next to the handle (default: the param label). */
+      label?: string;
+      /** CSS color of the handle, e.g. `#ff8800` (default: the theme primary). */
+      color?: string;
+  }
+  /** On a `point` param: one draggable dot at the param's value. */
+  export interface CanvasPointHint extends CanvasHintBase {
+      canvas: 'point';
+  }
+  /**
+   * On a `number` param: a draggable ring around the `anchor` point param. The
+   * value is the radius in normalized world-x units, clamped to the param's
+   * `[min, max]`.
+   */
+  export interface CanvasRadiusHint extends CanvasHintBase {
+      canvas: 'radius';
+      /** Key of the `point` param the ring is centered on. */
+      anchor: string;
+  }
+  /** Any canvas hint. */
+  export type CanvasHint = CanvasPointHint | CanvasRadiusHint;
+  /**
+   * Object form of a param's `ui`: card input override plus an optional canvas
+   * hint. The hint fields are flat (`canvas`, `anchor`, `label`, `color`);
+   * `validateManifest` checks which combination is valid for the param type.
+   */
+  export interface ParamUiOptions {
+      /** Card input override (default: the type's `pm.*` input). */
+      input?: PmInputName;
+      /** Canvas handle kind. */
+      canvas?: CanvasHintKind;
+      /** `radius` only: key of the anchor `point` param. */
+      anchor?: string;
+      /** Short text next to the handle. */
+      label?: string;
+      /** CSS color of the handle. */
+      color?: string;
+  }
+  /** A param's `ui`: a `pm.*` input name, or the object form with a canvas hint. */
+  export type ParamUi = PmInputName | ParamUiOptions;
+  /** The explicit card input of a param `ui` (undefined = the type's default). */
+  export function paramUiInput(ui: ParamUi | undefined): PmInputName | undefined;
+  /** The canvas hint of a param `ui`, or null when it declares none. */
+  export function paramCanvasHint(ui: ParamUi | undefined): CanvasHint | null;
+
   // ── packages/extension-api/src/commands.ts ──────────────────────
   /**
    * Commands (ADR §5.8, D21).
@@ -778,8 +854,8 @@ declare module '@pixelmapper/extension-api' {
       onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
       /** Definition lookup by RDM IDs (API 1.3). */
       findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
-      /** Stores a definition as a new custom fixture (API 1.4). */
-      saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
+      /** Stores a definition as a new custom fixture (API 1.4; async since 1.7). */
+      saveCustomFixtureDefinition(definition: Json): Promise<FixtureDefinitionKey>;
       /** The user's connector instances (API 1.4, `connectors.ts`). */
       connectors: ConnectorSet;
       /** Key of the current user for per-user storage (API 1.4, `user.ts`). */
@@ -1075,7 +1151,7 @@ declare module '@pixelmapper/extension-api' {
 
 
   /** Semver of this API package. Extensions declare a compatible range in `apiVersion`. */
-  export const API_VERSION = "1.6.0";
+  export const API_VERSION = "1.7.0";
   /** Everything an extension can contribute. All lists are optional. */
   export interface ExtensionContributions {
       slots?: SlotContribution[];
@@ -1252,6 +1328,7 @@ declare module '@pixelmapper/extension-api' {
 
 
 
+
   /** One control point of a curve param. Both axes are normalized 0–1. */
   export interface CurvePoint {
       /** Position in the cycle, 0–1, monotonically increasing. */
@@ -1271,8 +1348,12 @@ declare module '@pixelmapper/extension-api' {
       default: V;
       /** Optional longer description (shown as tooltip; read by AI). */
       description?: string;
-      /** Override the default `pm.*` input used to render this param. */
-      ui?: PmInputName;
+      /**
+       * Override the default `pm.*` input used to render this param (string), or
+       * the object form `{ input?, canvas?, … }` that also declares a canvas
+       * handle (see `canvas-hints.ts`).
+       */
+      ui?: ParamUi;
       /** Visual group name; params with the same group share a section. */
       group?: string;
       /**
@@ -1356,14 +1437,43 @@ declare module '@pixelmapper/extension-api' {
    * group `g` on in step `s`). Default input: `pm.steps`.
    */
   export type StepsParam = ParamBase<'steps', StepsValue>;
+  /**
+   * State of a momentary `trigger` param (ABI 1.3). The host records the
+   * edges; times are in engine-clock ms (the same clock as `Frame.timeMs`).
+   */
+  export interface TriggerValue {
+      /** True while the button is held. */
+      pressed: boolean;
+      /** Engine-clock ms of the last press; absent = never pressed. */
+      pressedAt?: number;
+      /** Engine-clock ms of the last release; absent = never released. */
+      releasedAt?: number;
+      /** Presses in the current multi-click burst (1 = single, 2 = double, …; 0 = never pressed). */
+      clicks?: number;
+  }
+  /**
+   * Momentary input (hold / release / double-click), e.g. "hold = blackout,
+   * release = shock wave, double-click = flash". Not saved as a look: the host
+   * updates it on press/release (card button or a live `button` widget mapped
+   * via `effect-param`) without an undo step. Manifest default: `{ "pressed": false }`.
+   *
+   * Wire: 4 f32 — `pressed (0/1), pressedAt, releasedAt, clicks` with the
+   * times in engine-clock ms (−1e9 = never). `render` stays pure: the SDK's
+   * `triggerMsSincePress(params, slot, ctx)` etc. subtract them from
+   * `ctx.timeMs`. Default input: `pm.button`.
+   */
+  export interface TriggerParam extends ParamBase<'trigger', TriggerValue> {
+      /** Max ms between a release and the next press that still counts as a multi-click. Default 350. */
+      multiClickMs?: number;
+  }
   /** Any param definition. */
-  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam | GradientParam | StepsParam;
+  export type ParamDef = NumberParam | IntParam | BoolParam | EnumParam | ColorParam | AngleParam | PointParam | CurveParam | GradientParam | StepsParam | TriggerParam;
   /** Param type discriminator. */
   export type ParamType = ParamDef['type'];
   /** An ordered list of param definitions. Order defines the wire layout. */
   export type ParamSchema = ParamDef[];
   /** Runtime value of any param. */
-  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue;
+  export type ParamValue = number | boolean | string | RgbColor | Vec2 | CurveValue | GradientValue | StepsValue | TriggerValue;
   /** Number of f32 slots each param type occupies in the params block. */
   export const PARAM_WIRE_SLOTS: Readonly<Record<ParamType, number>>;
   /** Default `pm.*` input per param type (D13). */
@@ -1457,19 +1567,20 @@ declare module '@pixelmapper/extension-api' {
    *
    * Set `rdm.modelId`, `pixelmapper.rdmManufacturerId` and the modes'
    * `rdmPersonalityIndex` so `findFixtureDefinitionByRdm` finds the definition
-   * next time. Returns the key `'custom/<id>'` for `commands.addFixtures`.
+   * next time. Resolves the key `'custom/<id>'` for `commands.addFixtures`
+   * (async since API 1.7: custom fixtures are synced user records).
    *
-   * @throws Error when the definition is invalid.
+   * @throws (rejects) Error when the definition is invalid.
    *
    * @example
-   * const key = saveCustomFixtureDefinition({
+   * const key = await saveCustomFixtureDefinition({
    *   name: 'Acme Bar (RDM)', categories: ['Pixel Bar'],
    *   rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
    *   availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
    *   modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
    * });
    */
-  export function saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
+  export function saveCustomFixtureDefinition(definition: Json): Promise<FixtureDefinitionKey>;
   /** Anything that occupies DMX channels (e.g. a `FixtureSummary`). */
   export interface AddressOccupant {
       /** Fixture id, matched by `FindFreeAddressOptions.ignore`. */
@@ -1707,6 +1818,26 @@ declare module '@pixelmapper/extension-api' {
       /** Opens a session; rejects (Error) when the bridge cannot start. */
       connect(handlers: ArtNetBridgeHandlers): Promise<ArtNetBridgeSession>;
   }
+  /**
+   * Native HTTP GET without browser CORS restrictions (API 1.7).
+   * Native implementations MAY restrict the allowed hosts (the desktop app
+   * allows the GitHub release hosts only).
+   */
+  export interface HttpApi {
+      /** Downloads a URL (redirects followed); rejects on network errors and non-2xx answers. */
+      getBytes(url: string): Promise<Uint8Array>;
+  }
+  /**
+   * Read-only files shipped inside the app bundle, e.g. the
+   * firmware matching the app release (ADR 0004 D19). Added in API 1.7.
+   */
+  export interface ResourcesApi {
+      /**
+       * Reads a bundled file by its relative path (e.g. `firmware/firmware.bin`).
+       * Resolves `null` when the file was not bundled.
+       */
+      read(path: string): Promise<Uint8Array | null>;
+  }
   /** Platform-dependent capabilities. `null` = not available here. */
   export interface Platform {
       readonly kind: PlatformKind;
@@ -1714,6 +1845,10 @@ declare module '@pixelmapper/extension-api' {
       readonly midi: MidiApi | null;
       /** In-process Art-Net bridge (desktop, API 1.5); `null` = use `pmnet-bridge serve` over WebSocket. */
       readonly artnetBridge: ArtNetBridgeApi | null;
+      /** Native HTTP (desktop). Optional: hosts before API 1.7 omit it — treat absent as `null`. */
+      readonly http?: HttpApi | null;
+      /** Files bundled with the app (desktop). Optional: absent = `null` (API 1.7). */
+      readonly resources?: ResourcesApi | null;
   }
   /** Returns the platform of the running host (connectors, drivers, components). */
   export function getPlatform(): Platform;

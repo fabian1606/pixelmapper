@@ -4,10 +4,15 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
+import { isTriggerParam } from '~/utils/plugins/trigger-param';
+import { controlParamValue } from '~/utils/live/control-param-value';
+import { setEffectTrigger } from './effect-trigger';
+import { setEffectParam } from './effect-param';
 
 /**
  * Shared runtime dispatcher for a {@link LiveMapping}. Used by canvas buttons,
- * canvas sliders, and controller-twin controls (buttons + faders) so that every
+ * canvas sliders, xy pads (`effect-param` → point params), and controller-twin
+ * controls (buttons + faders) so that every
  * mapping type behaves identically no matter where the control lives.
  *
  * Plain functions that reach for the Pinia stores internally — same pattern as
@@ -33,12 +38,30 @@ export function createDimmerState(): DimmerState {
 export interface MappingContext {
   /** Tracking key for overwrite / flash presets (widget.id or `${widgetId}::${controlId}`). */
   key: string;
-  /** Continuous 0..1 value for sliders/faders; omit for momentary buttons. */
+  /** Continuous 0..1 value for sliders/faders (x axis of an xy pad); omit for buttons. */
   value?: number;
+  /** 0..1 y axis of an xy pad (drives `point` params together with `value`). */
+  value2?: number;
   /** Namespaces virtual-dimmer base values (controlId on twins, falls back to key). */
   controlId?: string;
   /** Per-instance dimmer state; pass the same object across a component's lifetime. */
   dimmerState?: DimmerState;
+}
+
+/** Key of the `trigger` param an `effect-param` mapping targets (ABI 1.3), else null. */
+export function triggerParamKey(mapping: LiveMapping): string | null {
+  if (mapping.type !== 'effect-param' || mapping.effectId == null || !mapping.paramKey?.startsWith('params.')) return null;
+  const effect = useEngineStore().modifiers.find((e: any) => e.id === mapping.effectId);
+  const key = mapping.paramKey.slice('params.'.length);
+  return effect && isTriggerParam(getManifest(effect.plugin), key) ? key : null;
+}
+
+/** Manifest type of the plugin param an `effect-param` mapping targets, else null. */
+export function effectParamType(mapping: LiveMapping): string | null {
+  if (mapping.type !== 'effect-param' || mapping.effectId == null || !mapping.paramKey?.startsWith('params.')) return null;
+  const effect = useEngineStore().modifiers.find((e: any) => e.id === mapping.effectId);
+  const key = mapping.paramKey.slice('params.'.length);
+  return (effect && getManifest(effect.plugin)?.params.find(p => p.key === key)?.type) ?? null;
 }
 
 /**
@@ -57,6 +80,10 @@ export function isFlashMapping(mapping: LiveMapping): boolean {
   }
   // Other global functions are hold-to-active (flash behavior).
   if (mapping.type === 'global-function') return true;
+  // Trigger params are momentary by definition (press / release edges).
+  if (triggerParamKey(mapping)) return true;
+  // Bool params driven by a button in 'hold' mode are on only while held.
+  if (mapping.behavior === 'hold' && effectParamType(mapping) === 'bool') return true;
   return false;
 }
 
@@ -181,36 +208,11 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
     }
   } else if (mapping.type === 'dimmer-group') {
     applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, ctx);
-  } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null && value !== undefined) {
-    const effect = engineStore.modifiers.find((e: any) => e.id === mapping.effectId);
-    if (effect) {
-      const pk = mapping.paramKey;
-      if (pk === 'strength') {
-        effect.strength = value;
-      } else if (pk === 'speed') {
-        if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
-      } else if (pk === 'fanning') {
-        // Spread: length of the gradient handle (direction kept), 0–1 of the world width.
-        const d = effect.distribution;
-        const dx = d.end.x - d.origin.x;
-        const dy = d.end.y - d.origin.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const l = Math.max(0.001, value);
-        effect.distribution = { ...d, end: { x: d.origin.x + (dx / len) * l, y: d.origin.y + (dy / len) * l } };
-      } else if (pk.startsWith('params.') || pk.startsWith('waveformParams.')) {
-        // Plugin param: the 0–1 control value maps onto the param's range.
-        const key = pk.slice(pk.indexOf('.') + 1);
-        const def = getManifest(effect.plugin)?.params.find(p => p.key === key);
-        if (def && (def.type === 'number' || def.type === 'int')) {
-          const v = def.min + value * (def.max - def.min);
-          effect.params = { ...effect.params, [key]: def.type === 'int' ? Math.round(v) : v };
-        }
-        else if (def?.type === 'bool') {
-          effect.params = { ...effect.params, [key]: value >= 0.5 };
-        }
-      }
-      engineStore.triggerCanvasSync?.();
-    }
+  } else if (mapping.type === 'effect-param' && triggerParamKey(mapping)) {
+    // Trigger param (ABI 1.3): buttons send press/release; sliders press above half.
+    setEffectTrigger(mapping.effectId!, triggerParamKey(mapping)!, value !== undefined ? value >= 0.5 : active);
+  } else if (mapping.type === 'effect-param' && mapping.effectId != null && mapping.paramKey != null) {
+    applyEffectParam(mapping, active, ctx);
   } else if (mapping.type === 'page-switch' && mapping.targetPageId && active) {
     store.setActivePage(mapping.targetPageId);
   } else if (mapping.type === 'global-function' && mapping.globalFunction === 'speed') {
@@ -245,4 +247,44 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
       queueMicrotask(() => liveBus.dispatch('overwrite.release', { key }));
     }
   }
+}
+
+/**
+ * `effect-param` mapping (non-trigger): sliders drive the built-in keys and
+ * number/int/bool params, buttons drive bool params (toggle or momentary per
+ * `mapping.behavior`), xy pads drive point params. Inputs a param type cannot
+ * take are ignored (the `live.*` operation verify warns about them).
+ */
+function applyEffectParam(mapping: LiveMapping, active: boolean, ctx: MappingContext): void {
+  const engineStore = useEngineStore();
+  const effect = engineStore.modifiers.find((e: any) => e.id === mapping.effectId);
+  const pk = mapping.paramKey!;
+  if (!effect) return;
+  const { value } = ctx;
+
+  if (pk.startsWith('params.') || pk.startsWith('waveformParams.')) {
+    // Plugin param: the control input maps onto the param's type (range, toggle, point).
+    const key = pk.slice(pk.indexOf('.') + 1);
+    const def = getManifest(effect.plugin)?.params.find(p => p.key === key);
+    const next = controlParamValue(def, effect.params[key], { active, value, value2: ctx.value2, behavior: mapping.behavior });
+    if (next !== undefined) setEffectParam(effect.id, key, next);
+    return;
+  }
+
+  // Built-in modifier keys need a continuous value (sliders / faders).
+  if (value === undefined) return;
+  if (pk === 'strength') {
+    effect.strength = value;
+  } else if (pk === 'speed') {
+    if (effect.speed) effect.speed.timeMs = Math.max(100, Math.round(50 + value * 5000));
+  } else if (pk === 'fanning') {
+    // Spread: length of the gradient handle (direction kept), 0–1 of the world width.
+    const d = effect.distribution;
+    const dx = d.end.x - d.origin.x;
+    const dy = d.end.y - d.origin.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const l = Math.max(0.001, value);
+    effect.distribution = { ...d, end: { x: d.origin.x + (dx / len) * l, y: d.origin.y + (dy / len) * l } };
+  }
+  engineStore.triggerCanvasSync?.();
 }

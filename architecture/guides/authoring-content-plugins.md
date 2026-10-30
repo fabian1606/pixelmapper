@@ -19,7 +19,7 @@ A modifier changes light values over time and space. The engine calls it once pe
 | `rgb` | one head with a color system (RGB/RGBW/RGBA/CMY) | 3 values r, g, b |
 | `panTilt` | one head with pan + tilt | 2 values pan, tilt |
 
-The host owns everything generic: which channels/fixtures are targeted, speed, the **distribution** (how the instance spreads over fixtures: all the same, a direction on the canvas, the order numbers, or within each fixture), strength and blend mode. The plugin owns only what it computes from the **time phase**, the per-sample **distribution values** (`spatial`, `rank`, `distGroup`) and its **params**. Plugins never derive their spatial layout from `x`/`y` (position-based noise textures are the exception).
+The host owns everything generic: which channels/fixtures are targeted, speed, the **distribution** (how the instance spreads over fixtures: all the same, a direction on the canvas, the order numbers, or within each fixture), strength and blend mode. The plugin owns only what it computes from the **time phase**, the per-sample **distribution values** (`spatial`, `rank`, `distGroup`) and its **params**. Plugins never derive their spatial layout from `x`/`y` when the shared distribution can express it. Exceptions: position-based noise textures, and geometry the single distribution handle cannot express — several source points, mirror lines, room corners. Those use `point` params with canvas handles (world `x`/`y`) or the room coordinates `u`/`v` (see *Coordinates*).
 
 ## Package layout
 
@@ -107,10 +107,23 @@ Identity is the content hash `sha256:<hex>` over canonical(manifest) ‖ wasm �
 | `curve` | `{ shape, args }`, `{ points }` or a legacy point list (see Curves) | 128 (LUT) | `sampleLut(p.lut(i), x)` / `sampleSignedLut` | `pm.curve` |
 | `gradient` | `{ stops: [{ pos, color }] }`, 1–8 stops | 33 (`count, (pos, r, g, b) × 8`) | `sampleGradient(p.lut(i), u, transition, channel)` | `pm.gradient` |
 | `steps` | `{ groups, steps, cells[step][group] }` (1–8 × 1–16) | 18 (`groups, steps, mask[16]`) | `p.int(i)`, `p.int(i + 1)`, mask bits at `p.lut(i + 2)` | `pm.steps` |
+| `trigger` *(v1.3)* | momentary button state; manifest default `{ "pressed": false }` (+ optional `multiClickMs`, default 350) | 4 (`pressed, pressedAt, releasedAt, clicks`; engine-clock ms, −1e9 = never) | `triggerPressed(p, i)`, `triggerMsSincePress(p, i, ctx)`, `triggerMsSinceRelease(p, i, ctx)`, `triggerClicks(p, i)` | press-and-hold `pm.button` |
+
+**Live controls.** Performers can bind live widgets to params with an `effect-param` mapping: sliders drive `number`, `int`, `bool` and `trigger`; buttons drive `bool` (toggle or hold) and `trigger`; XY pads drive `point`. Other param types cannot be mapped.
+
+**Trigger params (v1.3).** For momentary input such as "hold = blackout, release = shock wave, double-click = flash". The host records the press/release edges (card button, or a live `button` widget mapped to the param with `effect-param`) as engine-clock timestamps; nothing is saved to undo history. `render` stays pure: the SDK readers subtract the stamps from `ctx.timeMs`. `triggerClicks` counts presses in the current burst (a press within `multiClickMs` of the previous release continues it), so `clicks >= 2` while pressed or shortly after means double click. Combine with `envelope(ms, attackMs, decayMs)`:
+
+```ts
+// params: [0] trigger "hit" (4 slots), [4] number "decayMs"
+const held = triggerPressed(this.params, 0);
+if (held && triggerClicks(this.params, 0) >= 2) out.setScalar(1.0);            // double click: blinder
+else if (held) out.setScalar(0.0);                                               // hold: blackout
+else out.setScalar(envelope(triggerMsSinceRelease(this.params, 0, ctx) - dist2(s.u, s.v, 0, 0, ctx.worldAspect) * 400.0, 0.0, this.params.get(4))); // release: wave from a corner
+```
 
 Common fields:
 - `key` (camelCase, unique), `label`, `default`;
-- optional `description` (tooltip), `group` (section title), `ui` (override the input, e.g. `"pm.numberInput"`);
+- optional `description` (tooltip), `group` (section title), `ui` (override the input, e.g. `"pm.numberInput"`, or the object form `{ "input"?, "canvas", … }` with a canvas handle, see Canvas handles);
 - `tier`: `primary` (card body, default), `advanced` (under "More"), `hidden` (never rendered; recipes and editors set it);
 - `optionDistribution` (enum only): option → distribution patch applied when the user picks that option, e.g. `{ "alternate": { "mode": "order" } }` when the option only works fixture by fixture;
 - `when`: show only when the condition holds, e.g. `{ "mode": "palette" }` or `{ "distribution.mode": ["order", "linear"] }`.
@@ -153,6 +166,30 @@ Each recipe is a **complete look**:
 - optional `when: { kind?: ["single" | "row" | "ring" | "area"], multiHead?, hasColor? }` picks the recipe for a new instance on the current selection.
 
 Every card shows a Preset row (`Preset ▾ Name`); a plugin without presets gets one *Default* recipe (the schema defaults). Hovering a recipe in the list previews it on the fixtures without saving; clicking applies everything as one undo step. When the recipe changes the distribution mode, the distribution is placed on the selection (handle along its axis, radial from its centroid, order along the axis). Recipes never set a direction: the user turns the handle on the canvas, so do not ship variants that only differ in direction.
+
+### Canvas handles (`ui.canvas`)
+
+Spatial params can declare a draggable handle on the 2D canvas, so an effect gets spatial controls without UI code ("a wave from four draggable corner points", "adjust how big the areas are"). The hint sits in the param's `ui` in object form; `ui.input` still overrides the card input, and the card input (e.g. the X/Y faders of a `point`) stays available:
+
+```json
+{ "key": "center", "type": "point", "label": "Center", "default": { "x": 0.5, "y": 0.5 },
+  "ui": { "canvas": "point", "label": "C", "color": "#ff8800" } },
+{ "key": "size", "type": "number", "label": "Size", "min": 0.02, "max": 1, "default": 0.2,
+  "ui": { "canvas": "radius", "anchor": "center" } }
+```
+
+| `canvas` | Param type | Handle | Value |
+|----------|-----------|--------|-------|
+| `point` | `point` | one dot at the value | `{ x, y }` in normalized world space (x over the world width, y over the height), clamped to 0–1 |
+| `radius` | `number` | a ring around the `anchor` point (+ a knob) | radius in **normalized world-x units** (1 = world width), clamped to the param's `[min, max]` |
+
+- Optional `label` (≤ 24 characters, default: the param label) and `color` (CSS color, default: the theme primary).
+- `anchor` must name a `point` param; give that param `canvas: "point"` too, or the ring's center cannot be dragged (validation warns).
+- A radius needs `min ≥ 0`.
+- **Coordinates:** handle values live in world x/y, the same space as `Sample.x/y` (the world is square, one unit on both axes). Measure distances to a handle point with `dist2(s.x, s.y, px, py, 1.0)`, which matches the drawn ring exactly. Do **not** use the room coordinates `Sample.u/v` for handle points: they are stretched per axis to the rig's bounding box (`ctx.worldAspect` is the *room* aspect for `u/v`, not a canvas correction). `u/v` are for room-relative layouts that need no handle, such as "the corners of the room" or a mirror line at the room center.
+- Handles show for the selected modifier whenever it has hinted params that the card would show (`tier` not `hidden`, `when` holds), in every distribution mode, next to the distribution handle.
+- Dragging updates the param live (and for collaborators); releasing commits one undo step. Points snap to the world edges, the center and the other points (hold Alt to drag freely).
+- There is no `line` hint; draw relations between points in the effect itself.
 
 ### Composite editors (`editors`)
 
@@ -200,13 +237,16 @@ Rules:
 - `timeMs` (shared clock, identical on all clients), `beatTime` (beats since epoch, continuous across tempo changes), `bpm`;
 - `phaseSpeed` (cycles/s; 0 when frozen), `arity`, `seed` (instance), `strength` (informational — the host applies it);
 - v1.1: `timePhase` (speed phase in cycles, unwrapped: one pass/step per unit), `rankCount` (numbered fixtures of the instance, the largest head count for scope within, 0 without ranks), `distGroupCount` (groups set by a recipe, 0 = none).
+- v1.3: `worldAspect` (room width / room depth), `worldDepth` (room depth in world units), `metersPerUnit` (meters per world unit, 0 = unknown). See *Coordinates* below.
 - v1.2: `spread` — the user's Spread choice: `SPREAD_SAME` (every fixture the same, `spatial` 0), `SPREAD_SPATIAL` (Spatial 2D handle), `SPREAD_ORDER` (Fixture by fixture: `rank` = number − 1, all heads of a fixture share it), `SPREAD_WITHIN` (Within each fixture: `rank` = head). Use it to decide who shares a random value (Noise) or how groups form (Pattern: alternate along numbers, bands along the handle). Also v1.2: `handleOriginX/Y`, `handleEndX/Y` — the Spatial 2D handle in the same normalized coordinates as `Sample.x/y` (e.g. scale or move a texture with it, as Noise does). Declare `"apiVersion": "^1.2.0"` when you read them.
 
 `Sample` (per target):
 
 | Field | Meaning |
 |-------|---------|
-| `x`, `y` | normalized world position 0–1 |
+| `x`, `y` | normalized world position 0–1 (fraction of the stage; one unit on both axes) |
+| `z` *(v1.3)* | height above the floor, same unit as `x`/`y` (0 on the floor / when unset) |
+| `u`, `v` *(v1.3)* | room coordinates: 0–1 across the bounding box of all fixtures (each axis separately; 0.5 on a degenerate axis) |
 | `spatial` *(v1.1)* | position along the distribution: 0 at the handle origin / first number, 1 at the end / after the last number; `head/headCount` within each fixture |
 | `rank` *(v1.1)* | the sample's order number (0-based; head index for scope within), −1 without ranks |
 | `distGroup` *(v1.1)* | group set by a recipe's grouping, −1 without |
@@ -217,12 +257,20 @@ Rules:
 | `base0..2` | current values before this modifier, 0–1 (scalar: base0; rgb: r, g, b; panTilt: pan, tilt) |
 | `channelSeed` | 32-bit seed of the channel type (scalar), so e.g. RED and BLUE flicker differently |
 
+### Coordinates (v1.3)
+
+- **World** (`x`, `y`, `z`): one unit on every axis, so `dist3(s.x, s.y, s.z, px, py, pz, 1, 1)` is a true distance; × `metersPerUnit` gives meters. `point` params and the Spatial 2D handle use world x/y.
+- **Room** (`u`, `v`): the rig's bounding box stretched to 0–1 on each axis. Use it for "corners", "center", "edges of the room" independent of where the rig sits on the stage. Because the axes are stretched separately, scale u differences by `ctx.worldAspect`: `dist2(s.u, s.v, cu, cv, ctx.worldAspect)` is isotropic, in units of the room depth. Heights join that space as `s.z / ctx.worldDepth`, e.g. `dist3(s.u, s.v, s.z / ctx.worldDepth, cu, cv, 0, ctx.worldAspect, 1)`.
+- The room is computed by the host from the whole layout (not only the targeted fixtures), so all modifiers share it. Declare `"apiVersion": "^1.3.0"` when you read v1.3 fields.
+
 ### SDK helpers (`@pixelmapper/plugin-sdk`)
 
 - math: `TAU`, `PI`, `fract`, `clamp`, `lerp`, `seededRandom(seed)`, `hash01(seed, i)`, `fnv1aPos(x, y)`, `crossfade(prev, curr, elapsedMs, durMs, fade)`, `perlin2`, `noise1/2/3`
 - waves: `evaluateShape(shape, t, param)` with `WAVE_SINE`, `WAVE_SQUARE`, `WAVE_TRIANGLE`, `WAVE_SAWTOOTH`, `WAVE_BOUNCE`, `WAVE_RAMP`, `WAVE_SMOOTH` (returns −1…1)
 - color: `Vec3`, `rgbToHsl`, `hslToRgb`, `rgbToHsv`, `hsvToRgb` (write into an `out` Vec3)
 - curves: `sampleLut(ptr, x)` (cycle domain), `sampleSignedLut(ptr, x)` (signed domain, wraps), `wrapSigned(x)`, `CURVE_LUT_SIZE` (128)
+- patterns (v1.3): `dist2(x, y, px, py, aspect)`, `dist3(x, y, z, px, py, pz, aspect, zScale)`, `minDistToPoints(x, y, aspect, pts, count)` / `nearestPointIndex(...)` (`pts`: a `StaticArray<f32>` of up to 8 interleaved x/y pairs — allocate it once in `prepare`, never per sample), `pingPong(t)`, `mirror(x, axis)`, `pulse(d, center, width, softness)`, `ease(kind, t)` with `EASE_LINEAR`, `EASE_IN_QUAD`, `EASE_OUT_QUAD`, `EASE_IN_OUT_QUAD`, `EASE_IN_EXPO`, `EASE_OUT_EXPO`, `EASE_IN_OUT_SINE`, `EASE_SMOOTH`, `crossingTimeLine(a0, va, b0, vb)`, `crossingTimeLoop(a0, va, b0, vb, t)` (time since the last meeting of two runners on a loop of length 1), `crossingCount(a0, va, b0, vb, t)` (meetings so far; `& 1` alternates colors per collision), `envelope(msSince, attackMs, decayMs)`
+- triggers (v1.3): `triggerPressed`, `triggerMsSincePress`, `triggerMsSinceRelease`, `triggerClicks`, `TRIGGER_SLOTS` (4), `TRIGGER_NEVER` (1e9 ms)
 - gradients: `gradientCount(g)`, `gradientPos(g, i)`, `gradientStopChannel(g, i, c)`, `sampleGradient(g, u, transition, c)` with `g = p.lut(slot)` (periodic palette; transition 0 = each stop holds until the next, 1 = blend)
 
 Randomness that changes once per step: `hash01(s.seed, <u32>Mathf.floor(ctx.timePhase))`.
@@ -266,14 +314,14 @@ export function mount(el: HTMLElement, api: PanelApi): (() => void) | void {
 | `setParam(key, value)` | change one param; validated against the manifest schema (numbers are clamped, unknown keys and invalid values are dropped) |
 | `beginScrub()` / `endScrub()` | wrap continuous edits so they become **one** undo step; a `setParam` outside a scrub commits immediately |
 | `onFrame(cb)` | ~30 fps `{ timeMs, beatTime, bpm }` for animations (only sent while subscribed) |
-| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 16` f32 in the `Sample` layout, returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
+| `render(samples, count)` | runs **this plugin's own** wasm synchronously with the current params: `samples` = `count × 20` f32 in the `Sample` layout (ABI 1.3), returns `count × arity` raw outputs (frame context is zero except `arity = 1`) |
 | `theme` | resolved CSS variables as full color values (`--background`, `--foreground`, `--primary`, `--muted`, `--border`, `--radius`, …); they are also set on `:root` inside the panel, so `var(--primary)` works in styles |
 
 Sandbox: the panel runs in `<iframe sandbox="allow-scripts">` with an opaque origin and a CSP without network access (`default-src 'none'`; inline scripts, styles, `data:` images and wasm only). It cannot reach the app, cookies, storage or the network; everything goes through `PanelApi` messages. The iframe resizes to its content height (24–600 px). Uncaught errors are shown under the panel.
 
 ## Validation (what makes a build fail)
 
-The harness renders 240 frames (4 s @ 60 fps) on a synthetic layout of 64 fixtures × 1–8 heads, for several param variants and every declared signature. Rejected:
+The harness renders 240 frames (4 s @ 60 fps; `timePhase` sweeps 0–4 cycles at 1 cycle/s) on a synthetic layout of 64 fixtures × 1–8 heads, for several param variants, every declared signature and every distribution the manifest offers (`distribution.modes` × `scopes`, default all; order ranks = fixture index with `rankCount` 64, within ranks = head with `rankCount` = max heads, gradient handles left → right / from the center; every-4 grouping when `grouping: 'required'`). `spatial`, `rank`, `distGroup`, `spread` and the handle are filled like the engine does; legacy `phase` = `timePhase − spatial`. Rejected:
 
 1. Invalid manifest (rules above).
 2. Compile errors; forbidden imports (only `env.memory`, `env.abort`, `pm.budget`, `pm.log` allowed).
@@ -297,11 +345,17 @@ Built-ins to read:
 
 Each has a `goldens.gen.ts` reference and `goldens.json`.
 
+Effect-authoring references (spatial effects with canvas handles and room coordinates, ABI 1.3):
+- `plugins/corner-wave` (**Corner Wave**: four draggable `point` params, a `radius` ring, nearest-point distance, palette per wave front);
+- `plugins/mirror-runner` (**Mirror Runner**: ping-pong runner along each tube's heads with a time-based tail, mirrored at the room center via `u`/`v`).
+
+**AI skill.** The step-by-step workflow for building an effect *with its controls* (inspect the project → write → `plugins.build` → `modifiers.add` → `observe` → live page), pattern recipes, UI rules and verification live in [`docs/ai/skills/effect-authoring/`](../../docs/ai/skills/effect-authoring/SKILL.md). Claude Code loads it as the `pixelmapper-effects` skill; over MCP it is served as `describe` topics `guide:effect-authoring/<file>` and as the prompts `create-effect` / `add-controls`.
+
 ### Checklist
 
 - [ ] `description` explains behavior and every non-obvious param; labels name what the user sees.
 - [ ] Recipes cover the common looks; one is `default`; each sets params, speed, distribution and strength.
-- [ ] Spatial behavior comes from `spatial`/`rank` (the shared distribution), not from `x`/`y` or own origin params.
+- [ ] Spatial behavior comes from `spatial`/`rank` (the shared distribution) where it can; own points are `point` params with `ui.canvas: "point"` and distances to them use world `x`/`y` with aspect 1.
 - [ ] Param slot indices in `prepare` match manifest order and slot counts.
 - [ ] Output range fits the output mode; no NaN (guard divisions).
 - [ ] No per-frame state, no per-sample allocation.

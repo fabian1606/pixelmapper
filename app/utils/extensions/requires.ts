@@ -54,6 +54,18 @@ export function commandOwner(commandType: string, src: RequiresSources): string 
 }
 
 /**
+ * Command types inside a persisted change, `Composite` children expanded
+ * (batches, plan M4.4), for the requirement checks of the open gate: a
+ * namespaced command inside a composite counts like a top-level one.
+ */
+export function flattenCommandTypes(commandType: string, payload: unknown): string[] {
+  if (commandType !== 'Composite') return [commandType];
+  const children = (payload as { children?: { commandType: string; payload: unknown }[] } | null)?.children;
+  if (!Array.isArray(children)) return [commandType];
+  return [commandType, ...children.flatMap(c => flattenCommandTypes(c.commandType, c.payload))];
+}
+
+/**
  * Extensions a just-executed command makes the project depend on.
  * `kindOfFixture` resolves the kind id of an existing fixture.
  */
@@ -64,12 +76,6 @@ export function requirementsOfCommand(
   kindOfFixture: (fixtureId: string | number) => string | undefined,
 ): string[] {
   const out = new Set<string>();
-  // A batch (plan M4.4) depends on whatever its children depend on.
-  if (commandType === 'Batch') {
-    const entries = (payload as { commands?: { commandType: string; payload: unknown }[] } | null)?.commands ?? [];
-    for (const e of entries) for (const id of requirementsOfCommand(e.commandType, e.payload, src, kindOfFixture)) out.add(id);
-    return [...out];
-  }
   const owner = commandOwner(commandType, src);
   if (owner) out.add(owner);
 
@@ -78,6 +84,12 @@ export function requirementsOfCommand(
     if (k?.required) out.add(k.extensionId);
   };
   const p = payload as Record<string, unknown> | null;
+  // Composite (ADR 0002 §4.3): the children's requirements count (open gate A0.3).
+  if (commandType === 'Composite' && p && Array.isArray(p.children)) {
+    for (const child of p.children as { commandType: string; payload: unknown }[]) {
+      for (const id of requirementsOfCommand(child.commandType, child.payload, src, kindOfFixture)) out.add(id);
+    }
+  }
   if (commandType === 'SetFixtureKindConfig' && p) addKind(kindOfFixture(p.fixtureId as string | number));
   if (commandType === 'AddFixtures' && p && Array.isArray(p.nodes)) {
     const visit = (n: { _type?: string; kind?: { id?: string }; children?: unknown[] }) => {

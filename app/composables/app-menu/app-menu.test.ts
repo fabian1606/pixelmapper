@@ -15,6 +15,8 @@ function context(project: string | null) {
     save: vi.fn(),
     exportFile: vi.fn(async () => {}),
     clearRecent: vi.fn(),
+    openSettings: vi.fn(),
+    copyMcpSetup: vi.fn(async () => {}),
   } satisfies AppCommandContext;
 }
 
@@ -49,6 +51,16 @@ describe('runAppCommand', () => {
     runAppCommand('recent:abc', ctx);
     expect(ctx.navigate).toHaveBeenCalledWith('/project/abc');
     expect(runAppCommand('nope', ctx)).toBe(false);
+  });
+
+  it('opens settings and the MCP setup, and copies MCP snippets, with or without a project', () => {
+    const ctx = context(null);
+    runAppCommand('app.settings', ctx);
+    runAppCommand('mcp.setup', ctx);
+    runAppCommand('mcp.copy-claude-code', ctx);
+    runAppCommand('mcp.copy-claude-desktop', ctx);
+    expect(ctx.openSettings.mock.calls).toEqual([[null], ['mcp']]);
+    expect(ctx.copyMcpSetup.mock.calls).toEqual([['claude-code'], ['claude-desktop']]);
   });
 });
 

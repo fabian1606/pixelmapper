@@ -4,12 +4,16 @@
  * project-only items. Call once, from `app.vue`.
  */
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { getAppShell } from '#platform';
+import { getAccountPolicy, getAppShell, getMcpSetupInfo } from '#platform';
+import { getProjectStore } from '~/utils/persistence/project-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { triggerSaveSnapshot } from '~/components/engine/composables/use-history';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
 import { exportProjectFile, openProjectFile } from '~/utils/persistence/project-file';
 import { runAppCommand, WEB_SHORTCUTS, type AppCommandContext } from './app-commands';
+import { openSettings } from '~/composables/use-settings-dialog';
+import { notify } from '~/composables/use-notifications';
+import { claudeCodeCommand, claudeDesktopConfig } from '~/utils/agents/mcp-setup';
 import { clearRecentProjects, loadRecentProjects, recentProjects, recordProjectOpened, syncRecentNames } from './recent-projects';
 
 /** Label for a recent project whose name is not known yet. */
@@ -37,11 +41,22 @@ export function useAppMenu(): void {
   /** Open project, from the route (`/project/:id/...`). */
   const projectId = computed(() => route.path.startsWith('/project/') ? (route.params.id as string | undefined) ?? null : null);
 
-  /** Refreshes recent names from the project list (drops deleted projects). */
+  /**
+   * Refreshes recent names from the project list (drops deleted projects).
+   * Local projects (ADR 0004 D3) count too, so they are never dropped.
+   */
   async function refreshNames() {
-    if (!user.value) return;
+    const locals = await getProjectStore()
+      .then(store => store.listProjects())
+      .then(list => list.map(m => ({ id: m.id, name: m.name })))
+      .catch(() => null);
+    if (!user.value) {
+      // Signed out on desktop the local store is the whole list.
+      if (locals && !getAccountPolicy().accountRequired) syncRecentNames(locals);
+      return;
+    }
     const { data, error } = await supabase.functions.invoke('get-projects');
-    if (!error && Array.isArray(data)) syncRecentNames(data);
+    if (!error && Array.isArray(data)) syncRecentNames([...(locals ?? []), ...data]);
   }
 
   const ctx: AppCommandContext = {
@@ -61,6 +76,19 @@ export function useAppMenu(): void {
       await exportProjectFile(shell, snapshot, name);
     },
     clearRecent: clearRecentProjects,
+    openSettings,
+    async copyMcpSetup(client) {
+      const { cliPath } = await getMcpSetupInfo();
+      const text = client === 'claude-code' ? claudeCodeCommand(cliPath) : claudeDesktopConfig(cliPath);
+      const what = client === 'claude-code' ? 'Claude Code command' : 'Claude Desktop config';
+      try {
+        await navigator.clipboard.writeText(text);
+        notify({ title: `Copied ${what}`, description: cliPath ? undefined : 'Replace <repo> with your Pixelmapper checkout.' }, 4000);
+      } catch (error) {
+        console.warn('[mcp] clipboard write failed', error);
+        notify({ title: `Could not copy the ${what}`, description: 'Open MCP → MCP Server Setup… and copy it there.', variant: 'warning' });
+      }
+    },
   };
 
   activeCtx = ctx;

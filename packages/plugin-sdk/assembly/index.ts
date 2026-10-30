@@ -19,6 +19,10 @@
  * `pm_render`), which the toolchain exports from `abi.ts`. Frame, Sample and
  * Out objects are reused views into host buffers: never keep references to
  * them across calls.
+ *
+ * Pattern helpers (`patterns.ts`, `patterns-time.ts`): aspect-correct
+ * distances, nearest point, pulse/mirror/pingPong, easing, crossing times of
+ * moving points and a trigger envelope.
  */
 
 export * from "./core";
@@ -27,4 +31,7 @@ export * from "./curves";
 export * from "./color";
 export * from "./gradient";
 export * from "./waves";
+export * from "./patterns";
+export * from "./patterns-time";
+export * from "./trigger";
 export * from "./abi";

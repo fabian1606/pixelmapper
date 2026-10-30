@@ -6,7 +6,11 @@ type u8 = number; type u16 = number; type u32 = number; type u64 = bigint; type 
 type f32 = number; type f64 = number; type bool = boolean;
 declare module '@pixelmapper/plugin-sdk' {
   // ── packages/plugin-sdk/assembly/abi.ts ─────────────────────────
-  /** ABI version implemented by this SDK. */
+  /**
+   * ABI version implemented by this SDK: major × 100 + minor (103 = 1.3). The
+   * host only loads modules with exactly its version (buffer strides changed
+   * in 1.3, so older binaries must be rebuilt).
+   */
   export function pm_abi_version(): i32;
   /** Allocates `bytes` of unmanaged memory for host buffers. */
   export function pm_alloc(bytes: i32): usize;
@@ -46,15 +50,25 @@ declare module '@pixelmapper/plugin-sdk' {
    * Core SDK types: frame/sample/out views, params and the `Modifier` base
    * class plus registration (ADR §6.6). Re-exported by `index.ts`.
    */
-  /** f32 slots per frame context. */
+  /** f32 slots per frame context (v1.3: 20; slot 19 reserved). */
   export const CTX_FIELDS: i32;
-  /** f32 slots per sample. */
+  /** f32 slots per sample (v1.3: 20; slot 19 reserved). */
   export const SAMPLE_FIELDS: i32;
   /**
    * Per-render-call context (one modifier instance, one frame).
    * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
    * strength, timePhase, rankCount, distGroupCount (v1.1), spread and the
-   * Spatial 2D handle origin x/y, end x/y (v1.2).
+   * Spatial 2D handle origin x/y, end x/y (v1.2), worldAspect, worldDepth,
+   * metersPerUnit, reserved (v1.3).
+   *
+   * Coordinates (v1.3): `Sample.x/y/z` are *world* coordinates — one unit on
+   * every axis (a fraction of the stage width), so distances computed from
+   * them are already isotropic. The *room* is the bounding box of all fixtures
+   * in the layout; `Sample.u/v` place a sample inside it (0–1 per axis, each
+   * axis normalized separately). Because u and v are stretched independently,
+   * multiply u differences by `worldAspect` before measuring distances:
+   * `dist = sqrt((du * worldAspect)² + dv²)` is in units of the room depth.
+   * Heights join that space as `dz / worldDepth`.
    */
   export class Frame {
       /** Address of the context buffer (set by the SDK). */
@@ -93,6 +107,20 @@ declare module '@pixelmapper/plugin-sdk' {
       get handleEndX(): f32;
       /** v1.2: Spatial 2D handle end y. */
       get handleEndY(): f32;
+      /**
+       * v1.3: room width / room depth (bounding box of all fixtures). Multiply a
+       * `Sample.u` difference by this to compare it with a `Sample.v` difference
+       * (`du * worldAspect` and `dv` are both in room-depth units). 1 for square
+       * rooms, single rows and single fixtures.
+       */
+      get worldAspect(): f32;
+      /**
+       * v1.3: room depth (y extent of the bounding box) in world units (> 0).
+       * `dz / worldDepth` is comparable to a `Sample.v` difference.
+       */
+      get worldDepth(): f32;
+      /** v1.3: meters per world unit (e.g. 12: x = 0.5 is 6 m); 0 when unknown. */
+      get metersPerUnit(): f32;
   }
   /** v1.2 `Frame.spread`: every fixture the same (spatial 0). */
   export const SPREAD_SAME: i32;
@@ -106,14 +134,15 @@ declare module '@pixelmapper/plugin-sdk' {
    * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).
    * Layout (f32): x, y, phase, groupIndex, groupCount, headIndex, headCount,
    * seed, base0, base1, base2, channelSeedLo, channelSeedHi, spatial, rank,
-   * distGroup (v1.1).
+   * distGroup (v1.1), z, u, v, reserved (v1.3). See `Frame` for the coordinate
+   * spaces.
    */
   export class Sample {
       /** Address of the sample (set by the SDK). */
       ptr: usize;
-      /** Normalized world x (0–1). */
+      /** Normalized world x (0–1 across the stage; same unit as y and z). */
       get x(): f32;
-      /** Normalized world y (0–1). */
+      /** Normalized world y (0–1 across the stage; same unit as x and z). */
       get y(): f32;
       /** Phase in cycles (1.0 = one full cycle): time phase − spatial (legacy; prefer `spatial`). */
       get phase(): f32;
@@ -141,6 +170,16 @@ declare module '@pixelmapper/plugin-sdk' {
       get rank(): i32;
       /** v1.1: distribution group of the sample (−1 without grouping). */
       get distGroup(): i32;
+      /**
+       * v1.3: height above the floor in world units (same unit as x/y, so
+       * `dist3(s.x, s.y, s.z, …, 1, 1)` is isotropic). 0 for fixtures on the floor
+       * or when heights were never set.
+       */
+      get z(): f32;
+      /** v1.3: room x — 0 at the leftmost fixture, 1 at the rightmost (0.5 in a single column). */
+      get u(): f32;
+      /** v1.3: room y — 0 at the frontmost (top) fixture, 1 at the backmost (0.5 in a single row). */
+      get v(): f32;
   }
   /** Output of one sample: `arity` values. */
   export class Out {
@@ -156,7 +195,8 @@ declare module '@pixelmapper/plugin-sdk' {
   /**
    * The params block: the f32 slots of all params in manifest order (ADR §6.2).
    * `number`/`int`/`angle` = 1 slot, `bool` = 1 (0/1), `enum` = 1 (index),
-   * `color` = 3, `point` = 2, `curve` = 128 (LUT).
+   * `color` = 3, `point` = 2, `curve` = 128 (LUT), `gradient` = 33, `steps` = 18,
+   * `trigger` = 4 (read with `triggerPressed` / `triggerMsSincePress` / …).
    */
   export class Params {
       /** Address of the params block (set by the SDK). */
@@ -275,6 +315,208 @@ declare module '@pixelmapper/plugin-sdk' {
   /** 3D noise from two offset 2D slices, roughly [-1, 1]. */
   export function noise3(x: f32, y: f32, z: f32): f32;
 
+  // ── packages/plugin-sdk/assembly/patterns-time.ts ───────────────
+  /** `ease` kind: identity. */
+  export const EASE_LINEAR: i32;
+  /** `ease` kind: t², slow start. */
+  export const EASE_IN_QUAD: i32;
+  /** `ease` kind: 1 − (1 − t)², slow end. */
+  export const EASE_OUT_QUAD: i32;
+  /** `ease` kind: quadratic in, then out. */
+  export const EASE_IN_OUT_QUAD: i32;
+  /** `ease` kind: 2^(10t − 10), very slow start. */
+  export const EASE_IN_EXPO: i32;
+  /** `ease` kind: 1 − 2^(−10t), very fast start. */
+  export const EASE_OUT_EXPO: i32;
+  /** `ease` kind: (1 − cos(πt)) / 2. */
+  export const EASE_IN_OUT_SINE: i32;
+  /** `ease` kind: Hermite smoothstep t²(3 − 2t). */
+  export const EASE_SMOOTH: i32;
+  /**
+   * Easing curve `kind` (an `EASE_*` constant, e.g. from an enum param)
+   * applied to `t`. `t` is clamped to [0, 1]; every curve maps 0 → 0 and
+   * 1 → 1 exactly. Unknown kinds behave like `EASE_LINEAR`.
+   *
+   * ```ts
+   * const v = ease(this.params.int(0), fract(ctx.timePhase));
+   * ```
+   */
+  export function ease(kind: i32, t: f32): f32;
+  /**
+   * First time `t` ≥ 0 at which two points on an infinite line meet:
+   * a0 + va·t == b0 + vb·t ⇒ t = (b0 − a0) / (va − vb).
+   * Units: positions in any unit, speeds in that unit per time unit (e.g.
+   * cycles or seconds). Returns −1 when they never meet (the meeting lies in
+   * the past, or parallel motion with different starts); 0 when they start
+   * together (parallel and equal starts: always together).
+   */
+  export function crossingTimeLine(a0: f32, va: f32, b0: f32, vb: f32): f32;
+  /**
+   * Time since the most recent meeting of two points moving on a loop of
+   * length 1 (positions wrap with `fract`, e.g. a ring of fixtures):
+   * a(t) = fract(a0 + va·t), b(t) = fract(b0 + vb·t). Returns how long ago
+   * (≥ 0, same time unit as the speeds) they last met at or before `t`.
+   *
+   * Math: the relative position k(t) = (a0 − b0) + (va − vb)·t; they meet
+   * whenever k is an integer, i.e. every period 1 / |va − vb|. The motion is
+   * treated as eternal, so the result is always in [0, period) — also for
+   * `t` before the first meeting after 0. Returns −1 when they never meet
+   * (equal speeds, different starts) and 0 for equal speeds and starts.
+   *
+   * ```ts
+   * // flash for 0.2 time units after two runners pass each other
+   * const since = crossingTimeLoop(0.0, 0.3, 0.5, -0.2, ctx.timePhase);
+   * out.setScalar(since >= 0.0 && since < 0.2 ? 1.0 - since / 0.2 : 0.0);
+   * ```
+   */
+  export function crossingTimeLoop(a0: f32, va: f32, b0: f32, vb: f32, t: f32): f32;
+  /**
+   * Number of meetings of the two loop points (see `crossingTimeLoop`) in the
+   * time interval (0, t]: floor(k(t)) − floor(k(0)) for va > vb (mirrored
+   * for va < vb). 0 for `t` ≤ 0 and for equal speeds. Useful to alternate
+   * colors per collision: `crossingCount(…) & 1`.
+   */
+  export function crossingCount(a0: f32, va: f32, b0: f32, vb: f32, t: f32): i32;
+  /**
+   * Attack/decay envelope for trigger params (`msSince` = milliseconds since
+   * the press or release). Phases:
+   * - `msSince` < 0 → 0 (not triggered yet);
+   * - attack: linear 0 → 1 over `attackMs` (≤ 0 = instant jump to 1);
+   * - decay: linear 1 → 0 over `decayMs` (≤ 0 = instant drop to 0 right after
+   *   the attack, so attack ≤ 0 and decay ≤ 0 together give always 0);
+   * - afterwards 0.
+   * Linear segments keep the timing predictable; shape them with `ease`.
+   *
+   * ```ts
+   * out.setScalar(ease(EASE_OUT_QUAD, envelope(msSincePress, 50.0, 800.0)));
+   * ```
+   */
+  export function envelope(msSince: f32, attackMs: f32, decayMs: f32): f32;
+
+  // ── packages/plugin-sdk/assembly/patterns.ts ────────────────────
+  /** Maximum number of points `minDistToPoints` / `nearestPointIndex` consider. */
+  export const MAX_PATTERN_POINTS: i32;
+  /** Distance returned by `minDistToPoints` when there is no point. */
+  export const NO_DISTANCE: f32;
+  /**
+   * 2D Euclidean distance from (x, y) to (px, py) with the x difference
+   * multiplied by `aspect`.
+   *
+   * World coordinates (`Sample.x/y`, `point` params) are already isotropic:
+   * pass `aspect` = 1. Room coordinates (`Sample.u/v`) need `aspect` =
+   * `ctx.worldAspect` (room width / room depth); the result is then in units
+   * of the room depth.
+   *
+   * ```ts
+   * // ring of radius 0.3 around a point param (world space)
+   * const d = dist2(s.x, s.y, this.params.get(0), this.params.get(1), 1.0);
+   * out.setScalar(pulse(d, 0.3, 0.1, 1.0));
+   * // ring around the room center, whatever the rig's proportions
+   * const r = dist2(s.u, s.v, 0.5, 0.5, ctx.worldAspect);
+   * ```
+   */
+  export function dist2(x: f32, y: f32, px: f32, py: f32, aspect: f32): f32;
+  /**
+   * 3D Euclidean distance like `dist2`, plus a z term multiplied by `zScale`
+   * (e.g. room height / room depth; 0 ignores z).
+   */
+  export function dist3(x: f32, y: f32, z: f32, px: f32, py: f32, pz: f32, aspect: f32, zScale: f32): f32;
+  /**
+   * Smallest `dist2` from (x, y) to up to 8 points stored interleaved in
+   * `pts` as [x0, y0, x1, y1, …]. `count` is clamped to 0..8 and to
+   * `pts.length / 2`; with no point it returns `NO_DISTANCE` (1e9).
+   *
+   * AssemblyScript has no closures, rest args or union types, so points are
+   * passed as a flat array. Allocate the array ONCE (field initializer or in
+   * `prepare`) and only overwrite its values; allocating per sample is slow.
+   *
+   * ```ts
+   * class Blobs extends Modifier {
+   *   pts: StaticArray<f32> = new StaticArray<f32>(16);
+   *   prepare(p: Params): void { for (let i = 0; i < 16; i++) this.pts[i] = p.get(i); }
+   *   render(ctx: Frame, s: Sample, out: Out): void {
+   *     const d = minDistToPoints(s.x, s.y, 1.0, this.pts, 8);
+   *     out.setScalar(pulse(d, 0.0, 0.4, 1.0));
+   *   }
+   * }
+   * ```
+   */
+  export function minDistToPoints(x: f32, y: f32, aspect: f32, pts: StaticArray<f32>, count: i32): f32;
+  /**
+   * Index (0..count−1) of the point nearest to (x, y); same arguments as
+   * `minDistToPoints`. Returns −1 when there is no point; ties pick the lower
+   * index. Useful for Voronoi-style cells (color by index).
+   */
+  export function nearestPointIndex(x: f32, y: f32, aspect: f32, pts: StaticArray<f32>, count: i32): i32;
+  /**
+   * Triangle wave 0 → 1 → 0 with period 1: 0 at integer `t`, 1 at `t` + 0.5.
+   * `t` is in unwrapped cycles (e.g. `ctx.timePhase`); negatives work too.
+   */
+  export function pingPong(t: f32): f32;
+  /**
+   * Mirrors `x` at `axis`: the distance |x − axis| from the mirror axis.
+   * Anything driven by `mirror(s.x, 0.5)` is symmetric around the room's
+   * center line (0 on the axis, 0.5 at both walls).
+   */
+  export function mirror(x: f32, axis: f32): f32;
+  /**
+   * A pulse (band) over a distance or position `d`: 1 at `d` == `center`,
+   * falling to 0 where |d − center| ≥ `width` / 2.
+   *
+   * `softness` ∈ [0, 1]: 0 = hard edge (1 inside, 0 outside), 1 = smoothstep
+   * falloff across the whole half-width; in between, the inner part stays at 1
+   * and only the outer `softness` fraction fades. `width` ≤ 0 → always 0.
+   *
+   * ```ts
+   * // a soft ring expanding from the center once per cycle
+   * const d = dist2(s.x, s.y, 0.5, 0.5, aspect);
+   * out.setScalar(pulse(d, fract(ctx.timePhase), 0.15, 0.6));
+   * ```
+   */
+  export function pulse(d: f32, center: f32, width: f32, softness: f32): f32;
+
+  // ── packages/plugin-sdk/assembly/trigger.ts ─────────────────────
+  /**
+   * Reading `trigger` params (ABI 1.3): momentary buttons (hold / release /
+   * double-click). A trigger occupies 4 param slots starting at `slot`
+   * (`pressed, pressedAt, releasedAt, clicks`, times in engine-clock ms); these
+   * helpers turn them into "how long ago" values relative to `ctx.timeMs`, so
+   * `render` stays a pure function of time.
+   *
+   * ```ts
+   * // params: [0] trigger "hit" (4 slots), [4] number "decay"
+   * const held = triggerPressed(this.params, 0);
+   * const sinceRelease = triggerMsSinceRelease(this.params, 0, ctx);
+   * if (triggerClicks(this.params, 0) >= 2) { … double click: flash … }
+   * else if (held) out.setScalar(0.0);                                  // hold = blackout
+   * else out.setScalar(envelope(sinceRelease, 0.0, this.params.get(4))); // release = wave
+   * ```
+   */
+
+  /** Param slots of a trigger. */
+  export const TRIGGER_SLOTS: i32;
+  /** "Never happened": returned by the ms-since helpers before the first press/release (1e9 ms ≈ 11 days). */
+  export const TRIGGER_NEVER: f32;
+  /** True while the trigger is held down. */
+  export function triggerPressed(params: Params, slot: i32): bool;
+  /**
+   * Milliseconds since the last press (also while still held). `TRIGGER_NEVER`
+   * before the first press. Feed it to `envelope(...)` for attack/decay looks.
+   */
+  export function triggerMsSincePress(params: Params, slot: i32, ctx: Frame): f32;
+  /**
+   * Milliseconds since the last release. While the trigger is held this still
+   * refers to the *previous* release, so check `triggerPressed` first.
+   * `TRIGGER_NEVER` before the first release.
+   */
+  export function triggerMsSinceRelease(params: Params, slot: i32, ctx: Frame): f32;
+  /**
+   * Presses in the current click burst: 1 = single click, 2 = double click, …
+   * (a press within the param's `multiClickMs`, default 350 ms, of the
+   * previous release continues the burst). 0 before the first press.
+   */
+  export function triggerClicks(params: Params, slot: i32): i32;
+
   // ── packages/plugin-sdk/assembly/waves.ts ───────────────────────
   /** Shape ids (enum param index order of the built-ins). */
   export const WAVE_SINE: i32;
@@ -313,5 +555,9 @@ declare module '@pixelmapper/plugin-sdk' {
    * `pm_render`), which the toolchain exports from `abi.ts`. Frame, Sample and
    * Out objects are reused views into host buffers: never keep references to
    * them across calls.
+   *
+   * Pattern helpers (`patterns.ts`, `patterns-time.ts`): aspect-correct
+   * distances, nearest point, pulse/mirror/pingPong, easing, crossing times of
+   * moving points and a trigger envelope.
    */
 }

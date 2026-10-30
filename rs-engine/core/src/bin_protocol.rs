@@ -109,14 +109,16 @@ impl<'a> Cursor<'a> {
     }
 }
 
-// ── Layout (0x14, v2) ────────────────────────────
+// ── Layout (0x14, v3) ────────────────────────────
 
 /// Parses fixtures → channels:
-/// `u16 count; { u16 group; u32 idHash; u16 channels; { u16 dmx; u8 type;
-/// f32 x; f32 y; u8 resolution; u16 fine0; u16 fine1; u8 rangeMin;
-/// u8 rangeMax; u16 head } }`.
+/// `f32 metersPerUnit; u16 count; { u16 group; u32 idHash; u16 channels;
+/// { u16 dmx; u8 type; f32 x; f32 y; f32 z; u8 resolution; u16 fine0;
+/// u16 fine1; u8 rangeMin; u8 rangeMax; u16 head } }` (v3 adds
+/// `metersPerUnit` and `z`, ABI v1.3).
 pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
-    fn parse(c: &mut Cursor) -> Option<Vec<LayoutEntry>> {
+    fn parse(c: &mut Cursor) -> Option<(f32, Vec<LayoutEntry>)> {
+        let meters_per_unit = c.f32()?;
         let count = c.u16()? as usize;
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
@@ -130,6 +132,7 @@ pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
                     channel_type_id: c.u8()?,
                     world_x: c.f32()?,
                     world_y: c.f32()?,
+                    world_z: c.f32()?,
                     resolution: c.u8()?,
                     fine_offsets: [c.u16()? as usize, c.u16()? as usize],
                     range_min: c.u8()?,
@@ -139,11 +142,12 @@ pub fn parse_layout_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
             }
             entries.push(LayoutEntry { group_index, id_hash, channels });
         }
-        Some(entries)
+        Some((meters_per_unit, entries))
     }
     match parse(&mut Cursor::new(data)) {
-        Some(entries) => {
+        Some((meters_per_unit, entries)) => {
             let n = entries.len() as i32;
+            engine.meters_per_unit = meters_per_unit;
             engine.sync_layout(entries);
             n
         }

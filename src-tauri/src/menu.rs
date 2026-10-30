@@ -62,11 +62,18 @@ pub fn install(app: &AppHandle) -> tauri::Result<AppMenu> {
     let live = item(app, "view.live", "Live", Some("CmdOrCtrl+2"))?;
     let connections = item(app, "view.connections", "Connections", Some("CmdOrCtrl+3"))?;
 
+    let settings = item(app, "app.settings", "Settings…", Some("CmdOrCtrl+,"))?;
+    let mcp_setup = item(app, "mcp.setup", "MCP Server Setup…", None)?;
+    let mcp_copy_code = item(app, "mcp.copy-claude-code", "Copy Claude Code Command", None)?;
+    let mcp_copy_desktop = item(app, "mcp.copy-claude-desktop", "Copy Claude Desktop Config", None)?;
+
     let recent = SubmenuBuilder::with_id(app, "file.recent", "Open Recent").build()?;
     fill_recent(app, &recent, &[])?;
 
     let app_menu = SubmenuBuilder::new(app, "Pixelmapper")
         .about(None)
+        .separator()
+        .item(&settings)
         .separator()
         .services()
         .separator()
@@ -104,6 +111,13 @@ pub fn install(app: &AppHandle) -> tauri::Result<AppMenu> {
         .separator()
         .fullscreen()
         .build()?;
+    // MCP: pair Claude Code / Claude Desktop with this window (pixelmapper-mcp).
+    let mcp = SubmenuBuilder::new(app, "MCP")
+        .item(&mcp_setup)
+        .separator()
+        .item(&mcp_copy_code)
+        .item(&mcp_copy_desktop)
+        .build()?;
     let window = SubmenuBuilder::new(app, "Window").minimize().maximize().build()?;
 
     let mut builder = tauri::menu::MenuBuilder::new(app);
@@ -111,7 +125,12 @@ pub fn install(app: &AppHandle) -> tauri::Result<AppMenu> {
     if cfg!(target_os = "macos") {
         builder = builder.item(&app_menu);
     }
-    let menu: Menu<Wry> = builder.items(&[&file, &edit, &view, &window]).build()?;
+    // Without an app menu (Windows/Linux) Settings lives in the File menu.
+    if !cfg!(target_os = "macos") {
+        file.append(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
+        file.append(&settings)?;
+    }
+    let menu: Menu<Wry> = builder.items(&[&file, &edit, &view, &mcp, &window]).build()?;
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         // Predefined items (copy, quit, …) are handled natively and never get here

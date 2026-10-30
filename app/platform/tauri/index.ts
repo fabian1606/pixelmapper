@@ -3,13 +3,19 @@
  *
  * Every capability not yet ported keeps its web implementation (or `null`
  * where WKWebView lacks it). Ported so far: the in-process Art-Net bridge
- * (`artnetBridge`). Next: `serial` and `midi` (step 3).
+ * (`artnetBridge`), `http` and `resources` (ADR 0004 D19). Next: `serial`
+ * and `midi` (step 3).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebPlatform } from '../web';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import { createTauriArtNetBridge } from './artnet-bridge';
+import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
+import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
+import { getSharedAgentBridge, type AgentBridge } from '../../utils/agents/agent-bridge';
+import { UNKNOWN_MCP_SETUP, type McpSetupInfo } from '../../utils/agents/mcp-setup';
 
 /**
  * Width reserved for the macOS traffic lights (positioned in tauri.conf.json):
@@ -23,6 +29,8 @@ export function createPlatform(): Platform {
     ...createWebPlatform(),
     kind: 'tauri',
     artnetBridge: createTauriArtNetBridge(),
+    http: createTauriHttp(),
+    resources: createTauriResources(),
   };
 }
 
@@ -63,5 +71,34 @@ function watchFullscreen(callback: (fullscreen: boolean) => void): () => void {
   };
 }
 
+/** Account optional, cloud projects mirrored (ADR 0004 D3, D13–D15). */
+export function getAccountPolicy(): AccountPolicy {
+  return DESKTOP_ACCOUNT_POLICY;
+}
+
 /** Native menu bar and file dialogs. */
 export { createTauriAppShell as getAppShell } from './app-shell';
+
+/** OFL library bundled into the app, works offline (ADR 0004 D18). */
+export { createBundledFixtureLibrary as getFixtureLibrary } from './fixture-library';
+
+/**
+ * MCP bridge to `pixelmapper-mcp` (ADR 0002 B8). Until the in-process MCP
+ * server lands, the webview uses the same WebSocket bridge as the browser.
+ */
+export function getAgentBridge(): AgentBridge {
+  return getSharedAgentBridge('tauri');
+}
+
+/**
+ * Token file, token and CLI path from the native side (`src-tauri/src/mcp.rs`):
+ * the desktop app can pair itself without copy/paste.
+ */
+export async function getMcpSetupInfo(): Promise<McpSetupInfo> {
+  try {
+    return await invoke<McpSetupInfo>('mcp_setup_info');
+  } catch (error) {
+    console.warn('[mcp] setup info unavailable', error);
+    return { ...UNKNOWN_MCP_SETUP };
+  }
+}

@@ -7,7 +7,9 @@
  * delivered per history step in a microtask, so subscribers may run
  * commands. Project loads replace the state without history; the engine
  * store calls `rebaseFixturePatchObservation()` afterwards so a load is not
- * reported as a change.
+ * reported as a change. Collaborators' changes applied by the sync engine
+ * (outside the history) are reported via `reportExternalFixturePatchChanges`
+ * with origin `remote`.
  */
 import type {
   FixtureId,
@@ -119,6 +121,15 @@ function onApplied(origin: HistoryOrigin): void {
     ...(initiator ? { initiator } : {}),
   }));
   queueMicrotask(() => deliver(changes));
+}
+
+/**
+ * Reports patch changes applied outside the history (the sync engine applies
+ * collaborators' changes directly to the state, ADR 0004). Same diff and
+ * delivery as a history step with the given origin.
+ */
+export function reportExternalFixturePatchChanges(origin: HistoryOrigin = 'remote'): void {
+  onApplied(origin);
 }
 
 /**

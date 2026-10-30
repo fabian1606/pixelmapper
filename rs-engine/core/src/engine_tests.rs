@@ -56,11 +56,11 @@ impl W {
 /// (dmx, type, head, resolution, fine0) per channel; fixtures in order.
 fn layout(fixtures: &[Vec<(u16, u8, u16, u8, u16)>]) -> Vec<u8> {
     let mut w = W::default();
-    w.u16(fixtures.len() as u16);
+    w.f32(12.0).u16(fixtures.len() as u16); // v3: meters per world unit
     for (g, chs) in fixtures.iter().enumerate() {
         w.u16(g as u16).u32(1000 + g as u32).u16(chs.len() as u16);
         for &(dmx, ty, head, res, fine0) in chs {
-            w.u16(dmx).u8(ty).f32(g as f32 * 0.25).f32(0.5).u8(res).u16(fine0).u16(0xFFFF).u8(0).u8(255).u16(head);
+            w.u16(dmx).u8(ty).f32(g as f32 * 0.25).f32(0.5).f32(g as f32 * 0.1).u8(res).u16(fine0).u16(0xFFFF).u8(0).u8(255).u16(head);
         }
     }
     w.0
@@ -288,6 +288,27 @@ fn read_signatures_after_render() {
 }
 
 #[test]
+fn read_head_signatures_after_render() {
+    let (mut e, _) = engine(vec![1.0, 1.0, 0.0]);
+    // Fixture 0: two RGB heads (head index in the 3rd tuple field), fixture 1: dimmer + red.
+    e.dispatch_bin(0x14, &layout(&[
+        vec![(0, 0, 0, 1, 0xFFFF), (1, 1, 0, 1, 0xFFFF), (2, 2, 0, 1, 0xFFFF), (3, 0, 1, 1, 0xFFFF), (4, 1, 1, 1, 0xFFFF), (5, 2, 1, 1, 0xFFFF)],
+        vec![(6, DIMMER, 0, 1, 0xFFFF), (7, 0, 0, 1, 0xFFFF)],
+    ]));
+    e.dispatch_bin(0x15, &channels(&[(6, 51.0), (7, 102.0)]));
+    e.render(0.0, 16.0);
+
+    let mut out = Vec::new();
+    // (0, head 1, rgb), (1, head 0, scalar auto = DIMMER), (1, head 0, scalar RED), (1, head 3, rgb = unavailable)
+    e.read_head_signatures(&[0, 1, 1, 255, 1, 0, 0, 255, 1, 0, 0, 0, 1, 3, 1, 255], &mut out);
+    assert_eq!(out.len(), 12);
+    assert!(out[0..3].iter().all(|v| v.is_finite()));
+    assert!((out[3] - 0.2).abs() < 1e-6, "auto scalar reads DIMMER");
+    assert!((out[6] - 0.4).abs() < 1e-6, "typed scalar reads RED");
+    assert!(out[9].is_nan());
+}
+
+#[test]
 fn v2_order_distribution_fills_abi_1_1_slots() {
     let (mut e, state) = engine(vec![1.0]);
     let three = vec![vec![(0, DIMMER, 0, 1, 0xFFFF)], vec![(1, DIMMER, 0, 1, 0xFFFF)], vec![(2, DIMMER, 0, 1, 0xFFFF)]];
@@ -334,4 +355,25 @@ fn v1_packets_map_onto_a_linear_distribution() {
     let st = state.borrow();
     assert!((st.last_samples[1].0[sample::SPATIAL] - 0.25).abs() < 1e-6);
     assert!((st.last_samples[1].0[sample::PHASE] + 0.25).abs() < 1e-6);
+}
+
+#[test]
+fn abi_1_3_fills_z_room_coordinates_and_world_slots() {
+    let (mut e, state) = engine(vec![1.0]);
+    // Fixtures at x = 0, 0.25, 0.5 (one row at y 0.5), z = 0, 0.1, 0.2.
+    let three: Vec<_> = (0..3).map(|i| vec![(i as u16, DIMMER, 0, 1, 0xFFFF)]).collect();
+    e.dispatch_bin(0x14, &layout(&three));
+    e.dispatch_bin(0x16, &modifiers(&[inst(0, 0, 0, 1.0)]));
+    e.render(0.0, 16.0);
+    let st = state.borrow();
+    // One row: the depth borrows the width (0.5) → aspect 1, v centered.
+    assert_eq!(st.last_ctx.0[ctx::WORLD_ASPECT], 1.0);
+    assert!((st.last_ctx.0[ctx::WORLD_DEPTH] - 0.5).abs() < 1e-6);
+    assert_eq!(st.last_ctx.0[ctx::METERS_PER_UNIT], 12.0);
+    assert_eq!(st.last_ctx.0[ctx::RESERVED_19], 0.0);
+    let us: Vec<f32> = st.last_samples.iter().map(|s| s.0[sample::U]).collect();
+    assert_eq!(us, vec![0.0, 0.5, 1.0]);
+    assert!(st.last_samples.iter().all(|s| (s.0[sample::V] - 0.5).abs() < 1e-6));
+    assert!((st.last_samples[2].0[sample::Z] - 0.2).abs() < 1e-6);
+    assert_eq!(st.last_samples[0].0[sample::RESERVED_19], 0.0);
 }

@@ -4,7 +4,7 @@
  */
 import { defaultParams } from '@pixelmapper/plugin-toolchain/params';
 import { clampArgs, getShape } from '@pixelmapper/plugin-toolchain/curve-shapes';
-import { isShapeCurve } from '@pixelmapper/extension-api';
+import { isShapeCurve, paramCanvasHint } from '@pixelmapper/extension-api';
 import type { ContentPluginManifest, ManifestPreset } from '@pixelmapper/plugin-toolchain/types';
 import type { ModifierInstance, SpeedConfig } from './types';
 import { applyDistributionPatch } from './distribution/create';
@@ -37,13 +37,30 @@ export function presetParams(manifest: ContentPluginManifest, preset: ManifestPr
 }
 
 /**
- * The instance with a recipe applied: all params, speed, distribution
- * (fields the recipe does not give are kept) and strength.
+ * Keys of the `point` params with a canvas handle (`ui.canvas: 'point'`)
+ * that the recipe does not set. Like the distribution handle, these are
+ * placements the user dragged on the canvas: a recipe changes the look, not
+ * where the points are, unless it names them explicitly.
+ */
+function keptCanvasPoints(manifest: ContentPluginManifest, preset: ManifestPreset): string[] {
+  return manifest.params
+    .filter(p => p.type === 'point' && paramCanvasHint(p.ui)?.canvas === 'point' && !(p.key in preset.params))
+    .map(p => p.key);
+}
+
+/**
+ * The instance with a recipe applied: all params (except canvas points the
+ * recipe does not name, see `keptCanvasPoints`), speed, distribution (fields
+ * the recipe does not give are kept) and strength.
  */
 export function applyPreset(m: ModifierInstance, manifest: ContentPluginManifest, preset: ManifestPreset): ModifierInstance {
+  const params = presetParams(manifest, preset);
+  for (const key of keptCanvasPoints(manifest, preset)) {
+    if (m.params[key] !== undefined) params[key] = JSON.parse(JSON.stringify(m.params[key])) as ModifierInstance['params'][string];
+  }
   return {
     ...m,
-    params: presetParams(manifest, preset),
+    params,
     speed: { ...m.speed, ...(preset.speed ?? {}) } as SpeedConfig,
     distribution: applyDistributionPatch(m.distribution, preset.distribution),
     strength: preset.strength ?? m.strength,
@@ -98,9 +115,17 @@ function setupScore(m: ModifierInstance, p: ManifestPreset): number {
  */
 export function activePreset(m: ModifierInstance, manifest: ContentPluginManifest): ManifestPreset | null {
   const full = normalizedParams(manifest, m.params);
-  const matches = cardPresets(manifest).filter(p => jsonEqual(normalizedParams(manifest, presetParams(manifest, p)), full));
+  // Canvas points a recipe does not name never make the instance "Custom".
+  const matches = cardPresets(manifest).filter((p) => {
+    const want = normalizedParams(manifest, presetParams(manifest, p));
+    for (const key of keptCanvasPoints(manifest, p)) want[key] = full[key]!;
+    return jsonEqual(want, full);
+  });
   if (matches.length <= 1) return matches[0] ?? null;
-  return matches.reduce((best, p) => (setupScore(m, p) > setupScore(m, best) ? p : best));
+  // A recipe that names the points matches more specifically than one that ignores them.
+  const fewestKept = Math.min(...matches.map(p => keptCanvasPoints(manifest, p).length));
+  const specific = matches.filter(p => keptCanvasPoints(manifest, p).length === fewestKept);
+  return specific.reduce((best, p) => (setupScore(m, p) > setupScore(m, best) ? p : best));
 }
 
 /** Context of the recipe choice on add. */

@@ -4,8 +4,8 @@
  * descriptions) as a new custom fixture of the user, so it shows up in the
  * custom fixture editor and can be edited like any other.
  *
- * Goes through the custom fixture accessor only (plan D11): the storage
- * moves to the user account later without touching this file.
+ * Goes through the custom fixture accessor only (plan D11), which stores
+ * it in the user's synced `custom-fixture` records (ADR 0004 D21).
  */
 import type { FixtureDefinitionKey, Json } from '@pixelmapper/extension-api';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
@@ -16,11 +16,11 @@ import { addCustomFixture, customFixtureKey } from '~/utils/fixture-definitions/
  * Validates `definition` (OFL fixture JSON, same lenient rules as the
  * editor's import), checks that every mode builds, and adds it as a new
  * custom fixture (never replacing an existing one; a taken name gets a
- * numeric suffix). Returns its definition key `'custom/<id>'`.
+ * numeric suffix). Resolves its definition key `'custom/<id>'`.
  *
- * @throws Error with a readable message when the definition is invalid.
+ * @throws (rejects) Error with a readable message when the definition is invalid.
  */
-export function saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey {
+export async function saveCustomFixtureDefinition(definition: Json): Promise<FixtureDefinitionKey> {
   const parsed = parseOflFixtureJson(JSON.stringify(definition ?? null));
   if (!parsed.ok) throw new Error(`saveCustomFixtureDefinition: ${parsed.error}`);
   // Guard: every mode must build, otherwise adding the fixture fails later.
@@ -32,5 +32,5 @@ export function saveCustomFixtureDefinition(definition: Json): FixtureDefinition
       throw new Error(`saveCustomFixtureDefinition: mode "${mode.name}" cannot be built (${(err as Error).message ?? err})`);
     }
   });
-  return customFixtureKey(addCustomFixture(parsed.fixture));
+  return customFixtureKey(await addCustomFixture(parsed.fixture));
 }

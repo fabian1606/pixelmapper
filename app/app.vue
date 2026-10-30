@@ -10,6 +10,8 @@ import ToastStack from '~/components/ToastStack.vue';
 import ConfirmDialogHost from '~/components/ConfirmDialogHost.vue';
 import WindowDragStrip from '~/components/WindowDragStrip.vue';
 import { useAppMenu } from '~/composables/app-menu/use-app-menu';
+import SettingsDialog from '~/components/settings/SettingsDialog.vue';
+import { settingsOpen } from '~/composables/use-settings-dialog';
 
 const engineStore = useEngineStore();
 
@@ -55,6 +57,8 @@ onBeforeUnmount(() => {
     <ToastStack />
     <!-- Core confirm dialog (requestConfirm, e.g. fixture change guards) -->
     <ConfirmDialogHost />
+    <!-- One Settings dialog for the header button, the desktop menu and ⌘, -->
+    <SettingsDialog v-model:open="settingsOpen" />
     <WindowDragStrip />
   </div>
 </template>

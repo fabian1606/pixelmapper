@@ -19,6 +19,7 @@ import { fixtureBaseColor, hueSat } from '~/utils/engine/fixture-color';
 import { previewRevision, renderTraces } from '~/utils/plugins/preview-pool';
 import type { SelectionShape } from '~/utils/engine/distribution/selection-shape';
 import { distributionForParams } from '~/utils/engine/option-distribution';
+import { setEffectTrigger } from '~/composables/live-ops/effect-trigger';
 import type { ParamValue } from '@pixelmapper/extension-api';
 import ModifierCardHeader from './ModifierCardHeader.vue';
 import ModifierCardMore from './ModifierCardMore.vue';
@@ -136,6 +137,7 @@ const beats = computed(() => (props.modifier.speed.mode === 'beat' ? props.modif
           :ticks="resolved.ticks" :beats="beats" :playhead="position" :time-phase="modifier.speed.mode === 'infinite' ? null : timePhase"
           :editor-context="{ rankCount: resolved.ticks, baseHue, traces }"
           @update:model-value="onParams" @scrub-end="emit('dragEnd', 'Update Modifier Params')"
+          @trigger="(k: string, p: boolean) => setEffectTrigger(modifier.id, k, p)"
         >
           <template #after-primary>
             <Replaceable

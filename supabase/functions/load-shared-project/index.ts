@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { LOADABLE_SNAPSHOT_FILTER } from '../_shared/snapshots.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,7 +81,11 @@ Deno.serve(async (req: Request) => {
     .from('project_snapshots')
     .select('snapshot')
     .eq('project_id', project.id)
+    // Same choice as load-project: no safety snapshots; among snapshots at
+    // the same sequence (restore, retried upload) the newest wins.
+    .or(LOADABLE_SNAPSHOT_FILTER)
     .order('sequence_number', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 

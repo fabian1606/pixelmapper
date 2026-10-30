@@ -12,6 +12,9 @@ import AiEnrichmentReview from './AiEnrichmentReview.vue';
 
 import { useCustomFixtureForm } from '~/composables/engine/useCustomFixtureForm';
 import { useAiFixtureEnrichment, type EnrichmentProposal } from '~/composables/engine/useAiFixtureEnrichment';
+import {
+  AI_UNREACHABLE_HINT, reportAiFailure, reportAiSuccess, useAiReachability,
+} from '~/composables/use-ai-reachability';
 
 import { buildOflFixture, initFromOflFixture } from '~/utils/engine/custom-fixture-omapping';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
@@ -57,7 +60,8 @@ const isExtracting = ref(false);
 const extractStatus = ref('Analyzing PDF...');
 const extractError = ref('');
 
-const runtimeConfig = useRuntimeConfig();
+// AI endpoint reachability (ADR 0004 D20) gates the AI import/verify actions.
+const { aiReachable, aiBaseUrl, probeAi } = useAiReachability();
 
 // AI Enrichment State — compares the current draft against a manual PDF and
 // proposes corrections to shutter/dimmer/wheel-slot behavior for review.
@@ -124,6 +128,8 @@ function currentDraftAsOfl(): OflFixture {
 }
 
 function startEnrichment() {
+  // Guard: the button is disabled too, but keep the action itself safe.
+  if (aiReachable.value === false) return;
   enrichFileInput.value?.click();
 }
 
@@ -145,14 +151,21 @@ async function handleAIPdfUpload(file: File) {
   extractError.value = '';
 
   try {
+    // Refuse early when the AI endpoint is not reachable (cached probe).
+    if (!(await probeAi())) {
+      extractError.value = AI_UNREACHABLE_HINT;
+      return;
+    }
+
     const formData = new FormData();
     formData.append('manualPdf', file);
 
-    const baseUrl = runtimeConfig.public.aiBackendUrl || 'http://localhost:4000';
-    const response = await fetch(`${baseUrl}/extract-fixture-pdf`, {
+    const response = await fetch(`${aiBaseUrl}/extract-fixture-pdf`, {
       method: 'POST',
       body: formData,
     });
+    // The request reached the backend; keep the reachability cache fresh.
+    reportAiSuccess();
 
     if (!response.body) throw new Error('No response body from server.');
     
@@ -194,6 +207,8 @@ async function handleAIPdfUpload(file: File) {
     }
   } catch (err: any) {
     console.error('AI Extraction Error:', err);
+    // Network-level failures trigger a re-probe so the UI gates correctly.
+    reportAiFailure(err);
     extractError.value = err.message || 'An error occurred during extraction.';
   } finally {
     isExtracting.value = false;
@@ -202,6 +217,8 @@ async function handleAIPdfUpload(file: File) {
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
+    // Refresh AI reachability (cached) so AI actions are gated correctly.
+    void probeAi();
     aiUploadPending.value = false;
     extractError.value = '';
     importError.value = '';
@@ -293,8 +310,14 @@ function handleSave() {
         v-if="props.fixtureToEdit && !aiUploadPending && !isExtracting"
         class="flex justify-end px-4 pt-2"
       >
+        <!-- Disabled with a hint while the AI backend is unreachable (ADR 0004 D20). -->
+        <span v-if="aiReachable === false" class="text-xs text-muted-foreground mr-2">
+          {{ AI_UNREACHABLE_HINT }}
+        </span>
         <button
-          class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4"
+          class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 disabled:opacity-50 disabled:pointer-events-none"
+          :disabled="aiReachable === false"
+          :title="aiReachable === false ? AI_UNREACHABLE_HINT : undefined"
           @click="startEnrichment"
         >
           Verify with AI (compare against manual)
@@ -323,7 +346,15 @@ function handleSave() {
                 Upload a user manual (DMX charts, specifications) to automatically generate the fixture.
               </p>
               
-              <label class="w-full relative group cursor-pointer">
+              <!-- Hint while the AI backend is unreachable (ADR 0004 D20). -->
+              <p v-if="aiReachable === false" class="text-sm text-muted-foreground">
+                {{ AI_UNREACHABLE_HINT }}
+              </p>
+              <label
+                class="w-full relative group cursor-pointer"
+                :class="{ 'opacity-50 pointer-events-none': aiReachable === false }"
+                :title="aiReachable === false ? AI_UNREACHABLE_HINT : undefined"
+              >
                 <div class="absolute inset-0 bg-primary/5 rounded-xl border-2 border-dashed border-primary/20 group-hover:border-primary/50 group-hover:bg-primary/10 transition-colors"></div>
                 <div class="px-6 py-12 flex flex-col items-center justify-center gap-3 relative z-10">
                   <div class="size-12 rounded-full bg-background shadow-sm border flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
@@ -336,7 +367,8 @@ function handleSave() {
                 <input 
                   type="file" 
                   accept="application/pdf"
-                  class="hidden" 
+                  class="hidden"
+                  :disabled="aiReachable === false"
                   @change="(e) => {
                     const target = e.target as HTMLInputElement;
                     if (target.files?.length) handleAIPdfUpload(target.files[0] as File);

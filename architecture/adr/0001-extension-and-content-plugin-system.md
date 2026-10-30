@@ -581,7 +581,7 @@ The module MUST be compiled by `@pixelmapper/plugin-toolchain` with **imported m
 Exports:
 
 ```ts
-export function pm_abi_version(): i32;                       // returns 1
+export function pm_abi_version(): i32;                       // v1.0–1.2: 1; v1.3: 103 (major × 100 + minor)
 export function pm_alloc(bytes: i32): usize;                 // host uses for ctx/params/sample/out buffers
 export function pm_prepare(params: usize, paramCount: i32): void;   // f32[paramCount]; called on load and on param change
 export function pm_render(ctx: usize, samples: usize, count: i32, out: usize): void;
@@ -593,6 +593,7 @@ Layouts (all little-endian f32, 4-byte aligned):
 FrameCtx  (16 × f32):  timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi, reserved[9]
 Sample    (16 × f32):  x, y, phase, groupIndex, groupCount, headIndex, headCount, seed,
                        base0, base1, base2, reserved[5]
+                       (v1.1/v1.2 fill the reserved slots; v1.3 grows both to 20 × f32, see amendment A21)
 out       (count × arity × f32)
 ```
 
@@ -752,7 +753,7 @@ Deviations found while implementing the plan. Each names the plan task.
   - *Plugin store early:* `app/utils/plugins/plugin-store.ts` exists from P3.11 with a synchronous `getManifest` (built-in manifests are embedded in the generated `builtin-index.ts`, so the modifiers packet and UI never wait for a fetch) and memory → `/plugins/<hex>.wasm` loading. P4.2 extends it with IndexedDB, Supabase and `publish`.
   - *Plugin table:* the modifiers packet references plugins by `u16` index; the index → hash table travels next to the packet in the worker message (`modifiers-sync`) instead of inside it. `TYPE_MODIFIERS_BIN` reuses id 0x16 and layout v2 replaces v1 in place; the ESP32 firmware still parses the old formats, so on-device rendering stays broken until P6.2 (no firmware changes in this migration, §9).
   - *Dropped modifier types:* Displacement and Speed Curve (meta-modifiers acting on other modifiers' phase/position) have no plugin equivalent in ABI v1 and are removed with their editors; `pm.curve` remains as a param input.
-  - *Spatial handles:* the canvas handles edit the host fields (origin, angle, fanning) unless the instance has a `point` param keyed `origin`; then they edit `params.origin` / `params.angle` / `params.scale` (sequencer). Live collaboration sends these as `paramChanges` in `modifier.update`.
+  - *Spatial handles:* the canvas handles edit the host distribution fields (origin, end). Plugin-owned spatial params get their own handles through canvas hints (`ui: { canvas: 'point' | 'radius' }`, plan M4; this replaced the former special case for a `point` param keyed `origin`). Live collaboration sends param drags as `paramChanges` in `modifier.update`.
   - *Stack mode:* the stack blend selector writes `blendMode` on every bipolar instance in one history step; new instances take the current stack mode. Instances store `strength` 0–1; the UI shows percent.
   - *Previews:* the preview pool keeps one main-thread instance per modifier id (LRU, 32) so stateful plugins do not share state between cards; a trapping plugin is only marked broken for previews.
   - *Signature live values:* `signature` targets read the fixture's first matching head (`scalar` = DIMMER channel, else the first channel) after the last render; the worker attaches tuples only while subscribed, tagged with a request generation so tuples of an outdated request are dropped.
@@ -807,3 +808,9 @@ Deviations found while implementing the plan. Each names the plan task.
     - `pm.pickCount` is removed (Noise has no pick mode); `pm.noiseHistory` binds `min`, `max` and an optional `coherence` (the event fields `rate`/`length`/`dir` are gone with Noise 3.1's Frequency).
     - Legacy redirects keep only the params the current built-in still has.
   - *Category stacking (plan M10.2):* the category-wide "Stacking" blend select is removed; each card sets its own blend mode under "More". New instances still default to `add` (bipolar/scale) or `override` (absolute).
+- **A21 (Agent/MCP plan M4, WP-C) — ABI 1.3: room coordinates, height, trigger params, pattern helpers.** Breaking (no users; no shim): `pm_abi_version()` returns `103` and the host loads only that version, so every plugin binary must be rebuilt (built-ins were). `PLUGIN_API_VERSION` = `1.3.0`.
+    - Frame grows to 20 f32: `[16] worldAspect` (room width / room depth), `[17] worldDepth` (room depth in world units), `[18] metersPerUnit`, `[19]` reserved (0). Sample grows to 20 f32: `[16] z` (height, world units like x/y), `[17] u`, `[18] v` (0–1 across the room), `[19]` reserved (0).
+    - The *room* is the bounding box of all channel positions of the layout (rs-engine `room.rs`); a degenerate axis borrows the other axis' extent and centers its coordinate at 0.5; a single fixture gets a unit box. `dist = √((du·worldAspect)² + dv²)` is isotropic in room-depth units; heights join as `dz / worldDepth`.
+    - Layout packet `0x14` v3: `f32 metersPerUnit` header and `f32 z` per channel (`fixture.positionZ`).
+    - New param type `trigger` (4 slots: `pressed, pressedAt, releasedAt, clicks`; timestamps in engine-clock ms, −1e9 = never; optional `multiClickMs`, default 350). The host stamps press/release edges into the instance's params without an undo step and syncs them through the `modifier.update` live op; live `button` widgets drive it through `effect-param` mappings. Storing absolute timestamps (instead of per-frame "ms since") keeps `render` pure without re-encoding params every frame; the SDK readers (`triggerMsSincePress` …) subtract them from `ctx.timeMs`.
+    - SDK pattern helpers (`patterns.ts`, `patterns-time.ts`, `trigger.ts`): distances with aspect, nearest of ≤ 8 points, `pingPong`, `mirror`, `pulse`, `ease`, crossing times/counts of moving points, `envelope`, trigger readers.

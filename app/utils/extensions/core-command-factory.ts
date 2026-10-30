@@ -29,7 +29,7 @@ import { SetFixtureKindConfigCommand } from '~/components/engine/commands/set-fi
 import { SetExtensionDataCommand, readExtensionData } from '~/components/engine/commands/set-extension-data-command';
 import { AddFixturesCommand } from '~/components/engine/commands/add-fixture-command';
 import { UpdateDmxCommand } from '~/components/engine/commands/update-dmx-command';
-import { createBatchCommand } from '~/components/engine/commands/batch-command';
+import { createBatchCommand } from '~/components/engine/commands/composite-command';
 import { createKindFixture, getKind } from '~/utils/kinds/kind-host';
 import { assignIdsAndAddresses } from '~/utils/engine/addressing';
 import { collectFixtures, findFixtureInTree } from '~/utils/engine/scene-tree';

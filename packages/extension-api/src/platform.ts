@@ -2,8 +2,8 @@
  * Platform contract (ADR 0003).
  *
  * Transport-shaped access to I/O that differs between the web app and the
- * native (Tauri) app: serial ports, MIDI ports and the in-process Art-Net
- * bridge. Protocol logic stays in the callers;
+ * native (Tauri) app: serial ports, MIDI ports, the in-process Art-Net
+ * bridge, native HTTP and bundled resources. Protocol logic stays in the callers;
  * implementations only move bytes.
  *
  * A capability the current platform cannot provide is `null`. Callers must
@@ -131,6 +131,32 @@ export interface ArtNetBridgeApi {
   connect(handlers: ArtNetBridgeHandlers): Promise<ArtNetBridgeSession>;
 }
 
+// ── HTTP ────────────────────────────────────────────
+
+/**
+ * Native HTTP GET without browser CORS restrictions (API 1.7).
+ * Native implementations MAY restrict the allowed hosts (the desktop app
+ * allows the GitHub release hosts only).
+ */
+export interface HttpApi {
+  /** Downloads a URL (redirects followed); rejects on network errors and non-2xx answers. */
+  getBytes(url: string): Promise<Uint8Array>;
+}
+
+// ── Bundled resources ───────────────────────────────
+
+/**
+ * Read-only files shipped inside the app bundle, e.g. the
+ * firmware matching the app release (ADR 0004 D19). Added in API 1.7.
+ */
+export interface ResourcesApi {
+  /**
+   * Reads a bundled file by its relative path (e.g. `firmware/firmware.bin`).
+   * Resolves `null` when the file was not bundled.
+   */
+  read(path: string): Promise<Uint8Array | null>;
+}
+
 // ── Platform ────────────────────────────────────────
 
 /** Platform-dependent capabilities. `null` = not available here. */
@@ -140,6 +166,10 @@ export interface Platform {
   readonly midi: MidiApi | null;
   /** In-process Art-Net bridge (desktop, API 1.5); `null` = use `pmnet-bridge serve` over WebSocket. */
   readonly artnetBridge: ArtNetBridgeApi | null;
+  /** Native HTTP (desktop). Optional: hosts before API 1.7 omit it — treat absent as `null`. */
+  readonly http?: HttpApi | null;
+  /** Files bundled with the app (desktop). Optional: absent = `null` (API 1.7). */
+  readonly resources?: ResourcesApi | null;
 }
 
 /** Returns the platform of the running host (connectors, drivers, components). */

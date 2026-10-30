@@ -33,4 +33,11 @@ export interface AppShell {
   saveProjectFile(bytes: Uint8Array, fileName: string): Promise<boolean>;
   /** Lets the user pick a `.pmproject`; `null` if cancelled. */
   openProjectFile(): Promise<PickedFile | null>;
+  /**
+   * Runs `handler` before the desktop window closes / the app quits and waits
+   * for it (bounded by a timeout) so pending local writes can finish.
+   * Web: no-op (the browser offers no such hook beyond `beforeunload`).
+   * Returns an unsubscribe.
+   */
+  onBeforeQuit(handler: () => Promise<void>): () => void;
 }

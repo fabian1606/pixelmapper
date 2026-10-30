@@ -3,18 +3,28 @@
  * class plus registration (ADR §6.6). Re-exported by `index.ts`.
  */
 
-// ── Buffer layouts (ABI v1, v1.1) ───────────────
+// ── Buffer layouts (ABI v1 … v1.3) ──────────────
 
-/** f32 slots per frame context. */
-export const CTX_FIELDS: i32 = 16;
-/** f32 slots per sample. */
-export const SAMPLE_FIELDS: i32 = 16;
+/** f32 slots per frame context (v1.3: 20; slot 19 reserved). */
+export const CTX_FIELDS: i32 = 20;
+/** f32 slots per sample (v1.3: 20; slot 19 reserved). */
+export const SAMPLE_FIELDS: i32 = 20;
 
 /**
  * Per-render-call context (one modifier instance, one frame).
  * Layout (f32): timeMs, beatTime, bpm, phaseSpeed, arity, seedLo, seedHi,
  * strength, timePhase, rankCount, distGroupCount (v1.1), spread and the
- * Spatial 2D handle origin x/y, end x/y (v1.2).
+ * Spatial 2D handle origin x/y, end x/y (v1.2), worldAspect, worldDepth,
+ * metersPerUnit, reserved (v1.3).
+ *
+ * Coordinates (v1.3): `Sample.x/y/z` are *world* coordinates — one unit on
+ * every axis (a fraction of the stage width), so distances computed from
+ * them are already isotropic. The *room* is the bounding box of all fixtures
+ * in the layout; `Sample.u/v` place a sample inside it (0–1 per axis, each
+ * axis normalized separately). Because u and v are stretched independently,
+ * multiply u differences by `worldAspect` before measuring distances:
+ * `dist = sqrt((du * worldAspect)² + dv²)` is in units of the room depth.
+ * Heights join that space as `dz / worldDepth`.
  */
 export class Frame {
   /** Address of the context buffer (set by the SDK). */
@@ -54,6 +64,20 @@ export class Frame {
   @inline get handleEndX(): f32 { return load<f32>(this.ptr, 56); }
   /** v1.2: Spatial 2D handle end y. */
   @inline get handleEndY(): f32 { return load<f32>(this.ptr, 60); }
+  /**
+   * v1.3: room width / room depth (bounding box of all fixtures). Multiply a
+   * `Sample.u` difference by this to compare it with a `Sample.v` difference
+   * (`du * worldAspect` and `dv` are both in room-depth units). 1 for square
+   * rooms, single rows and single fixtures.
+   */
+  @inline get worldAspect(): f32 { return load<f32>(this.ptr, 64); }
+  /**
+   * v1.3: room depth (y extent of the bounding box) in world units (> 0).
+   * `dz / worldDepth` is comparable to a `Sample.v` difference.
+   */
+  @inline get worldDepth(): f32 { return load<f32>(this.ptr, 68); }
+  /** v1.3: meters per world unit (e.g. 12: x = 0.5 is 6 m); 0 when unknown. */
+  @inline get metersPerUnit(): f32 { return load<f32>(this.ptr, 72); }
 }
 
 /** v1.2 `Frame.spread`: every fixture the same (spatial 0). */
@@ -69,15 +93,16 @@ export const SPREAD_WITHIN: i32 = 3;
  * One sample = one target (a channel for `scalar`, a head for `rgb`/`panTilt`).
  * Layout (f32): x, y, phase, groupIndex, groupCount, headIndex, headCount,
  * seed, base0, base1, base2, channelSeedLo, channelSeedHi, spatial, rank,
- * distGroup (v1.1).
+ * distGroup (v1.1), z, u, v, reserved (v1.3). See `Frame` for the coordinate
+ * spaces.
  */
 export class Sample {
   /** Address of the sample (set by the SDK). */
   ptr: usize = 0;
 
-  /** Normalized world x (0–1). */
+  /** Normalized world x (0–1 across the stage; same unit as y and z). */
   @inline get x(): f32 { return load<f32>(this.ptr, 0); }
-  /** Normalized world y (0–1). */
+  /** Normalized world y (0–1 across the stage; same unit as x and z). */
   @inline get y(): f32 { return load<f32>(this.ptr, 4); }
   /** Phase in cycles (1.0 = one full cycle): time phase − spatial (legacy; prefer `spatial`). */
   @inline get phase(): f32 { return load<f32>(this.ptr, 8); }
@@ -107,6 +132,16 @@ export class Sample {
   @inline get rank(): i32 { return <i32>load<f32>(this.ptr, 56); }
   /** v1.1: distribution group of the sample (−1 without grouping). */
   @inline get distGroup(): i32 { return <i32>load<f32>(this.ptr, 60); }
+  /**
+   * v1.3: height above the floor in world units (same unit as x/y, so
+   * `dist3(s.x, s.y, s.z, …, 1, 1)` is isotropic). 0 for fixtures on the floor
+   * or when heights were never set.
+   */
+  @inline get z(): f32 { return load<f32>(this.ptr, 64); }
+  /** v1.3: room x — 0 at the leftmost fixture, 1 at the rightmost (0.5 in a single column). */
+  @inline get u(): f32 { return load<f32>(this.ptr, 68); }
+  /** v1.3: room y — 0 at the frontmost (top) fixture, 1 at the backmost (0.5 in a single row). */
+  @inline get v(): f32 { return load<f32>(this.ptr, 72); }
 }
 
 /** Output of one sample: `arity` values. */
@@ -129,7 +164,8 @@ export class Out {
 /**
  * The params block: the f32 slots of all params in manifest order (ADR §6.2).
  * `number`/`int`/`angle` = 1 slot, `bool` = 1 (0/1), `enum` = 1 (index),
- * `color` = 3, `point` = 2, `curve` = 128 (LUT).
+ * `color` = 3, `point` = 2, `curve` = 128 (LUT), `gradient` = 33, `steps` = 18,
+ * `trigger` = 4 (read with `triggerPressed` / `triggerMsSincePress` / …).
  */
 export class Params {
   /** Address of the params block (set by the SDK). */

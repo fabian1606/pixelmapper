@@ -1,5 +1,5 @@
 /**
- * App commands: the actions of the menu bar (File, View). The native menu
+ * App commands: the actions of the menu bar (App, File, View, MCP). The native menu
  * (`src-tauri/src/menu.rs`) emits these ids; in the browser the subset in
  * `WEB_SHORTCUTS` is reachable by keyboard. Ids MUST match the Rust side.
  */
@@ -21,6 +21,10 @@ export interface AppCommandContext {
   /** File → Export: save the open project as `.pmproject`. */
   exportFile(): Promise<void>;
   clearRecent(): void;
+  /** App → Settings… / MCP → MCP Server Setup…: opens the Settings dialog. */
+  openSettings(section: 'mcp' | null): void;
+  /** MCP → Copy …: copies a setup snippet for the given client. */
+  copyMcpSetup(client: 'claude-code' | 'claude-desktop'): Promise<void>;
 }
 
 /** Commands that need an open project, keyed by id. */
@@ -48,6 +52,10 @@ export function runAppCommand(id: string, ctx: AppCommandContext): boolean {
     case 'file.export': if (projectId) void ctx.exportFile(); return true;
     case 'view.projects': ctx.navigate('/'); return true;
     case 'recent.clear': ctx.clearRecent(); return true;
+    case 'app.settings': ctx.openSettings(null); return true;
+    case 'mcp.setup': ctx.openSettings('mcp'); return true;
+    case 'mcp.copy-claude-code': void ctx.copyMcpSetup('claude-code'); return true;
+    case 'mcp.copy-claude-desktop': void ctx.copyMcpSetup('claude-desktop'); return true;
     default: return false;
   }
 }
@@ -60,4 +68,5 @@ export function runAppCommand(id: string, ctx: AppCommandContext): boolean {
 export const WEB_SHORTCUTS = [
   { key: 'o', ctrl: true, label: 'Open…', command: 'file.open' },
   { key: 'e', ctrl: true, shift: true, label: 'Export…', command: 'file.export' },
+  { key: ',', ctrl: true, label: 'Settings…', command: 'app.settings' },
 ] as const;

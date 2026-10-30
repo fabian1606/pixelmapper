@@ -1,88 +1,59 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { authenticate } from '../_shared/auth.ts';
+import { statusForDbError } from '../_shared/db-errors.ts';
+import { errorResponse, json, preflight, readJsonObject } from '../_shared/http.ts';
+import { parsePushChanges } from '../_shared/validate.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// ── push-change ──────────────────────────────────────────────────────────────
+// Appends changes to the project's change log (ADR 0004 §3.2 step 4.5).
+//
+// Request:  { projectId, changes: [{ changeId, commandType, payload }] }
+//           or the single form { projectId, changeId?, commandType, payload }
+// Response: { sequenceNumbers, sequenceNumber, changeIds }  (request order)
+//
+// Writes go through the `push_changes` RPC (migration 009):
+// * idempotent: a change id the caller already pushed returns its stored
+//   sequence number (retry after a lost response) instead of failing;
+// * a change id stored by ANOTHER user is never acknowledged
+//   (`sequenceNumbers[i] = null` → the client keeps it in its outbox);
+// * per-project advisory lock: sequence numbers of one project become
+//   visible in ascending order, so `pull-changes` (> cursor) cannot skip a
+//   change that committed late.
+// 401 without token, 400 for invalid input, 403 unless owner/editor.
+
+/** One row returned by `push_changes`. */
+interface AckRow {
+  idx: number;
+  ack_change_id: string;
+  ack_sequence: number | null;
+}
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
+  const early = preflight(req);
+  if (early) return early;
 
-  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: corsHeaders });
+  const caller = await authenticate(req);
+  if (caller instanceof Response) return caller;
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return new Response('Unauthorized', { status: 401 });
+  const body = await readJsonObject(req);
+  if (!body) return errorResponse('invalid JSON body', 400);
+  const parsed = parsePushChanges(body);
+  if (!parsed.ok) return errorResponse(parsed.error, 400);
+  const { projectId, changes } = parsed.value;
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
+  if (changes.length === 0) return json({ sequenceNumbers: [], changeIds: [] });
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return new Response('Unauthorized', { status: 401 });
+  const { data, error } = await caller.supabase.rpc('push_changes', {
+    p_project_id: projectId,
+    p_changes: changes,
+  });
+  if (error) return errorResponse(error.message, statusForDbError(error));
 
-  const body = await req.json();
-  const projectId: string | undefined = body.projectId;
-  if (!projectId) {
-    return new Response(JSON.stringify({ error: 'projectId required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  }
+  // The RPC returns one row per request element; match by `idx` to be safe.
+  const byIdx = new Map<number, AckRow>();
+  for (const row of (data ?? []) as AckRow[]) byIdx.set(row.idx, row);
+  const sequenceNumbers = changes.map((_, i) => byIdx.get(i)?.ack_sequence ?? null);
+  const changeIds = changes.map(c => c.changeId);
 
-  // Accept both single-form { commandType, payload, changeId? } and array-form { changes: [...] }.
-  // `changeId` is the client-generated idempotency key — same id on retry returns the existing row.
-  type Change = { commandType: string; payload: unknown; changeId?: string };
-  let changes: Change[];
-  if (Array.isArray(body.changes)) {
-    changes = body.changes;
-  } else if (body.commandType && body.payload !== undefined) {
-    changes = [{ commandType: body.commandType, payload: body.payload, changeId: body.changeId }];
-  } else {
-    return new Response(
-      JSON.stringify({ error: 'either { commandType, payload } or { changes: [...] } required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
-  }
-  if (changes.length === 0) {
-    return new Response(JSON.stringify({ sequenceNumbers: [], changeIds: [] }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Assign a server-side change_id if the client didn't supply one (back-compat).
-  const rows = changes.map(c => ({
-    project_id: projectId,
-    user_id: user.id,
-    command_type: c.commandType,
-    payload: c.payload,
-    change_id: c.changeId ?? crypto.randomUUID(),
-  }));
-
-  // Idempotent upsert: on (project_id, change_id) conflict, the existing row is preserved
-  // (sequence_number is `generated always as identity` so it cannot be changed). The
-  // returned data reflects the existing row, so retries see the same sequence_number.
-  const { data, error } = await supabase
-    .from('project_changes')
-    .upsert(rows, { onConflict: 'project_id,change_id', ignoreDuplicates: false })
-    .select('sequence_number, change_id');
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  }
-
-  // Re-order response to match request order, since upsert may return rows in a different order.
-  // We match by change_id (which is unique per request).
-  const byChangeId = new Map<string, { sequence_number: number; change_id: string }>();
-  for (const r of (data ?? [])) byChangeId.set(r.change_id as string, r as any);
-  const ordered = rows.map(r => byChangeId.get(r.change_id) ?? null);
-
-  const sequenceNumbers = ordered.map(r => r?.sequence_number as number | undefined);
-  const changeIds       = ordered.map(r => r?.change_id as string | undefined);
-
-  return new Response(
-    JSON.stringify({ sequenceNumbers, sequenceNumber: sequenceNumbers[0], changeIds }),
-    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-  );
+  return json({ sequenceNumbers, sequenceNumber: sequenceNumbers[0], changeIds });
 });

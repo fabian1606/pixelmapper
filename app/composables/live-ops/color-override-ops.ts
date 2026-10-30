@@ -1,4 +1,5 @@
 import { registerLiveOp, useLiveBusStore } from '~/stores/live-bus-store';
+import { colorOverrideKey } from './coalesce-keys';
 import { useEngineStore } from '~/stores/engine-store';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { applyRGBOverride } from '~/components/engine/composables/preset-apply';
@@ -101,6 +102,8 @@ registerLiveOp<ColorOverridePayload>('color.override', {
   throttle: 'raf',
   merge: 'replace',
   persistent: true,
+  // Per preset — overrides on two presets within one window both persist (ADR 0004 D8).
+  coalesceKey: colorOverrideKey,
   apply: ({ key, rgb }) => {
     const engineStore = useEngineStore();
     const preset = engineStore.savedPresets.find((p: any) => p.id === key);

@@ -69,6 +69,34 @@ describe('recipes', () => {
   });
 });
 
+describe('canvas points (ui.canvas: point)', () => {
+  const pts = {
+    params: [
+      { key: 'w', type: 'number', min: 0, max: 1, default: 0.5, label: 'W' },
+      { key: 'a', type: 'point', default: { x: 0.2, y: 0.2 }, label: 'A', ui: { canvas: 'point' } },
+      { key: 'b', type: 'point', default: { x: 0.8, y: 0.8 }, label: 'B' },
+    ],
+    presets: [
+      { id: 'thin', label: 'Thin', params: { w: 0.1 } },
+      { id: 'centered', label: 'Centered', params: { w: 0.1, a: { x: 0.5, y: 0.5 } } },
+    ],
+  } as unknown as ContentPluginManifest;
+  const dragged = () => ({ ...inst(), params: { w: 0.7, a: { x: 0.1, y: 0.9 }, b: { x: 0.3, y: 0.3 } } }) as unknown as ModifierInstance;
+
+  it('a recipe keeps dragged canvas points it does not name; other params reset', () => {
+    const m = applyPreset(dragged(), pts, pts.presets![0]!);
+    expect(m.params).toEqual({ w: 0.1, a: { x: 0.1, y: 0.9 }, b: { x: 0.8, y: 0.8 } });
+    expect(activePreset(m, pts)?.id).toBe('thin');
+  });
+
+  it('a recipe that names a canvas point sets it', () => {
+    const m = applyPreset(dragged(), pts, pts.presets![1]!);
+    expect(m.params.a).toEqual({ x: 0.5, y: 0.5 });
+    expect(activePreset(m, pts)?.id).toBe('centered');
+    expect(activePreset({ ...m, params: { ...m.params, a: { x: 0.4, y: 0.5 } } }, pts)?.id).toBe('thin');
+  });
+});
+
 describe('every modifier has recipes', () => {
   it('a manifest without presets gets one Default recipe (the schema defaults), active on a fresh instance', () => {
     const bare = { params: manifest.params } as unknown as ContentPluginManifest;

@@ -96,19 +96,20 @@ export function findFixtureDefinitionByRdm(manufacturerId: number, modelId: numb
  *
  * Set `rdm.modelId`, `pixelmapper.rdmManufacturerId` and the modes'
  * `rdmPersonalityIndex` so `findFixtureDefinitionByRdm` finds the definition
- * next time. Returns the key `'custom/<id>'` for `commands.addFixtures`.
+ * next time. Resolves the key `'custom/<id>'` for `commands.addFixtures`
+ * (async since API 1.7: custom fixtures are synced user records).
  *
- * @throws Error when the definition is invalid.
+ * @throws (rejects) Error when the definition is invalid.
  *
  * @example
- * const key = saveCustomFixtureDefinition({
+ * const key = await saveCustomFixtureDefinition({
  *   name: 'Acme Bar (RDM)', categories: ['Pixel Bar'],
  *   rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
  *   availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
  *   modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],
  * });
  */
-export function saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey {
+export function saveCustomFixtureDefinition(definition: Json): Promise<FixtureDefinitionKey> {
   return getHostApi().saveCustomFixtureDefinition(definition);
 }
 

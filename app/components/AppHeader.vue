@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
-import { House, Sparkles, Cable, Zap, Download } from 'lucide-vue-next';
+import { House, Sparkles, Cable, Zap, Download, Settings } from 'lucide-vue-next';
 import { useEngineStore } from '~/stores/engine-store';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
+import SyncStatusIndicator from '~/components/sync/SyncStatusIndicator.vue';
 import PmToolbar from '~/components/primitives/PmToolbar.vue';
+import { openSettings } from '~/composables/use-settings-dialog';
 import { useAsTitleBar, useWindowChrome } from '~/composables/use-window-chrome';
 import { hasNativeMenu, runMenuCommand } from '~/composables/app-menu/use-app-menu';
 
@@ -18,6 +20,7 @@ const { projectLoading } = storeToRefs(engineStore);
 const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
 
 const beatOverlayOpen = ref(false);
+/** App settings dialog (External agents, …). */
 const beatActive = ref(false);
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -101,6 +104,9 @@ const tabs = computed(() => projectId.value ? [
     </nav>
 
     <div class="ml-auto flex items-center gap-4" data-tauri-drag-region>
+      <!-- Sync status of the open project (ADR 0004 D17) -->
+      <SyncStatusIndicator v-if="projectId" :project-id="projectId" />
+
       <div class="relative">
         <button
           @click="beatOverlayOpen = !beatOverlayOpen"
@@ -117,6 +123,15 @@ const tabs = computed(() => projectId.value ? [
 
       <!-- Collaborators -->
       <CollaboratorsPanel v-if="projectId" :project-id="projectId" />
+
+      <!-- App settings (device-level preferences) -->
+      <button
+        class="flex items-center justify-center w-8 h-8 rounded-md transition-colors text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+        title="Settings"
+        @click="openSettings()"
+      >
+        <Settings :size="16" />
+      </button>
     </div>
     <div
       v-if="projectLoading"

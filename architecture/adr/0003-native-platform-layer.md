@@ -74,6 +74,7 @@ interface Platform {
 - A capability that the current platform cannot provide MUST be `null`. Callers MUST check for `null` and either fall back (Art-Net → bridge) or show a clear message ("Needs Chrome/Edge or the desktop app").
 - The contract is **transport-shaped** (bytes in, bytes out, port lists), never feature-shaped. Protocol logic (ArtDMX encoding, ESP line protocol, APC note mapping) stays in TypeScript, shared by both platforms.
 - A raw `udp` capability existed from step 2 until API 1.6.0 and was removed: its only user, the old manual-target Art-Net connector, was replaced by the single `artnet` connector, which sends everything through `artnetBridge` (desktop) or `pmnet-bridge serve` (browser). A future sACN connector would add it back or go through the bridge.
+- `http` (native GET without CORS) and `resources` (files bundled with the app) came from the offline work (ADR 0004 D19) as platform API 1.3.0 on its branch; merged with the Art-Net branch (1.4–1.6) they are part of API 1.7.0 (optional fields, absent = `null`). API 1.7.0 also made `saveCustomFixtureDefinition` async (custom fixtures are synced user records, ADR 0004 D21).
 - Further capabilities (`touch`, `engine`) are added to this interface when they are implemented (D6, D7). Adding a capability is an additive API change (minor version bump).
 
 ### D3 — Build-time selection for host code, runtime access for extensions

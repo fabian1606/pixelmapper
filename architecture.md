@@ -7,7 +7,8 @@ Pixelmapper is a DMX lighting controller with a Nuxt 4 / Vue 3 / TypeScript fron
 - **Rendering runs in the browser** — the Rust engine (`rs-engine-core`) and the 2D canvas renderer (`rs-engine-canvas`) run as WASM inside a Web Worker (`app/utils/engine/engine-worker.ts`). Modifiers are sandboxed content plugins (AssemblyScript → WASM) executed by the worker's plugin bridge.
 - **Everything specific is an extension** — controls (color picker, pan/tilt), fixture kinds (NeoPixel strip), outputs (ArtNet, ESP nodes) and hardware controllers (AKAI APC Mini mk2) are extensions. The core runs with zero extensions (`PM_NO_EXTENSIONS=1`, checked in CI).
 - **Outputs are rendered frames** — connectors receive rendered universes/pixels; ESP32 devices are pure output devices. (This replaces the former principle "browser and ESP32 run the same engine".)
-- **Web first, native where it pays off** ([ADR 0003](architecture/adr/0003-native-platform-layer.md)) — the web app stays a first-class target. Platform-dependent I/O (UDP, serial, MIDI; later raw touch and the engine) goes through the `Platform` contract: host code imports `#platform` (resolved to `app/platform/web` or `app/platform/tauri` at build time), extensions call `getPlatform()`. Missing capabilities are `null` and degrade visibly (Art-Net falls back to the local bridge). Host-only shell features (window chrome, the native menu bar with File/View commands and Open Recent, project file dialogs) come from `getWindowChrome()` / `getAppShell()` of the same `#platform` entry; the commands live in `app/composables/app-menu`.
+- **Web first, native where it pays off** ([ADR 0003](architecture/adr/0003-native-platform-layer.md)) — the web app stays a first-class target. Platform-dependent I/O (serial, MIDI, the built-in Art-Net bridge, native HTTP and bundled resources; later raw touch and the engine) goes through the `Platform` contract: host code imports `#platform` (resolved to `app/platform/web` or `app/platform/tauri` at build time), extensions call `getPlatform()`. Missing capabilities are `null` and degrade visibly (Art-Net falls back to `pmnet-bridge serve` over WebSocket). Host-only shell features (window chrome, the native menu bar with File/View commands and Open Recent, project file dialogs) come from `getWindowChrome()` / `getAppShell()` of the same `#platform` entry; the commands live in `app/composables/app-menu`.
+- **Offline-first projects** ([ADR 0004](architecture/adr/0004-offline-first.md)) — a local `ProjectStore` (IndexedDB, `app/utils/persistence/project-store`) is the primary store; Supabase is a sync and collaboration layer. Every persisted change (history commands and persistent live-ops) goes through a local outbox with a client `changeId`; the sync engine (`app/utils/sync`) pulls remote changes, rebases pending local changes with a field-level 3-way merge (`app/utils/sync/merge`) and pushes them. The desktop app works fully offline (account optional, bundled OFL library and firmware); the web app keeps mandatory login and only guarantees that a dropped connection loses no data. Retries go through `app/utils/sync/connectivity.ts` (backoff, reconnect).
 - **Planned targets:** a **Tauri 2** desktop app (native Rust engine, `wasmtime` modifier runtime, direct ArtNet; migration steps in ADR 0003 §4) and a backend render engine for generated visuals.
 
 ## Architectural Principles
@@ -43,7 +44,10 @@ pixelmapper/
 │   ├── plugins/                   # 00 extension host · 01 content plugins · 02 connectors · 03 bundle loader
 │   ├── stores/                    # Pinia (engine-store = render loop & project state, connections, controllers, live)
 │   └── utils/
+│       ├── agents/                # AgentHost, MCP bridge client, guide topics (agent layer)
 │       ├── extensions/            # registry, activation, slots, scopes, replacements, live hub, requires, loader + cache
+│       ├── observability/         # event log, observe-lite (preview/live capture, features, report)
+│       ├── operations/            # operations registry, read API, apply, core catalog
 │       ├── engine/                # Fixture model, worker, serialization, modifier instances
 │       ├── kinds/                 # Fixture-kind host: build application, world transforms, canvas primitives
 │       ├── plugins/               # Plugin store (memory → IndexedDB → built-ins → Supabase), worker bridge, preview pool, create/import
@@ -56,21 +60,24 @@ pixelmapper/
 │   ├── color-picker/ pan-tilt/ connector-artnet/   # distribution set (layered into every build)
 │   ├── neopixel-strip/ connector-esp/ controller-akai-apc-mini-mk2/   # catalog (installable bundles)
 │   └── _debug-slots/              # dev-only slot labels (PM_DEBUG_SLOTS=1)
-├── plugins/                       # Built-in content plugins (AssemblyScript): color-adjust, noise, sequencer, waveform
+├── plugins/                       # Built-in content plugins (AssemblyScript): color-adjust, noise, sequencer, waveform, corner-wave, mirror-runner
 ├── packages/
+│   ├── agent-kit/                 # @pixelmapper/agent-kit — operation/finding/expectation/observe types, AgentHost, MCP tools
 │   ├── extension-api/             # @pixelmapper/extension-api — the only core surface extensions may import
 │   ├── extension-build/           # Vite lib preset → ES bundle + extension.json
+│   ├── mcp-bridge/                # pixelmapper-mcp: stdio MCP server ⇄ app over ws://127.0.0.1:7778 (ADR 0002 D16)
 │   ├── plugin-sdk/                # @pixelmapper/plugin-sdk (AssemblyScript)
 │   └── plugin-toolchain/          # compile → instrument → validate → hash (CLI + in-browser)
 ├── public/extensions/             # Built catalog bundles + catalog.json
 ├── docs/
-│   ├── ai/                        # Generated API reference (d.ts bundles, index.json) — `bun run docs:ai`
+│   ├── ai/                        # Generated API reference (d.ts bundles, index.json) — `bun run docs:ai`; skills/ (effect-authoring)
 │   └── controller-designs/        # Design sources of controller layouts
+├── evals/effects/                 # Effect acceptance scenarios (manual MCP runs)
 ├── rs-engine/
-│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
-│   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
-├── src-tauri/                     # Desktop app (Tauri 2): native commands (built-in Art-Net bridge artnet.rs, menu, files), config, icons — ADR 0003
-├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs, start-pmnet-bridge
+│   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime (wasm-pack → core/pkg)
+│   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only, wasm-pack → canvas/pkg)
+├── src-tauri/                     # Desktop app (Tauri 2): native commands (built-in Art-Net bridge artnet.rs, net.rs HTTP/resources, menu, files, mcp), config, icons — ADR 0003
+├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs, build-wasm, start-pmnet-bridge
 ├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)
 └── pio*/                          # ESP32 firmware (out of scope; must implement frames 0x21/0x22)
 ```
@@ -86,23 +93,33 @@ pixelmapper/
 - `bun run lint` — ESLint import rules for `extensions/**`; `bun run check:extensions` — manifest/import/replacement checks for first-party extensions.
 - `PM_DEBUG_SLOTS=1 bun run dev:nuxt` — includes the dev-only `_debug-slots` extension that labels every extension slot.
 - `cargo test` in `rs-engine/` — Rust unit tests (core; canvas is wasm-only and built via `wasm-pack`).
+- `bun run build:wasm` — builds `rs-engine-core`/`rs-engine-canvas` into `rs-engine/{core,canvas}/pkg` (aliased imports, not `node_modules`; `bun install` leaves them alone). `ensure:wasm` rebuilds only missing/stale outputs and runs before `dev`, `dev:nuxt`/`dev:tauri`, `build` and `generate`. The worker checks the engine's ABI version on start and reports a missing or mismatched build as a toast ([engine.md](architecture/engine.md#build-location-and-handshake)).
+- `bun run check:optimize-deps` — boots `nuxt dev` (web and desktop flavour) with a fresh Vite cache, crawls the client module graph and fails when a dependency is only discovered at runtime (add it to `vite.optimizeDeps.include`; otherwise WKWebView gets "504 Outdated Optimize Dep" or two copies of Vue). Web and desktop dev servers use separate Vite caches (`node_modules/.cache/vite-web` / `vite-tauri`).
 - `bun run check:zero-extensions` — builds without any extension (`PM_NO_EXTENSIONS=1`) and runs the zero-extension smoke test.
 - `bun run build:plugins` / `bun run build:extensions` — compile built-in content plugins / build catalog extension bundles into `public/extensions/`.
-- `bun run docs:ai` — regenerate `docs/ai/` (extension-API and plugin-SDK declarations, `index.json`). The dev page `/dev/slots` lists every slot rendered in the session.
+- `bun run mcp` — `pixelmapper-mcp` stdio MCP server for Claude Code / Claude Desktop (`bun run mcp token` prints the pairing token); see [packages/mcp-bridge/README.md](packages/mcp-bridge/README.md).
+- `bun run docs:ai` — regenerate `docs/ai/` (extension-API and plugin-SDK declarations, `index.json` incl. the operation catalog). The dev page `/dev/slots` lists every slot rendered in the session.
 
 ## Documentation Map
 
 - **Decisions:** [ADR 0001 — Extension & Content-Plugin System](architecture/adr/0001-extension-and-content-plugin-system.md)
 - **Work plan:** [Plugin-system implementation plan](architecture/plugin-system-implementation-plan.md)
 - **Decisions:** [ADR 0002 — Operations, Observation & Agent Layer](architecture/adr/0002-agent-and-operations-layer.md)
-- **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the plugin plan)
+- **Work plan:** [Agent-system implementation plan](architecture/agent-system-implementation-plan.md) (interleaved with the ADR 0003 Tauri steps; MCP-first slice per ADR 0002 B12)
+- **Agent layer (MCP)** — overview in the [section below](#agent-layer-mcp):
+  - [Operations](architecture/operations.md) — registry, read API, transactions (`apply`), operation kinds incl. `action`, core catalog
+  - [Observability (observe-lite)](architecture/observability.md) — `observe(request)`: headless-core preview of one modifier, live capture, features (range/color/temporal/spatial/radial/mirror), text report, expectation JSON paths
+  - **Contract:** [MCP bridge WebSocket protocol](architecture/mcp-bridge-protocol.md) — `pixelmapper-mcp` ⇄ app (hello/semver, token + Origin, dynamic tool list, `call`/`result`, relay mode)
+  - [Effect-authoring skill](docs/ai/skills/effect-authoring/SKILL.md) — AI workflow for spatial effects with controls (patterns, UI rules, verification, reference plugins)
+  - [Effect acceptance scenarios](evals/effects/README.md) — target effects 0–6 with prompts, expected controls and `observe` expectations (manual runs)
 - **Decisions:** [ADR 0003 — Platform Layer: Web First, Native Where It Pays Off](architecture/adr/0003-native-platform-layer.md) (Tauri 2, `#platform`, `getPlatform()`, migration steps)
+- **Decisions:** [ADR 0004 — Offline-First Projects](architecture/adr/0004-offline-first.md) (local-first store, outbox, rebase + 3-way merge, optional account on desktop); package notes in [architecture/offline/](architecture/offline/) (`wp-p0`, `wp-merge`, `wp-store`, `wp-server`, `wp-tauri`, `wp-records`, `wp-sync`, `wp-account`)
 - [Engine & Render Loop](architecture/engine.md) *(describes the pre-migration effect pipeline until plan P3.17)*
 - [Binary Protocol](architecture/binary-protocol.md)
 - **Work plan:** [Modifier UX implementation plan](architecture/modifier-ux-implementation-plan.md) — curve component, shared Distribution, recipes, Wave/Noise/Pattern/Color Shift redesign
 - **Work plan:** [Art-Net 4 & RDM implementation plan](architecture/artnet-rdm-implementation-plan.md) — Pixelmapper Node, RDM discovery/patch of XBAR500 tubes (v1 = M6: device list, add, addressing, sync, status badge — [connectors.md › RDM devices](architecture/connectors.md#rdm-devices-plan-m6-v1)); M7: node configuration in the node card, tube firmware updates (batch per node, per tube), RDM section in the fixture inspector — [connectors.md › Node configuration](architecture/connectors.md#node-configuration-plan-m73-d8), [› Tube firmware update](architecture/connectors.md#tube-firmware-update-plan-m74-d17), [› Inspector RDM section](architecture/connectors.md#inspector-rdm-section-plan-m72-d18); bridge `pmnet-bridge serve` in the browser and built into the desktop app (same Rust core, Tauri IPC instead of WebSocket), started on demand only; bridge contract (1.0.0 candidate, authoritative in `pixelmapper-hardware` `protocol/bridge-ws.md`, mirrored here and in `extensions/connector-artnet/bridge/`): [bridge WebSocket protocol](architecture/artnet-bridge-ws-protocol.md)
 - [Modifier design principles](architecture/guides/modifier-design-principles.md) — what every modifier must satisfy (for people and automated agents)
-- [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.1, distribution, previews
+- [Engine & Render Loop](architecture/engine.md) — worker, signatures, ModifierRuntime, ABI v1.3 (room coordinates, z, trigger params), distribution, previews
 - [Binary Protocol](architecture/binary-protocol.md) — layout v2, `TYPE_MODIFIERS_BIN` v2 (distribution block)
 - [Authoring extensions](architecture/guides/authoring-extensions.md) — task-oriented: controls, panel actions, kinds, connectors, controllers, widgets, commands (AI-ready)
 - [Authoring content plugins](architecture/guides/authoring-content-plugins.md) — SDK, manifest, params, validation, custom panels (AI-ready)
@@ -112,7 +129,7 @@ pixelmapper/
 - [UI & History](architecture/ui-history.md)
 - [Live Collaboration](architecture/live-collaboration.md)
 - [Extensions — how the extension host works](architecture/extensions.md) (registry, scopes, slots, `pm.*` replaceables, live values, requires, distribution)
-- **Generated reference:** [docs/ai/](docs/ai/README.md) — bundled API declarations and `index.json` of contracts, scopes and slots
+- **Generated reference:** [docs/ai/](docs/ai/README.md) — bundled API declarations and `index.json` of contracts, scopes, slots and the operation catalog
 
 ## Glossary
 
@@ -134,6 +151,7 @@ pixelmapper/
 | **Profile / Motion** | Curves of Wave and Color Shift: what is lit over the distance / where it is during one pass. |
 | **Curve shape** | Programmatic curve generator with args (each arg is a handle in `pm.curve`); extensions can contribute more. |
 | **Composite editor** | One `pm.*` input bound to several params (e.g. the hue strip binds hue shift + range). |
+| **Canvas hint** | `ui: { canvas: 'point' \| 'radius' }` on a param: a draggable dot (point param) or ring (number param around an anchor point) on the 2D canvas for the selected modifier, in any distribution mode (`canvas-hints/ModifierCanvasHandles.vue`; guide: authoring-content-plugins.md "Canvas handles"). |
 | **Endless strip** | Animated preview of a modifier on "infinitely many pixels", independent of the fixture count. |
 
 
@@ -226,7 +244,42 @@ An Express + LangGraph backend uses LLMs to parse fixture manuals and extract ph
 - **LangGraph workflow:** a state machine (`ExtractionState`) runs the text through isolated nodes (`extractGeneralInfo.ts`, `extractChannels.ts`, `extractModes.ts`).
 - **Typed output:** simple nodes use `withStructuredOutput`; nested arrays (channels, modes) use tool calling bound to Zod schemas (e.g. `OflChannelSchema`), which splits the context and keeps outputs strictly typed.
 - **SSE streaming:** status messages stream to `CustomFixtureEditorDialog.vue` before the final assembled `OflFixture` is returned.
-- The AI agent loop for generating plugins is out of scope of ADR 0001; it builds on the self-describing surfaces in `docs/ai/`.
+- The AI agent loop for generating plugins is out of scope of ADR 0001; it is the [agent layer](#agent-layer-mcp) (ADR 0002), built on the self-describing surfaces in `docs/ai/`. The in-app `fixture-definition` agent is planned to replace this service (ADR 0002 B9, plan A7.2).
+
+## Agent layer (MCP)
+
+External agents (Claude Code, Claude Desktop) read, change and verify the running app through MCP. Spec: [ADR 0002](architecture/adr/0002-agent-and-operations-layer.md) with amendment **B12** (MCP-first: the tool layer ships first; the in-app agent runtime A5 — providers, LangGraph, copilot UI — is deferred). Progress: [agent-system implementation plan](architecture/agent-system-implementation-plan.md).
+
+```
+Claude Code / Desktop ──stdio MCP──► pixelmapper-mcp (packages/mcp-bridge)
+                                        │ ws://127.0.0.1:7778, token + Origin check
+                                        ▼
+                     App tab / Tauri webview: bridge client ("External agents")
+                                        ▼
+                     Tools (packages/agent-kit/src/tools, host-agnostic)
+                                        ▼
+        AgentHost (app/utils/agents/host.ts) ─► operations ─► apply → CompositeCommand → history
+                                             └► observe (preview | live) ─► text report + JSON
+```
+
+- **Operations** ([operations.md](architecture/operations.md)): `app/utils/operations` — registry, `CoreReadApi`, transaction runner `applyOperations` (batch → one `CompositeCommand` undo step, `dryRun`, `verify` rollback, semantic diff, expectations) and the core catalog (`project`, `fixtures`, `nodes`, `groups`, `selection`, `channels`, `extensionData`, `modifiers`, `plugins`, `live`). Kinds: `query`, `mutation`, and `action` (`plugins.build` / `plugins.publish`: outside history, idempotent because content-addressed). Types and Zod schemas live in `@pixelmapper/agent-kit` (`packages/agent-kit`). `app/plugins/07a.operations.client.ts` registers the core catalog at boot. `modifiers.add` / `live.addPage` take an optional caller-chosen `id`, so an effect and its live page fit into one `apply` batch (one undo step). Mutations are logged with their actor in the event log (`app/utils/observability/event-log.ts`). Agent ergonomics (WP-L): `modifiers.add/update` `color` option, `dark-base` warnings (also in `observe`), left→right default direction with `spread.direction`, modifier views in the input vocabulary everywhere, compact apply results (summaries; `detail: "full"` for views) — see [operations.md](architecture/operations.md).
+- **Observe-lite** ([observability.md](architecture/observability.md)): `observe(request)` in `app/utils/observability`. `preview` renders one modifier instance per call through the real `rs-engine-core` WASM in a private headless engine; `live` captures real output via `liveHub` signature targets (DMX fallback); `sim` is not implemented. Features range/color/temporal/spatial/radial/mirror, compact text report, expectation JSON paths.
+- **Tools** (`packages/agent-kit/src/tools/`, `createTools()`): `inspect`, `operations`, `describe`, `apply`, `observe` (`delegate` / `ask_user` return with A5), plus the opt-in `screenshot` (`createTools({ screenshot: true })`, enabled by the app bridge; see *Screenshot* below). Host-agnostic `ToolDefinition`s (JSON input schema from Zod, `run(host, input, { actor, signal })`) that return MCP-friendly `text` + `json` content. Domain failures (validation findings, failed expectations) come back as `isError` results. `describe` also serves guide topics (`guide:plugin-authoring`, `guide:modifier-design`, `guide:plugin-sdk`, `guide:<skill>/<file>`). Ergonomics (WP-J): every surface shows the apply envelope `{ label, ops: [ { op, input } ] }` (apply description with a full example, an `operations` footer, `describe` returns an input summary plus a ready-to-copy `exampleCall` built from the op's first example); `apply` folds input keys placed next to `op` into `input` (`envelope.ts`, see [operations](architecture/operations.md)); `parseInput` accepts key aliases (`describe`: `op`/`selector`/`operation`/`name` → `id`; `inspect`: `id`/`ids`/`query`/`target` → `selector`, top-level `{ op, input }`) and names unknown and expected keys on failure. `app/utils/agents/usability-eval.test.ts` (env-gated) dumps the tool surface of a seeded 22-fixture stage and replays recorded agent sessions for usability evals.
+- **Screenshot** (ADR 0002 §5 opt-in tool; `app/utils/agents/screenshot/`): returns a PNG (MCP image content) plus a caption. `view: "layout"` (default) is a schematic top view built from the project model, so it works on any page and headless: `stage-model.ts` (footprints via `kindToWorld`, heads via `headSamples` like the layout packet, colors via fixture photometry on the latest engine frame, neutral grey without one) → `layout-scene.ts` / `viewport.ts` (pure, deterministic draw commands: world box with 0–1 ticks, room box, footprints, head dots, head 0 ringed + arrow to the last head, labels `name`/`id`/`none`, `highlight`, `region` fit/world/rect, `size` ≤ 2048) → `canvas-backend.ts` (OffscreenCanvas → PNG). `view: "canvas"` captures the 2D editor: `FixtureCanvas.vue` registers a capture (`editor-canvas.ts`) that asks the engine worker (`canvas.capture`) to draw and `convertToBlob` in one task, then composites it on the editor background; HTML overlays (modifier handles, guides) are not included, and without a mounted editor the tool answers with an error recommending `layout`. A 3D capture is not implemented (later: render the three.js viewport with `preserveDrawingBuffer` or an offscreen pass). Rotation semantics in text: `orientation` in `project.digest` / `fixtures.find` / `fixtures.get`, see [operations.md](architecture/operations.md#coordinates).
+- **App host** (`app/utils/agents/host.ts`, `createAppAgentHost()`): `AgentHost` on the operations registry, `applyOperations` (actor per call, undo label `AI: <label>`), the read API, the event log and `observe` from `~/utils/observability` (loaded lazily; a clear "observe is not available" error if it cannot load). Guides are bundled lazily as `?raw` (`guides.ts`).
+- **CLI** `packages/mcp-bridge` (`pixelmapper-mcp`, Bun; `bun run mcp`): a thin stdio MCP server. It serves the tool list the **app announces** (dynamic `tools/list` plus `notifications/tools/list_changed`) and forwards `tools/call`; tools execute in the app. Contract: [mcp-bridge-protocol.md](architecture/mcp-bridge-protocol.md); usage: [packages/mcp-bridge/README.md](packages/mcp-bridge/README.md).
+  - **Transport:** the app (tab or Tauri webview — one transport for both until the in-process Rust server, plan A8.3) connects as a WebSocket client to `ws://127.0.0.1:7778`. Auth uses an Origin allow-list plus a pairing token from `~/.pixelmapper/mcp-token`. Only the latest app connection is active. The hub uses `node:http` + `ws` rather than `Bun.serve`, so the same code runs under Bun and under Vitest (Node).
+  - **Several MCP clients:** the first CLI process is the **hub**; later ones connect to it as **relays**, and a relay takes over the port when the hub exits. Every call carries the MCP client name, so the app attributes it as actor `agent:mcp:<client>`.
+  - **Offline behaviour:** with no app connected, `tools/list` returns the last-known list (`~/.pixelmapper/mcp-tools.json`) or built-in placeholders, plus the local `pixelmapper_status` tool. Calls fail with a pairing hint.
+  - **Prompts:** `docs/ai/skills/**/prompts/*.md` (YAML frontmatter `name`, `description`, `arguments`; `{{arg}}` placeholders) are served as MCP prompts.
+- **Bridge client** (`app/utils/agents/bridge-client.ts` + `bridge-calls.ts`, `bridge-status.ts`): Vue-free WebSocket client following the protocol doc (hello with token + app info + tools, `call` → tool run as actor `agent:mcp:<client>`, `cancel` aborts, ping/pong, backoff 1/2/5/10 s, no reconnect after 4001/4002/4003). `agent-bridge.ts` is the per-window singleton (settings in `localStorage` `pixelmapper.agentBridge`, lazy host/tools). It is exposed as `getAgentBridge()` through `#platform` (web and Tauri share it; ADR 0002 B8/B12) and started by `app/plugins/08.agent-bridge.client.ts` when enabled.
+  - **Settings → MCP Server** (`SettingsDialog.vue`, mounted once in `app.vue`, opened by the header gear, ⌘, and the desktop menu; `ExternalAgentsSection.vue`): on/off per device, pairing-token field, connection status (connected / waiting for pixelmapper-mcp / token rejected / another window connected / update needed), copyable Claude Code / Claude Desktop snippets. Desktop: `#platform` `getMcpSetupInfo()` → Tauri command `mcp_setup_info` (`src-tauri/src/mcp.rs`) reads the token file and the CLI path of the checkout, so pairing is one click (**Use it**).
+  - **Desktop menu bar:** *Pixelmapper → Settings…* (⌘,) and a top-level **MCP** menu (*MCP Server Setup…*, *Copy Claude Code Command*, *Copy Claude Desktop Config*); ids `app.settings`, `mcp.*` in `app-commands.ts`.
+  - **Tauri:** `csp` is `null` in `tauri.conf.json`, so the webview may open `ws://127.0.0.1:7778` without a capability. If a CSP is introduced, add `connect-src ws://127.0.0.1:7778`.
+- **Effect capabilities** (for agents and people alike, see [engine.md](architecture/engine.md) and [authoring content plugins](architecture/guides/authoring-content-plugins.md)): ABI 1.3 (`worldAspect`, `worldDepth`, `Sample.z`, room `u`/`v`), the `trigger` param type (hold / release / multi-click from live buttons), canvas hints (`ui: { canvas: 'point' | 'radius' }`, see Glossary) and SDK pattern helpers (`plugin-sdk/assembly/{patterns,patterns-time,trigger}.ts`).
+- **Effect-authoring skill** ([SKILL.md](docs/ai/skills/effect-authoring/SKILL.md), plan M5): `docs/ai/skills/effect-authoring/` is the single source of the workflow an AI follows to build a spatial effect *with its controls* (`SKILL.md`, `patterns.md`, `ui-rules.md`, `verification.md`, `examples/` → the built-ins `plugins/corner-wave` and `plugins/mirror-runner`). Served three ways: Claude Code skill `pixelmapper-effects` (`.claude/skills/pixelmapper-effects` is a directory symlink to it), MCP prompts `create-effect` / `add-controls`, and `describe` topics `guide:effect-authoring/<file>`.
+- **Acceptance:** [evals/effects/](evals/effects/README.md) holds one scenario per target effect (prompt, expected controls, `observe` expectations), run manually from Claude Code / Claude Desktop (the automated eval runner, plan A6, is deferred). `app/utils/agents/effects-acceptance.test.ts` runs the tool loop headlessly in Vitest; `app/utils/agents/mcp-e2e.test.ts` drives a real MCP client over stdio against the CLI and the app host.
+- **Generated catalog:** `bun run docs:ai` writes the operation catalog (id, kind, namespace, one-line summary) into `docs/ai/index.json`.
 
 ## Direct DMX Control (Universe Inspector)
 

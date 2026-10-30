@@ -20,6 +20,7 @@ import { modifierKey } from '~/utils/engine/modifiers';
 import { getManifest, loadWasm } from './plugin-store';
 import { mapOutput } from './host-mapping';
 import { frameCounts, groupOf, hasGrouping, QUANTIZED_RANKS, sampleDistribution, spreadKind } from '~/utils/engine/distribution/sample';
+import type { DistributionSampleInput } from '~/utils/engine/distribution/sample';
 
 // ── Pool state ─────────────────────────────────────
 
@@ -68,22 +69,26 @@ function load(id: string, hash: string): void {
     .finally(() => pending.delete(id));
 }
 
-/** The ready instance of a modifier, or null (starts loading). */
-function instanceFor(m: ModifierInstance): PluginInstance | null {
+/**
+ * The ready instance of a modifier, or null (starts loading). `key` names
+ * the pool slot (default: the modifier id); callers previewing a modifier
+ * outside its card pass their own key so stateful plugins do not share state.
+ */
+function instanceFor(m: ModifierInstance, key: string = m.id): PluginInstance | null {
   if (broken.has(m.plugin)) return null;
-  const entry = instances.get(m.id);
+  const entry = instances.get(key);
   if (entry && entry.hash === m.plugin) {
     // Refresh LRU position.
-    instances.delete(m.id);
-    instances.set(m.id, entry);
+    instances.delete(key);
+    instances.set(key, entry);
     return entry.instance;
   }
-  if (entry) instances.delete(m.id);
-  load(m.id, m.plugin);
+  if (entry) instances.delete(key);
+  load(key, m.plugin);
   return null;
 }
 
-/** Drops a modifier's preview instance (card removed). */
+/** Drops a preview instance by modifier id or instance key (card removed). */
 export function releasePreview(id: string): void {
   instances.delete(id);
 }
@@ -144,6 +149,13 @@ export interface PreviewOptions {
   timePhase?: number;
   /** Return the plugin's raw output (no host mapping). */
   raw?: boolean;
+  /**
+   * Pool slot of the plugin instance (default: the modifier id). The sample
+   * seeds still derive from the modifier id, so results match the engine.
+   */
+  instanceKey?: string;
+  /** Ticks for curve params (default `rankCount`). */
+  ticks?: number;
 }
 
 /** Position and distribution values of one preview sample. */
@@ -153,6 +165,14 @@ interface Placed {
   spatial: number;
   rank: number;
   group: number;
+  /** Index of the sample's fixture among the targeted ones and their count (default i / count). */
+  fixture?: number;
+  fixtureCount?: number;
+  /** Head index / count within the fixture (default 0 / 1). */
+  head?: number;
+  headCount?: number;
+  /** Working values under the modifier for this sample (default `opts.base`). */
+  base?: readonly number[];
 }
 
 /** One rendered preview: `count × arity` values after host blending. */
@@ -171,9 +191,10 @@ function render(
   count: number,
   place: (i: number) => Placed,
   opts: PreviewOptions,
+  maxHeads = 1,
 ): PreviewResult | null {
   const manifest = getManifest(m.plugin);
-  const instance = manifest ? instanceFor(m) : null;
+  const instance = manifest ? instanceFor(m, opts.instanceKey) : null;
   if (!manifest || !instance) return null;
 
   const arity = ARITY[m.signature] ?? 1;
@@ -193,7 +214,7 @@ function render(
   ctx[CTX.strength] = m.strength;
   const tp = opts.timePhase ?? speedPhase(m.speed, timeMs, ctx[CTX.beatTime]!);
   const rankCount = opts.rankCount ?? 0;
-  const counts = frameCounts(m.distribution, rankCount, 1);
+  const counts = frameCounts(m.distribution, rankCount, maxHeads);
   ctx[CTX.timePhase] = tp;
   ctx[CTX.rankCount] = counts.rankCount;
   ctx[CTX.distGroupCount] = counts.distGroupCount;
@@ -202,22 +223,31 @@ function render(
   ctx[CTX.handleOriginY] = m.distribution.origin.y;
   ctx[CTX.handleEndX] = m.distribution.end.x;
   ctx[CTX.handleEndY] = m.distribution.end.y;
+  // v1.3: previews place samples in a unit room (u, v = x, y; flat floor).
+  ctx[CTX.worldAspect] = 1;
+  ctx[CTX.worldDepth] = 1;
 
   const cseed = channelSeed(m.targetChannels[0] ?? 'DIMMER');
   const samples = new Float32Array(count * SAMPLE_FIELDS);
+  /** Per-sample bases (only when a placement overrides the base). */
+  let bases: (readonly number[])[] | null = null;
   for (let i = 0; i < count; i++) {
     const o = i * SAMPLE_FIELDS;
-    samples[o + SAMPLE.groupIndex] = i;
-    samples[o + SAMPLE.groupCount] = count;
-    samples[o + SAMPLE.headIndex] = 0;
-    samples[o + SAMPLE.headCount] = 1;
+    const p = place(i);
+    const sampleBase = p.base ?? base;
+    if (p.base) (bases ??= new Array(count).fill(base))[i] = p.base;
+    samples[o + SAMPLE.groupIndex] = p.fixture ?? i;
+    samples[o + SAMPLE.groupCount] = p.fixtureCount ?? count;
+    samples[o + SAMPLE.headIndex] = p.head ?? 0;
+    samples[o + SAMPLE.headCount] = p.headCount ?? 1;
     samples[o + SAMPLE.seed] = fmix32(Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(key, 0x85ebca6b)) & 0xffffff;
-    for (let c = 0; c < 3; c++) samples[o + SAMPLE.base0 + c] = base[c] ?? 0;
+    for (let c = 0; c < 3; c++) samples[o + SAMPLE.base0 + c] = sampleBase[c] ?? 0;
     samples[o + SAMPLE.channelSeedLo] = cseed & 0xffff;
     samples[o + SAMPLE.channelSeedHi] = cseed >>> 16;
-    const p = place(i);
     samples[o + SAMPLE.x] = p.x;
     samples[o + SAMPLE.y] = p.y;
+    samples[o + SAMPLE.u] = p.x;
+    samples[o + SAMPLE.v] = p.y;
     samples[o + SAMPLE.phase] = tp - p.spatial;
     samples[o + SAMPLE.spatial] = p.spatial;
     samples[o + SAMPLE.rank] = p.rank;
@@ -225,12 +255,13 @@ function render(
   }
 
   try {
-    instance.prepare(encodeParams(manifest.params, m.params, { ticks: rankCount }));
+    instance.prepare(encodeParams(manifest.params, m.params, { ticks: opts.ticks ?? rankCount }));
     const out = instance.render(ctx, samples, count);
     if (opts.raw) return { values: out, arity };
     for (let i = 0; i < count; i++) {
+      const b = bases?.[i] ?? base;
       for (let c = 0; c < arity; c++) {
-        out[i * arity + c] = mapOutput(manifest.output, base[c] ?? 0, out[i * arity + c]!, m.strength);
+        out[i * arity + c] = mapOutput(manifest.output, b[c] ?? 0, out[i * arity + c]!, m.strength);
       }
     }
     return { values: out, arity };
@@ -238,7 +269,7 @@ function render(
   catch (err) {
     if (err instanceof PluginTrap) {
       broken.add(m.plugin);
-      instances.delete(m.id);
+      instances.delete(opts.instanceKey ?? m.id);
       console.warn(`[preview-pool] ${manifest.name} trapped (${err.reason}): ${err.message}`);
       return null;
     }
@@ -307,6 +338,34 @@ export function renderTraces(m: ModifierInstance, count: number, points: number,
     for (let i = 0; i < count; i++) traces[i]![p] = r.values[i * r.arity]!;
   }
   return traces;
+}
+
+/** One fixture sample of `renderPoints` (normalized world position). */
+export interface PreviewPoint extends DistributionSampleInput {
+  /** Index of the point's fixture among the targeted fixtures and their count (engine `groupIndex` / `groupCount`). */
+  fixture?: number;
+  fixtureCount?: number;
+  /** Working values under the modifier (default `opts.base` / per signature). */
+  base?: readonly number[];
+}
+
+/**
+ * The modifier at arbitrary fixture samples at `opts.timeMs` (version
+ * preview of an effect on the snapshot's fixtures): per-sample distribution
+ * as in the engine (`sampleDistribution` with the fixture's order rank and
+ * head). `opts.rankCount` is the instance's order rank count (from
+ * `resolveRanks`, 0 when the distribution has no ranks); the largest
+ * `headCount` sets the rank count of scope `within`.
+ */
+export function renderPoints(m: ModifierInstance, points: readonly PreviewPoint[], opts: PreviewOptions = {}): PreviewResult | null {
+  const d = m.distribution;
+  const rankCount = opts.rankCount ?? 0;
+  let maxHeads = 1;
+  for (const p of points) maxHeads = Math.max(maxHeads, p.headCount);
+  return render(m, points.length, (i) => {
+    const p = points[i]!;
+    return { x: p.x, y: p.y, fixture: p.fixture, fixtureCount: p.fixtureCount, head: p.head, headCount: p.headCount, base: p.base, ...sampleDistribution(d, rankCount, p) };
+  }, opts, maxHeads);
 }
 
 /** Converts preview values to CSS-ready RGB bytes (scalar → gray, panTilt → x/y as r/g). */

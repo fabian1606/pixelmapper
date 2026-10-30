@@ -73,3 +73,24 @@ bun run preview
 ```
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+
+## Use Pixelmapper from Claude Code / Claude Desktop
+
+Claude drives the **running** app through the MCP server `pixelmapper-mcp` (`packages/mcp-bridge`). The app connects to it over `ws://127.0.0.1:7778`, and the tools run inside the app: every change is one undo step labelled `AI: …`.
+
+1. **Register the server.**
+   - Claude Code, inside this repo: `cp .mcp.json.example .mcp.json`, or from anywhere:
+     ```bash
+     claude mcp add pixelmapper -- bun run /ABSOLUTE/PATH/TO/pixelmapper/packages/mcp-bridge/src/cli.ts
+     ```
+   - Claude Desktop: see [packages/mcp-bridge/README.md](packages/mcp-bridge/README.md#register-with-claude-desktop).
+2. **Get the pairing token:** `bun run mcp token` (created once in `~/.pixelmapper/mcp-token`).
+3. **Start the app:**
+   - Web: `bun run dev` and open `http://localhost:3000`.
+   - Desktop: `bun run dev:tauri`.
+4. **Pair:** open **Settings → MCP Server** (gear icon in the header, ⌘, or, in the desktop app, the menu **MCP → MCP Server Setup…**), turn it on and paste the token. The desktop app finds the token on this computer and offers **Use it**. The status should say *Connected*. The panel (and the MCP menu) also copies the ready-made Claude Code command and Claude Desktop config.
+5. **Ask Claude**, for example: *"Inspect the project and add a slow rainbow wave on the left group."*
+
+Claude works in this order: `inspect` the project, then `operations` / `describe`, then `apply` with `dryRun` and `expect`, then `observe` the output. `describe` with `guide:plugin-authoring` teaches it to write new content plugins.
+
+Only one app window is connected at a time; the most recently enabled one wins.

@@ -15,6 +15,17 @@ The single source of truth for the workspace. Owns:
 
 Also holds the binary packet cache (`layoutPacket`, `channelsPacket`, `effectsPacket`) and revision counters (`layoutRevision`, `channelsRevision`, `effectsRevision`). See [Engine & Render Loop](engine.md) for details.
 
+### Project persistence (local-first, ADR 0004)
+
+`engine-store.ts` only wires its state into the sync layer (`app/utils/sync/`):
+
+- **Engine init** (`initEngine`): idempotent, returns one shared promise (called by `app.vue` and `layouts/project.vue`). It waits for the WASM worker (`engine.ready`), then installs watchers, plugin hooks and the render loop. It never seeds or replaces project state (the old 20-fixture demo grid is gone); `loadProject` awaits it (bounded, 15 s) before applying a project.
+- **Open** (`loadProject`): the local working snapshot (IndexedDB `ProjectStore`) is applied first — the project opens offline — plus outbox rows written after it. Without a local copy the project is downloaded once (`load-project` + `pull-changes`); offline that shows *Not available offline*. Local-only projects never call the server.
+- **Live-state port** (`engine-state-port.ts`): `capture` = `serializeProject`, `apply` = `applyProjectSnapshot`, `replay` = command registry, then live-op registry. The sync engine computes base / rebased / working states only through it.
+- **Persist path**: history commands and persistent live-ops → persist queue → outbox row (durable) → SyncEngine push. `markEngineDirty` also schedules the debounced working-snapshot write.
+- **Safety gate**: nothing is persisted for a project before its state is applied. `closeSession` calls `setPersistProjectId(null)` (the persist queue drops entries while no project is applied) and disarms the server-snapshot autosave; `loadProject` re-opens the gate only after the apply, right before the session (writer, sync engine, autosave) starts. A closed session's `doSaveSnapshot` is a no-op.
+- Details: [offline/wp-sync.md](offline/wp-sync.md).
+
 ### connections-store.ts
 
 Registry of active connectors. Called by the render loop each frame:
@@ -71,6 +82,7 @@ Presets store a snapshot of channel states (and modifier effects) for specific f
 - **Selective application**: Each preset stores `fixtureIds` indicating which fixtures it covers. Loading a preset does not affect fixtures not listed in it.
 - **Diffing**: The engine compares live programmer state against a preset's snapshot (filtered by `fixtureIds`) to detect unsaved changes. Editing a non-preset fixture doesn't mark the preset as modified.
 - **Save / delete / overwrite** go through the command system (`preset-commands.ts`), so they are fully undoable.
+- **Modifier ids**: applying a preset recreates its modifier snapshots with their saved ids (so the diff matches them), except when an id is already live (a surviving instance outside the preset, or the same id in two categories of a resolved preset): then the copy gets a fresh id (`reconstructEffect(snap, takenIds)` in `preset-apply.ts`). Pinned modifiers and card splits always get fresh ids. Two live instances must never share an id; `deserializeProject` repairs older projects in place (`dedupeModifierIds`: the first occurrence keeps its id, so live widget mappings stay on it).
 
 ### Active preset — single source of truth
 

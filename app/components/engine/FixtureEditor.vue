@@ -6,9 +6,11 @@ import type { Fixture } from '~/utils/engine/core/fixture';
 import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import FixtureCanvas from './FixtureCanvas.vue';
 import FixtureEditorSpatialControls from './FixtureEditorSpatialControls.vue';
+import ModifierCanvasHandles from './canvas-hints/ModifierCanvasHandles.vue';
 import ModifierFieldOverlay from '~/components/plugin-host/ModifierFieldOverlay.vue';
 import { useCamera } from './composables/use-camera';
 import { useSelection } from './composables/use-selection';
+import { useSwapHandles } from './composables/use-swap-handles';
 import { useHistory } from './composables/use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { MoveFixtureCommand } from './commands/move-fixture-command';
@@ -23,6 +25,7 @@ import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { useDistributionToolStore } from '~/stores/distribution-tool-store';
+import { useCanvasHoverStore } from '~/stores/canvas-hover-store';
 import OrderTool from './distribution/OrderTool.vue';
 import DistributionOverlay from './distribution/DistributionOverlay.vue';
 
@@ -121,6 +124,34 @@ const { selectedIds, editingId, focusedHandle, interaction, alignmentGuides, onV
     () => engineStore.sceneNodes,
     () => ({ width: editorWidth.value, height: editorHeight.value }),
   );
+
+// ─── Swap handles (Figma-style: drag a center dot; hovered partner moves aside, ghost shows the landing spot) ───
+const { handles: swapHandles, ghosts: swapGhosts, swapDrag, isOverHandle: isOverSwapHandle,
+  onMouseDown: onSwapMouseDown, onMouseMove: onSwapMouseMove, onMouseUp: onSwapMouseUp } = useSwapHandles({
+  getFixtures: () => props.fixtures,
+  selectedIds,
+  worldWidth: WORLD_WIDTH,
+  worldHeight: WORLD_HEIGHT,
+  worldToViewport,
+  viewportToWorld,
+  getScale: () => camera.scale,
+  // Hidden while another interaction or the distribution order tool owns the pointer.
+  isAvailable: () => interaction.value.type === 'idle' && !orderToolActive.value && !isSpatialDragging.value,
+  onLayoutChange: () => {
+    engineStore.triggerCanvasSync();
+    fixtureCanvas.value?.sync();
+  },
+  onSwap: (before, after) => {
+    history.execute(new MoveFixtureCommand(props.fixtures, before, after));
+    engineStore.triggerCanvasSync();
+    fixtureCanvas.value?.sync();
+  },
+});
+
+/** Neutral, low-key handle color — must not compete with the fixture glows. */
+const SWAP_HANDLE_COLOR = '#9ca3af';
+/** Outline color of the swap ghosts (where each fixture would land). */
+const SWAP_GHOST_COLOR = 'rgba(255, 255, 255, 0.75)';
 
 // ─── Alignment-guide overlay (Figma-style smart guides) ──────────────────────
 const GUIDE_COLOR = '#c2578f';
@@ -279,6 +310,7 @@ const cursor = ref('default');
 
 function updateCursor(e: MouseEvent) {
   const t = interaction.value.type;
+  if (swapDrag.value) { cursor.value = 'grabbing'; return; }
   if (t === 'drag') { cursor.value = 'grabbing'; return; }
   if (t === 'kind-handle') { cursor.value = 'grabbing'; return; }
   if (t === 'line') { cursor.value = 'crosshair'; return; }
@@ -288,6 +320,7 @@ function updateCursor(e: MouseEvent) {
   const r = rect();
   const vx = e.clientX - r.left;
   const vy = e.clientY - r.top;
+  if (t === 'idle' && isOverSwapHandle(vx, vy)) { cursor.value = 'grab'; return; }
   const handleHit = fixtureCanvas.value?.hitTestHandle?.(vx, vy);
   if (handleHit) {
     const role = props.fixtures.find(f => String(f.id) === handleHit.fixtureId)?.kind?.compiled?.handles.find(h => h.id === handleHit.handleId)?.role;
@@ -309,6 +342,8 @@ function handleWheel(e: WheelEvent) {
 function handleMouseDown(e: MouseEvent) {
   // Middle-mouse or space-drag pans the viewport — stop following
   if (e.button === 1) liveBus.followedSessionId = null;
+  // Swap handles sit on top of the fixture bodies, so they win over select/drag.
+  if (onSwapMouseDown(e, rect())) { updateHoveredFixture(e); updateCursor(e); return; }
   onViewportMouseDown(e, rect());
 }
 
@@ -358,7 +393,30 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown, { capture: true });
 });
+// ─── Hover (mirrored as a row highlight in the scene sidebar) ────────────────
+const canvasHover = useCanvasHoverStore();
+
+/**
+ * Publishes the fixture under the pointer so the sidebar can highlight its row.
+ * During a swap drag the grabbed fixture is always under the pointer, so the
+ * swap partner (or nothing) is published instead.
+ */
+function updateHoveredFixture(e: MouseEvent) {
+  const drag = swapDrag.value;
+  if (drag) {
+    canvasHover.setHovered(drag.targetId !== null ? String(drag.targetId) : null, true);
+    return;
+  }
+  const r = rect();
+  canvasHover.setHovered(fixtureCanvas.value?.hitTest(e.clientX - r.left, e.clientY - r.top) ?? null);
+}
+
+onBeforeUnmount(() => canvasHover.setHovered(null));
+
 function handleMouseMove(e: MouseEvent) {
+  // Swap state first, so the hover reflects this move's partner.
+  if (onSwapMouseMove(e, rect())) { updateHoveredFixture(e); updateCursor(e); return; }
+  updateHoveredFixture(e);
   onMouseMove(e, rect());
   const t = interaction.value.type;
   if (t === 'drag' || t === 'rotate' || t === 'kind-handle') fixtureCanvas.value?.sync();
@@ -382,6 +440,14 @@ function handleMouseMove(e: MouseEvent) {
   }
 }
 function handleMouseUp(e?: MouseEvent) {
+  if (e?.type === 'mouseleave') canvasHover.setHovered(null);
+  // Leaving the viewport cancels a swap preview instead of committing it.
+  if (onSwapMouseUp(e?.type === 'mouseleave')) {
+    // Drag ended: back to plain hover of whatever is under the pointer.
+    if (e && e.type !== 'mouseleave') updateHoveredFixture(e); else canvasHover.setHovered(null);
+    if (e) updateCursor(e); else cursor.value = 'default';
+    return;
+  }
   const t = interaction.value.type;
   const wasInteracting = t === 'drag' || t === 'rotate';
   onMouseUp();
@@ -483,6 +549,34 @@ function handleMouseUp(e?: MouseEvent) {
       </g>
     </svg>
 
+    <!-- Swap handles: a center dot per selected fixture (multi-selection only).
+         While dragging one over a partner, ghost outlines show where both would land. -->
+    <svg
+      v-if="swapHandles.length > 0 || swapGhosts.length > 0"
+      class="absolute inset-0 w-full h-full pointer-events-none"
+    >
+      <rect
+        v-for="g in swapGhosts"
+        :key="`sg-${g.id}`"
+        :x="-g.halfW" :y="-g.halfH"
+        :width="g.halfW * 2" :height="g.halfH * 2"
+        rx="4"
+        :transform="`translate(${g.x} ${g.y}) rotate(${g.rotation})`"
+        fill="rgba(255, 255, 255, 0.06)"
+        :stroke="SWAP_GHOST_COLOR"
+        stroke-width="1.5"
+      />
+      <circle
+        v-for="h in swapHandles"
+        :key="`sw-${h.id}`"
+        :cx="h.x" :cy="h.y" r="3.5"
+        :fill="SWAP_HANDLE_COLOR"
+        stroke="rgba(0, 0, 0, 0.5)"
+        stroke-width="1"
+        opacity="0.7"
+      />
+    </svg>
+
     <!-- Distribution of the active modifier: rank badges, group colors, head arrows -->
     <DistributionOverlay
       v-if="activeModifier?.distribution && !orderToolActive"
@@ -525,6 +619,23 @@ function handleMouseUp(e?: MouseEvent) {
 
     <FixtureEditorSpatialControls
       v-if="activeModifier && !orderToolActive && activeModifier.distribution?.scope === 'across' && ['linear', 'radial', 'conical'].includes(activeModifier.distribution.mode)"
+      :viewport-el="viewportEl"
+      :editor-width="editorWidth"
+      :editor-height="editorHeight"
+      :camera="camera"
+      :active-modifier="activeModifier"
+      :world-width="WORLD_WIDTH"
+      :world-height="WORLD_HEIGHT"
+      :world-to-viewport="worldToViewport"
+      @dragStart="handleSpatialDragStart"
+      @modifierChange="handleModifierChange"
+      @modifierDragEnd="handleModifierDragEnd"
+      @redraw="() => { engineStore.flushEngineOutput?.(); fixtureCanvas?.draw(); }"
+    />
+
+    <!-- Canvas hints (plan M4): handles of the active modifier's hinted params, any distribution mode -->
+    <ModifierCanvasHandles
+      v-if="activeModifier && !orderToolActive"
       :viewport-el="viewportEl"
       :editor-width="editorWidth"
       :editor-height="editorHeight"

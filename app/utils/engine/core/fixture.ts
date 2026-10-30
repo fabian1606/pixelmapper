@@ -1,5 +1,6 @@
 import type { ChannelType, SpatialVector } from '../types';
 import type { Channel } from './channel';
+import type { MotionRange } from './motion-range';
 import { buildBeamPhotometry, resolvePhotometricColor, type BeamPhotometry } from './photometry';
 import { Beam } from './beam';
 import { reactive } from 'vue';
@@ -69,6 +70,19 @@ export class Fixture {
    * Persisted (unlike `definition`) so 3D beam cones survive project reloads.
    */
   lensDegreesMinMax?: [number, number];
+
+  /**
+   * Pan/tilt travel from the OFL capabilities (see motion-range.ts).
+   * Persisted (unlike channel `oflCapabilities`) so the 3D motion range
+   * survives project reloads.
+   */
+  motionRange?: MotionRange;
+
+  /**
+   * Physical housing size [width, height, depth] in millimeters (OFL).
+   * Persisted (unlike `definition`) — shapes the 3D moving-head model.
+   */
+  dimensionsMm?: [number, number, number];
 
   manufacturer: string = '';
   fixtureType: string = '';

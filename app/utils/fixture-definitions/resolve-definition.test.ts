@@ -2,17 +2,21 @@
  * Definition keys, the custom fixture accessor (plan M4.7) and definition
  * resolution / fixture building (M4.1, M4.3).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OflFixture } from '~/utils/ofl/types';
 import { customDefinitionKey, isCustomDefinitionKey, parseDefinitionKey } from './definition-keys';
 import { customFixtureKey, getCustomFixture, getCustomFixtures, removeCustomFixture, saveCustomFixture } from './custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { createFixtureFromDefinition, resolveFixtureDefinition, setDefinitionFetcher } from './resolve-definition';
 import { carryChannelValues } from './fixture-mode';
 import xbar500 from './__fixtures__/xbar500-custom.json';
 
 const XBAR = xbar500 as unknown as OflFixture;
 
-beforeEach(() => localStorage.clear());
+beforeEach(async () => {
+  localStorage.clear();
+  await useFreshCustomFixtureLibrary();
+});
 afterEach(() => setDefinitionFetcher(null));
 
 describe('definition keys', () => {
@@ -25,29 +29,37 @@ describe('definition keys', () => {
 });
 
 describe('custom fixture accessor', () => {
-  it('saves (upsert by name), lists newest first, reads and removes', () => {
-    const first = saveCustomFixture({ ...XBAR, name: 'One' });
-    const second = saveCustomFixture({ ...XBAR, name: 'Two' });
+  it('saves (UUID identity, upsert by id), lists newest first, reads and removes', async () => {
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1000);
+    const first = (await saveCustomFixture({ ...XBAR, name: 'One' }))!;
+    now.mockReturnValue(2000);
+    const second = (await saveCustomFixture({ ...XBAR, name: 'Two' }))!;
+    now.mockRestore();
     expect(getCustomFixtures().map(c => c.name)).toEqual(['Two', 'One']);
-    const updated = saveCustomFixture({ ...XBAR, name: 'One', shortName: 'v2' });
-    expect(updated.id).toBe(first.id);
+    // Same name without an id: a new entry, not an update.
+    const twin = (await saveCustomFixture({ ...XBAR, name: 'One' }))!;
+    expect(twin.id).not.toBe(first.id);
+    await removeCustomFixture(twin.id);
+    // With the id: replaces the entry, keeps its creation time (position).
+    const updated = (await saveCustomFixture({ ...XBAR, name: 'One', shortName: 'v2' }, first.id))!;
+    expect(updated).toMatchObject({ id: first.id, createdAt: 1000 });
     expect(getCustomFixture(first.id)?.ofl.shortName).toBe('v2');
     expect(customFixtureKey(second)).toBe(`custom/${second.id}`);
-    removeCustomFixture(second.id);
+    await removeCustomFixture(second.id);
     expect(getCustomFixtures().map(c => c.name)).toEqual(['One']);
   });
 
-  it('reads the pre-existing storage key and survives malformed data', () => {
-    localStorage.setItem('pixelmapper:customFixtures', JSON.stringify([{ id: 'custom-7', name: 'Legacy', ofl: XBAR, createdAt: 1 }]));
-    expect(getCustomFixture('custom-7')?.name).toBe('Legacy');
-    localStorage.setItem('pixelmapper:customFixtures', '{not json');
-    expect(getCustomFixtures()).toEqual([]);
+  it('round-trips the RDM fields through the record', async () => {
+    const ofl = { ...XBAR, rdm: { modelId: 5 }, pixelmapper: { rdmManufacturerId: 0x7ff0 } } as OflFixture;
+    const stored = (await saveCustomFixture(ofl))!;
+    expect(getCustomFixture(stored.id)?.ofl).toMatchObject({ rdm: { modelId: 5 }, pixelmapper: { rdmManufacturerId: 0x7ff0 } });
   });
 });
 
 describe('resolveFixtureDefinition / createFixtureFromDefinition', () => {
   it('resolves custom fixtures and records the source', async () => {
-    const key = customFixtureKey(saveCustomFixture(XBAR));
+    const key = customFixtureKey((await saveCustomFixture(XBAR))!);
     const resolved = (await resolveFixtureDefinition(key))!;
     expect(resolved.definition.name).toBe(XBAR.name);
     const fixture = createFixtureFromDefinition(resolved, 3);
@@ -79,7 +91,7 @@ describe('resolveFixtureDefinition / createFixtureFromDefinition', () => {
 
 describe('carryChannelValues', () => {
   it('copies programmed values per head and channel type', async () => {
-    const key = customFixtureKey(saveCustomFixture(XBAR));
+    const key = customFixtureKey((await saveCustomFixture(XBAR))!);
     const resolved = (await resolveFixtureDefinition(key))!;
     const from = createFixtureFromDefinition(resolved, 0); // 4×RGB
     const to = createFixtureFromDefinition(resolved, 3); // 4×RGB + Dimmer

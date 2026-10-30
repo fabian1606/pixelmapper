@@ -27,7 +27,7 @@ The ESP32 strips the header via a state-machine parser (`processByte` in `main.c
 |----------|-------|-------------|
 | `TYPE_BPM` | `0x10` | Global BPM (f32 LE) |
 | `TYPE_TIMESYNC` | `0x13` | Clock alignment for ESP32 (f32 LE, elapsed ms) |
-| `TYPE_LAYOUT_BIN` | `0x14` | Fixtures, channels, heads (v2) |
+| `TYPE_LAYOUT_BIN` | `0x14` | Fixtures, channels, heads (v3) |
 | `TYPE_CHAN_BIN` | `0x15` | Chaser configurations per DMX channel |
 | `TYPE_MODIFIERS_BIN` | `0x16` | Modifier instances (content plugins) |
 
@@ -57,8 +57,9 @@ Total: 4 bytes payload.
 ```
 ESP32-only. Used for clock alignment via exponential smoothing: `offset = offset * 0.85 + newOffset * 0.15`.
 
-### TYPE_LAYOUT_BIN (0x14, v2)
+### TYPE_LAYOUT_BIN (0x14, v3)
 ```
+[meters_per_unit: f32 LE]   // v3: meters per normalized world unit (STAGE_SIZE_METERS)
 [fixture_count: u16 LE]
 for each fixture:
   [group_index: u16 LE]     // position in the flat fixture list
@@ -69,6 +70,7 @@ for each fixture:
     [channel_type_id: u8]   // see channel type table below
     [world_x: f32 LE]       // normalized 0–1 world position
     [world_y: f32 LE]
+    [world_z: f32 LE]       // v3: height above the floor, same unit as x/y (fixture.positionZ)
     [resolution: u8]        // 0 = fine byte of another channel, 1 = 8 bit, 2 = 16 bit
     [fine0: u16 LE]         // dmx index of the fine byte (0xFFFF = none)
     [fine1: u16 LE]         // reserved (24 bit), 0xFFFF
@@ -79,7 +81,9 @@ for each fixture:
 
 `world_x/world_y` are computed in `buildLayoutBin` with the beam rotation transform (strips: the LED group's center on the sampled curve). The engine groups channels with equal `(group_index, head_index)` into heads and detects their color system (RGB, RGBW, RGBA, CMY) and pan/tilt pairs.
 
-Per fixture 8 bytes, per channel 20 bytes. Example: 20 fixtures × 4 channels = `5 + 2 + 20×8 + 80×20` = **1,767 bytes**.
+Per fixture 8 bytes, per channel 24 bytes. Example: 20 fixtures × 4 channels = `5 + 6 + 20×8 + 80×24` = **2,091 bytes**.
+
+v3 (ABI 1.3) added `meters_per_unit` and `world_z`. The engine derives the *room* (bounding box of all channel x/y) from the layout and passes it to plugins as `Frame.worldAspect`/`worldDepth`/`metersPerUnit` and per-sample `Sample.z`/`u`/`v` (see `architecture/adr/0001-*.md`, ABI 1.3).
 
 ### TYPE_CHAN_BIN (0x15)
 ```

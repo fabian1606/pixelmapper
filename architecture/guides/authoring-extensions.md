@@ -249,7 +249,7 @@ No definition? Generate one (OFL JSON) and store it as a **new custom fixture** 
 ```ts
 import { saveCustomFixtureDefinition } from '@pixelmapper/extension-api';
 
-const key = saveCustomFixtureDefinition({
+const key = await saveCustomFixtureDefinition({
   name: 'Acme Bar', categories: ['Pixel Bar'], rdm: { modelId: 1 }, pixelmapper: { rdmManufacturerId: 0x7ff0 },
   availableChannels: { Dimmer: { capability: { type: 'Intensity' } } },
   modes: [{ name: '1 ch', rdmPersonalityIndex: 1, channels: ['Dimmer'] }],

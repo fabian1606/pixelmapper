@@ -4,10 +4,12 @@
 // §6.8). Browser: `JsModifierRuntime` (runtime_js.rs) calls the worker's
 // plugin bridge. Tauri (later): wasmtime with fuel. Tests: closures.
 
-/// f32 slots of a frame context (ABI v1; v1.1 fills reserved slots 8–10, v1.2 slots 11–15).
-pub const CTX_FIELDS: usize = 16;
-/// f32 slots of a sample (ABI v1; v1.1 fills reserved slots 13–15).
-pub const SAMPLE_FIELDS: usize = 16;
+/// f32 slots of a frame context (ABI v1; v1.1 fills slots 8–10, v1.2 slots 11–15,
+/// v1.3 grows it to 20: slots 16–18, slot 19 reserved = 0).
+pub const CTX_FIELDS: usize = 20;
+/// f32 slots of a sample (ABI v1; v1.1 fills slots 13–15, v1.3 grows it to 20:
+/// slots 16–18, slot 19 reserved = 0).
+pub const SAMPLE_FIELDS: usize = 20;
 
 /// Frame-context field indices (ABI v1, amendment A13; v1.1, amendment A20).
 pub mod ctx {
@@ -32,6 +34,14 @@ pub mod ctx {
     pub const HANDLE_ORIGIN_Y: usize = 13;
     pub const HANDLE_END_X: usize = 14;
     pub const HANDLE_END_Y: usize = 15;
+    /// v1.3: room width / room depth (see `room::Room`); `du * aspect` is comparable to `dv`.
+    pub const WORLD_ASPECT: usize = 16;
+    /// v1.3: room depth (y extent) in normalized world units; `dz / depth` is comparable to `dv`.
+    pub const WORLD_DEPTH: usize = 17;
+    /// v1.3: meters per normalized world unit (0 = unknown).
+    pub const METERS_PER_UNIT: usize = 18;
+    /// v1.3: reserved (always 0).
+    pub const RESERVED_19: usize = 19;
 }
 
 /// Sample field indices (ABI v1, amendment A13; v1.1, amendment A20).
@@ -53,6 +63,14 @@ pub mod sample {
     pub const RANK: usize = 14;
     /// v1.1: distribution group of the sample (−1 if none).
     pub const DIST_GROUP: usize = 15;
+    /// v1.3: height above the floor in normalized world units (same unit as x/y).
+    pub const Z: usize = 16;
+    /// v1.3: room-normalized x (0 at the room's left edge, 1 at its right edge).
+    pub const U: usize = 17;
+    /// v1.3: room-normalized y (0 at the room's top edge, 1 at its bottom edge).
+    pub const V: usize = 18;
+    /// v1.3: reserved (always 0).
+    pub const RESERVED_19: usize = 19;
 }
 
 /// Per-render-call context (one instance, one frame).

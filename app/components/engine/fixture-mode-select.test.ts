@@ -11,6 +11,7 @@ import type { SceneNode } from '~/utils/engine/core/group';
 import { useEngineStore } from '~/stores/engine-store';
 import { useHistory } from './composables/use-history';
 import { saveCustomFixture, customFixtureKey } from '~/utils/fixture-definitions/custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { resolveFixtureDefinition, createFixtureFromDefinition } from '~/utils/fixture-definitions/resolve-definition';
 import { clearFixtureChangeGuards, registerFixtureChangeGuard } from '~/utils/extensions/fixture-change-guard';
 import xbar500 from '~/utils/fixture-definitions/__fixtures__/xbar500-custom.json';
@@ -21,16 +22,17 @@ beforeAll(() => {
   vi.stubGlobal('useSupabaseClient', () => ({}));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   setActivePinia(createPinia());
   localStorage.clear();
+  await useFreshCustomFixtureLibrary();
 });
 
 afterEach(() => clearFixtureChangeGuards());
 
 /** Adds an XBAR500 tube (mode 0) with extension data to the store's scene. */
 async function addTube() {
-  const key = customFixtureKey(saveCustomFixture(xbar500 as unknown as OflFixture));
+  const key = customFixtureKey((await saveCustomFixture(xbar500 as unknown as OflFixture))!);
   const fixture = createFixtureFromDefinition((await resolveFixtureDefinition(key))!, 0);
   fixture.id = 'tube-1';
   fixture.fixturePosition = { x: 0.3, y: 0.4 };

@@ -9,6 +9,7 @@ import type { Json, RdmDefinitionMatch } from '@pixelmapper/extension-api';
 import { useEngineStore } from '~/stores/engine-store';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { getCustomFixtures } from '~/utils/fixture-definitions/custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { setDefinitionFetcher } from '~/utils/fixture-definitions/resolve-definition';
 import { setRdmLookupFetcher } from '~/utils/fixture-definitions/rdm-lookup';
 import { createCoreCommandFactory } from '~/utils/extensions/core-command-factory';
@@ -223,11 +224,12 @@ describe('through the host', () => {
     vi.stubGlobal('useSupabaseClient', () => ({}));
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     setActivePinia(createPinia());
     resetRegistry();
     installSharedGlobals();
     localStorage.clear();
+    await useFreshCustomFixtureLibrary();
     setRdmLookupFetcher(async () => ({ keys: [] }));
     setDefinitionFetcher(async (url) => { throw new Error(`404 ${url}`); });
   });

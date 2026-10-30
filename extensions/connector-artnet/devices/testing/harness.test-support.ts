@@ -16,6 +16,7 @@ import { installSharedGlobals } from '~/utils/extensions/shared-globals';
 import { clearFixtureChangeGuards } from '~/utils/extensions/fixture-change-guard';
 import { resetRegistry } from '~/utils/extensions/registry';
 import { saveCustomFixture, customFixtureKey } from '~/utils/fixture-definitions/custom-fixtures';
+import { useFreshCustomFixtureLibrary } from '~/utils/fixture-definitions/custom-fixtures.test-support';
 import { setDefinitionFetcher } from '~/utils/fixture-definitions/resolve-definition';
 import { setRdmLookupFetcher } from '~/utils/fixture-definitions/rdm-lookup';
 import xbar500 from '~/utils/fixture-definitions/__fixtures__/xbar500-custom.json';
@@ -59,7 +60,8 @@ export async function createHarness(setup: (tubes: FakeRdmDevices) => void = () 
   resetRegistry();
   installSharedGlobals();
   localStorage.clear();
-  const xbarKey = customFixtureKey(saveCustomFixture({ ...(xbar500 as unknown as OflFixture), pixelmapper: { rdmManufacturerId: 0x7ff0 } }));
+  await useFreshCustomFixtureLibrary();
+  const xbarKey = customFixtureKey((await saveCustomFixture({ ...(xbar500 as unknown as OflFixture), pixelmapper: { rdmManufacturerId: 0x7ff0 } }))!);
   setRdmLookupFetcher(async () => ({ keys: [] }));
   setDefinitionFetcher(async (url) => { throw new Error(`404 ${url}`); });
 

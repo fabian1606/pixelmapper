@@ -3,7 +3,7 @@
  *
  * One string identifies the definition a fixture is created from:
  * - OFL library fixtures: `'<manufacturer>/<fixture>'` (e.g. `'cameo/flat-pro-18'`),
- * - custom fixtures: `'custom/<id>'` (e.g. `'custom/custom-1729800000000'`).
+ * - custom fixtures: `'custom/<id>'` (`<id>` = UUID of the library record).
  *
  * The same format is used by the add dialog (recent fixtures, custom list),
  * `Fixture.source`, `commands.addFixtures` and `findFixtureDefinitionByRdm`.

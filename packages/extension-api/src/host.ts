@@ -59,8 +59,8 @@ export interface HostApi {
   onFixturePatchChange(callback: (changes: FixturePatchChange[]) => void, options?: FixturePatchObserverOptions): () => void;
   /** Definition lookup by RDM IDs (API 1.3). */
   findFixtureDefinitionByRdm(manufacturerId: number, modelId: number): Promise<RdmDefinitionMatch | null>;
-  /** Stores a definition as a new custom fixture (API 1.4). */
-  saveCustomFixtureDefinition(definition: Json): FixtureDefinitionKey;
+  /** Stores a definition as a new custom fixture (API 1.4; async since 1.7). */
+  saveCustomFixtureDefinition(definition: Json): Promise<FixtureDefinitionKey>;
   /** The user's connector instances (API 1.4, `connectors.ts`). */
   connectors: ConnectorSet;
   /** Key of the current user for per-user storage (API 1.4, `user.ts`). */

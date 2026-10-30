@@ -8,10 +8,12 @@
  * `env.memory`, `env.abort`, `pm.budget` (instrumentation) and `pm.log`.
  */
 
-/** f32 slots of the frame context. */
-export const CTX_FIELDS = 16;
-/** f32 slots per sample. */
-export const SAMPLE_FIELDS = 16;
+/** f32 slots of the frame context (ABI v1.3; slot 19 reserved). */
+export const CTX_FIELDS = 20;
+/** f32 slots per sample (ABI v1.3; slot 19 reserved). */
+export const SAMPLE_FIELDS = 20;
+/** `pm_abi_version()` of modules this host loads: major × 100 + minor (1.3). */
+export const ABI_VERSION = 103;
 /** Maximum memory pages of a plugin (16 MiB). */
 export const MAX_PAGES = 256;
 /** Imports a plugin module may declare. */
@@ -26,6 +28,8 @@ export const CTX = {
   spread: 11,
   // ABI v1.2: the Spatial 2D handle (normalized world coordinates)
   handleOriginX: 12, handleOriginY: 13, handleEndX: 14, handleEndY: 15,
+  // ABI v1.3: room width / depth, room depth (world units), meters per world unit; 19 reserved
+  worldAspect: 16, worldDepth: 17, metersPerUnit: 18,
 } as const;
 /** Field offsets of a sample (f32 index). */
 export const SAMPLE = {
@@ -33,6 +37,8 @@ export const SAMPLE = {
   base0: 8, base1: 9, base2: 10, channelSeedLo: 11, channelSeedHi: 12,
   // ABI v1.1 (ADR A20)
   spatial: 13, rank: 14, distGroup: 15,
+  // ABI v1.3: height (world units), room coordinates 0–1; 19 reserved
+  z: 16, u: 17, v: 18,
 } as const;
 
 /** Thrown when a plugin traps, aborts or exceeds its budget. */
@@ -60,7 +66,7 @@ export function forbiddenImports(module: WebAssembly.Module): string[] {
     .filter(n => !ALLOWED_IMPORTS.includes(n));
 }
 
-/** Plugin exports of ABI v1. */
+/** Plugin exports of the ABI (v1.3). */
 interface AbiExports {
   pm_abi_version(): number;
   pm_alloc(bytes: number): number;
@@ -131,8 +137,12 @@ export class PluginInstance {
   private static check(module: WebAssembly.Module, exports: AbiExports): void {
     const bad = forbiddenImports(module);
     if (bad.length > 0) throw new PluginTrap(`forbidden imports: ${bad.join(', ')}`, 'trap');
-    if (typeof exports.pm_render !== 'function' || exports.pm_abi_version?.() !== 1) {
-      throw new PluginTrap('not a pixelmapper plugin (ABI v1 exports missing)', 'trap');
+    if (typeof exports.pm_render !== 'function' || typeof exports.pm_abi_version !== 'function') {
+      throw new PluginTrap('not a pixelmapper plugin (ABI exports missing)', 'trap');
+    }
+    const v = exports.pm_abi_version();
+    if (v !== ABI_VERSION) {
+      throw new PluginTrap(`plugin ABI ${Math.floor(v / 100)}.${v % 100} is not supported (host ABI 1.3): rebuild it with the current SDK`, 'trap');
     }
   }
 

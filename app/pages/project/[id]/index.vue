@@ -11,7 +11,8 @@ import { useHistory, triggerSaveSnapshot } from '~/components/engine/composables
 import { useWorkspaceOperations } from '~/components/engine/composables/use-workspace-operations';
 import { UpdateFixtureTypesCommand } from '~/components/engine/commands/update-fixture-types-command';
 import { createFixtureFromOfl } from '~/utils/ofl/fixture-factory';
-import { isCustomDefinitionKey } from '~/utils/fixture-definitions/definition-keys';
+import { isCustomDefinitionKey, parseDefinitionKey } from '~/utils/fixture-definitions/definition-keys';
+import { newUuid } from '~/utils/ids';
 import { customFixtureKey, saveCustomFixture } from '~/utils/fixture-definitions/custom-fixtures';
 import AddFixtureDialog from '~/components/engine/AddFixtureDialog.vue';
 import CustomFixtureEditorDialog from '~/components/engine/custom-fixture-editor/CustomFixtureEditorDialog.vue';
@@ -208,10 +209,18 @@ function handleUpdateFixtureType(newOfl: import('~/utils/ofl/types').OflFixture)
   if (!targetName) return
   const oldInstances = flatFixtures.value.filter(f => f.definition?.name === targetName)
   if (oldInstances.length > 0) {
-    // Instances of a custom fixture keep pointing at its stored definition,
-    // so the edited version is saved under that key (plan M4.3).
+    // Instances of a custom fixture keep pointing at its library entry, so
+    // the edited version replaces that entry (UUID identity, plan M4.3).
+    // The first instance's entry wins; without one a new entry is created.
     let customKey: string | null = null
-    const storedKey = () => (customKey ??= customFixtureKey(saveCustomFixture(newOfl)))
+    const storedKey = () => {
+      if (customKey) return customKey
+      const existing = oldInstances.find(f => f.source && isCustomDefinitionKey(f.source.key))?.source?.key
+      const parsed = existing ? parseDefinitionKey(existing) : null
+      const id = parsed?.source === 'custom' ? parsed.id : newUuid()
+      saveCustomFixture(newOfl, id).catch(err => console.error('Failed to save custom fixture:', err))
+      return (customKey = customFixtureKey({ id }))
+    }
     const newInstances = oldInstances.map(old => {
       // Keep each instance's mode when the edited definition still has it.
       const modeIndex = old.source && newOfl.modes[old.source.modeIndex] ? old.source.modeIndex : 0

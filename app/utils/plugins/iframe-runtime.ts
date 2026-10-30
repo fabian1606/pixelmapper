@@ -14,6 +14,7 @@
 import type { GradientValue, ParamDef, ParamSchema, ParamValue } from '@pixelmapper/extension-api';
 import { validateCurveValue } from '@pixelmapper/plugin-toolchain/manifest-curve';
 import { checkGradient, checkSteps, normalizeGradient } from '@pixelmapper/plugin-toolchain/param-structs';
+import { CTX_FIELDS, SAMPLE_FIELDS } from '@pixelmapper/plugin-toolchain/runtime';
 
 // ── Messages ─────────────────────────────────────
 
@@ -73,6 +74,9 @@ export function coerceParam(def: ParamDef, value: unknown): ParamValue | null {
       return checkGradient(value) ? null : (normalizeGradient(value as GradientValue) as ParamValue);
     case 'steps':
       return checkSteps(value) ? null : (JSON.parse(JSON.stringify(value)) as ParamValue);
+    case 'trigger':
+      // Momentary state is owned by the host (press/release edges), never set by a panel.
+      return null;
     case 'curve': {
       // v2 values (`{ shape, args }`, `{ points }`) are checked by the shared curve validator.
       if (!Array.isArray(value)) {
@@ -151,6 +155,8 @@ export function resolveTheme(el: Element = document.documentElement): Record<str
 const RUNTIME_JS = String.raw`
 (function () {
   var CHANNEL = __PM_CHANNEL__;
+  // ABI buffer strides (f32 slots), injected from plugin-toolchain/runtime.
+  var CTX_FIELDS = __PM_CTX_FIELDS__, SAMPLE_FIELDS = __PM_SAMPLE_FIELDS__;
   var PROTOCOL = 'pm-panel/1';
   var params = {};
   var paramCbs = [];
@@ -161,7 +167,7 @@ const RUNTIME_JS = String.raw`
   function send(msg, transfer) { parent.postMessage({ protocol: PROTOCOL, channel: CHANNEL, msg: msg }, '*', transfer || []); }
   function fail(e) { send({ type: 'error', message: String(e && e.message || e) }); }
 
-  // Minimal ABI v1 host for api.render (mirrors plugin-toolchain/runtime).
+  // Minimal ABI host for api.render (mirrors plugin-toolchain/runtime).
   function instantiate(bytes) {
     var module = new WebAssembly.Module(bytes);
     var memImport = WebAssembly.Module.imports(module).find(function (i) { return i.module === 'env' && i.name === 'memory'; });
@@ -201,9 +207,9 @@ const RUNTIME_JS = String.raw`
       },
       render: function (ctx, samples, count) {
         var arity = Math.max(1, Math.round(ctx[4] || 1));
-        var c = region('ctx', 16), s = region('samples', count * 16), o = region('out', count * arity);
-        new Float32Array(mem.buffer, c.ptr, 16).set(ctx.subarray(0, 16));
-        new Float32Array(mem.buffer, s.ptr, count * 16).set(samples.subarray(0, count * 16));
+        var c = region('ctx', CTX_FIELDS), s = region('samples', count * SAMPLE_FIELDS), o = region('out', count * arity);
+        new Float32Array(mem.buffer, c.ptr, CTX_FIELDS).set(ctx.subarray(0, CTX_FIELDS));
+        new Float32Array(mem.buffer, s.ptr, count * SAMPLE_FIELDS).set(samples.subarray(0, count * SAMPLE_FIELDS));
         budget.left = 50000 + 2000 * count;
         exp.pm_render(c.ptr, s.ptr, count, o.ptr);
         return new Float32Array(mem.buffer, o.ptr, count * arity).slice();
@@ -223,7 +229,7 @@ const RUNTIME_JS = String.raw`
     onFrame: function (cb) { frameCbs.push(cb); if (frameCbs.length === 1) send({ type: 'frames', enabled: true }); },
     render: function (samples, count) {
       if (!plugin) throw new Error('plugin not available in this panel');
-      var ctx = new Float32Array(16); ctx[4] = 1;
+      var ctx = new Float32Array(CTX_FIELDS); ctx[4] = 1;
       plugin.prepare(encoded);
       return plugin.render(ctx, samples, count);
     },
@@ -281,6 +287,6 @@ export function buildPanelSrcdoc(channel: string, uiJs: string, theme: Record<st
     + `<style>:root{${vars}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground);`
     + `font:12px/1.4 system-ui,-apple-system,sans-serif;overflow:hidden}*{box-sizing:border-box}</style>`
     + `</head><body><div id="root"></div>`
-    + `<script>${scriptSafe(panel)}\n${scriptSafe(RUNTIME_JS.replace('__PM_CHANNEL__', JSON.stringify(channel)))}</script>`
+    + `<script>${scriptSafe(panel)}\n${scriptSafe(RUNTIME_JS.replace('__PM_CHANNEL__', JSON.stringify(channel)).replace('__PM_CTX_FIELDS__', String(CTX_FIELDS)).replace('__PM_SAMPLE_FIELDS__', String(SAMPLE_FIELDS)))}</script>`
     + `</body></html>`;
 }
