@@ -15,7 +15,7 @@ const { trafficLightInset } = useWindowChrome();
 useAsTitleBar();
 
 const engineStore = useEngineStore();
-const { projectLoading } = storeToRefs(engineStore);
+const { projectLoading, projectOrigin } = storeToRefs(engineStore);
 const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
 
 const beatOverlayOpen = ref(false);
@@ -119,8 +119,8 @@ const tabs = computed(() => projectId.value ? [
         <BeatOverlay v-if="beatOverlayOpen" @close="beatOverlayOpen = false" />
       </div>
 
-      <!-- Collaborators -->
-      <CollaboratorsPanel v-if="projectId" :project-id="projectId" />
+      <!-- Collaborators: cloud projects only; local-only projects have no one to invite -->
+      <CollaboratorsPanel v-if="projectId && projectOrigin === 'cloud'" :project-id="projectId" />
     </div>
     <div
       v-if="projectLoading"
