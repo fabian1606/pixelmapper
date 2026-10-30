@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ApplyResult } from '../apply';
-import { summarizeApply } from './apply';
+import { diffLines, summarizeApply } from './apply';
 
 /** Minimal apply result with overridable fields. */
 function result(over: Partial<ApplyResult>): ApplyResult {
@@ -34,5 +34,21 @@ describe('summarizeApply', () => {
   it('reports committed batches with their undo group', () => {
     const text = summarizeApply(result({ committed: true, undoGroupId: 'g1' }), false, 'Wave');
     expect(text.split('\n')[0]).toBe('Committed "Wave" as one undo step (g1).');
+  });
+});
+
+describe('diffLines', () => {
+  it('lists added entities first and groups identical field changes', () => {
+    const lines = diffLines([
+      { entity: 'fixture:a', field: 'channels.3.value', from: 0, to: 255 },
+      { entity: 'fixture:b', field: 'channels.3.value', from: 0, to: 255 },
+      { entity: 'fixture:c', field: 'position.x', from: 0.1, to: 0.2 },
+      { entity: 'modifier:m', field: 'added', to: 'Waveform · chase' },
+    ]);
+    expect(lines).toEqual([
+      '+ modifier:m: Waveform · chase',
+      'fixture a, b: channels.3.value 0 → 255',
+      'fixture:c: position.x 0.1 → 0.2',
+    ]);
   });
 });

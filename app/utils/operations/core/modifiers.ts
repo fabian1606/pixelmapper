@@ -15,20 +15,19 @@
 import { z } from 'zod';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { useEngineStore } from '~/stores/engine-store';
-import { cloneModifiers, duplicateModifierIds, modifierName } from '~/utils/engine/modifiers';
-import { activePreset } from '~/utils/engine/recipes';
+import { cloneModifiers, duplicateModifierIds } from '~/utils/engine/modifiers';
 import type { ModifierInstance } from '~/utils/engine/types';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import { defineCoreOperation } from '../define';
 import type { CoreReadApi } from '../read-api';
 import type { CoreOperation } from '../registry';
-import { buildInstance, instanceFindings, InstanceFieldsSchema, patchInstance, targetFixtures, withRecipe } from './modifier-build';
+import { buildInstance, instanceFindings, InstanceFieldsSchema, patchInstance, withRecipe } from './modifier-build';
 import { BaseColorSchema, baseColorCommands, type BaseColorResult } from './modifier-color';
 import { darkTargetFindings } from './modifier-dark';
 import { modifiersTrigger } from './modifier-trigger';
-import { distributionToSpread, speedView, SpeedViewSchema, SpreadViewSchema } from './modifier-spread';
+import { modifierView, ModifierViewSchema } from './modifier-view';
 import { PluginRefSchema, requirePlugin } from './plugin-ref';
-import { FixtureIdSchema, modifierAmbiguous, ModifierIdSchema, requireModifier, SignatureSchema } from './shared';
+import { FixtureIdSchema, modifierAmbiguous, ModifierIdSchema, requireModifier } from './shared';
 
 // ── Helpers ─────────────────────────────────────
 
@@ -82,24 +81,6 @@ const InstanceOutputSchema = z.object({
 
 // ── View ────────────────────────────────────────
 
-/** A modifier in the operation vocabulary. */
-const ModifierViewSchema = z.object({
-  id: z.string(),
-  index: z.number().int().describe('Stack position (0 = bottom, evaluated first; the last entry is on top).'),
-  plugin: z.object({ hash: z.string(), alias: z.string().nullable(), name: z.string().describe('Display name incl. the first enum option.') }),
-  recipe: z.string().nullable().describe('Id of the recipe the params match, or null ("Custom").'),
-  signature: SignatureSchema,
-  targets: z.object({
-    fixtureIds: z.array(FixtureIdSchema).nullable().describe('null = all fixtures.'),
-    channelTypes: z.array(z.string()),
-  }),
-  params: z.record(z.string(), z.unknown()),
-  spread: SpreadViewSchema,
-  strength: z.number(),
-  blend: z.string(),
-  speed: SpeedViewSchema,
-});
-
 /** A modifier id several instances share (see `duplicateIdWarnings`). */
 const DuplicateIdSchema = z.object({ id: z.string(), count: z.number().int().describe('Number of instances sharing the id.') });
 
@@ -110,25 +91,6 @@ const DuplicateIdSchema = z.object({ id: z.string(), count: z.number().int().des
 function duplicateIdWarnings(duplicates: Map<string, number>): string[] {
   return [...duplicates].map(([id, count]) =>
     `modifier id "${id}" is shared by ${count} instances (inconsistent stack): ops addressing "${id}" fail as ambiguous until the project is reloaded (the load repair gives the duplicates fresh ids) or the instances are removed and re-added`);
-}
-
-/** View of one instance. */
-function modifierView(read: CoreReadApi, m: ModifierInstance, index: number): z.infer<typeof ModifierViewSchema> {
-  const manifest = getManifest(m.plugin);
-  const points = targetFixtures(read, m.targetFixtureIds).map(f => ({ id: f.id, x: f.x, y: f.y }));
-  return {
-    id: m.id,
-    index,
-    plugin: { hash: m.plugin, alias: manifest?.alias ?? null, name: modifierName(m) },
-    recipe: manifest ? activePreset(m, manifest)?.id ?? null : null,
-    signature: m.signature,
-    targets: { fixtureIds: m.targetFixtureIds ? [...m.targetFixtureIds] : null, channelTypes: [...m.targetChannels] },
-    params: m.params as Record<string, unknown>,
-    spread: distributionToSpread(m.distribution, points),
-    strength: m.strength,
-    blend: m.blendMode,
-    speed: speedView(m.speed),
-  };
 }
 
 // ── Shared description parts ────────────────────

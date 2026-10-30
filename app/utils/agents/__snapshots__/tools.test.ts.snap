@@ -162,11 +162,20 @@ Call shape — each op entry is { "op": "<operation id>", "input": { …that ope
 \`describe { "id": "<operation id>" }\` shows each operation's input and a ready-to-copy call. (Input keys placed next to "op" are folded into "input" with an info note.)
 Later ops see the effects of earlier ones. Any error (unknown op, invalid input, failed verification) rolls the whole batch back.
 Use \`dryRun: true\` first for non-trivial changes: same diff, findings and expectations, then the state is restored.
-\`expect\`: assertions evaluated after the batch on { state, diff, results } (state = bpm, fixtures, groups, modifiers, livePages, selection; results = per-op output values). Each: { path, eq|ne|gt|gte|lt|lte|within|oneOf|contains|exists }, \`*\` fans out, e.g. { "path": "results.0.id", "exists": true }.
-Result: committed flag, semantic diff, findings (errors/warnings with hints), expectation results. Then use \`observe\` to check how the change actually looks.
+\`expect\`: assertions evaluated after the batch on { state, diff, results } (state = bpm, fixtures, groups, modifiers (as in modifiers.list: blend, spread, speed.value), livePages, selection; results = per-op output values, so \`results.0.modifierId\`, not \`results.0.value.modifierId\`). Each: { path, eq|ne|gt|gte|lt|lte|within|oneOf|contains|exists }, \`*\` fans out, e.g. { "path": "results.0.id", "exists": true }.
+A failed \`expect\` assertion marks the call as an error but does NOT roll back (only op errors do): use dryRun + expect to check before committing.
+Result: committed flag, field-level diff ({ entity, field, from, to }; a new or removed entity is ONE "added"/"removed" entry with a one-line summary), affected entities as { entity, summary } (\`detail: "full"\` adds each complete view), findings (errors/warnings with hints), expectation results. Then use \`observe\` to check how the change actually looks.
 Coordinates are normalized 0–1 world space.",
     "inputSchema": {
       "properties": {
+        "detail": {
+          "description": ""summary" (default): affected entities as id + one-line summary; "full": also their complete post-state view.",
+          "enum": [
+            "summary",
+            "full",
+          ],
+          "type": "string",
+        },
         "dryRun": {
           "type": "boolean",
         },

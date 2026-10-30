@@ -34,6 +34,9 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
    - `state` holds `bpm`, `fixtures`, `groups`, `modifiers`, `livePages` and `selection`;
    - paths use dots, `*` fans out, and numeric segments index arrays;
    - `state.livePages` is the stored form (`mapping.effectId`, `paramKey: "params.<key>"`), unlike the views below.
+   - `state.modifiers` are `modifiers.list` views (`blend`, `spread`, `speed.value`, `targets.fixtureIds`), not the stored instance (WP-L: `state.modifiers.N.blendMode` / `.distribution.*` / `.speed.timeMs` became `.blend` / `.spread.*` / `.speed.value`).
+   - `results.N` is op N's output value; `results.N.value.<key>` (the outcome shape the output shows) is accepted as `results.N.<key>` when that value has no own `value` key (`resultValuePath`).
+   - A failed expectation flags the tool call as an error but does not roll back.
 9. **End-of-batch postconditions** (`OperationDefinition.verifyAfterBatch`): checked once after the last op, on the final state, for problems a later op of the same batch may still fix. Same semantics as `verify` (errors roll back). `modifiers.add` / `update` / `applyRecipe` use it for the `dark-base` warning, so "add chase, then `channels.set` the dimmer" in one batch stays quiet.
 
 ## Modifier ergonomics for agents (WP-L)
@@ -42,6 +45,13 @@ Implements ADR 0002 §4 (plan A0.2, A0.3, A1.1–A1.4). Every caller (later the 
 - **Dark base** (`core/modifier-dark.ts`): `dark-base` warning when targets of a `scale` / `bipolar` layer (or blend `multiply`) have DIMMER base 0 or an all-zero color base, unless the layer itself (absolute output) or an absolute layer below drives that channel. The message names the fixtures and carries a ready `channels.set` op. `observe` adds the same warning in preview (the instance) and live (stack layers on the observed fixtures).
 - **Blend semantics** per output kind are in the `modifiers.add` / `update` description and `docs/ai/skills/effect-authoring/ui-rules.md` *Output and blend*.
 - **Direction.** Agent ops do not use the card's PCA main axis (which can run front-to-back on a two-row rig): `targetShape` replaces it with `directedAxis` (`core/modifier-spread.ts`): left→right along x by default (top→bottom when all targets share one x; a single fixture keeps its own axis). `spread.direction` (`left-to-right` | `right-to-left` | `top-to-bottom` | `bottom-to-top`) on `spatial` / `order` re-places the handle / order line; `origin`/`end`, `ranks`/`fixtureOrder` and `reverse` still win. The card UI keeps PCA.
+
+## Apply result shape (WP-L)
+
+- `diff`: field-level `{ entity, field, from, to }`. A whole new / removed entity is ONE entry `{ field: "added", to: <summary> }` / `{ field: "removed", from: <summary> }` with a one-line summary (e.g. `Wave · chase · scalar DIMMER · 21 fixtures · order left→right · 8 beats/cycle · blend add`), listed first. Path change: `diff.N.to.<field>` of an added entity no longer exists; read new entities through `state.*` or `detail: "full"`.
+- `affected`: `{ entity, summary }`; `detail: "full"` on the request adds `view` (the complete post-state, `null` when removed).
+- Modifier entities in the diff and inspect `modifier:<id>` use the `modifiers.list` view (`core/modifier-view.ts`), so list → update round-trips; the stored `ModifierInstance` is unchanged.
+- The `apply` tool's text summary (`diffLines`) groups entities with identical changes into one line (`fixture bar-1, bar-2, … (21): channels.3.value 0 → 255`), new entities first.
 
 ## Agent vocabulary of live mappings
 

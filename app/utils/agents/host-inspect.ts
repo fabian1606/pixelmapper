@@ -6,6 +6,7 @@ import type { InspectRequest, InspectResult, OperationCaller, OperationContext }
 import type { EventLog, EventQuery } from '~/utils/observability/event-log';
 import type { CoreReadApi } from '~/utils/operations/read-api';
 import { liveWidgetView, livePageView } from '~/utils/operations/core/live';
+import { modifierView } from '~/utils/operations/core/modifier-view';
 import { normalizeInputAliases } from '~/utils/operations/input-aliases';
 import type { OperationRegistry } from '~/utils/operations/registry';
 
@@ -64,8 +65,11 @@ function entityView(deps: InspectDeps, ref: string, full: boolean): unknown {
   switch (type) {
     case 'fixture':
       return fixtureById(full ? i => read.fixtureDetail(i) : i => read.fixture(i));
-    case 'modifier':
-      return read.modifier(id);
+    case 'modifier': {
+      // The agent view (blend / spread / speed.value), like modifiers.list.
+      const index = read.modifiers().findIndex(m => m.id === id);
+      return index < 0 ? null : modifierView(read, read.modifiers()[index]!, index);
+    }
     case 'group':
       return read.groups().find(g => String(g.id) === id) ?? null;
     case 'livePage': {

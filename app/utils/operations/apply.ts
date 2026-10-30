@@ -37,6 +37,7 @@ import type { z } from 'zod';
 import { CompositeCommand } from '~/components/engine/commands/composite-command';
 import { useHistory, type Command } from '~/components/engine/composables/use-history';
 import { eventLog, logEvent } from '~/utils/observability/event-log';
+import { modifierViews } from './core/modifier-view';
 import { affectedEntities, captureState, diffStates } from './diff';
 import { normalizeInputAliases } from './input-aliases';
 import { readApi as defaultReadApi, type CoreReadApi } from './read-api';
@@ -95,10 +96,23 @@ export function expectationState(read: CoreReadApi): Record<string, unknown> {
     bpm: read.bpm(),
     fixtures: read.fixtures(),
     groups: read.groups(),
-    modifiers: read.modifiers(),
+    modifiers: modifierViews(read),
     livePages: read.livePages(),
     selection: read.selection(),
   };
+}
+
+/**
+ * Tolerates the outcome shape the apply output shows (`results: [{ op, kind,
+ * value }]`): `results.N.value.x` → `results.N.x` when op N's value has no own
+ * `value` key (the expectation subject holds the values directly).
+ */
+export function resultValuePath(path: string, values: readonly unknown[]): string {
+  const m = /^results\.(\d+)\.value(\.|$)/.exec(path);
+  if (!m) return path;
+  const v = values[Number(m[1])];
+  if (v && typeof v === 'object' && 'value' in v) return path;
+  return `results.${m[1]}${path.slice(m[0].length - m[2]!.length)}`;
 }
 
 // ── Runner ──────────────────────────────────────
@@ -130,7 +144,7 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
       findings: [...findings, { level: 'error', code: 'invalid-request', message: `${issuesText(parsed.error.issues)}. Expected ${APPLY_ENVELOPE}.` }],
     };
   }
-  const { ops, label, dryRun = false, expect } = parsed.data;
+  const { ops, label, dryRun = false, expect, detail } = parsed.data;
 
   /** Runs an op without executing its commands (also used for composition). */
   async function runOp(id: string, input: unknown, opIndex: number): Promise<{ result: OperationResult<unknown, Command>; input: unknown }> {
@@ -241,9 +255,10 @@ export async function applyOperations(request: ApplyRequest, opts: ApplyOptions 
 
   const after = captureState(read);
   const diff = diffStates(before, after);
-  const affected = affectedEntities(diff, after);
+  const affected = affectedEntities(diff, after, detail === 'full');
+  const values = results.map(r => r.value);
   const expectations = expect?.length
-    ? evaluateExpectations({ state: expectationState(read), diff, results: results.map(r => r.value) }, expect)
+    ? evaluateExpectations({ state: expectationState(read), diff, results: values }, expect.map(e => ({ ...e, path: resultValuePath(e.path, values) })))
     : undefined;
 
   if (dryRun || executed.length === 0) {

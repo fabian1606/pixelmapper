@@ -32,6 +32,8 @@ export interface ApplyRequest {
    * batch, `diff` the semantic changes, `results` the per-op output values.
    */
   expect?: Expectation[];
+  /** `full` adds the complete post-state view of every affected entity (default: summaries). */
+  detail?: 'summary' | 'full';
 }
 
 /** Zod schema of an apply request. */
@@ -43,6 +45,8 @@ export const ApplyRequestSchema = z.object({
   label: z.string().min(1).describe('Short undo label, e.g. "Add rainbow wave".'),
   dryRun: z.boolean().optional(),
   expect: z.array(ExpectationSchema).optional(),
+  detail: z.enum(['summary', 'full']).optional()
+    .describe('"summary" (default): affected entities as id + one-line summary; "full": also their complete post-state view.'),
 });
 
 // ── Result ──────────────────────────────────────
@@ -51,7 +55,7 @@ export const ApplyRequestSchema = z.object({
 export interface SemanticChange {
   /** `<type>:<id>`; types: `project`, `fixture`, `group`, `modifier`, `livePage`, `liveWidget`. */
   entity: string;
-  /** `added` / `removed` for whole entities, else a dot path of the field. */
+  /** `added` / `removed` for whole entities (`to` / `from` = one-line summary), else a dot path of the field. */
   field: string;
   from?: unknown;
   to?: unknown;
@@ -60,8 +64,10 @@ export interface SemanticChange {
 /** Post-state of a touched entity. */
 export interface EntityView {
   entity: string;
-  /** `null` when the entity was removed. */
-  view: unknown;
+  /** One-line post-state summary (`removed` when the entity was removed). */
+  summary: string;
+  /** Complete post-state view, only with `detail: "full"` (`null` when removed). */
+  view?: unknown;
 }
 
 /** Reference to an event-log entry written during the transaction. */
@@ -110,7 +116,7 @@ export const ApplyResultSchema = z.object({
   committed: z.boolean(),
   undoGroupId: z.string().optional(),
   diff: z.array(SemanticChangeSchema),
-  affected: z.array(z.object({ entity: z.string(), view: z.unknown() })),
+  affected: z.array(z.object({ entity: z.string(), summary: z.string(), view: z.unknown().optional() })),
   findings: z.array(FindingSchema),
   results: z.array(z.object({
     op: z.string(),

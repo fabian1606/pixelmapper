@@ -149,3 +149,37 @@ describe('default direction', () => {
     expect(r.b1).toBeLessThan(r.f1!);
   });
 });
+
+describe('views in the input vocabulary and compact apply results', () => {
+  it('diff, affected and expect state speak blend / spread / speed.value', async () => {
+    await apply({ label: 'Add', ops: [{ op: 'modifiers.add', input: { plugin: 'waveform', id: 'w' } }] });
+    const res = await apply({
+      label: 'Update',
+      ops: [{ op: 'modifiers.update', input: { modifierId: 'w', blend: 'multiply', spread: { type: 'same' } } }],
+      expect: [{ path: 'state.modifiers.0.blend', eq: 'multiply' }, { path: 'state.modifiers.0.spread.type', eq: 'same' }],
+    });
+    expect(res.expectations?.every(e => e.pass)).toBe(true);
+    expect(res.diff).toContainEqual({ entity: 'modifier:w', field: 'blend', from: 'add', to: 'multiply' });
+    expect(res.diff.some(c => c.field.startsWith('distribution') || c.field === 'blendMode')).toBe(false);
+  });
+
+  it('a new modifier is one "added" entry with a summary; affected has summaries unless detail is full', async () => {
+    const res = await apply({ label: 'Chase', ops: [{ op: 'modifiers.add', input: { plugin: 'waveform', recipe: 'chase', id: 'c', color: '#0000ff' } }] });
+    const added = res.diff.filter(c => c.entity === 'modifier:c');
+    expect(added).toHaveLength(1);
+    expect(added[0]!.field).toBe('added');
+    expect(added[0]!.to).toMatch(/^Wave · chase · scalar DIMMER · 6 fixtures · order left→right/);
+    expect(res.affected.find(a => a.entity === 'modifier:c')).toEqual({ entity: 'modifier:c', summary: added[0]!.to });
+    const full = await apply({ label: 'Full', detail: 'full', ops: [{ op: 'modifiers.update', input: { modifierId: 'c', strength: 0.5 } }] });
+    expect(full.affected[0]!.view).toMatchObject({ blend: 'add', strength: 0.5 });
+  });
+
+  it('accepts results.N.value.<key> paths as shown in the output', async () => {
+    const res = await apply({
+      label: 'Add',
+      ops: [{ op: 'modifiers.add', input: { plugin: 'waveform', id: 'v' } }],
+      expect: [{ path: 'results.0.value.modifierId', eq: 'v' }, { path: 'results.0.modifierId', eq: 'v' }],
+    });
+    expect(res.expectations?.map(e => e.pass)).toEqual([true, true]);
+  });
+});

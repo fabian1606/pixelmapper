@@ -183,7 +183,9 @@ describe('modifiers.update / remove / reorder / applyRecipe', () => {
     expect(m.speed).toMatchObject({ mode: 'time', timeMs: 1500 });
     expect(m.blendMode).toBe('max');
     expect(res.diff).toContainEqual({ entity: `modifier:${id}`, field: 'params.rangeMin', from: old.params.rangeMin, to: 0.2 });
-    expect(res.diff).toContainEqual({ entity: `modifier:${id}`, field: 'speed.timeMs', from: old.speed.timeMs, to: 1500 });
+    // The diff speaks the input vocabulary (speed.value in seconds, blend), not the stored fields.
+    expect(res.diff).toContainEqual({ entity: `modifier:${id}`, field: 'speed.value', from: old.speed.beatValue, to: 1.5 });
+    expect(res.diff).toContainEqual({ entity: `modifier:${id}`, field: 'blend', from: old.blendMode, to: 'max' });
     expectUndoRestores(before);
   });
 
