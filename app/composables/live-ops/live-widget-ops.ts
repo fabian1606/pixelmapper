@@ -26,6 +26,11 @@ registerLiveOp<WidgetTriggerPayload>('widget.trigger', {
 type TriggerHandler = (pageId: string, widgetId: string, active: boolean, controlId?: string) => void;
 const widgetTriggerHandlers = new Set<TriggerHandler>();
 
+/** Notifies this tab's views of a press / release (the live op only reaches other tabs). */
+export function emitWidgetTriggerLocal(pageId: string, widgetId: string, active: boolean, controlId?: string): void {
+  widgetTriggerHandlers.forEach(h => h(pageId, widgetId, active, controlId));
+}
+
 export function onWidgetTrigger(handler: TriggerHandler): () => void {
   widgetTriggerHandlers.add(handler);
   return () => widgetTriggerHandlers.delete(handler);

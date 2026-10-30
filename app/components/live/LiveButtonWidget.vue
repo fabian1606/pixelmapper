@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue';
-import { Zap } from 'lucide-vue-next';
-import type { LiveWidget, SpeedConfig } from '~/utils/live/types';
+import { ref, computed, onUnmounted, watch } from 'vue';
+import type { LiveWidget } from '~/utils/live/types';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
 import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
-import { applyMapping, isFlashMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { hasPendingLongPress, isButtonActive, longPressProgress, pressButton, releaseButton } from '~/composables/live-ops/button-runtime';
+import { appearanceLevel, autoColor, autoLabel, isAnimatedLook, sectionTrigger, triggerBadge } from '~/utils/live/button-actions';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
@@ -22,42 +23,57 @@ const pressed = ref(false);
 
 const section = useSectionBinding({ widget: () => props.widget });
 
-const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed' };
-
-function speedLabel(cfg: SpeedConfig): string {
-  if (cfg.multiplier === 0) return 'Freeze';
-  if (cfg.multiplier === 1) return 'Reset 1×';
-  if (cfg.multiplier === 0.5) return '½×';
-  return `${cfg.multiplier}×`;
-}
-
-function autoLabel(w: typeof props.widget): string | null {
-  const m = w.mapping;
-  if (m.type === 'global-function' && m.globalFunction === 'speed') {
-    return speedLabel((m.globalFunctionConfig ?? { multiplier: 1, behavior: 'latch' }) as SpeedConfig);
-  }
-  if (m.type === 'global-function' && m.globalFunction) return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
-  if (m.type === 'preset' && m.presetId) {
-    const p = engineStore.savedPresets.find((sp: any) => sp.id === m.presetId);
-    if (p?.name) return p.name;
-  }
-  return null;
-}
-
 // Visual label/color: section binding wins when this widget is part of a section.
-const displayLabel = computed(() => section.effectiveLabel.value ?? props.widget.label ?? autoLabel(props.widget) ?? props.widget.type);
-const displayColor = computed(() => section.effectiveColor.value ?? props.widget.color ?? '#334155');
+const displayLabel = computed(() =>
+  section.effectiveLabel.value
+  ?? (props.widget.label || autoLabel(props.widget.actions, engineStore.savedPresets))
+  ?? 'Button',
+);
+const baseColor = computed(() =>
+  section.effectiveColor.value
+  ?? (props.widget.color || autoColor(props.widget.actions, engineStore.savedPresets))
+  ?? '#334155',
+);
 
-// Single/multi-select sections also light up when "active" without being held.
-const visuallyActive = computed(() => pressed.value || section.isActive.value);
+/** Look: the section's shared one for members, the button's own otherwise. */
+const appearance = computed(() => (section.membership.value ? section.membership.value.section.appearance : props.widget.appearance));
 
-const isFlash = computed(() => {
-  // Section flash mode
-  if (section.membership.value?.section.mode === 'flash') return true;
-  // Section bound preset is flash
-  if (section.boundPreset.value?.type === 'flash') return true;
-  // Own mapping flash/overwrite/global-function detection (shared with controller twins).
-  return isFlashMapping(props.widget.mapping);
+// Lit while held, while a section slot is active, or while one of its actions runs.
+const visuallyActive = computed(() =>
+  pressed.value || section.isActive.value || isButtonActive(props.widget.id, props.widget.actions),
+);
+
+// ── Animated look (blink / pulse) and long-press bar ────────────────────────
+const now = ref(performance.now());
+let raf = 0;
+function tick() {
+  now.value = performance.now();
+  raf = requestAnimationFrame(tick);
+}
+/** Only animate while something actually moves. */
+const needsFrames = computed(() =>
+  (visuallyActive.value && isAnimatedLook(appearance.value)) || hasPendingLongPress(props.widget.id),
+);
+watch(needsFrames, (on) => {
+  cancelAnimationFrame(raf);
+  if (on) raf = requestAnimationFrame(tick);
+}, { immediate: true });
+onUnmounted(() => cancelAnimationFrame(raf));
+
+const displayColor = computed(() => {
+  const bpm = engineStore.engine?.globalBpm?.value ?? 120;
+  const level = appearanceLevel(appearance.value, visuallyActive.value, now.value, bpm);
+  if (level >= 1) return baseColor.value;
+  return `color-mix(in srgb, ${baseColor.value} ${Math.round(level * 100)}%, #0a0a0a)`;
+});
+
+const longProgress = computed(() => longPressProgress(props.widget.id, now.value));
+
+/** Small corner badge: which trigger kinds this button uses. */
+const badge = computed(() => {
+  const m = section.membership.value;
+  if (m) return sectionTrigger(m.section) === 'hold' || section.boundPreset.value?.type === 'flash' ? '⚡' : '';
+  return triggerBadge(props.widget.actions);
 });
 
 const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
@@ -69,16 +85,12 @@ onUnmounted(offTrigger);
 
 const dimmerState = createDimmerState();
 
-function applyOwnMapping(active: boolean) {
-  applyMapping(props.widget.mapping, active, { key: props.widget.id, dimmerState });
-}
-
 /** pm.button pressed. */
 function onPress() {
   if (props.editMode) return;
   pressed.value = true;
   if (section.membership.value) section.press();
-  else applyOwnMapping(true);
+  else pressButton(props.widget.actions, { key: props.widget.id, dimmerState });
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true });
 }
 
@@ -87,7 +99,7 @@ function onRelease() {
   if (props.editMode) return;
   pressed.value = false;
   if (section.membership.value) section.release();
-  else applyOwnMapping(false);
+  else releaseButton(props.widget.actions, { key: props.widget.id, dimmerState });
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false });
 }
 </script>
@@ -103,6 +115,15 @@ function onRelease() {
     @press="onPress"
     @release="onRelease"
   >
-    <Zap v-if="isFlash" class="absolute bottom-0.5 right-0.5 size-2.5 text-yellow-400 drop-shadow" :stroke-width="2.5" />
+    <span
+      v-if="badge"
+      class="absolute bottom-0.5 right-1 text-[9px] font-mono leading-none text-yellow-400 drop-shadow pointer-events-none"
+    >{{ badge }}</span>
+    <!-- Long press: fills along the bottom edge, primary once it fired -->
+    <span
+      v-if="longProgress !== null"
+      class="absolute left-0 bottom-0 h-1 rounded-bl pointer-events-none bg-white/85"
+      :style="{ width: `${longProgress * 100}%` }"
+    />
   </Replaceable>
 </template>

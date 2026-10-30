@@ -10,6 +10,10 @@ import { setColorOverride, getEffectiveRGB } from '~/composables/live-ops/color-
 import type { Preset } from '~/utils/engine/preset-types';
 import type { RGB } from '~/utils/live/color-utils';
 import { getPresetNaturalRGB } from '~/utils/live/color-utils';
+import { sectionTrigger } from '~/utils/live/button-actions';
+
+/** Active preset before a toggle section was switched on, per section id (to go back to). */
+const presetBeforeSection = new Map<string, string | null>();
 
 /** RGB within ±1 per channel (rounding tolerance from HSV→RGB conversions). */
 function rgbEquals(a: RGB | null, b: RGB | null): boolean {
@@ -58,7 +62,7 @@ function setActiveSet(
   const map = new Map(liveStore.activeSectionMembers);
   map.set(sectionId, next);
   liveStore.activeSectionMembers = map;
-  // Broadcast latched state so other tabs mirror single-/multi-select sections.
+  // Broadcast latched state so other tabs mirror latched sections.
   // Flash-mode press+release will fire this twice (active + empty); harmless.
   // Deferred to next microtask so the LiveBus dispatch doesn't sit in the
   // synchronous click handler that just kicked off the engine flush.
@@ -103,7 +107,8 @@ export function sectionPress(args: {
   const cur = liveStore.activeSectionMembers.get(bound.membership.section.id) ?? new Set<string>();
   const isAutoColor = bound.membership.section.source === 'color-variants'
     || (bound.membership.section.source as string) === 'auto-color-variants';
-  const isFlash = bound.membership.section.mode === 'flash' || bound.preset.type === 'flash';
+  const trigger = sectionTrigger(bound.membership.section);
+  const isFlash = trigger === 'hold' || bound.preset.type === 'flash';
 
   if (isAutoColor) {
     // Color-variant slots don't switch presets — they override the active preset's base color.
@@ -114,15 +119,16 @@ export function sectionPress(args: {
     next.add(key);
     setActiveSet(liveStore, bound.membership.section.id, next);
     pressFlashPreset(key, bound.preset.id);
-  } else if (bound.membership.section.mode === 'single-select') {
+  } else if (trigger === 'toggle' && cur.has(key)) {
+    // Pressing the lit button again goes back to the preset from before.
+    setActiveSet(liveStore, bound.membership.section.id, new Set());
+    setActivePreset(presetBeforeSection.get(bound.membership.section.id) ?? null);
+    presetBeforeSection.delete(bound.membership.section.id);
+  } else {
+    // press / toggle-on: exactly one member is active, since only one preset can be.
+    if (cur.size === 0) presetBeforeSection.set(bound.membership.section.id, engineStore.selectedPresetId);
     setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
     setActivePreset(bound.preset.id);
-  } else {
-    const next = new Set(cur);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    setActiveSet(liveStore, bound.membership.section.id, next);
-    if (next.has(key)) setActivePreset(bound.preset.id);
   }
   return true;
 }
@@ -138,8 +144,8 @@ export function sectionRelease(args: {
   const bound = findBoundPreset(page, args.widgetId, args.controlId, engineStore.savedPresets, engineStore.selectedPresetId);
   if (!bound) return false;
   const { section } = bound.membership;
-  const isFlash = section.mode === 'flash' || bound.preset.type === 'flash';
-  // Single/multi-select sections without a flash preset stay latched on release.
+  const isFlash = sectionTrigger(section) === 'hold' || bound.preset.type === 'flash';
+  // Press / toggle sections without a flash preset stay latched on release.
   if (!isFlash) return true;
   const key = memberKey({ widgetId: args.widgetId, controlId: args.controlId });
   const cur = liveStore.activeSectionMembers.get(section.id) ?? new Set<string>();
@@ -178,6 +184,9 @@ export function useSectionBinding(args: {
   const boundPreset = computed(() => bound.value?.preset ?? null);
   const effectiveLabel = computed(() => bound.value?.label ?? boundPreset.value?.name ?? null);
   const effectiveColor = computed(() => {
+    // A shared section color (Appearance) wins over the slot's preset color.
+    const shared = bound.value?.membership.section.color;
+    if (shared) return shared;
     const c = bound.value?.colorOverride;
     if (c) return `rgb(${c.r}, ${c.g}, ${c.b})`;
     return boundPreset.value ? getPresetMainColor(boundPreset.value) : null;

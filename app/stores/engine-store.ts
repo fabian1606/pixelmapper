@@ -306,7 +306,13 @@ export const useEngineStore = defineStore('engine', () => {
     flushEngineOutput();
   }
 
-  function clearOverwriteStack() {
+  /**
+   * Ends every overwrite and restores the state from before them. With
+   * `flush: false` nothing is output yet, so a caller that changes more state
+   * right after (Stop all) sends a single frame instead of a flash of the
+   * restored look.
+   */
+  function clearOverwriteStack(opts: { flush?: boolean } = {}) {
     _stopStrobeTimer();
     if (overwriteStack.value.length > 0) {
       if (baseSnapshot) _restoreBaseSnapshot(baseSnapshot);
@@ -315,7 +321,7 @@ export const useEngineStore = defineStore('engine', () => {
     overwriteStack.value.splice(0);
     baseSnapshot = null;
     baseModifiersSnapshot = null;
-    flushEngineOutput();
+    if (opts.flush !== false) flushEngineOutput();
   }
 
   const engine = markRaw(new EffectEngine());

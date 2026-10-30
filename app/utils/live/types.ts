@@ -40,7 +40,8 @@ export interface MovingHeadPosition {
   }>
 }
 
-export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed'
+/** `stop-all` is instant: clears preset, flashes, overwrites, toggles and speed. */
+export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed' | 'stop-all'
 
 export interface StrobeConfig {
   frequency: number
@@ -100,6 +101,66 @@ export interface LiveMapping {
   positionId?: string
 }
 
+// ── Button actions ────────────────────────────────────────────────────────────
+
+/** When a button action fires. */
+export type ButtonTrigger = 'press' | 'double' | 'long' | 'hold' | 'release' | 'toggle';
+
+/** MIDI note or controller that presses a button (any input port). */
+export interface MidiTrigger {
+  type: 'note' | 'cc';
+  /** MIDI channel 1–16. */
+  channel: number;
+  /** Note or controller number 0–127. */
+  number: number;
+}
+
+/** How long a fired action lasts (only for press / double / long / release). */
+export type ActionDuration =
+  | { mode: 'forever' }
+  | { mode: 'beats'; beats: number }
+  | { mode: 'time'; ms: number }
+  /** One pass of the preset's slowest modifier (presets only). */
+  | { mode: 'once' };
+
+/** How long a long press must be held. */
+export type HoldTime = { mode: 'beats'; beats: number } | { mode: 'time'; ms: number };
+
+/** One step of a button's script: trigger → action → duration. */
+export interface ButtonAction {
+  id: string;
+  trigger: ButtonTrigger;
+  /** Reuses the mapping shape (preset, global function, page switch, …). */
+  action: LiveMapping;
+  /** Absent = forever. Ignored for hold / toggle and instant actions. */
+  duration?: ActionDuration;
+  /** Required hold time for trigger === 'long'. Absent = 1 s. */
+  hold?: HoldTime;
+  /** Set once the user picked the trigger, so smart defaults stop overriding it. */
+  triggerTouched?: boolean;
+}
+
+/**
+ * Outside inputs that press the button like a click / pad hit: key down or
+ * note-on presses, key up or note-off releases, so every trigger works.
+ */
+export interface ButtonInputs {
+  /** `KeyboardEvent.code`, e.g. "KeyB", "Space". */
+  key?: string;
+  midi?: MidiTrigger;
+}
+
+/** How a button looks while active. */
+export type ButtonActiveLook = 'full' | 'blink' | 'pulse';
+/** How a button looks while inactive. */
+export type ButtonInactiveLook = 'dim' | 'off' | 'full';
+
+/** Look of a button on the canvas and of its controller LED. Absent fields = defaults (full / dim). */
+export interface ButtonAppearance {
+  active?: ButtonActiveLook;
+  inactive?: ButtonInactiveLook;
+}
+
 /**
  * Per-control mapping override stored inside a controller-twin widget.
  * Children are NOT canvas widgets — they are mapping records keyed by a
@@ -108,8 +169,15 @@ export interface LiveMapping {
 export interface ControllerChildBinding {
   controlId: string
   label?: string
+  /** Own color; absent = derived from the first preset action. */
   color?: string
+  /** Fader mapping. Pads use `actions` instead. */
   mapping: LiveMapping
+  /** Pad script (pads only). */
+  actions?: ButtonAction[]
+  appearance?: ButtonAppearance
+  /** Keyboard / MIDI that also press this pad. */
+  inputs?: ButtonInputs
 }
 
 export interface LiveWidget {
@@ -121,7 +189,13 @@ export interface LiveWidget {
   gridH: number
   label?: string
   color?: string
+  /** Slider mapping. Buttons use `actions` instead. */
   mapping: LiveMapping
+  /** Button script (button widgets only). */
+  actions?: ButtonAction[]
+  appearance?: ButtonAppearance
+  /** Keyboard / MIDI that also press this button. */
+  inputs?: ButtonInputs
   // controller-twin specific
   controllerKey?: string
   /** ID of the specific LiveControllerInstance this twin is bound to. */
@@ -134,7 +208,14 @@ export interface LiveWidget {
 }
 
 export type SectionSource = 'all-presets' | 'selected-presets' | 'preset-variants' | 'color-variants'
-export type SectionMode = 'flash' | 'single-select' | 'multi-select'
+/**
+ * How a section button reacts. Exactly one member is active at a time,
+ * because only one preset can be active:
+ * - press: pressed button becomes active (stays)
+ * - hold: active while held, then back to the previous preset
+ * - toggle: like press; pressing the lit button again goes back
+ */
+export type SectionTrigger = 'press' | 'hold' | 'toggle'
 
 export interface SectionMember {
   widgetId: string
@@ -149,8 +230,13 @@ export interface LiveSection {
   id: string
   name?: string
   source: SectionSource
-  mode: SectionMode
+  /** Absent = 'press'. */
+  trigger?: SectionTrigger
   members: SectionMember[]
+  /** Shared color for all members; empty / absent = each slot's preset color. */
+  color?: string
+  /** Shared look for all members. */
+  appearance?: ButtonAppearance
   /**
    * For source === 'selected-presets': an ordered, user-curated list of preset
    * IDs. Slot order follows this list (filtered to presets that still exist),
@@ -224,5 +310,12 @@ export function defaultLiveWidget(type: LiveWidgetType, gridX = 0, gridY = 0, si
     gridW: w,
     gridH: h,
     mapping: { type: 'none' },
+    // A button always starts with one "On press" action; the user picks what it does.
+    ...(type === 'button' ? { actions: [defaultButtonAction()] } : {}),
   }
+}
+
+/** The action every button starts with: On press, nothing chosen yet. */
+export function defaultButtonAction(): ButtonAction {
+  return { id: crypto.randomUUID(), trigger: 'press', action: { type: 'none' } }
 }
