@@ -10,7 +10,6 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from './composables/use-history';
 import { Button } from '@/components/ui/button';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
-import { createHighlightCommand } from './commands/highlight-fixture-command';
 import {
   Trash2,
   AlignHorizontalDistributeCenter,
@@ -112,14 +111,18 @@ const emit = defineEmits<{
 const { openMenu } = useGlobalContextMenu();
 const fixtureEditor = ref<InstanceType<typeof FixtureEditor> | null>(null);
 
-function handleHighlightSelected() {
-  const targets = flatFixtures.value.filter(f => {
+/** Fixtures that are selected themselves or sit inside a selected group. */
+function selectedFixtures() {
+  return flatFixtures.value.filter(f => {
     let c: SceneNode | null = f;
     while (c) { if (selectedIds.value.has(c.id)) return true; c = c.parent; }
     return false;
   });
-  const command = createHighlightCommand(targets);
-  if (command) history.execute(command);
+}
+
+/** Starts/stops blinking the selected fixtures white (identify on the rig). */
+function handleHighlightSelected() {
+  engineStore.toggleHighlight(selectedFixtures());
 }
 
 function onWorkspaceContextMenu(e: MouseEvent) {
@@ -133,7 +136,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
     });
 
     options.push({
-      label: 'Highlight (Set to White)',
+      label: engineStore.isHighlighted(selectedFixtures()) ? 'Stop Highlight' : 'Highlight (Blink White)',
       icon: Lightbulb,
       action: handleHighlightSelected,
     });

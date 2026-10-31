@@ -22,6 +22,7 @@ import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { cloneModifiers } from '~/utils/engine/modifiers';
+import { applyHighlight, buildHighlightSlots, type HighlightSlot } from '~/utils/engine/highlight-overlay';
 import { getManifest, loadWasm, resolve as resolvePlugin, resolveErrors } from '~/utils/plugins/plugin-store';
 import { BUILTIN_PLUGINS } from '~/utils/plugins/builtin-index';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
@@ -618,6 +619,7 @@ export const useEngineStore = defineStore('engine', () => {
 
   function clearAllOverrides() {
     overrideMap.value = new Map();
+    clearHighlight();
     resetFixtureChannels(flatFixtures.value);
     // Route effects clear through history so it's pushed to the Supabase tail
     // and survives page reloads. Without this, the tail still contains the
@@ -635,6 +637,33 @@ export const useEngineStore = defineStore('engine', () => {
       if (key >= start && key < end) next.delete(key);
     }
     overrideMap.value = next;
+  }
+
+  // ── Highlight layer ───────────────────────────────────────────────────────
+
+  /** Fixtures currently blinking white (identify on the rig); not persisted. */
+  const highlightedFixtureIds = shallowRef(new Set<string | number>());
+  /** Buffer slots of the highlighted fixtures; rebuilt when the patch changes. */
+  let highlightSlots: HighlightSlot[] = [];
+  watch([highlightedFixtureIds, layoutRevision], ([ids]) => {
+    highlightSlots = ids.size === 0 ? [] : buildHighlightSlots(flatFixtures.value.filter(f => ids.has(f.id)));
+  });
+
+  /** True when every one of `fixtures` is highlighted. */
+  function isHighlighted(fixtures: Fixture[]): boolean {
+    return fixtures.length > 0 && fixtures.every(f => highlightedFixtureIds.value.has(f.id));
+  }
+
+  /** Starts (or, when all are already highlighted, stops) the highlight of `fixtures`. */
+  function toggleHighlight(fixtures: Fixture[]) {
+    const stop = isHighlighted(fixtures);
+    const next = new Set(highlightedFixtureIds.value);
+    for (const f of fixtures) stop ? next.delete(f.id) : next.add(f.id);
+    highlightedFixtureIds.value = next;
+  }
+
+  function clearHighlight() {
+    if (highlightedFixtureIds.value.size > 0) highlightedFixtureIds.value = new Set();
   }
 
   // ── Render loop state ─────────────────────────────────────────────────────
@@ -899,6 +928,8 @@ export const useEngineStore = defineStore('engine', () => {
           if (idx < outputBuffer.length) outputBuffer[idx] = val;
         }
       }
+      // Highlight sits on top of everything so effects can't mask it.
+      if (highlightSlots.length > 0) applyHighlight(outputBuffer, highlightSlots, Date.now());
 
       connectionsStore.sendFrame(outputBuffer);
       // Extension live values (no-op without subscribers).
@@ -1208,6 +1239,8 @@ export const useEngineStore = defineStore('engine', () => {
     await closeSession();
     const generation = loadGeneration;
     currentProjectId.value = projectId;
+    // Highlight is a transient identify aid; it never carries into another project.
+    clearHighlight();
     projectLoading.value = true;
     projectError.value = null;
     // Installed extension bundles must be registered before fixtures (kinds)
@@ -1473,6 +1506,10 @@ export const useEngineStore = defineStore('engine', () => {
     clearOverride,
     clearAllOverrides,
     clearUniverseOverrides,
+    highlightedFixtureIds,
+    isHighlighted,
+    toggleHighlight,
+    clearHighlight,
     getOutputBuffer,
     initEngine,
     triggerCanvasSync,

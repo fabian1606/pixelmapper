@@ -276,11 +276,11 @@ async function updateDmx() {
 
 <template>
   <!--
-    At most 60 % of the sidebar, so extension sections below the fixture
+    At most 45 % of the sidebar, so extension sections below the fixture
     fields cannot push the scene list away; the content scrolls instead.
   -->
   <div
-    class="border-t border-border bg-sidebar/50 flex flex-col min-h-0 max-h-[60%] transition-opacity duration-200"
+    class="border-t border-border bg-sidebar/50 flex flex-col min-h-0 max-h-[45%] transition-opacity duration-200"
     :class="{ 'opacity-40 grayscale pointer-events-none select-none': !hasSelection }"
   >
     <!-- Header -->
