@@ -16,12 +16,12 @@ import { randomBytes } from 'node:crypto';
 
 // ── Hardware repo ──────────────────────────────
 
-/** Default location of the hardware repo's bridge worktree on the developer machine. */
-export const DEFAULT_HARDWARE_DIR = '/Users/fabian.rafreider/Documents/projekte/pixelmapper-hardware-wt/bridge-adapter';
+/** Default location of the hardware repo checkout on the developer machine. */
+export const DEFAULT_HARDWARE_DIR = '/Users/fabian.rafreider/Documents/projekte/pixelmapper-hardware';
 
 /**
  * The hardware repo to test against: `PIXELMAPPER_HARDWARE_DIR`, else the
- * default worktree when it exists; null when neither is usable (the suite
+ * default checkout when it exists; null when neither is usable (the suite
  * is skipped then).
  */
 export function resolveHardwareDir(): string | null {
