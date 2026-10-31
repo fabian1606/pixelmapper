@@ -69,7 +69,7 @@ pixelmapper/
 ├── rs-engine/
 │   ├── core/                      # Engine, binary protocol, signatures, phase/beat clock, ModifierRuntime
 │   └── canvas/                    # 2D renderer: generic kind primitives + handles (WASM only)
-├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs), config, icons — ADR 0003
+├── src-tauri/                     # Desktop app (Tauri 2): native commands (udp.rs, midi.rs), config, icons — ADR 0003
 ├── scripts/                       # build-plugins, build-extensions, check-extensions, check-zero-extensions, generate-ai-docs
 ├── tools/artnet-bridge/           # Local WebSocket → UDP ArtNet bridge
 ├── supabase/migrations/           # Database schema (005 content plugins, 006 extensions)

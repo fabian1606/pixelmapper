@@ -7,6 +7,7 @@
 mod files;
 mod lifecycle;
 mod menu;
+mod midi;
 mod net;
 mod udp;
 
@@ -17,14 +18,24 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(udp::UdpSockets::default())
         .manage(lifecycle::QuitGuard::default())
-        // Native menu bar; clicks are forwarded to the frontend as `app-menu` events.
-        .setup(|app| Ok(menu::setup(app.handle())?))
+        .manage(midi::MidiConnections::default())
+        // Native menu bar (clicks forwarded as `app-menu` events) and the
+        // main-thread MIDI client that receives hot-plug notifications.
+        .setup(|app| {
+            midi::warm_up();
+            Ok(menu::setup(app.handle())?)
+        })
         // Closing the window lets the frontend flush pending writes first.
         .on_window_event(lifecycle::on_window_event)
         .invoke_handler(tauri::generate_handler![
             udp::udp_bind,
             udp::udp_send,
             udp::udp_close,
+            midi::midi_list,
+            midi::midi_open_input,
+            midi::midi_open_output,
+            midi::midi_send,
+            midi::midi_close,
             menu::menu_set_recent,
             menu::menu_set_project_open,
             files::save_project_file,

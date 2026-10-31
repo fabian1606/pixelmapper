@@ -22,3 +22,5 @@ serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
 # Native HTTP for firmware downloads (net.rs, ADR 0004 D19); rustls, no OpenSSL.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Native MIDI for the platform `MidiApi` (midi.rs); WKWebView has no Web MIDI.
+midir = "0.10"

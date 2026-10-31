@@ -3,12 +3,13 @@
  *
  * Every capability not yet ported keeps its web implementation (or `null`
  * where WKWebView lacks it). Ported so far: `udp` (step 2), `http` and
- * `resources` (ADR 0004 D19). Next: `serial` and `midi` (step 3).
+ * `resources` (ADR 0004 D19), `midi` (step 3). Next: `serial` (step 3).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebPlatform } from '../web';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createTauriUdp } from './udp';
+import { createTauriMidi } from './midi';
 import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
@@ -25,6 +26,7 @@ export function createPlatform(): Platform {
     ...createWebPlatform(),
     kind: 'tauri',
     udp: createTauriUdp(),
+    midi: createTauriMidi(),
     http: createTauriHttp(),
     resources: createTauriResources(),
   };
