@@ -15,12 +15,12 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
 import { Trash2, Lightbulb } from 'lucide-vue-next';
 import { isAdditiveModifier } from '~/utils/engine/selection-logic';
-import { createHighlightCommand } from '~/components/engine/commands/highlight-fixture-command';
 import PmListItem from '~/components/primitives/PmListItem.vue';
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { fixtureView } from '~/utils/extensions/scope-views';
 import { useScopeSnapshot } from '~/composables/extensions/use-scope';
 import { useCanvasHoverStore } from '~/stores/canvas-hover-store';
+import { useEngineStore } from '~/stores/engine-store';
 
 const props = defineProps<{
   node: SceneNode;
@@ -131,9 +131,11 @@ function collectFixtures(node: SceneNode): Fixture[] {
   return [node as Fixture];
 }
 
+const engineStore = useEngineStore();
+
+/** Starts/stops blinking this node's fixtures white (identify on the rig). */
 function handleHighlight() {
-  const command = createHighlightCommand(collectFixtures(props.node));
-  if (command) history.execute(command);
+  engineStore.toggleHighlight(collectFixtures(props.node));
 }
 
 function onContextMenu(e: MouseEvent) {
@@ -164,7 +166,7 @@ function onContextMenu(e: MouseEvent) {
   });
 
   options.push({
-    label: 'Highlight (Set to White)',
+    label: engineStore.isHighlighted(collectFixtures(props.node)) ? 'Stop Highlight' : 'Highlight (Blink White)',
     icon: Lightbulb,
     action: handleHighlight,
   });

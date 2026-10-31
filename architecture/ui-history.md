@@ -68,5 +68,6 @@ Domain inputs (faders, number fields, color/XY inputs, tap tempo, trigger button
 `FixtureSidebar.vue` provides a navigable tree of all fixtures and groups with:
 
 - **Fixture tree tab** — Hierarchical view with selection sync to the canvas editor. Hovering a fixture in the 2D canvas highlights its row (`canvas-hover-store.ts`), also inside a selected group, and scrolls it into view.
+- **Highlight (identify)** — Context menu of a tree row or the canvas selection: "Highlight (Blink White)" / "Stop Highlight" toggles the fixtures blinking full white at 2 Hz. Not a history command and not persisted: `engine-store` keeps the highlighted ids and writes `highlight-overlay.ts` slots onto the final output buffer after the Simple Desk overrides, so effects can't mask it (needed for RGB-only fixtures, which have no dimmer). Cleared by "Clear all" and on project load.
 - **Preset/programmer tab** — Active preset management.
 - **Selection info** — Average X/Y position for multi-selections; full channel details (address, type, manufacturer, model) for single selections.
