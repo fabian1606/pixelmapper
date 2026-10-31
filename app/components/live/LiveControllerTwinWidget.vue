@@ -16,6 +16,7 @@ import { hasPendingLongPress, isButtonActive, longPressProgress, pressButton, re
 import { appearanceLevel, autoColor, autoLabel, isAnimatedLook, sectionTrigger } from '~/utils/live/button-actions';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
 import { memberKey, findSectionFor } from '~/utils/live/sections';
+import { formatSpeed, speedToFader } from '~/utils/live/speed-fader';
 import type { ControlFeedbackState, ControlInputEvent, ControllerControl } from '~/utils/controllers/types';
 
 const props = defineProps<{
@@ -115,6 +116,8 @@ type SliderRig = {
   rangeBottomY: number;
   knobOriginY: number;
   knobHeight: number;
+  /** Readout above the track (speed faders only). */
+  readout: SVGTextElement;
 };
 type Rig = ButtonRig | SliderRig;
 
@@ -212,10 +215,24 @@ function applyButtonFill(id: string) {
   }
 }
 
+/**
+ * Where a fader's knob is drawn. Speed faders show the current multiplier
+ * (snapped to its step / the 1× dead zone, following speed changes made
+ * elsewhere) instead of the raw position — the hardware has no motor faders,
+ * so the twin is where the snapped value is visible.
+ */
+function knobValue(id: string): number {
+  const mapping = getChild(id)?.mapping;
+  if (mapping?.type === 'speed') return speedToFader(engineStore.speedMultiplier, mapping.speedMode ?? 'continuous');
+  return faderValues.value.get(id) ?? 0;
+}
+
 function applyKnob(id: string) {
   const rig = rigs.get(id);
   if (!rig || rig.kind !== 'slider') return;
-  const v = faderValues.value.get(id) ?? 0;
+  const v = knobValue(id);
+  const isSpeed = getChild(id)?.mapping.type === 'speed';
+  rig.readout.textContent = isSpeed ? formatSpeed(engineStore.speedMultiplier) : '';
   const targetTop = rig.rangeTopY + (1 - v) * (rig.rangeBottomY - rig.rangeTopY - rig.knobHeight);
   const dy = targetTop - rig.knobOriginY;
   rig.knob.setAttribute('transform', `translate(0 ${dy.toFixed(2)})`);
@@ -730,6 +747,22 @@ function wireButton(ctrl: ControllerControl, el: SVGGraphicsElement, svg: SVGSVG
   });
 }
 
+/** Small text centered just above a fader's track; empty unless the fader shows a value. */
+function createFaderReadout(group: SVGGElement, rangeBox: DOMRect): SVGTextElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const text = document.createElementNS(NS, 'text');
+  text.setAttribute('x', (rangeBox.x + rangeBox.width / 2).toString());
+  text.setAttribute('y', (rangeBox.y - 2.5).toString());
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('font-size', '7');
+  text.setAttribute('font-family', 'ui-monospace, monospace');
+  text.setAttribute('fill', '#ffffff');
+  text.setAttribute('pointer-events', 'none');
+  group.appendChild(text);
+  cleanupFns.push(() => text.remove());
+  return text;
+}
+
 function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElement) {
   const knob  = group.querySelector('g[id^="knob"], g[id*="knob"]') as SVGGraphicsElement | null;
   const range = group.querySelector('rect[id^="range"], rect[id*="range"]') as SVGGraphicsElement | null;
@@ -747,6 +780,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     rangeBottomY: rangeBox.y + rangeBox.height,
     knobOriginY:  knobBox.y,
     knobHeight:   knobBox.height,
+    readout:      createFaderReadout(group, rangeBox),
   };
   rigs.set(ctrl.id, rig);
   group.style.cursor = 'ns-resize';
@@ -849,7 +883,8 @@ watch(pressedControls, () => {
   kickAnimation();
 }, { deep: true });
 
-watch(faderValues, () => {
+// Fader positions, the speed multiplier (speed faders) and fader mappings all move knobs / readouts.
+watch([faderValues, () => engineStore.speedMultiplier, () => props.widget.controllerChildren], () => {
   for (const id of rigs.keys()) {
     const rig = rigs.get(id);
     if (rig?.kind === 'slider') applyKnob(id);

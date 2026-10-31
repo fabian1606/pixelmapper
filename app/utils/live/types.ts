@@ -27,7 +27,13 @@ export interface LiveControllerInstance {
   definitionKey: string
 }
 
-export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'position-recall' | 'none'
+export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'position-recall' | 'speed' | 'none'
+
+/**
+ * How a `speed` fader maps onto the speed multiplier (see utils/live/speed-fader.ts):
+ * `continuous` = ½×–2× around 1× in the center; `steps` = snaps to ¼×, ½×, 1×, 2×, 4×.
+ */
+export type SpeedFaderMode = 'continuous' | 'steps'
 
 export interface MovingHeadPosition {
   id: string
@@ -97,6 +103,8 @@ export interface LiveMapping {
   fixtureIds?: (string | number)[]
   // position-recall
   positionId?: string
+  // speed (faders only); absent = 'continuous'
+  speedMode?: SpeedFaderMode
 }
 
 // ── Button actions ────────────────────────────────────────────────────────────

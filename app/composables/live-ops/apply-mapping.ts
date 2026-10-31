@@ -4,6 +4,7 @@ import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset } from '~/components/engine/composables/preset-activation';
+import { faderToSpeed } from '~/utils/live/speed-fader';
 
 /**
  * Shared runtime dispatcher for a {@link LiveMapping}. Used by canvas buttons,
@@ -224,6 +225,13 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
     } else if (cfg.behavior === 'hold') {
       engineStore.setSpeedMultiplier(1);
       queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: 1 }));
+    }
+  } else if (mapping.type === 'speed' && value !== undefined) {
+    // Speed fader: sets the multiplier on top of the tapped BPM; only broadcast real changes.
+    const multiplier = faderToSpeed(value, mapping.speedMode ?? 'continuous');
+    if (multiplier !== engineStore.speedMultiplier) {
+      engineStore.setSpeedMultiplier(multiplier);
+      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier }));
     }
   } else if (mapping.type === 'position-recall' && mapping.positionId && active) {
     const position = store.savedPositions.find((p: any) => p.id === mapping.positionId);

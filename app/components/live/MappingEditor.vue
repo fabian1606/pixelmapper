@@ -2,7 +2,7 @@
 import { modifierName } from '~/utils/engine/modifiers';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import { computed } from 'vue';
-import type { LiveMapping, GlobalFunctionType, SpeedConfig, StrobeConfig, BlindConfig } from '~/utils/live/types';
+import type { LiveMapping, GlobalFunctionType, SpeedConfig, SpeedFaderMode, StrobeConfig, BlindConfig } from '~/utils/live/types';
 import { defaultStrobeConfig, defaultBlindConfig, defaultSpeedConfig } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveModeStore } from '~/stores/live-mode-store';
@@ -169,7 +169,24 @@ function setDimmerGroup(raw: string) {
       <option value="channel">Channel (DMX)</option>
       <option value="dimmer-group">Dimmer Group</option>
       <option value="effect-param">Effect Parameter</option>
+      <option value="speed">Speed</option>
     </select>
+
+    <!-- Speed fader mode -->
+    <div v-if="mapping.type === 'speed'" class="flex flex-col gap-1">
+      <span class="text-[9px] uppercase tracking-wider text-muted-foreground/60">Mode</span>
+      <select
+        class="w-full text-xs bg-background border border-border rounded px-2 py-1.5"
+        :value="mapping.speedMode ?? 'continuous'"
+        @change="(e) => patch({ type: 'speed', speedMode: (e.target as HTMLSelectElement).value as SpeedFaderMode })"
+      >
+        <option value="continuous">Continuous (½× – 2×)</option>
+        <option value="steps">Steps (¼×, ½×, 1×, 2×, 4×)</option>
+      </select>
+      <p class="text-[10px] text-muted-foreground/70 leading-snug">
+        1× in the center. Multiplies the tapped BPM, so tap tempo keeps working.
+      </p>
+    </div>
 
     <!-- Preset picker -->
     <div v-if="mapping.type === 'preset'" class="flex flex-col gap-1">
@@ -195,6 +212,7 @@ function setDimmerGroup(raw: string) {
         <option value="blackout">Blackout</option>
         <option value="speed">Speed</option>
         <option value="stop-all">Stop all</option>
+        <option value="step-back">Step back</option>
       </select>
 
       <!-- Speed config -->
@@ -212,7 +230,6 @@ function setDimmerGroup(raw: string) {
             <option value="1">Reset (1×)</option>
             <option value="2">2×</option>
             <option value="4">4×</option>
-        <option value="step-back">Step back</option>
           </select>
         </div>
         <div class="flex items-center gap-2 text-xs">

@@ -69,6 +69,7 @@ const fillColor = computed(() => props.color ?? 'var(--primary)');
 
 /** Formatted value readout. */
 const valueText = computed(() => {
+  if (props.valueText != null) return props.valueText;
   if (props.unit === '%') return `${Math.round(norm.value * 100)}%`;
   // Without a step, small ranges need decimals (0–1 params would all read "0" or "1").
   const range = Math.abs(props.max - props.min);
