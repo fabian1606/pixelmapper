@@ -14,6 +14,8 @@
  *   *Add* (emitted) for a present device that is not on the canvas yet.
  *
  * Laid out for the narrow sidebar: long values truncated with a tooltip.
+ * With `compact` (inspector) only the Mismatch actions stay visible; the rest
+ * folds into a collapsed “Details” block.
  */
 import { computed, ref, shallowRef, watch } from 'vue';
 import { getFixture, type FixtureId } from '@pixelmapper/extension-api';
@@ -47,7 +49,9 @@ const props = withDefaults(defineProps<{
   patchEditable?: boolean;
   /** Show the status kind as a chip (the inspector shows its badge in the heading instead). */
   showKind?: boolean;
-}>(), { runtime: undefined, patchEditable: false, showKind: true });
+  /** Fold everything but the Mismatch actions into a collapsed “Details” block (inspector). */
+  compact?: boolean;
+}>(), { runtime: undefined, patchEditable: false, showKind: true, compact: false });
 
 const emit = defineEmits<{
   /** “Add”: put the device on the canvas with its current address and mode (the parent runs it). */
@@ -162,75 +166,84 @@ async function runLink(action: (runtime: DeviceRuntime, fixtureId: FixtureId) =>
 
 <template>
   <div class="flex flex-col gap-2 text-xs" data-rdm-device-panel>
-    <div class="flex flex-col gap-1">
-      <span v-if="showKind" class="w-fit rounded px-1 text-[10px] leading-4" :class="KIND_STYLE[kind].cls" data-rdm-kind>{{ KIND_STYLE[kind].text }}</span>
-      <p class="text-[11px] text-muted-foreground" data-rdm-status>{{ statusText }}</p>
-      <div v-if="state?.status.kind === 'mismatch'" class="flex flex-wrap gap-1.5" data-rdm-mismatch>
-        <button type="button" :class="PRIMARY" :disabled="linkBusy" title="Send the fixture's mode and address to the device" data-write-device @click="runLink(writeToDevice)">
-          Write to device
-        </button>
-        <button type="button" :class="BUTTON" :disabled="linkBusy" title="Set the fixture to the device's address and mode" data-take-device @click="runLink(takeFromDevice)">
-          Take from device
-        </button>
-      </div>
-    </div>
-    <dl class="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[11px]">
-      <dt class="text-muted-foreground">UID</dt>
-      <dd class="truncate font-mono select-all" :title="uid" data-rdm-uid>{{ uid }}</dd>
-      <dt class="text-muted-foreground">Port</dt>
-      <dd class="truncate" :title="portLine" data-rdm-port>{{ portLine }}</dd>
-      <dt class="text-muted-foreground">Model</dt>
-      <dd class="truncate" :title="model ?? undefined" data-rdm-model>{{ model ?? '—' }}</dd>
-      <dt class="text-muted-foreground">Maker</dt>
-      <dd class="truncate" :title="manufacturer ?? undefined" data-rdm-manufacturer>{{ manufacturer ?? '—' }}</dd>
-      <dt class="text-muted-foreground">Firmware</dt>
-      <dd class="truncate" :title="firmware ?? undefined" data-rdm-firmware>{{ firmware ?? '—' }}</dd>
-    </dl>
-    <div class="flex min-h-7 items-center gap-2" data-rdm-identify>
-      <span class="w-16 shrink-0 text-muted-foreground">Identify</span>
-      <IdentifyButton :on="identifying" :disabled="!reachable || identifyBusy" @toggle="identify.set" />
-    </div>
-    <p v-if="identifyError" class="text-[10px] text-destructive">{{ identifyError }}</p>
-    <RdmPatchFields v-if="runtime && patchEditable" :runtime="runtime" :uid="uid" :fixture-id="fixtureId" :follow="!!state?.effective" :disabled="!reachable" />
-    <RdmDeviceLabelField v-if="runtime && labelSupported" :store="runtime.store" :uid="uid" :label="description?.deviceLabel ?? null" :disabled="!reachable" />
-    <RdmParameterForm v-if="address && formDescription && device?.present" :address="address" :description="formDescription" :backend="backend" :exclude="OWN_PIDS" title="Parameters" />
-    <p v-else-if="device?.loading" class="text-[11px] text-muted-foreground">Reading the device…</p>
-    <div class="flex flex-wrap items-center gap-2">
-      <TubeFirmwareButton v-if="firmwareUpdatable && nodeId" :node-id="nodeId" :uid="uid" :backend="backend" :read-tube="readTube" />
-      <button
-        v-if="canAdd"
-        type="button"
-        :class="['ml-auto', PRIMARY]"
-        title="Add the device to the canvas with its current address and mode"
-        data-add-device
-        @click="emit('add')"
-      >
-        Add
+    <div v-if="state?.status.kind === 'mismatch'" class="flex flex-wrap gap-1.5" data-rdm-mismatch>
+      <button type="button" :class="PRIMARY" :disabled="linkBusy" title="Send the fixture's mode and address to the device" data-write-device @click="runLink(writeToDevice)">
+        Write to device
       </button>
-      <template v-if="state">
-        <button
-          v-if="state.effective"
-          type="button"
-          :class="['ml-auto', BUTTON]"
-          title="Stop sending address and mode changes to the device (the UID is kept)"
-          data-unlink
-          @click="runLink(unlinkFixture)"
-        >
-          Unlink
-        </button>
-        <button
-          v-else
-          type="button"
-          :class="['ml-auto', BUTTON]"
-          :disabled="!!relinkBlocked"
-          :title="relinkBlocked ?? 'Move the fixture back to its node port’s universe and send changes to the device again'"
-          data-relink
-          @click="runLink(relinkFixture)"
-        >
-          Re-link
-        </button>
-      </template>
+      <button type="button" :class="BUTTON" :disabled="linkBusy" title="Set the fixture to the device's address and mode" data-take-device @click="runLink(takeFromDevice)">
+        Take from device
+      </button>
     </div>
+    <!-- Native <details> in compact mode: folded content stays mounted and only hides. -->
+    <component :is="compact ? 'details' : 'div'" class="group" data-rdm-details>
+      <summary v-if="compact" class="flex cursor-pointer select-none list-none items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span class="inline-block transition-transform group-open:rotate-90">›</span>
+        Details
+      </summary>
+      <div class="flex flex-col gap-2" :class="{ 'pt-2': compact }">
+        <div class="flex flex-col gap-1">
+          <span v-if="showKind" class="w-fit rounded px-1 text-[10px] leading-4" :class="KIND_STYLE[kind].cls" data-rdm-kind>{{ KIND_STYLE[kind].text }}</span>
+          <p class="text-[11px] text-muted-foreground" data-rdm-status>{{ statusText }}</p>
+        </div>
+        <dl class="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[11px]">
+          <dt class="text-muted-foreground">UID</dt>
+          <dd class="truncate font-mono select-all" :title="uid" data-rdm-uid>{{ uid }}</dd>
+          <dt class="text-muted-foreground">Port</dt>
+          <dd class="truncate" :title="portLine" data-rdm-port>{{ portLine }}</dd>
+          <dt class="text-muted-foreground">Model</dt>
+          <dd class="truncate" :title="model ?? undefined" data-rdm-model>{{ model ?? '—' }}</dd>
+          <dt class="text-muted-foreground">Maker</dt>
+          <dd class="truncate" :title="manufacturer ?? undefined" data-rdm-manufacturer>{{ manufacturer ?? '—' }}</dd>
+          <dt class="text-muted-foreground">Firmware</dt>
+          <dd class="truncate" :title="firmware ?? undefined" data-rdm-firmware>{{ firmware ?? '—' }}</dd>
+        </dl>
+        <div class="flex min-h-7 items-center gap-2" data-rdm-identify>
+          <span class="w-16 shrink-0 text-muted-foreground">Identify</span>
+          <IdentifyButton :on="identifying" :disabled="!reachable || identifyBusy" @toggle="identify.set" />
+        </div>
+        <p v-if="identifyError" class="text-[10px] text-destructive">{{ identifyError }}</p>
+        <RdmPatchFields v-if="runtime && patchEditable" :runtime="runtime" :uid="uid" :fixture-id="fixtureId" :follow="!!state?.effective" :disabled="!reachable" />
+        <RdmDeviceLabelField v-if="runtime && labelSupported" :store="runtime.store" :uid="uid" :label="description?.deviceLabel ?? null" :disabled="!reachable" />
+        <RdmParameterForm v-if="address && formDescription && device?.present" :address="address" :description="formDescription" :backend="backend" :exclude="OWN_PIDS" title="Parameters" />
+        <p v-else-if="device?.loading" class="text-[11px] text-muted-foreground">Reading the device…</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <TubeFirmwareButton v-if="firmwareUpdatable && nodeId" :node-id="nodeId" :uid="uid" :backend="backend" :read-tube="readTube" />
+          <button
+            v-if="canAdd"
+            type="button"
+            :class="['ml-auto', PRIMARY]"
+            title="Add the device to the canvas with its current address and mode"
+            data-add-device
+            @click="emit('add')"
+          >
+            Add
+          </button>
+          <template v-if="state">
+            <button
+              v-if="state.effective"
+              type="button"
+              :class="['ml-auto', BUTTON]"
+              title="Stop sending address and mode changes to the device (the UID is kept)"
+              data-unlink
+              @click="runLink(unlinkFixture)"
+            >
+              Unlink
+            </button>
+            <button
+              v-else
+              type="button"
+              :class="['ml-auto', BUTTON]"
+              :disabled="!!relinkBlocked"
+              :title="relinkBlocked ?? 'Move the fixture back to its node port’s universe and send changes to the device again'"
+              data-relink
+              @click="runLink(relinkFixture)"
+            >
+              Re-link
+            </button>
+          </template>
+        </div>
+      </div>
+    </component>
     <p v-if="linkError" class="text-[10px] text-destructive" data-rdm-link-error>{{ linkError }}</p>
   </div>
 </template>

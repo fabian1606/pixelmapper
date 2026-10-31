@@ -6,7 +6,8 @@
  * badge in one row like the other inspector sections; the body is the
  * shared `RdmDevicePanel` (status text, UID, port, firmware, Identify,
  * DEVICE_LABEL, parameters, “Update firmware…”, Unlink / Re-link) without
- * its patch editors — address and mode stay the normal fixture fields.
+ * its patch editors — address and mode stay the normal fixture fields — and
+ * in `compact` mode, so only the heading (and Mismatch actions) take room.
  *
  * Holds `retainArtNetDiscovery()` while mounted, so the bridge connection
  * runs even when the Connectors page was never opened.
@@ -41,6 +42,6 @@ const state = computed(() => (runtime && fixture.value ? fixtureLinkState(runtim
       <span class="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/60">RDM</span>
       <RdmStatusBadge :runtime="runtime" />
     </div>
-    <RdmDevicePanel :uid="state.link.uid" :fixture-id="fixture.id" :runtime="runtime" :patch-editable="false" :show-kind="false" />
+    <RdmDevicePanel :uid="state.link.uid" :fixture-id="fixture.id" :runtime="runtime" :patch-editable="false" :show-kind="false" compact />
   </section>
 </template>
