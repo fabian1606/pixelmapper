@@ -16,7 +16,7 @@ import { findFixture, findWidgetAnywhere, mergeField, ok, skip } from './helpers
 // ── Payloads ─────────────────────────────────────────────────────────────────
 
 interface PositionEntry { id: EntityId; x: number; y: number; z?: number }
-interface RotationEntry { id: EntityId; rotation: number; tiltX?: number; rollZ?: number }
+interface RotationEntry { id: EntityId; rotation: number; tiltX?: number; rollZ?: number; x?: number; y?: number }
 interface BeforeAfter<T> { before: T[]; after: T[] }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -33,6 +33,9 @@ function rotationOf(f: SerializedFixture, like: RotationEntry): RotationEntry {
   const out: RotationEntry = { id: f.id, rotation: f.rotation };
   if (like.tiltX !== undefined) out.tiltX = f.tiltX ?? 0;
   if (like.rollZ !== undefined) out.rollZ = f.rollZ ?? 0;
+  // Group rotations also orbit member positions.
+  if (like.x !== undefined) out.x = f.fixturePosition.x;
+  if (like.y !== undefined) out.y = f.fixturePosition.y;
   return out;
 }
 
@@ -68,7 +71,7 @@ function rebasePerFixture<T extends { id: EntityId }>(
 export const moveFixtureAdapter: RebaseAdapter = (payload: BeforeAfter<PositionEntry>, { current }) =>
   rebasePerFixture(payload, current, (f, like) => positionOf(f, like.z !== undefined), 'move');
 
-/** `RotateFixture`: per fixture rotation/tilt/roll 3-way merge. */
+/** `RotateFixture`: per fixture rotation/tilt/roll(/x/y) 3-way merge. */
 export const rotateFixtureAdapter: RebaseAdapter = (payload: BeforeAfter<RotationEntry>, { current }) =>
   rebasePerFixture(payload, current, rotationOf, 'rotate');
 

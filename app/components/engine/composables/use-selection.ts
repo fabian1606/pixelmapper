@@ -5,6 +5,7 @@ import type { Point } from './use-camera';
 import type { FixturePositionSnapshot } from '../commands/move-fixture-command';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { FixtureRotationSnapshot } from '../commands/rotate-fixture-command';
+import { applyRotationDelta, collectRotationTargets, wrapDegrees, type RotationTarget } from '~/utils/engine/group-rotation';
 import { cloneJson, getKind, kindContext, rebuildKindFixture, worldToKind } from '~/utils/kinds/kind-host';
 import { hasEditHandles } from '~/utils/kinds/kind-canvas';
 import { resolveSnapSpacing, type ZoomTier } from '~/utils/engine/snap-policy';
@@ -47,7 +48,7 @@ export type Interaction =
       /** Pre-drag fixturePosition in world-pixels of every selected fixture. */
       startPositions: Map<string | number, Point>;
     }
-  | { type: 'rotate'; startWorld: Point; startAngles: Map<string | number, number>; centerWorld: Point }
+  | { type: 'rotate'; startWorld: Point; targets: RotationTarget[]; centerWorld: Point }
   | {
       /** Drag a fixture-kind handle; the kind's `onHandleMove` maps it to a config. */
       type: 'kind-handle';
@@ -293,28 +294,34 @@ export function useSelection(
     if (event.button === 2) return;
     const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
 
-    let effectiveSelectedIds = new Set(selectedIds.value);
-    if (!effectiveSelectedIds.has(fixture.id)) {
-      effectiveSelectedIds = new Set([fixture.id]);
-      selectedIds.value = effectiveSelectedIds;
-    }
+    // Keep the selection when the grabbed fixture is covered by it — directly
+    // or through a selected (ancestor) group; otherwise rotate it alone.
+    const isCovered = buildAncestorPath(fixture as unknown as SceneNode).some(n => selectedIds.value.has(n.id));
+    if (!isCovered) selectedIds.value = new Set([fixture.id]);
 
-    const startAngles = new Map<string | number, number>();
-    beforeRotationSnapshot = [];
-    let sumX = 0, sumY = 0, count = 0;
+    // Selected groups turn as a whole (members orbit the group center);
+    // individually selected fixtures spin in place.
+    const targets = collectRotationTargets(getFixtures(), selectedIds.value);
+    beforeRotationSnapshot = targets.map(t => (t.pivot
+      ? { id: t.id, rotation: t.rotation, x: t.x, y: t.y }
+      : { id: t.id, rotation: t.rotation }));
+
+    // The gesture angle is measured around the grabbed fixture's group
+    // center, or around the selection's average position.
     const w = getWidth();
     const h = getHeight();
-    for (const f of getFixtures()) {
-      if (effectiveSelectedIds.has(f.id)) {
-        sumX += f.fixturePosition.x * w;
-        sumY += f.fixturePosition.y * h;
-        count++;
-        startAngles.set(f.id, f.rotation || 0);
-        beforeRotationSnapshot.push({ id: f.id, rotation: f.rotation || 0 });
-      }
+    const grabbed = targets.find(t => t.id === fixture.id);
+    let centerWorld: Point;
+    if (grabbed?.pivot) {
+      centerWorld = { x: grabbed.pivot.x * w, y: grabbed.pivot.y * h };
+    } else {
+      const n = targets.length || 1;
+      centerWorld = {
+        x: targets.reduce((acc, t) => acc + t.x, 0) / n * w,
+        y: targets.reduce((acc, t) => acc + t.y, 0) / n * h,
+      };
     }
-    const centerWorld = { x: count > 0 ? sumX / count : 0, y: count > 0 ? sumY / count : 0 };
-    interaction.value = { type: 'rotate', startWorld: world, startAngles, centerWorld };
+    interaction.value = { type: 'rotate', startWorld: world, targets, centerWorld };
   }
 
   /** Begins dragging a kind handle; the fixture becomes the sole selection. */
@@ -375,13 +382,17 @@ export function useSelection(
       const startAngle = Math.atan2(iv.startWorld.y - iv.centerWorld.y, iv.startWorld.x - iv.centerWorld.x);
       const currAngle  = Math.atan2(world.y - iv.centerWorld.y, world.x - iv.centerWorld.x);
       const deltaDeg = (currAngle - startAngle) * (180 / Math.PI);
-      for (const f of getFixtures()) {
-        const startR = iv.startAngles.get(f.id);
-        if (startR !== undefined) {
-          let r = startR + deltaDeg;
-          if (event.shiftKey) r = Math.round(r / 15) * 15;
-          r = ((r % 360) + 360) % 360;
-          f.rotation = r;
+      const byId = new Map(getFixtures().map(f => [f.id, f]));
+      for (const t of iv.targets) {
+        const f = byId.get(t.id);
+        if (!f) continue;
+        if (t.pivot) {
+          // Group member: snap the shared delta so the group stays rigid.
+          applyRotationDelta(f, t, event.shiftKey ? Math.round(deltaDeg / 15) * 15 : deltaDeg);
+        } else {
+          // Standalone fixture: snap its absolute angle.
+          const r = t.rotation + deltaDeg;
+          f.rotation = wrapDegrees(event.shiftKey ? Math.round(r / 15) * 15 : r);
         }
       }
       engineStore.triggerCanvasSync();
@@ -474,7 +485,10 @@ export function useSelection(
     } else if (iv.type === 'rotate' && beforeRotationSnapshot.length > 0 && onRotateComplete) {
       const afterSnapshot = beforeRotationSnapshot.map(snap => {
         const f = getFixtures().find(f => f.id === snap.id);
-        return { id: snap.id, rotation: f ? (f.rotation || 0) : snap.rotation };
+        if (!f) return snap;
+        return snap.x !== undefined
+          ? { id: snap.id, rotation: f.rotation || 0, x: f.fixturePosition.x, y: f.fixturePosition.y }
+          : { id: snap.id, rotation: f.rotation || 0 };
       });
       const didRotate = beforeRotationSnapshot.some((b, i) => afterSnapshot[i] && b.rotation !== afterSnapshot[i]!.rotation);
       if (didRotate) onRotateComplete(beforeRotationSnapshot, afterSnapshot);

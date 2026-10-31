@@ -9,6 +9,7 @@ import { useHistory } from '~/components/engine/composables/use-history';
 import { MoveFixtureCommand, type FixturePositionSnapshot } from '~/components/engine/commands/move-fixture-command';
 import { RotateFixtureCommand, type FixtureRotationSnapshot } from '~/components/engine/commands/rotate-fixture-command';
 import { STAGE_SIZE_METERS } from '~/utils/engine/constants';
+import { applyRotationDelta, collectRotationTargets, type RotationTarget } from '~/utils/engine/group-rotation';
 import type { Fixture } from '~/utils/engine/core/fixture';
 import type { SceneNode } from '~/utils/engine/core/group';
 import type { GizmoMode, SelectionModifiers, ThreeSceneManager, TransformDelta } from './scene/three-scene-manager';
@@ -150,6 +151,8 @@ function handleBoxSelect(ids: Set<string | number>) {
 
 let dragPositionsBefore: FixturePositionSnapshot[] | null = null;
 let dragRotationsBefore: FixtureRotationSnapshot[] | null = null;
+/** Yaw start state: members of a selected group orbit the group center. */
+let dragRotationTargets: Map<string | number, RotationTarget> | null = null;
 
 // ── Alignment guides (shared core with the 2D editor, 3 axes in meters) ───────
 
@@ -180,12 +183,21 @@ function handleDragStart() {
     y: f.fixturePosition.y,
     z: f.positionZ || 0,
   }));
-  dragRotationsBefore = targets.map(f => ({
-    id: f.id,
-    rotation: f.rotation || 0,
-    tiltX: f.tiltX || 0,
-    rollZ: f.rollZ || 0,
-  }));
+  dragRotationTargets = new Map(collectRotationTargets(targets, selectedIds.value).map(t => [t.id, t]));
+  dragRotationsBefore = targets.map((f) => {
+    const snap: FixtureRotationSnapshot = {
+      id: f.id,
+      rotation: f.rotation || 0,
+      tiltX: f.tiltX || 0,
+      rollZ: f.rollZ || 0,
+    };
+    // Group members move with the yaw — record their position for undo.
+    if (dragRotationTargets?.get(f.id)?.pivot) {
+      snap.x = f.fixturePosition.x;
+      snap.y = f.fixturePosition.y;
+    }
+    return snap;
+  });
 
   alignSession = null;
   if (manager && targets.length > 0) {
@@ -273,7 +285,9 @@ function handleDragMove(mode: GizmoMode, delta: TransformDelta): number[] | void
     for (const snap of dragRotationsBefore) {
       const f = flatFixtures.value.find(x => x.id === snap.id);
       if (!f) continue;
-      f.rotation = wrapDeg(snap.rotation + delta.rotationDeg);
+      const target = dragRotationTargets?.get(f.id);
+      if (target) applyRotationDelta(f, target, delta.rotationDeg);
+      else f.rotation = wrapDeg(snap.rotation + delta.rotationDeg);
       f.tiltX = wrapDeg((snap.tiltX ?? 0) + delta.tiltXDeg);
       f.rollZ = wrapDeg((snap.rollZ ?? 0) + delta.rollZDeg);
     }
@@ -293,11 +307,19 @@ function handleDragEnd(mode: GizmoMode) {
   } else if (mode === 'rotate' && dragRotationsBefore) {
     const after: FixtureRotationSnapshot[] = all
       .filter(f => dragRotationsBefore!.some(s => s.id === f.id))
-      .map(f => ({ id: f.id, rotation: f.rotation || 0, tiltX: f.tiltX || 0, rollZ: f.rollZ || 0 }));
+      .map((f) => {
+        const snap: FixtureRotationSnapshot = { id: f.id, rotation: f.rotation || 0, tiltX: f.tiltX || 0, rollZ: f.rollZ || 0 };
+        if (dragRotationsBefore!.find(s => s.id === f.id)?.x !== undefined) {
+          snap.x = f.fixturePosition.x;
+          snap.y = f.fixturePosition.y;
+        }
+        return snap;
+      });
     history.execute(new RotateFixtureCommand(all, dragRotationsBefore, after));
   }
   dragPositionsBefore = null;
   dragRotationsBefore = null;
+  dragRotationTargets = null;
   alignSession = null;
   guideLabels.value = [];
 }

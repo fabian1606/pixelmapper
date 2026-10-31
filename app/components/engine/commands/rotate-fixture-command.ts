@@ -8,6 +8,9 @@ export interface FixtureRotationSnapshot {
     /** Pitch/roll in degrees (3D viewport). Omitted by 2D-only callers. */
     tiltX?: number;
     rollZ?: number;
+    /** Normalized position. Set only when the fixture orbits a rotated group's center. */
+    x?: number;
+    y?: number;
 }
 
 export class RotateFixtureCommand implements SerializableCommand {
@@ -39,6 +42,8 @@ export class RotateFixtureCommand implements SerializableCommand {
                 fixture.rotation = snapshot.rotation;
                 if (snapshot.tiltX !== undefined) fixture.tiltX = snapshot.tiltX;
                 if (snapshot.rollZ !== undefined) fixture.rollZ = snapshot.rollZ;
+                if (snapshot.x !== undefined) fixture.fixturePosition.x = snapshot.x;
+                if (snapshot.y !== undefined) fixture.fixturePosition.y = snapshot.y;
             }
         }
     }

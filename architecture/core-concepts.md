@@ -14,6 +14,8 @@ A `FixtureGroup` is a logical container that can hold `Fixture`s or other `Fixtu
 
 The primary node array `sceneNodes` is a `shallowRef` in Pinia. This deliberately prevents Vue from building deep reactive proxy graphs over the entire scene. Adding or removing nodes replaces the array reference or calls `triggerRef(sceneNodes)`.
 
+**Rotating groups** (`app/utils/engine/group-rotation.ts`): when a group is selected, rotating it turns the group as one unit. Its member fixtures spin by the delta and orbit the center of the members' bounding box. A fixture selected on its own, including a group member selected by drilling in, spins in place. This applies to the 2D rotation handles, the inspector's R field and the 3D gizmo's yaw (tilt and roll stay per fixture). `RotateFixture` snapshots carry optional `x`/`y` for orbiting members, so undo/redo and the sync rebase adapter restore their positions too.
+
 ## Fixture
 
 A `Fixture` represents a physical light device. Fixtures are stored inside a `shallowRef` and act as plain JavaScript objects — not Vue reactive proxies. This Data-Oriented Design (DoD) choice prevents Vue from tracking thousands of nested properties at 60 fps.
