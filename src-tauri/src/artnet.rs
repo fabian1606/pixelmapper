@@ -9,6 +9,11 @@
 //! transports”): bridge → app over a Tauri `Channel` as [`ArtNetSessionEvent`]s, app → bridge through
 //! `artnet_send_text` and `artnet_send_binary` (raw IPC body, no JSON encoding of DMX). The frontend side is
 //! `app/platform/tauri/artnet-bridge.ts`.
+//!
+//! Sessions belong to the webview that opened them. A reload (⌘R, Nuxt HMR full reload) never runs the
+//! frontend's `close()`, so [`ArtNetBridge::on_page_load`] closes them instead: an orphaned session would keep
+//! re-sending its last frame every second under its own ArtDmx `Physical`, which the node merges (HTP) as a
+//! second source that never times out.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -19,7 +24,7 @@ use pmnet_bridge::backend::NetBackend;
 use pmnet_bridge::bridge::{Bridge, BridgeConfig, ClientInfo, ClientSession, Outgoing};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeBody, Request};
-use tauri::State;
+use tauri::{Manager, State, Webview};
 use tokio::sync::OnceCell;
 
 /// Close code reported when a session ended without a close code of the bridge (like a dropped WebSocket).
@@ -50,7 +55,8 @@ pub enum ArtNetSessionEvent {
 /// Open bridge sessions of one bridge, addressed by a numeric id. Generic over the backend for tests.
 pub struct Sessions<B: NetBackend> {
     next_id: AtomicU32,
-    open: Mutex<HashMap<u32, Arc<ClientSession>>>,
+    /// Open sessions with the label of the webview that owns them.
+    open: Mutex<HashMap<u32, (String, Arc<ClientSession>)>>,
     _backend: std::marker::PhantomData<fn() -> B>,
 }
 
@@ -65,16 +71,17 @@ impl<B: NetBackend> Default for Sessions<B> {
 }
 
 impl<B: NetBackend> Sessions<B> {
-    /// Opens a session on `bridge` and forwards its messages to `emit` from a task until it ends; returns its id.
-    /// Must be called inside a Tokio runtime.
+    /// Opens a session for the webview `owner` on `bridge` and forwards its messages to `emit` from a task until
+    /// it ends; returns its id. Must be called inside a Tokio runtime.
     pub fn connect(
         self: &Arc<Self>,
         bridge: &Bridge<B>,
+        owner: &str,
         emit: impl Fn(ArtNetSessionEvent) + Send + 'static,
     ) -> Result<u32, String> {
         let (session, mut outgoing) = bridge.connect(ClientInfo::new("tauri"));
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        self.lock()?.insert(id, Arc::new(session));
+        self.lock()?.insert(id, (owner.to_owned(), Arc::new(session)));
         let sessions = Arc::clone(self);
         tokio::spawn(async move {
             let mut closed = false;
@@ -110,22 +117,35 @@ impl<B: NetBackend> Sessions<B> {
 
     /// Ends a session (the frontend went away). Unknown ids are ignored (idempotent).
     pub fn disconnect(&self, id: u32) -> Result<(), String> {
-        if let Some(session) = self.lock()?.remove(&id) {
+        if let Some((_, session)) = self.lock()?.remove(&id) {
             session.close();
         }
         Ok(())
+    }
+
+    /// Ends every session of the webview `owner` (its page was reloaded); returns how many were open.
+    pub fn disconnect_owner(&self, owner: &str) -> Result<usize, String> {
+        let closed: Vec<Arc<ClientSession>> = {
+            let mut open = self.lock()?;
+            let ids: Vec<u32> = open.iter().filter(|(_, (o, _))| o == owner).map(|(id, _)| *id).collect();
+            ids.iter().filter_map(|id| open.remove(id)).map(|(_, s)| s).collect()
+        };
+        for session in &closed {
+            session.close();
+        }
+        Ok(closed.len())
     }
 
     /// The session with `id`, cloned out so the lock is not held while awaiting it.
     fn get(&self, id: u32) -> Result<Arc<ClientSession>, String> {
         self.lock()?
             .get(&id)
-            .cloned()
+            .map(|(_, session)| Arc::clone(session))
             .ok_or_else(|| format!("unknown Art-Net bridge session {id}"))
     }
 
     /// The session table.
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, HashMap<u32, Arc<ClientSession>>>, String> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, HashMap<u32, (String, Arc<ClientSession>)>>, String> {
         self.open.lock().map_err(|e| e.to_string())
     }
 }
@@ -157,6 +177,20 @@ impl ArtNetBridge {
             })
             .await
     }
+
+    /// Page-load hook: a page starting to load in `webview` means its previous document is gone, so its sessions
+    /// are closed (see the module comment).
+    pub fn on_page_load<R: tauri::Runtime>(webview: &tauri::Webview<R>, payload: &tauri::webview::PageLoadPayload<'_>) {
+        if payload.event() != tauri::webview::PageLoadEvent::Started {
+            return;
+        }
+        let state = webview.state::<ArtNetBridge>();
+        match state.sessions.disconnect_owner(webview.label()) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("[artnet] page reload: closed {n} orphaned bridge session(s)"),
+            Err(e) => eprintln!("[artnet] closing the sessions of a reloaded page failed: {e}"),
+        }
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -175,11 +209,12 @@ fn header<'a>(request: &'a Request<'_>, name: &str) -> Result<&'a str, String> {
 /// Opens a bridge session; its messages arrive on `on_event` (first the bridge `hello`). Returns the session id.
 #[tauri::command]
 pub async fn artnet_connect(
+    webview: Webview,
     state: State<'_, ArtNetBridge>,
     on_event: Channel<ArtNetSessionEvent>,
 ) -> Result<u32, String> {
     let bridge = state.bridge().await;
-    state.sessions.connect(bridge, move |event| {
+    state.sessions.connect(bridge, webview.label(), move |event| {
         if let Err(e) = on_event.send(event) {
             eprintln!("[artnet] cannot deliver a bridge message to the webview: {e}");
         }
@@ -230,7 +265,7 @@ mod tests {
         let bridge = Bridge::new(Arc::new(mock.clone()), BridgeConfig::default());
         let sessions = Arc::new(Sessions::default());
         let (tx, rx) = mpsc::unbounded_channel();
-        let id = sessions.connect(&bridge, move |e| { let _ = tx.send(e); }).unwrap();
+        let id = sessions.connect(&bridge, "main", move |e| { let _ = tx.send(e); }).unwrap();
         (mock, bridge, sessions, id, rx)
     }
 
@@ -300,7 +335,7 @@ mod tests {
         let bridge = Bridge::new(backend.clone(), BridgeConfig::default());
         let sessions = Arc::new(Sessions::default());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let id = sessions.connect(&bridge, move |e| { let _ = tx.send(e); }).unwrap();
+        let id = sessions.connect(&bridge, "main", move |e| { let _ = tx.send(e); }).unwrap();
 
         let hello = next_json(&mut rx).await;
         assert_eq!(hello["udp"]["bound"], true);
@@ -319,6 +354,19 @@ mod tests {
         assert_eq!(tod["uids"], json!([fixture.to_string()]));
         sessions.disconnect(id).unwrap();
         backend.shutdown();
+    }
+
+    #[tokio::test]
+    async fn page_reload_closes_only_the_sessions_of_that_webview() {
+        let (_mock, bridge, sessions, id, mut rx) = setup().await;
+        next_json(&mut rx).await;
+        let (tx, _other_rx) = mpsc::unbounded_channel();
+        let other = sessions.connect(&bridge, "other", move |e| { let _ = tx.send(e); }).unwrap();
+
+        assert_eq!(sessions.disconnect_owner("main").unwrap(), 1);
+        assert!(sessions.send_text(id, "{}").await.is_err(), "the reloaded page's session is gone");
+        assert!(sessions.get(other).is_ok(), "other webviews keep theirs");
+        assert_eq!(sessions.disconnect_owner("main").unwrap(), 0);
     }
 
     #[tokio::test]

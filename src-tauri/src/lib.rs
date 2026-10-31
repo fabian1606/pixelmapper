@@ -30,6 +30,8 @@ pub fn run() {
             midi::warm_up();
             Ok(menu::setup(app.handle())?)
         })
+        // A reloaded page leaves its Art-Net sessions behind; close them.
+        .on_page_load(artnet::ArtNetBridge::on_page_load)
         // Closing the window lets the frontend flush pending writes first.
         .on_window_event(lifecycle::on_window_event)
         .invoke_handler(tauri::generate_handler![
