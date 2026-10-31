@@ -3,14 +3,15 @@
  *
  * Every capability not yet ported keeps its web implementation (or `null`
  * where WKWebView lacks it). Ported so far: the in-process Art-Net bridge
- * (`artnetBridge`), `http` and `resources` (ADR 0004 D19). Next: `serial`
- * and `midi` (step 3).
+ * (`artnetBridge`), `http` and `resources` (ADR 0004 D19), `midi` (step 3).
+ * Next: `serial` (step 3).
  */
 import type { Platform } from '@pixelmapper/extension-api';
 import { createWebPlatform } from '../web';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { createTauriArtNetBridge } from './artnet-bridge';
+import { createTauriMidi } from './midi';
 import { createTauriHttp, createTauriResources } from './native-files';
 import { NO_WINDOW_CHROME, type WindowChrome } from '../window-chrome';
 import { DESKTOP_ACCOUNT_POLICY, type AccountPolicy } from '../account-policy';
@@ -29,6 +30,7 @@ export function createPlatform(): Platform {
     ...createWebPlatform(),
     kind: 'tauri',
     artnetBridge: createTauriArtNetBridge(),
+    midi: createTauriMidi(),
     http: createTauriHttp(),
     resources: createTauriResources(),
   };

@@ -66,6 +66,8 @@ export interface FaderProps extends BaseInputProps {
   showValue?: boolean;
   /** Display unit appended to the value; `'%'` shows the normalized value as percent. */
   unit?: string;
+  /** Preformatted value readout (e.g. "½×"); overrides the min/max/unit formatting. */
+  valueText?: string;
   /**
    * Presentation hint. `'track'` (default): a linear fill slider.
    * `'box'`: a compact square swatch dragged horizontally (property sidebar).

@@ -32,7 +32,7 @@ const KIND_LABELS: Record<LiveWidgetKind, string> = {
 };
 
 /** Global function names as shown on buttons (`LiveButtonWidget`). */
-const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed' };
+const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back' };
 
 /** Maps a (possibly legacy or malformed) widget type to its drawing kind. */
 export function widgetKind(type: unknown): LiveWidgetKind {
@@ -63,7 +63,6 @@ function mappingLabel(m: LiveMapping | undefined): string | null {
   if (!m || typeof m !== 'object') return null;
   if (m.type === 'global-function' && m.globalFunction === 'speed') return speedLabel(m.globalFunctionConfig as SpeedConfig);
   if (m.type === 'global-function' && typeof m.globalFunction === 'string') return GLOBAL_FN_LABELS[m.globalFunction] ?? m.globalFunction;
-  if (m.type === 'global-function' && m.globalFunction === 'stop-all') return 'Stop all';
   if (m.type === 'preset') return 'Preset';
   if (m.type === 'page-switch') return 'Page';
   if (m.type === 'position-recall') return 'Position';

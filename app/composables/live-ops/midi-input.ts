@@ -15,7 +15,7 @@ const portOffs = new Map<string, () => void>();
 let starting: Promise<void> | null = null;
 let midiApi: MidiApi | null | undefined;
 
-/** Platform MIDI (Web MIDI in browsers; null in Safari / WKWebView). */
+/** Platform MIDI (Web MIDI in browsers, native in the desktop app; null in Safari). */
 function platformMidi(): MidiApi | null {
   if (midiApi === undefined) midiApi = createPlatform().midi;
   return midiApi;

@@ -11,6 +11,7 @@ import type { Preset } from '~/utils/engine/preset-types';
 import type { RGB } from '~/utils/live/color-utils';
 import { getPresetNaturalRGB } from '~/utils/live/color-utils';
 import { sectionTrigger } from '~/utils/live/button-actions';
+import { recordLiveStep } from '~/composables/live-ops/live-history';
 
 /** Active preset before a toggle section was switched on, per section id (to go back to). */
 const presetBeforeSection = new Map<string, string | null>();
@@ -112,6 +113,7 @@ export function sectionPress(args: {
 
   if (isAutoColor) {
     // Color-variant slots don't switch presets — they override the active preset's base color.
+    recordLiveStep();
     setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
     setColorOverride(bound.preset.id, bound.colorOverride ?? null);
   } else if (isFlash) {
@@ -121,11 +123,13 @@ export function sectionPress(args: {
     pressFlashPreset(key, bound.preset.id);
   } else if (trigger === 'toggle' && cur.has(key)) {
     // Pressing the lit button again goes back to the preset from before.
+    recordLiveStep();
     setActiveSet(liveStore, bound.membership.section.id, new Set());
     setActivePreset(presetBeforeSection.get(bound.membership.section.id) ?? null);
     presetBeforeSection.delete(bound.membership.section.id);
   } else {
     // press / toggle-on: exactly one member is active, since only one preset can be.
+    recordLiveStep();
     if (cur.size === 0) presetBeforeSection.set(bound.membership.section.id, engineStore.selectedPresetId);
     setActiveSet(liveStore, bound.membership.section.id, new Set([key]));
     setActivePreset(bound.preset.id);

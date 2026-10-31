@@ -8,6 +8,7 @@ import { isTriggerParam } from '~/utils/plugins/trigger-param';
 import { controlParamValue } from '~/utils/live/control-param-value';
 import { setEffectTrigger } from './effect-trigger';
 import { setEffectParam } from './effect-param';
+import { faderToSpeed } from '~/utils/live/speed-fader';
 
 /**
  * Shared runtime dispatcher for a {@link LiveMapping}. Used by canvas buttons,
@@ -168,8 +169,8 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
   const liveBus = useLiveBusStore();
   const { key, value } = ctx;
 
-  // "Stop all" is handled by the button runtime (it also clears button state).
-  if (mapping.type === 'global-function' && mapping.globalFunction === 'stop-all') return;
+  // "Stop all" / "Step back" are handled by the button runtime (they also touch button state).
+  if (mapping.type === 'global-function' && (mapping.globalFunction === 'stop-all' || mapping.globalFunction === 'step-back')) return;
 
   if (mapping.type === 'preset' && mapping.presetId) {
     const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
@@ -226,6 +227,13 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
     } else if (cfg.behavior === 'hold') {
       engineStore.setSpeedMultiplier(1);
       queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier: 1 }));
+    }
+  } else if (mapping.type === 'speed' && value !== undefined) {
+    // Speed fader: sets the multiplier on top of the tapped BPM; only broadcast real changes.
+    const multiplier = faderToSpeed(value, mapping.speedMode ?? 'continuous');
+    if (multiplier !== engineStore.speedMultiplier) {
+      engineStore.setSpeedMultiplier(multiplier);
+      queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier }));
     }
   } else if (mapping.type === 'position-recall' && mapping.positionId && active) {
     const position = store.savedPositions.find((p: any) => p.id === mapping.positionId);

@@ -17,11 +17,14 @@ import { patchStateAt, patchStateOf } from '~/utils/extensions/fixture-patch-sta
 import { provideScope } from '~/composables/extensions/provide-scope';
 import { fixtureView } from '~/utils/extensions/scope-views';
 import { useEngineStore } from '~/stores/engine-store';
+import { applyRotationDelta, collectRotationTargets, type RotationTarget } from '~/utils/engine/group-rotation';
 import { storeToRefs } from 'pinia';
 
 const props = defineProps<{
   selectedFixtures: Fixture[];
   allFixtures: Fixture[];
+  /** Raw selection (may hold group ids) — decides whether rotation turns whole groups. */
+  selectedIds: Set<string | number>;
 }>();
 
 const history = useHistory();
@@ -91,6 +94,8 @@ const avgRollZ = computed(() => {
 // Snapshots before live movement and the average position at drag start
 let dragSnapshotsBefore: FixturePositionSnapshot[] | null = null;
 let dragRotationSnapshotsBefore: FixtureRotationSnapshot[] | null = null;
+// Start state for the 'r' axis: selected groups orbit their center.
+let dragRotationTargets: Map<string | number, RotationTarget> | null = null;
 let dragOriginX = 0; // avgX at the start of the interaction (0-1 space)
 let dragOriginY = 0;
 let dragOriginZ = 0;
@@ -106,12 +111,23 @@ function handleLiveChange(axis: PositionAxis, value: number) {
       dragOriginR = avgRotation.value;
       dragOriginTX = avgTiltX.value;
       dragOriginRZ = avgRollZ.value;
-      dragRotationSnapshotsBefore = props.selectedFixtures.map(f => ({
-        id: f.id,
-        rotation: f.rotation || 0,
-        tiltX: f.tiltX || 0,
-        rollZ: f.rollZ || 0,
-      }));
+      dragRotationTargets = new Map(
+        collectRotationTargets(props.selectedFixtures, props.selectedIds).map(t => [t.id, t]),
+      );
+      dragRotationSnapshotsBefore = props.selectedFixtures.map((f) => {
+        const snap: FixtureRotationSnapshot = {
+          id: f.id,
+          rotation: f.rotation || 0,
+          tiltX: f.tiltX || 0,
+          rollZ: f.rollZ || 0,
+        };
+        // Group members also move — record their position for undo.
+        if (axis === 'r' && dragRotationTargets?.get(f.id)?.pivot) {
+          snap.x = f.fixturePosition.x;
+          snap.y = f.fixturePosition.y;
+        }
+        return snap;
+      });
     }
 
     const origin = axis === 'r' ? dragOriginR : axis === 'tx' ? dragOriginTX : dragOriginRZ;
@@ -124,7 +140,9 @@ function handleLiveChange(axis: PositionAxis, value: number) {
     for (const snap of dragRotationSnapshotsBefore) {
       const fixture = props.allFixtures.find(f => f.id === snap.id);
       if (!fixture) continue;
-      if (axis === 'r') fixture.rotation = wrap(snap.rotation + delta);
+      const target = dragRotationTargets?.get(snap.id);
+      if (axis === 'r' && target) applyRotationDelta(fixture, target, delta);
+      else if (axis === 'r') fixture.rotation = wrap(snap.rotation + delta);
       else if (axis === 'tx') fixture.tiltX = wrap((snap.tiltX ?? 0) + delta);
       else fixture.rollZ = wrap((snap.rollZ ?? 0) + delta);
     }
@@ -171,10 +189,18 @@ function handlePositionChange(axis: PositionAxis, _value: number) {
 
     const snapshotsAfter: FixtureRotationSnapshot[] = props.allFixtures
       .filter(f => dragRotationSnapshotsBefore!.some(s => s.id === f.id))
-      .map(f => ({ id: f.id, rotation: f.rotation || 0, tiltX: f.tiltX || 0, rollZ: f.rollZ || 0 }));
+      .map((f) => {
+        const snap: FixtureRotationSnapshot = { id: f.id, rotation: f.rotation || 0, tiltX: f.tiltX || 0, rollZ: f.rollZ || 0 };
+        if (dragRotationSnapshotsBefore!.find(s => s.id === f.id)?.x !== undefined) {
+          snap.x = f.fixturePosition.x;
+          snap.y = f.fixturePosition.y;
+        }
+        return snap;
+      });
 
     history.execute(new RotateFixtureCommand(props.allFixtures, dragRotationSnapshotsBefore, snapshotsAfter));
     dragRotationSnapshotsBefore = null;
+    dragRotationTargets = null;
     return;
   }
 

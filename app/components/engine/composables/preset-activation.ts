@@ -6,6 +6,7 @@ import { resolvePreset } from './preset-resolve';
 import { persistChange } from './use-history';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import { forgetColorOverride } from '~/composables/live-ops/color-override-ops';
 import { mark, measure, trace } from '~/utils/perf';
 
 /**
@@ -43,6 +44,7 @@ export function applyActivePreset(ctx: PresetActivationContext, presetId: string
   if (presetId) {
     const target = presets.find((p) => p.id === presetId);
     if (!target) return;
+    forgetColorOverride(presetId);
     trace('preset.apply', () =>
       _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.modifiers),
     );
@@ -126,6 +128,7 @@ function _transitionFlash(prevId: string | null, nextId: string | null): void {
   }
   if (nextId) {
     const target = presets.find(p => p.id === nextId);
+    forgetColorOverride(nextId);
     if (target) _applyPreset(resolvePreset(target, presets), ctx.flatFixtures, ctx.modifiers);
   }
   ctx.triggerCanvasSync();
@@ -184,6 +187,7 @@ export function stopEverything(opts: { fromRemote?: boolean } = {}): void {
   for (const id of ids) {
     const preset = id ? ctx.savedPresets.find(p => p.id === id) : undefined;
     if (preset) _stopPreset(resolvePreset(preset, ctx.savedPresets), ctx.flatFixtures, ctx.modifiers);
+    forgetColorOverride(id);
   }
   ctx.setSelectedPresetId(null);
   // The single frame: everything stopped.

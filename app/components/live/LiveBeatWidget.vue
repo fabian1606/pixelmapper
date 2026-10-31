@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
+import { recordLiveStep } from '~/composables/live-ops/live-history';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
@@ -57,6 +58,8 @@ let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
 function applyBpm(newBpm: number, epochMs?: number) {
   const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
   if (!engineStore.engine) return;
+  // A tap series is one step: Step back returns to the tempo before it.
+  recordLiveStep({ coalesce: 'bpm' });
   engineStore.baseBpm = clamped;
   const epoch = epochMs ?? Date.now();
   engineStore.setClockEpoch(epoch);

@@ -151,6 +151,7 @@ const selectedFixtures = computed(() =>
       <SelectionInfoSection
         v-if="activeTab === 'fixtures'"
         :selected-fixtures="selectedFixtures"
+        :selected-ids="selectedIds"
         :all-fixtures="fixtures"
       />
     </Sidebar>

@@ -12,6 +12,7 @@ import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { applyRGBToActivePreset, setColorOverride, getEffectiveRGB } from '~/composables/live-ops/color-override-ops';
 import { getPresetNaturalRGB, type RGB } from '~/utils/live/color-utils';
+import { recordLiveStep } from '~/composables/live-ops/live-history';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
@@ -70,7 +71,11 @@ function onInput(c: RgbColor) {
 /** Commits and broadcasts the final color of an edit. */
 function onScrubEnd() {
   const id = activePresetId.value;
-  if (id && preview.value) setColorOverride(id, preview.value);
+  if (id && preview.value) {
+    // One wheel gesture = one step (the tracked override is still the one from before the drag).
+    recordLiveStep();
+    setColorOverride(id, preview.value);
+  }
   preview.value = null;
 }
 
@@ -78,6 +83,7 @@ function resetOverride() {
   const id = activePresetId.value;
   if (!id || props.editMode) return;
   preview.value = null;
+  recordLiveStep();
   setColorOverride(id, null);
 }
 
