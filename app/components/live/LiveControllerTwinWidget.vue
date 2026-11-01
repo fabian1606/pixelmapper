@@ -112,6 +112,8 @@ type SliderRig = {
   kind: 'slider';
   group: SVGGElement;
   knob: SVGGraphicsElement;
+  /** Fader track; its screen rect maps pointer positions onto the track. */
+  range: SVGGraphicsElement;
   rangeTopY: number;        // svg coords
   rangeBottomY: number;
   knobOriginY: number;
@@ -347,13 +349,17 @@ function applyAllSectionHighlights() {
 }
 
 // ── Pointer → SVG-space coordinate ─────────────────────────────────────────
-function clientToSvg(svg: SVGSVGElement, x: number, y: number): { x: number; y: number } {
-  const pt = svg.createSVGPoint();
-  pt.x = x; pt.y = y;
-  const ctm = svg.getScreenCTM();
-  if (!ctm) return { x: 0, y: 0 };
-  const m = pt.matrixTransform(ctm.inverse());
-  return { x: m.x, y: m.y };
+/**
+ * Maps a pointer's clientY onto the fader track in SVG coords. Measured via the
+ * track's bounding rect rather than `getScreenCTM()`: WebKit (Safari / Tauri)
+ * ignores the live canvas' CSS `translate + scale` in the CTM, which put every
+ * mouse position above the track and pinned the knob to the top.
+ */
+function clientYToSvg(rig: SliderRig, clientY: number): number {
+  const rect = rig.range.getBoundingClientRect();
+  if (rect.height <= 0) return rig.rangeTopY;
+  const svgPerPx = (rig.rangeBottomY - rig.rangeTopY) / rect.height;
+  return rig.rangeTopY + (clientY - rect.top) * svgPerPx;
 }
 
 function valueFromSvgY(rig: SliderRig, svgY: number): number {
@@ -384,7 +390,7 @@ async function setup() {
     if (!el) continue;
 
     if (ctrl.type === 'button') wireButton(ctrl, el, svg);
-    else if (ctrl.type === 'slider') wireSlider(ctrl, el as SVGGElement, svg);
+    else if (ctrl.type === 'slider') wireSlider(ctrl, el as SVGGElement);
   }
 
   applySelectionHighlight();
@@ -763,7 +769,7 @@ function createFaderReadout(group: SVGGElement, rangeBox: DOMRect): SVGTextEleme
   return text;
 }
 
-function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElement) {
+function wireSlider(ctrl: ControllerControl, group: SVGGElement) {
   const knob  = group.querySelector('g[id^="knob"], g[id*="knob"]') as SVGGraphicsElement | null;
   const range = group.querySelector('rect[id^="range"], rect[id*="range"]') as SVGGraphicsElement | null;
   if (!knob || !range) return;
@@ -776,6 +782,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     kind: 'slider',
     group,
     knob,
+    range,
     rangeTopY:    rangeBox.y,
     rangeBottomY: rangeBox.y + rangeBox.height,
     knobOriginY:  knobBox.y,
@@ -798,8 +805,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
   };
   const onMoveDoc = (e: PointerEvent) => {
     if (e.pointerId !== activePointerId) return;
-    const { y } = clientToSvg(svg, e.clientX, e.clientY);
-    const v = valueFromSvgY(rig, y);
+    const v = valueFromSvgY(rig, clientYToSvg(rig, e.clientY));
     setFaderValue(ctrl.id, v);
     applyKnob(ctrl.id);
     const child = getChild(ctrl.id);
@@ -818,8 +824,7 @@ function wireSlider(ctrl: ControllerControl, group: SVGGElement, svg: SVGSVGElem
     if (props.editMode) return;
     e.stopPropagation();
     activePointerId = e.pointerId;
-    const { y } = clientToSvg(svg, e.clientX, e.clientY);
-    const v = valueFromSvgY(rig, y);
+    const v = valueFromSvgY(rig, clientYToSvg(rig, e.clientY));
     setFaderValue(ctrl.id, v);
     applyKnob(ctrl.id);
     const child = getChild(ctrl.id);
