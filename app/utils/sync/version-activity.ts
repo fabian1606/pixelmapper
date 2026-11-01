@@ -46,7 +46,9 @@ export const COMMAND_LABELS: Readonly<Record<string, string>> = {
   // Engine
   'engine.bpm': 'Change BPM',
   'engine.speed': 'Change speed',
+  'engine.master': 'Change master dimmer',
   'engine.clock': 'Reset clock',
+  'engine.beatAlign': 'Tap beat',
   // Live pages
   'live.addPage': 'Add live page',
   'live.removePage': 'Remove live page',

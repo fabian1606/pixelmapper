@@ -32,7 +32,8 @@ const KIND_LABELS: Record<LiveWidgetKind, string> = {
 };
 
 /** Global function names as shown on buttons (`LiveButtonWidget`). */
-const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back' };
+const GLOBAL_FN_LABELS: Record<string, string> = { strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back', 'tap-tempo': 'Beat',
+  'speed-double': 'Speed ×2', 'speed-half': 'Speed ÷2', 'speed-reset': 'Speed reset' };
 
 /** Maps a (possibly legacy or malformed) widget type to its drawing kind. */
 export function widgetKind(type: unknown): LiveWidgetKind {

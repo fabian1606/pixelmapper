@@ -12,11 +12,12 @@
  * `rs-engine/core/src/lib.rs` (checked by `engine-abi.test.ts`). Bump both
  * on every incompatible change to the `WasmEngine` API or a packet format.
  */
-export const ENGINE_ABI_VERSION = 1;
+export const ENGINE_ABI_VERSION = 4;
 
 /** `WasmEngine` methods the worker and previews call. */
 export const REQUIRED_ENGINE_METHODS = [
-  'set_bpm_at', 'reset_clock', 'render', 'dispatch', 'retry_disabled',
+  'set_bpm_at', 'reset_clock', 'align_beat', 'beat_time', 'base_beat_time', 'speed_time',
+  'request_speed', 'speed', 'render', 'dispatch', 'retry_disabled',
   'read_signatures', 'read_head_signatures', 'get_dmx_view',
 ] as const;
 

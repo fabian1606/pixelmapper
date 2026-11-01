@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, ref } from 'vue';
 import { House, Sparkles, Cable, Zap, Download, Settings } from 'lucide-vue-next';
 import { useEngineStore } from '~/stores/engine-store';
+import { useBeatPulse } from '~/composables/engine/use-beat-pulse';
 import { storeToRefs } from 'pinia';
 import CollaboratorsPanel from '~/components/CollaboratorsPanel.vue';
 import BeatOverlay from '~/components/BeatOverlay.vue';
@@ -17,41 +18,12 @@ useAsTitleBar();
 
 const engineStore = useEngineStore();
 const { projectLoading, projectOrigin } = storeToRefs(engineStore);
-const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
+// Base tempo (the music); the speed multiplier is shown on the speed controls.
+const bpm = computed(() => engineStore.baseBpm);
 
 const beatOverlayOpen = ref(false);
-/** App settings dialog (External agents, …). */
-const beatActive = ref(false);
-
-let intervalId: ReturnType<typeof setInterval> | null = null;
-let beatTimeout: ReturnType<typeof setTimeout> | null = null;
-
-function pulse() {
-  beatActive.value = true;
-  setTimeout(() => { beatActive.value = false; }, 120);
-}
-
-function startBeatInterval() {
-  if (intervalId) clearInterval(intervalId);
-  if (beatTimeout) clearTimeout(beatTimeout);
-  const ms = 60000 / (bpm.value || 120);
-  const elapsed = Date.now() - engineStore.clockEpoch;
-  const phase = ((elapsed % ms) + ms) % ms;
-  const delay = ms - phase;
-  beatTimeout = setTimeout(() => {
-    pulse();
-    intervalId = setInterval(pulse, ms);
-  }, delay);
-}
-
-onMounted(() => {
-  watch([bpm, () => engineStore.clockEpoch], startBeatInterval, { immediate: true });
-});
-
-onUnmounted(() => {
-  if (intervalId) clearInterval(intervalId);
-  if (beatTimeout) clearTimeout(beatTimeout);
-});
+/** Beat dot: lights on every whole beat of the engine's beat clock. */
+const beatActive = useBeatPulse();
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string | undefined);

@@ -5,6 +5,7 @@
 //   0x14 TYPE_LAYOUT_BIN     fixtures, channels, heads (v2)
 //   0x15 TYPE_CHAN_BIN       chaser configs
 //   0x16 TYPE_MODIFIERS_BIN  modifier instances (replaces TYPE_FX_BIN)
+//   0x17 TYPE_INTENSITY_BIN  intensity factors (master / group dimmers)
 
 use crate::distribution::{Distribution, Grouping, Mode, Scope};
 use crate::engine::{ChannelEntry, EffectEngine, LayoutChannelEntry, LayoutEntry, ModifierInstance};
@@ -176,6 +177,29 @@ pub fn parse_channels_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
         Some(entries) => {
             let n = entries.len() as i32;
             engine.sync_channels(entries);
+            n
+        }
+        None => -1,
+    }
+}
+
+// ── Intensity (0x17) ─────────────────────────────
+
+/// Parses intensity factors: `u32 count; { u32 dmxIndex; f32 factor }`.
+/// Replaces the whole list (an empty packet = everything at full).
+pub fn parse_intensity_bin(engine: &mut EffectEngine, data: &[u8]) -> i32 {
+    fn parse(c: &mut Cursor) -> Option<Vec<(usize, f32)>> {
+        let count = c.u32()? as usize;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            entries.push((c.u32()? as usize, c.f32()?));
+        }
+        Some(entries)
+    }
+    match parse(&mut Cursor::new(data)) {
+        Some(entries) => {
+            let n = entries.len() as i32;
+            engine.set_intensity(entries);
             n
         }
         None => -1,

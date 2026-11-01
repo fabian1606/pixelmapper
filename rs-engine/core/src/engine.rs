@@ -1,21 +1,39 @@
 // ── Engine ───────────────────────────────────────
 //
 // Render pipeline per frame (ADR §6.5):
-//   1. beat time from the piecewise BPM clock,
+//   1. tempo layers: base beat (piecewise BPM clock + tap nudges), then the
+//      speed multiplier (speed_layer.rs) → effective beat and speed time,
 //   2. base values from chasers,
 //   3. for each modifier instance in list order: collect samples for its
 //      signature (scalar channels / rgb heads / pan-tilt heads), compute
 //      phase and seeds, run the plugin through `ModifierRuntime`, blend,
-//   4. write the DMX buffer with per-channel range remapping.
+//   4. intensity: scale channels by their factor (master / group dimmers),
+//   5. write the DMX buffer with per-channel range remapping.
 // Modifiers themselves live in content plugins; the core only orchestrates.
 
 use crate::beat_clock::BeatClock;
+use crate::speed_layer::SpeedLayer;
 use crate::distribution::Distribution;
 use crate::phase::{phase_speed, speed_phase};
 use crate::room::Room;
 use crate::runtime::{ctx, sample, FrameCtx, ModifierRuntime, NullRuntime, PluginRef, Sample};
 use crate::signatures::{from_dmx16, remap_range, rgb_read, rgb_write, to_dmx16, ColorSystem, Signature};
 use crate::types::{BlendMode, ChaserConfig, OutputMode, RenderTarget, SpeedConfig, SpeedMode};
+
+// ── Frame clock ──────────────────────────────────
+
+/// Clock values of one frame (see `EffectEngine::render`).
+#[derive(Debug, Clone, Copy)]
+struct Clock {
+    /// Wall time since the epoch (plugins' `TIME_MS`, trigger edges).
+    time_ms: f32,
+    /// Speed time: wall time scaled by the multiplier (time-mode phase).
+    speed_ms: f32,
+    /// Effective beat (beat-mode phase).
+    beat_time: f32,
+    base_bpm: f32,
+    speed: f32,
+}
 
 // ── Layout input ─────────────────────────────────
 
@@ -264,6 +282,8 @@ pub struct EffectEngine {
     /// Working values (0–255).
     pub render_buffer: Vec<f32>,
     pub clock: BeatClock,
+    /// Global speed multiplier on top of the base beat (layer 2).
+    pub speed: SpeedLayer,
     pub targets: Vec<RenderTarget>,
     pub heads: Vec<Head>,
     /// Fixture id hashes by group index.
@@ -283,6 +303,9 @@ pub struct EffectEngine {
     target_head: Vec<usize>,
     /// Random-grouping permutations by rank count (per instance render).
     perms: std::collections::HashMap<usize, Vec<u32>>,
+    /// Intensity factors (dmx index, 0..1) from master / group dimmers,
+    /// applied after the modifiers. Channels not listed stay at full.
+    intensity: Vec<(usize, f32)>,
 }
 
 impl Default for EffectEngine {
@@ -304,6 +327,7 @@ impl EffectEngine {
             base_buffer: vec![0.0; 512],
             render_buffer: vec![0.0; 512],
             clock: BeatClock::new(120.0),
+            speed: SpeedLayer::new(1.0),
             targets: Vec::new(),
             heads: Vec::new(),
             fixture_hashes: Vec::new(),
@@ -317,10 +341,11 @@ impl EffectEngine {
             group_rank: Vec::new(),
             target_head: Vec::new(),
             perms: std::collections::HashMap::new(),
+            intensity: Vec::new(),
         }
     }
 
-    /// Tempo change at `at_ms` (ms since the clock epoch).
+    /// Base tempo change at `at_ms` (ms since the clock epoch).
     pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32) {
         self.clock.set_bpm(bpm, at_ms);
     }
@@ -333,6 +358,39 @@ impl EffectEngine {
     /// Restarts the beat clock (new clock epoch).
     pub fn reset_clock(&mut self, bpm: f32) {
         self.clock.reset(bpm);
+        self.speed.reset();
+    }
+
+    /// Requests a global speed multiplier at `now_ms`; it takes effect on the
+    /// next common beat (see `SpeedLayer`).
+    pub fn request_speed(&mut self, speed: f32, now_ms: f32) {
+        let b = self.clock.beat_time(now_ms);
+        self.speed.request(speed, b);
+    }
+
+    /// Active speed multiplier.
+    pub fn speed(&self) -> f32 {
+        self.speed.speed()
+    }
+
+    /// Base beats (the music) at `time_ms`.
+    pub fn base_beat_time(&self, time_ms: f32) -> f32 {
+        self.clock.beat_time(time_ms)
+    }
+
+    /// Speed time (ms, scaled by the multiplier) at `time_ms`.
+    pub fn speed_time(&self, time_ms: f32) -> f32 {
+        self.speed.time(time_ms)
+    }
+
+    /// Nudges the beat grid onto a tap at `tap_ms`, starting at `now_ms`.
+    pub fn align_beat(&mut self, tap_ms: f32, now_ms: f32) {
+        self.clock.align_to(tap_ms, now_ms);
+    }
+
+    /// Effective beats (base beat × speed) at `time_ms` (ms since the clock epoch).
+    pub fn beat_time(&self, time_ms: f32) -> f32 {
+        self.speed.beat(self.clock.beat_time(time_ms))
     }
 
     /// Single entry point for binary packets.
@@ -346,6 +404,7 @@ impl EffectEngine {
             0x14 => crate::bin_protocol::parse_layout_bin(self, data),
             0x15 => crate::bin_protocol::parse_channels_bin(self, data),
             0x16 => crate::bin_protocol::parse_modifiers_bin(self, data),
+            0x17 => crate::bin_protocol::parse_intensity_bin(self, data),
             _ => -1,
         }
     }
@@ -398,6 +457,13 @@ impl EffectEngine {
             self.base_buffer.resize(size, 0.0);
             self.render_buffer.resize(size, 0.0);
         }
+    }
+
+    /// Replaces the intensity factors (master / group dimmers). They scale
+    /// the final values, so presets, chasers and modifiers keep running
+    /// underneath and every output (DMX, preview) shows the dimmed level.
+    pub fn set_intensity(&mut self, entries: Vec<(usize, f32)>) {
+        self.intensity = entries.into_iter().map(|(i, f)| (i, f.clamp(0.0, 1.0))).collect();
     }
 
     /// Updates chaser configs of channels.
@@ -633,13 +699,18 @@ impl EffectEngine {
         self.base_buffer.fill(0.0);
         self.render_buffer.fill(0.0);
 
-        let beat_time = self.clock.beat_time(time_ms);
-        let bpm = self.clock.bpm();
+        // Tempo layers: base beat → speed switch → effective beat / speed time.
+        let base_beat = self.clock.beat_time(time_ms);
+        self.speed.update(time_ms, base_beat);
+        let beat_time = self.speed.beat(base_beat);
+        let speed_ms = self.speed.time(time_ms);
+        let base_bpm = self.clock.bpm();
+        let speed = self.speed.speed();
 
-        // 1. Base values from chasers.
+        // 1. Base values from chasers (speed time; one beat = 60000 / base bpm of it).
         for t in &self.targets {
             if t.dmx_index >= self.render_buffer.len() { continue; }
-            let v = t.chaser_config.as_ref().map(|c| Self::chaser_value(c, time_ms, bpm)).unwrap_or(0.0).clamp(0.0, 255.0);
+            let v = t.chaser_config.as_ref().map(|c| Self::chaser_value(c, speed_ms, base_bpm)).unwrap_or(0.0).clamp(0.0, 255.0);
             self.base_buffer[t.dmx_index] = v;
             self.render_buffer[t.dmx_index] = v;
         }
@@ -647,11 +718,16 @@ impl EffectEngine {
         // 2. Modifiers in list order.
         for idx in 0..self.instances.len() {
             if !self.instances[idx].disabled {
-                self.render_instance(idx, time_ms, beat_time, bpm);
+                self.render_instance(idx, Clock { time_ms, speed_ms, beat_time, base_bpm, speed });
             }
         }
 
-        // 3. DMX output with per-channel range remap.
+        // 3. Intensity (master / group dimmers) on top of everything.
+        for &(i, f) in &self.intensity {
+            if let Some(v) = self.render_buffer.get_mut(i) { *v *= f; }
+        }
+
+        // 4. DMX output with per-channel range remap.
         for t in &self.targets {
             if t.dmx_index >= self.dmx_buffer.len() { continue; }
             self.dmx_buffer[t.dmx_index] = remap_range(self.render_buffer[t.dmx_index], t.range_min, t.range_max) as u8;
@@ -659,7 +735,10 @@ impl EffectEngine {
     }
 
     /// Runs one modifier instance and blends its output.
-    fn render_instance(&mut self, idx: usize, time_ms: f32, beat_time: f32, bpm: f32) {
+    fn render_instance(&mut self, idx: usize, clock: Clock) {
+        let Clock { time_ms, speed_ms, beat_time, base_bpm, speed } = clock;
+        // Effective tempo: the rate of `beat_time`.
+        let bpm = base_bpm * speed;
         self.collect(idx);
         if self.refs.is_empty() { return; }
         let inst = self.instances[idx].clone();
@@ -677,12 +756,14 @@ impl EffectEngine {
         }
 
         let arity = inst.signature.arity();
-        let sp = speed_phase(&inst.speed, time_ms, beat_time);
+        // Phase on the speed layers; `TIME_MS` stays wall time (trigger edges use it).
+        let sp = speed_phase(&inst.speed, speed_ms, beat_time);
         let mut fctx = FrameCtx::default();
         fctx.0[ctx::TIME_MS] = time_ms;
         fctx.0[ctx::BEAT_TIME] = beat_time;
         fctx.0[ctx::BPM] = bpm;
-        fctx.0[ctx::PHASE_SPEED] = phase_speed(&inst.speed, bpm);
+        let time_scale = if matches!(inst.speed.mode, SpeedMode::Time) { speed } else { 1.0 };
+        fctx.0[ctx::PHASE_SPEED] = phase_speed(&inst.speed, bpm) * time_scale;
         fctx.0[ctx::ARITY] = arity as f32;
         fctx.0[ctx::SEED_LO] = (inst.key & 0xffff) as f32;
         fctx.0[ctx::SEED_HI] = (inst.key >> 16) as f32;

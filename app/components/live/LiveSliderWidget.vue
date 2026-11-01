@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
 import { useLiveBusStore } from '~/stores/live-bus-store';
-import { applyMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { applyMapping } from '~/composables/live-ops/apply-mapping';
 import { formatSpeed, speedToFader } from '~/utils/live/speed-fader';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 
@@ -24,20 +24,17 @@ const value = ref(0); // 0–1
  * collaborators changing the speed elsewhere.
  */
 const isSpeed = computed(() => props.widget.mapping.type === 'speed');
-const shownValue = computed(() => isSpeed.value
-  ? speedToFader(engineStore.speedMultiplier, props.widget.mapping.speedMode ?? 'continuous')
-  : value.value);
+/** Master dimmer faders follow the shared level (other faders / collaborators). */
+const isMaster = computed(() => props.widget.mapping.type === 'master-dimmer');
+const shownValue = computed(() => {
+  if (isSpeed.value) return speedToFader(engineStore.speedMultiplier, props.widget.mapping.speedMode ?? 'continuous');
+  if (isMaster.value) return engineStore.masterLevel;
+  return value.value;
+});
 const valueText = computed(() => isSpeed.value ? formatSpeed(engineStore.speedMultiplier) : undefined);
 
-// Per-instance virtual-dimmer base-value tracking; reset when the mapping changes.
-const dimmerState = createDimmerState();
-watch(() => props.widget.mapping, () => {
-  dimmerState.baseValues.clear();
-  dimmerState.lastTarget.clear();
-}, { deep: true });
-
 function applyValue(v: number) {
-  applyMapping(props.widget.mapping, true, { key: props.widget.id, value: v, dimmerState });
+  applyMapping(props.widget.mapping, true, { key: props.widget.id, value: v });
 }
 
 /** Fader moved: apply locally and broadcast to collaborators. */

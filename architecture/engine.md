@@ -43,7 +43,8 @@ On start the worker checks the loaded modules (`app/utils/engine/engine-abi.ts`)
 | `signatures.rs` | `Signature` (scalar / rgb / panTilt), color-system read/write (RGB, RGBW, RGBA, CMY), 16-bit pairs, range remap |
 | `phase.rs` | Speed phase (time / beat / infinite) and phase speed |
 | `distribution.rs` | Per-sample `spatial`, `rank`, `distGroup` of an instance's distribution (ADR A20); mirrored in `app/utils/engine/distribution/sample.ts`, parity-tested on `distribution_table.json` |
-| `beat_clock.rs` | Piecewise BPM integral (`set_bpm_at`) so beat time is continuous across tempo changes |
+| `beat_clock.rs` | Piecewise BPM integral (`set_bpm_at`) so beat time is continuous across tempo changes; `align_to` (tap alignment) slides the grid onto a tap by running ±(error/4) faster for `NUDGE_BEATS` = 4 beats — no phase jump, presets keep running |
+| `speed_layer.rs` | Global speed multiplier on top of the base beat: effective beat `E` and speed time `T`; changes switch on the next common beat (see *Tempo layers*) |
 | `runtime.rs` | `ModifierRuntime` trait, `FrameCtx` / `Sample` (16 f32 each), `NullRuntime` |
 | `runtime_js.rs` + `js/plugin-bridge.js` | Browser runtime: calls `globalThis.__pmPluginBridge` (the worker's `WorkerPluginBridge`) |
 | `wasm_bindings.rs` | `WasmEngine` for the worker |
@@ -66,7 +67,8 @@ On start the worker checks the loaded modules (`app/utils/engine/engine-abi.ts`)
       - `scale` (A20): `factor = 1 − strength + strength × out`, `mapped = base × factor`; `add` applies `prev + (mapped − base)`, `multiply` `prev × factor`, others combine `prev` and `mapped`.
       - `absolute`: `mixed = blendOp(prev, out)`, then `prev + (mixed − prev) × strength`.
       - rgb heads write through their color system (RGBW white = min(r, g, b), CMY inverted); pan/tilt write 16-bit pairs when a fine channel exists.
-3. **DMX** — `render_buffer` remapped to each channel's `[rangeMin, rangeMax]` into `dmx_buffer`.
+3. **Intensity** — `render_buffer` values multiplied by the master / group dimmer factors (`set_intensity`, packet 0x17; unlisted channels stay at full). Programmed values and modifier state are untouched; signature readback sees the dimmed values.
+4. **DMX** — `render_buffer` remapped to each channel's `[rangeMin, rangeMax]` into `dmx_buffer`.
 
 ### Signature readback (live values)
 
@@ -79,7 +81,13 @@ On start the worker checks the loaded modules (`app/utils/engine/engine-abi.ts`)
 ```rust
 pub fn dispatch(&mut self, packet_type: u8, data: &[u8]) -> i32   // count or -1
 pub fn render(&mut self, time_ms: f32, delta_time_ms: f32)
-pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32)                 // tempo change on the beat clock
+pub fn set_bpm_at(&mut self, bpm: f32, at_ms: f32)                 // base tempo change on the beat clock
+pub fn align_beat(&mut self, tap_ms: f32, now_ms: f32)             // tap alignment: nudge the base beat grid onto a tap
+pub fn request_speed(&mut self, speed: f32, now_ms: f32)           // speed multiplier, switches on the next common beat
+pub fn beat_time(&self, time_ms: f32) -> f32                        // effective beat E (sent with every frame)
+pub fn base_beat_time(&self, time_ms: f32) -> f32                   // base beat B (the music)
+pub fn speed_time(&self, time_ms: f32) -> f32                       // speed time T (ms × multiplier)
+pub fn speed(&self) -> f32                                          // active multiplier
 pub fn reset_clock(&mut self, bpm: f32)                            // new clock epoch
 pub fn retry_disabled(&mut self)                                   // after plugin loads
 pub fn read_signatures(&self, requests: &[u32]) -> Vec<f32>
@@ -87,6 +95,26 @@ pub fn read_head_signatures(&self, requests: &[u32]) -> Vec<f32>
 pub fn get_dmx_view(&self) -> js_sys::Uint8Array                   // zero-copy
 pub fn engine_abi_version() -> u32                                  // free function: host handshake
 ```
+
+## Tempo layers
+
+Three layers produce the clock of every frame (ABI 3):
+
+```
+t (ms since epoch, wall)
+ └─ Layer 1  BaseClock (beat_clock.rs)   B(t): base BPM segments + tap nudges = the music
+     └─ Layer 2  SpeedLayer (speed_layer.rs), multiplier m switched at base beats b0
+           E(B) = e0 + m·(B − b0) + nudge   effective beat  → beat-mode phase, plugin BEAT_TIME, BPM = base·m
+           T(t) = t0 + m·(t − ts)           speed time (ms) → time-mode phase, chasers
+```
+
+- **Base tempo** (`set_bpm_at`) and **tap alignment** (`align_beat`) only touch layer 1. The tap nudge runs the base clock ±(error/4) for 4 beats until the tap sits on a whole beat. The clock epoch is never re-anchored, so presets never restart.
+- **Speed** (`request_speed`) is quantized: it switches at the next *common* beat, a whole base beat where `E` is whole as well. ×1→×2 switches on the next base beat; ×1→×½ switches within 2 beats. `E` and `T` stay continuous, and the new grid is phase-locked to the music. Without a common beat (unfreeze, continuous fader values such as ×1.37), the switch happens at the next base beat. A 4-beat nudge then slides `E` onto a whole beat when the new speed can lock (×n, ×1/n). A newer request replaces a pending one.
+- Plugins still get wall time as `TIME_MS`, because trigger edges are stamped with it. Only the speed phase uses `T`. For time-mode instances, `PHASE_SPEED` is scaled by `m`.
+- The worker sends `{ beatTime, baseBeat, speedTimeMs, speed }` with every frame. `EffectEngine.clockAt()` on the main thread extrapolates from it.
+  - Beat indicators (`useBeatPulse`), BPM displays, the live hub `beat` and the project scope use **B** / base BPM.
+  - Previews (`sampleClock`) use `E` / `T`.
+- The store sends base BPM (`postBpm`) and multiplier (`postSpeed`) separately. Snapshots store the base BPM.
 
 ## Plugin runtime
 

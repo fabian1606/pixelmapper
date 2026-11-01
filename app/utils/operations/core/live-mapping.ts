@@ -133,12 +133,16 @@ export const LiveMappingInputSchema = z.discriminatedUnion('type', [
   }).describe('Switch to another live page.'),
   z.object({
     type: z.literal('global-function'),
-    function: z.enum(['strobe', 'blind', 'blackout', 'speed', 'stop-all']).describe('Global function ("stop-all" clears preset, flashes, overwrites and speed at once; buttons only, default trigger "long").'),
+    function: z.enum(['strobe', 'blind', 'blackout', 'speed', 'stop-all', 'tap-tempo', 'speed-double', 'speed-half', 'speed-reset']).describe([
+      'Global function ("stop-all" clears preset, flashes, overwrites and speed at once; buttons only, default trigger "long";',
+      '"tap-tempo" = Beat: each press is one tap of the tap tempo; "speed-double" / "speed-half": current speed ×2 / ÷2 (¼×–4×);',
+      '"speed-reset": back to 1× of the tapped BPM).',
+    ].join(' ')),
     config: z.record(z.string(), z.unknown()).optional().describe([
       'Optional config merged over the defaults: strobe { frequency: 8 (Hz), beatSync: false, beatDivision: 8 },',
       'blind { color: "#ffffff", dimmerCurve: false }, speed { multiplier: 2, behavior: "latch" | "hold" }.',
     ].join(' ')),
-  }).describe('Global function while held (strobe, blind, blackout), speed multiplier, or stop-all.'),
+  }).describe('Global function while held (strobe, blind, blackout), speed multiplier, stop-all, tap-tempo (Beat), or speed ×2 / ÷2 / reset.'),
   z.object({
     type: z.literal('position-recall'),
     positionId: z.string().describe('Saved moving-head position id.'),

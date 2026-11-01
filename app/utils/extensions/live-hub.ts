@@ -24,8 +24,8 @@ export type FrameCallback = (frame: LiveFrame) => void;
 export interface LiveHubSources {
   /** Absolute 1-based DMX address of a channel's coarse byte, or `null`. */
   resolveChannelAddress(fixtureId: FixtureId, channelIndex: number): number | null;
-  /** Current tempo and clock epoch (ms since Unix epoch). */
-  beatSource(): { bpm: number; clockEpoch: number };
+  /** Current tempo and the engine's beat time at `nowMs` (wall clock). */
+  beatSource(nowMs: number): { bpm: number; beatTime: number };
   /**
    * Asks the engine for these signature tuples from now on (empty = none).
    * `generation` must be echoed with the values (see `SignatureFrame`).
@@ -57,9 +57,9 @@ export function targetKey(t: LiveTarget): string {
  * prove that no work happens without subscribers.
  */
 export const extractors = {
-  /** Beat clock from tempo + epoch (constant BPM since the epoch; P3.6 adds BPM history). */
-  beat(nowMs: number, src: { bpm: number; clockEpoch: number }): BeatInfo {
-    const beatTime = Math.max(0, ((nowMs - src.clockEpoch) * src.bpm) / 60000);
+  /** Beat info from the engine's beat time (tempo history and tap nudges included). */
+  beat(src: { bpm: number; beatTime: number }): BeatInfo {
+    const beatTime = Math.max(0, src.beatTime);
     return { beatTime, bpm: src.bpm, phase: beatTime - Math.floor(beatTime) };
   },
   /** Rendered coarse DMX value of a channel. */
@@ -188,7 +188,7 @@ export class LiveHub {
       case 'universe':
         return extractors.universe(dmx, target.universe);
       case 'beat':
-        return src ? extractors.beat(nowMs, src.beatSource()) : undefined;
+        return src ? extractors.beat(src.beatSource(nowMs)) : undefined;
       case 'signature':
         return this.signatureValues.get(targetKey(target));
     }
@@ -212,8 +212,8 @@ export class LiveHub {
     }
 
     if (this.frameCallbacks.size > 0) {
-      const src = this.sources?.beatSource() ?? { bpm: 120, clockEpoch: nowMs };
-      const frame: LiveFrame = { timeMs, beat: extractors.beat(nowMs, src), dmx };
+      const src = this.sources?.beatSource(nowMs) ?? { bpm: 120, beatTime: 0 };
+      const frame: LiveFrame = { timeMs, beat: extractors.beat(src), dmx };
       for (const cb of this.frameCallbacks) {
         try {
           cb(frame);

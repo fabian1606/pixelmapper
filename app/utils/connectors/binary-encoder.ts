@@ -14,6 +14,8 @@ export const TYPE_LAYOUT_BIN    = 0x14;
 export const TYPE_CHAN_BIN      = 0x15;
 /** Modifier instances (replaces the former TYPE_FX_BIN, same id). */
 export const TYPE_MODIFIERS_BIN = 0x16;
+/** Intensity factors of master / group dimmers (see utils/engine/intensity.ts). */
+export const TYPE_INTENSITY_BIN = 0x17;
 
 const MAGIC0 = 0xaa, MAGIC1 = 0x55;
 

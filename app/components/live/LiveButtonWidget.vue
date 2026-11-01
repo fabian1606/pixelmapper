@@ -5,7 +5,6 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { useEngineStore } from '~/stores/engine-store';
 import { onWidgetTrigger } from '~/composables/live-ops/live-widget-ops';
 import { useSectionBinding } from '~/composables/live-ops/use-section-binding';
-import { createDimmerState } from '~/composables/live-ops/apply-mapping';
 import { hasPendingLongPress, isButtonActive, longPressProgress, pressButton, releaseButton } from '~/composables/live-ops/button-runtime';
 import { appearanceLevel, autoColor, autoLabel, isAnimatedLook, sectionTrigger, triggerBadge } from '~/utils/live/button-actions';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
@@ -83,14 +82,12 @@ const offTrigger = onWidgetTrigger((pageId, widgetId, active) => {
 });
 onUnmounted(offTrigger);
 
-const dimmerState = createDimmerState();
-
 /** pm.button pressed. */
 function onPress() {
   if (props.editMode) return;
   pressed.value = true;
   if (section.membership.value) section.press();
-  else pressButton(props.widget.actions, { key: props.widget.id, dimmerState });
+  else pressButton(props.widget.actions, { key: props.widget.id });
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: true });
 }
 
@@ -99,7 +96,7 @@ function onRelease() {
   if (props.editMode) return;
   pressed.value = false;
   if (section.membership.value) section.release();
-  else releaseButton(props.widget.actions, { key: props.widget.id, dimmerState });
+  else releaseButton(props.widget.actions, { key: props.widget.id });
   liveBus.dispatch('widget.trigger', { pageId: props.pageId, widgetId: props.widget.id, active: false });
 }
 </script>

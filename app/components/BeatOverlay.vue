@@ -1,57 +1,36 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useEngineStore } from '~/stores/engine-store';
-import { useLiveBusStore } from '~/stores/live-bus-store';
+import { applyTapBpm, tapBeat } from '~/composables/live-ops/tap-tempo';
 
 const emit = defineEmits<{ close: [] }>();
 
 const engineStore = useEngineStore();
-const liveBus = useLiveBusStore();
 
-const bpmInput = ref(engineStore.engine?.globalBpm.value ?? 120);
-
-function applyBpm(newBpm: number, epochMs?: number) {
-  const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
-  if (!engineStore.engine) return;
-  engineStore.engine.globalBpm.value = clamped;
-  engineStore.engine.postBpm(clamped);
-  const epoch = epochMs ?? Date.now();
-  engineStore.setClockEpoch(epoch);
-  liveBus.dispatch('engine.bpm', { bpm: clamped });
-  if (epochMs !== undefined) liveBus.dispatch('engine.clock', { epochMs: epoch });
-  bpmInput.value = clamped;
-}
+// The popup edits the base tempo (the music); the speed multiplier stays applied on top.
+const bpmInput = ref(engineStore.baseBpm);
+watch(() => engineStore.baseBpm, (bpm) => { bpmInput.value = bpm; });
 
 function onBpmInputChange(e: Event) {
   const val = parseFloat((e.target as HTMLInputElement).value);
-  if (!isNaN(val) && val >= 20 && val <= 300) applyBpm(val);
+  if (!isNaN(val) && val >= 20 && val <= 300) applyTapBpm(val);
 }
 
-function increment() { applyBpm((engineStore.engine?.globalBpm.value ?? 120) + 1); }
-function decrement() { applyBpm((engineStore.engine?.globalBpm.value ?? 120) - 1); }
+function increment() { applyTapBpm(engineStore.baseBpm + 1); }
+function decrement() { applyTapBpm(engineStore.baseBpm - 1); }
 
-// Tap tempo
-const tapTimes = ref<number[]>([]);
+// Tap tempo: shared rules (tap-tempo.ts) — every tap nudges the beat grid
+// onto itself, from the second tap on the averaged tempo is applied.
+const tapCount = ref(0);
 let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onTap() {
-  const now = Date.now();
+  tapBeat();
+  // Counter for the label only (same 2.5 s series reset as tap-tempo.ts).
   if (tapResetTimer) clearTimeout(tapResetTimer);
-  tapResetTimer = setTimeout(() => { tapTimes.value = []; }, 2500);
-
-  tapTimes.value = [...tapTimes.value, now].slice(-8);
-
-  if (tapTimes.value.length >= 2) {
-    const diffs: number[] = [];
-    for (let i = 1; i < tapTimes.value.length; i++) {
-      diffs.push(tapTimes.value[i] - tapTimes.value[i - 1]);
-    }
-    const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-    applyBpm(60000 / avg, tapTimes.value[0]);
-  }
+  tapResetTimer = setTimeout(() => { tapCount.value = 0; }, 2500);
+  tapCount.value = Math.min(8, tapCount.value + 1);
 }
-
-const tapCount = computed(() => tapTimes.value.length);
 
 // Close on outside click
 function onDocClick(e: MouseEvent) {
@@ -60,7 +39,6 @@ function onDocClick(e: MouseEvent) {
 }
 
 onMounted(() => {
-  bpmInput.value = engineStore.engine?.globalBpm.value ?? 120;
   setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
 });
 onUnmounted(() => {

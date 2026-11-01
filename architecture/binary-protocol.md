@@ -30,6 +30,7 @@ The ESP32 strips the header via a state-machine parser (`processByte` in `main.c
 | `TYPE_LAYOUT_BIN` | `0x14` | Fixtures, channels, heads (v3) |
 | `TYPE_CHAN_BIN` | `0x15` | Chaser configurations per DMX channel |
 | `TYPE_MODIFIERS_BIN` | `0x16` | Modifier instances (content plugins) |
+| `TYPE_INTENSITY_BIN` | `0x17` | Intensity factors of master / group dimmers (ABI 4) |
 
 Removed: `TYPE_FX_BIN` (0x16, legacy effects). The worker additionally receives plugin modules (`plugin-load`) and, next to each modifiers packet, the plugin table (index → content hash); these are worker messages, not framed packets.
 
@@ -113,6 +114,10 @@ for each entry:
 ```
 
 Channels with identical `chaserConfig` objects are grouped into a single entry by `buildChannelsBin`. This is critical for packet size: if all 80 channels have the same value (common case), the packet contains just **1 entry** regardless of fixture count.
+
+### TYPE_INTENSITY_BIN (0x17)
+
+`u32 count; { u32 dmxIndex; f32 factor (0..1) }` — replaces the whole list; channels not listed stay at full (an empty list = no dimming). Built by `utils/engine/intensity.ts` (factor = master × covering group levels; DIMMER channels, or COLOR channels of fixtures without one). The engine multiplies the working values after the modifiers, before the range remap, so the DMX output and the 2D canvas preview both show it.
 
 ### TYPE_MODIFIERS_BIN (0x16)
 ```

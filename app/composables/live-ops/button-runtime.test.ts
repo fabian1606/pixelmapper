@@ -19,6 +19,8 @@ const engineStore = {
   baseBpm: 120,
   setSpeedMultiplier: (m: number) => { calls.push(`speed:${m}`); engineStore.speedMultiplier = m; },
   clearOverwriteStack: () => calls.push('clearOverwrites'),
+  setClockEpoch: (_ms: number) => calls.push('clock'),
+  alignBeat: (_ms: number) => calls.push('align'),
 };
 
 vi.mock('~/stores/engine-store', () => ({ useEngineStore: () => engineStore }));
@@ -166,6 +168,40 @@ describe('step back', () => {
     calls.length = 0;
     expect(stepBack()).toBe(true);
     expect(calls).toEqual(['preset:warm']);
+  });
+
+  it('Speed ×2 / ÷2 step the current speed within ¼×–4×', () => {
+    const fn = (f: 'speed-double' | 'speed-half') => [act(f, 'press', { action: { type: 'global-function', globalFunction: f } })];
+    for (let i = 0; i < 3; i++) tap(fn('speed-double'), 'd');
+    expect(engineStore.speedMultiplier).toBe(4);
+    tap(fn('speed-half'), 'h');
+    expect(engineStore.speedMultiplier).toBe(2);
+    for (let i = 0; i < 4; i++) tap(fn('speed-half'), 'h');
+    expect(engineStore.speedMultiplier).toBe(0.25);
+  });
+
+  it('Speed reset goes back to 1× and ends a latched speed button', () => {
+    const fast = [act('f', 'toggle', { action: { type: 'global-function', globalFunction: 'speed', globalFunctionConfig: { multiplier: 2, behavior: 'latch' } } })];
+    const reset = [act('r', 'press', { action: { type: 'global-function', globalFunction: 'speed-reset' } })];
+    tap(fast, 'f');
+    expect(isButtonActive('f', fast)).toBe(true);
+    engineStore.speedMultiplier = 2;
+    tap(reset, 'r');
+    expect(isButtonActive('f', fast)).toBe(false);
+    expect(engineStore.speedMultiplier).toBe(1);
+  });
+
+  it('a Beat button taps the tempo (two taps 400 ms apart = 150 BPM)', () => {
+    const beat = [act('t', 'press', { action: { type: 'global-function', globalFunction: 'tap-tempo' } })];
+    tap(beat, 't');
+    // Every tap nudges the beat grid onto itself (here and on collaborators).
+    expect(calls).toEqual(['align', 'bus:engine.beatAlign']);
+    tap(beat, 't'); // the helper waits 400 ms after each tap
+    expect(engineStore.baseBpm).toBe(150);
+    // The clock epoch is never re-anchored, so presets don't restart.
+    expect(calls).toEqual(['align', 'bus:engine.beatAlign', 'align', 'bus:engine.beatAlign', 'bus:engine.bpm']);
+    expect(isButtonActive('t', beat)).toBe(false);
+    engineStore.baseBpm = 120;
   });
 
   it('undoes a toggled blackout', () => {

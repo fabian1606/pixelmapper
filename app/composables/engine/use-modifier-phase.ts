@@ -11,9 +11,9 @@ import { useEngineStore } from '~/stores/engine-store';
 
 /** Clock state shared by previews. */
 export interface ClockSample {
-  /** ms since the clock epoch. */
+  /** Speed time: ms since the clock epoch scaled by the speed multiplier. */
   timeMs: number;
-  /** Beats since the clock epoch (constant-BPM approximation, as the engine store's state). */
+  /** Beats since the clock epoch, as the engine renders them (tempo history, tap nudges). */
   beatTime: number;
   bpm: number;
 }
@@ -23,8 +23,8 @@ export function sampleClock(): ClockSample {
   try {
     const store = useEngineStore();
     const bpm = store.engine.globalBpm.value || 120;
-    const timeMs = Math.max(0, Date.now() - store.clockEpoch);
-    return { timeMs, beatTime: (timeMs * bpm) / 60000, bpm };
+    const now = Date.now();
+    return { timeMs: store.speedTimeAt(now), beatTime: store.beatTimeAt(now), bpm };
   }
   catch {
     const timeMs = performance.now();

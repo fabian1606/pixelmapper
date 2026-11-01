@@ -4,8 +4,10 @@ import { useLiveBusStore } from '~/stores/live-bus-store';
 import { setActivePreset, pressFlashPreset, releaseFlashPreset, stopEverything } from '~/components/engine/composables/preset-activation';
 import { useLiveModeStore } from '~/stores/live-mode-store';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
-import { applyMapping, type DimmerState } from './apply-mapping';
+import { applyMapping } from './apply-mapping';
 import { recordLiveStep, stepBack } from './live-history';
+import { tapBeat } from './tap-tempo';
+import { setSpeed, stepSpeed } from './speed-steps';
 import type { ButtonAction } from '~/utils/live/types';
 import {
   DOUBLE_PRESS_MS,
@@ -35,7 +37,6 @@ import {
 export interface ButtonContext {
   /** Button key: widget.id, or `${twinId}::${controlId}` for pads. */
   key: string;
-  dimmerState?: DimmerState;
 }
 
 /** Reactive state the views read (lit state, long-press bar). */
@@ -99,15 +100,31 @@ function startAction(a: ButtonAction, ctx: ButtonContext, momentary: boolean): v
     stepBack();
     return;
   }
+  if (m.type === 'global-function' && m.globalFunction === 'tap-tempo') {
+    tapBeat();
+    return;
+  }
+  if (m.type === 'global-function' && m.globalFunction === 'speed-double') {
+    stepSpeed(2);
+    return;
+  }
+  if (m.type === 'global-function' && m.globalFunction === 'speed-half') {
+    stepSpeed(0.5);
+    return;
+  }
+  if (m.type === 'global-function' && m.globalFunction === 'speed-reset') {
+    resetSpeed();
+    return;
+  }
   if (isInstantAction(m)) {
-    applyMapping(m, true, { key: sk, dimmerState: ctx.dimmerState });
+    applyMapping(m, true, { key: sk });
     return;
   }
   if (isNormalPreset(m, useEngineStore().savedPresets)) {
     if (momentary) pressFlashPreset(sk, m.presetId!);
     else setActivePreset(m.presetId!);
   } else {
-    applyMapping(m, true, { key: sk, dimmerState: ctx.dimmerState });
+    applyMapping(m, true, { key: sk });
   }
   // A forever normal preset is reflected by the active preset, not by `running`.
   if (momentary || !isNormalPreset(m, useEngineStore().savedPresets)) state.running.add(sk);
@@ -130,7 +147,7 @@ function stopAction(a: ButtonAction, ctx: ButtonContext): void {
     useEngineStore().setSpeedMultiplier(1);
     queueMicrotask(() => useLiveBusStore().dispatch('engine.speed', { multiplier: 1 }));
   } else {
-    applyMapping(m, false, { key: sk, dimmerState: ctx.dimmerState });
+    applyMapping(m, false, { key: sk });
   }
 }
 
@@ -270,6 +287,18 @@ export function stopAll(opts: { fromRemote?: boolean } = {}): void {
   // Lit section slots go dark too.
   useLiveModeStore().activeSectionMembers = new Map();
   if (!opts.fromRemote) queueMicrotask(() => useLiveBusStore().dispatch('engine.stopAll', {}));
+}
+
+/**
+ * "Speed reset": back to 1× (the tapped BPM). Latched speed buttons end too,
+ * so no button stays lit for a speed that no longer runs.
+ */
+export function resetSpeed(): void {
+  recordLiveStep();
+  for (const e of [...latched.values()]) {
+    if (e.action.action.type === 'global-function' && e.action.action.globalFunction === 'speed') stopAction(e.action, e.ctx);
+  }
+  setSpeed(1);
 }
 
 // ── Step back support ───────────────────────────────────────────────────────

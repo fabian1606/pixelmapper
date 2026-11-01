@@ -14,7 +14,7 @@ beforeEach(() => {
   liveHub.configure({
     // Fixture "f" starts at address 10; channel n sits at 10 + n.
     resolveChannelAddress: (id, idx) => (id === 'f' ? 10 + idx : null),
-    beatSource: () => ({ bpm: 120, clockEpoch: 0 }),
+    beatSource: (nowMs: number) => ({ bpm: 120, beatTime: (nowMs * 120) / 60000 }),
   });
 });
 
@@ -133,7 +133,7 @@ describe('live hub: signature targets (P3.15)', () => {
     const calls: { keys: string[]; generation: number }[] = [];
     liveHub.configure({
       resolveChannelAddress: () => null,
-      beatSource: () => ({ bpm: 120, clockEpoch: 0 }),
+      beatSource: (nowMs: number) => ({ bpm: 120, beatTime: (nowMs * 120) / 60000 }),
       requestSignatures: (targets, generation) => calls.push({ keys: targets.map(t => `${t.fixtureId}:${t.signature}`), generation }),
     });
     return calls;

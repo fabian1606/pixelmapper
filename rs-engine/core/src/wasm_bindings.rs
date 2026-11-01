@@ -38,6 +38,43 @@ impl WasmEngine {
         self.engine.reset_clock(bpm);
     }
 
+    /// Nudges the beat grid onto a tap at `tap_ms` (ms since the epoch),
+    /// starting at `now_ms` — tap tempo without a phase jump.
+    #[wasm_bindgen]
+    pub fn align_beat(&mut self, tap_ms: f32, now_ms: f32) {
+        self.engine.align_beat(tap_ms, now_ms);
+    }
+
+    /// Effective beats (base beat × speed) at `time_ms` (ms since the epoch).
+    #[wasm_bindgen]
+    pub fn beat_time(&self, time_ms: f32) -> f32 {
+        self.engine.beat_time(time_ms)
+    }
+
+    /// Base beats (the music) at `time_ms`.
+    #[wasm_bindgen]
+    pub fn base_beat_time(&self, time_ms: f32) -> f32 {
+        self.engine.base_beat_time(time_ms)
+    }
+
+    /// Speed time (ms scaled by the multiplier) at `time_ms`.
+    #[wasm_bindgen]
+    pub fn speed_time(&self, time_ms: f32) -> f32 {
+        self.engine.speed_time(time_ms)
+    }
+
+    /// Requests a global speed multiplier; it switches on the next common beat.
+    #[wasm_bindgen]
+    pub fn request_speed(&mut self, speed: f32, now_ms: f32) {
+        self.engine.request_speed(speed, now_ms);
+    }
+
+    /// Active speed multiplier.
+    #[wasm_bindgen]
+    pub fn speed(&self) -> f32 {
+        self.engine.speed()
+    }
+
     /// Renders one frame at `time_ms` since the clock epoch.
     #[wasm_bindgen]
     pub fn render(&mut self, time_ms: f32, delta_time_ms: f32) {

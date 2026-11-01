@@ -180,7 +180,14 @@ function setDimmerGroup(raw: string) {
       <option v-if="variant === 'slider'" value="dimmer-group">Dimmer Group</option>
       <option value="effect-param">Effect Parameter</option>
       <option value="speed">Speed</option>
+      <option v-if="variant === 'slider'" value="master-dimmer">Master Dimmer</option>
     </select>
+
+    <!-- Master / group dimmer hint -->
+    <p v-if="mapping.type === 'master-dimmer' || mapping.type === 'dimmer-group'" class="text-[10px] text-muted-foreground/70 leading-snug">
+      Dims {{ mapping.type === 'master-dimmer' ? 'the whole rig' : 'the group' }} on top of everything, so it stays when presets change.
+      Scales the dimmer channel, or the color channels evenly on RGB-only fixtures.
+    </p>
 
     <!-- Speed fader mode -->
     <div v-if="mapping.type === 'speed'" class="flex flex-col gap-1">
@@ -223,6 +230,10 @@ function setDimmerGroup(raw: string) {
         <option value="speed">Speed</option>
         <option value="stop-all">Stop all</option>
         <option value="step-back">Step back</option>
+        <option value="tap-tempo">Beat (tap tempo)</option>
+        <option value="speed-double">Speed ×2</option>
+        <option value="speed-half">Speed ÷2</option>
+        <option value="speed-reset">Speed reset (1×)</option>
       </select>
 
       <!-- Speed config -->

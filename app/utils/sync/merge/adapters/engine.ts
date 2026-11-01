@@ -24,6 +24,10 @@ export function registerEngineAdapters(): void {
   registerRebaseAdapter('engine.bpm', engineBpmAdapter);
   // Runtime-only multiplier → replay as recorded.
   registerRebaseAdapter('engine.speed', passThroughAdapter);
+  // Runtime-only master dimmer level → replay as recorded.
+  registerRebaseAdapter('engine.master', passThroughAdapter);
   // Min-merged epoch (apply keeps the smaller value) → commutative, pass through.
   registerRebaseAdapter('engine.clock', passThroughAdapter);
+  // Tap nudge at a wall-clock moment → replay as recorded.
+  registerRebaseAdapter('engine.beatAlign', passThroughAdapter);
 }

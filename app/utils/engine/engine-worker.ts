@@ -15,6 +15,7 @@ let engine: WasmEngine | null = null;
 let canvas: WasmCanvas | null = null;
 let canvasReady = false;
 let offscreen: OffscreenCanvas | null = null;
+/** Base tempo (the music); the speed multiplier is applied in the engine. */
 let bpm = 120;
 let clockEpoch = Date.now();
 let lastTime = Date.now();
@@ -57,6 +58,14 @@ function renderFrame(engine: WasmEngine) {
   engine.set_bpm_at(bpm, elapsed);
   engine.render(elapsed, delta);
   const view = engine.get_dmx_view();
+  // Tempo layers of this frame (main thread extrapolates from them):
+  // effective beat, base beat (music), speed time and the active multiplier.
+  const clock = {
+    beatTime: engine.beat_time(elapsed),
+    baseBeat: engine.base_beat_time(elapsed),
+    speedTimeMs: engine.speed_time(elapsed),
+    speed: engine.speed(),
+  };
 
   // Draw directly into the OffscreenCanvas — no main-thread round-trip.
   if (canvasReady && canvas) {
@@ -70,12 +79,12 @@ function renderFrame(engine: WasmEngine) {
     // Requested signature tuples (3 f32 each) travel with the frame.
     const values = engine.read_signatures(signatureRequests);
     (self as unknown as Worker).postMessage(
-      { type: 'frame', dmx, elapsedMs: elapsed, signatures: { generation: signatureGeneration, values } },
+      { type: 'frame', dmx, elapsedMs: elapsed, clock, signatures: { generation: signatureGeneration, values } },
       [dmx.buffer, values.buffer],
     );
   }
   else {
-    (self as unknown as Worker).postMessage({ type: 'frame', dmx, elapsedMs: elapsed }, [dmx.buffer]);
+    (self as unknown as Worker).postMessage({ type: 'frame', dmx, elapsedMs: elapsed, clock }, [dmx.buffer]);
   }
 
   try {
@@ -153,6 +162,8 @@ function handleMessage(e: MessageEvent) {
     data?: ArrayBuffer;
     bpm?: number;
     epoch?: number;
+    tapMs?: number;
+    speed?: number;
     // plugin messages
     hash?: string;
     wasm?: ArrayBuffer;
@@ -195,6 +206,14 @@ function handleMessage(e: MessageEvent) {
         // New epoch → the beat clock restarts at the current tempo.
         engine?.reset_clock(bpm);
       }
+      break;
+    case 'speed':
+      // Switches on the next common beat (engine speed layer).
+      if (m.speed !== undefined) engine?.request_speed(m.speed, Date.now() - clockEpoch);
+      break;
+    case 'beat-align':
+      // Tap (wall clock) → nudge the beat grid onto it, starting now.
+      if (m.tapMs !== undefined) engine?.align_beat(m.tapMs - clockEpoch, Date.now() - clockEpoch);
       break;
     case 'plugin-load':
       if (m.hash && m.wasm) {

@@ -7,6 +7,7 @@ import type {
   ButtonAction,
   ButtonAppearance,
   ButtonTrigger,
+  GlobalFunctionType,
   HoldTime,
   LiveMapping,
   LiveSection,
@@ -50,10 +51,15 @@ export function sectionTrigger(section: LiveSection): SectionTrigger {
   return section.trigger ?? 'press';
 }
 
+/** Global functions that act once, instantly (handled by the button runtime, not applyMapping). */
+export const INSTANT_GLOBAL_FUNCTIONS: ReadonlySet<GlobalFunctionType> = new Set<GlobalFunctionType>([
+  'stop-all', 'step-back', 'tap-tempo', 'speed-double', 'speed-half', 'speed-reset',
+]);
+
 /** Actions that happen once, instantly, and have nothing to end. */
 export function isInstantAction(m: LiveMapping): boolean {
   if (m.type === 'page-switch' || m.type === 'position-recall') return true;
-  return m.type === 'global-function' && (m.globalFunction === 'stop-all' || m.globalFunction === 'step-back');
+  return m.type === 'global-function' && !!m.globalFunction && INSTANT_GLOBAL_FUNCTIONS.has(m.globalFunction);
 }
 
 /** A preset that switches the base preset (not a flash / overwrite preset). */
@@ -71,7 +77,7 @@ export function isNormalPreset(m: LiveMapping, presets: Preset[]): boolean {
 export function defaultTriggerFor(m: LiveMapping, presets: Preset[]): ButtonTrigger {
   if (m.type === 'global-function') {
     if (m.globalFunction === 'stop-all') return 'long';
-    if (m.globalFunction === 'speed' || m.globalFunction === 'step-back') return 'press';
+    if (m.globalFunction === 'speed' || INSTANT_GLOBAL_FUNCTIONS.has(m.globalFunction!)) return 'press';
     return 'hold';
   }
   if (m.type === 'preset' && m.presetId) {
@@ -175,7 +181,8 @@ export function triggerBadge(actions: ButtonAction[] | undefined): string {
 }
 
 const GLOBAL_LABELS: Record<string, string> = {
-  strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back',
+  strobe: 'Strobe', blind: 'Blind', blackout: 'Blackout', speed: 'Speed', 'stop-all': 'Stop all', 'step-back': 'Step back', 'tap-tempo': 'Beat',
+  'speed-double': 'Speed ×2', 'speed-half': 'Speed ÷2', 'speed-reset': 'Speed reset',
 };
 
 /** Short name of one action, used for the auto label and the card summary. */

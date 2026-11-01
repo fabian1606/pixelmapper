@@ -10,6 +10,7 @@ pub mod signatures;
 pub mod phase;
 pub mod distribution;
 pub mod beat_clock;
+pub mod speed_layer;
 pub mod runtime;
 pub mod room;
 
@@ -20,7 +21,7 @@ pub mod room;
 /// The worker compares it with `ENGINE_ABI_VERSION` in
 /// `app/utils/engine/engine-abi.ts` and refuses to run a mismatched build
 /// (stale or foreign `pkg/`). Bump both on every incompatible change.
-pub const ENGINE_ABI_VERSION: u32 = 1;
+pub const ENGINE_ABI_VERSION: u32 = 4;
 
 // Browser bindings (WasmEngine + JS plugin runtime).
 #[cfg(target_arch = "wasm32")]

@@ -390,3 +390,31 @@ fn empty_layout_is_accepted_and_truncated_payload_rejected() {
     assert_eq!(e.dispatch_bin(0x14, &[]), -1);
     assert_eq!(e.dispatch_bin(0x14, &12.0f32.to_le_bytes()), -1);
 }
+
+// ── Intensity (0x17) ─────────────────────────────
+
+/// `u32 count; { u32 dmxIndex; f32 factor }`.
+fn intensity(entries: &[(u32, f32)]) -> Vec<u8> {
+    let mut b = (entries.len() as u32).to_le_bytes().to_vec();
+    for (i, f) in entries {
+        b.extend_from_slice(&i.to_le_bytes());
+        b.extend_from_slice(&f.to_le_bytes());
+    }
+    b
+}
+
+/// Master / group dimmers scale the output without touching the programmed
+/// values: unlisted channels stay, and a later full level restores them.
+#[test]
+fn intensity_scales_output_and_keeps_programmed_values() {
+    let (mut e, _) = engine(vec![]);
+    e.dispatch_bin(0x14, &layout(&[vec![(0, DIMMER, 0, 1, 0xFFFF), (1, DIMMER, 0, 1, 0xFFFF)]]));
+    e.dispatch_bin(0x15, &channels(&[(0, 200.0), (1, 200.0)]));
+    assert_eq!(e.dispatch_bin(0x17, &intensity(&[(0, 0.5)])), 1);
+    e.render(0.0, 16.0);
+    assert_eq!((e.dmx_buffer[0], e.dmx_buffer[1]), (100, 200));
+    e.dispatch_bin(0x17, &intensity(&[]));
+    e.render(0.0, 16.0);
+    assert_eq!(e.dmx_buffer[0], 200);
+    assert_eq!(e.dispatch_bin(0x17, &[1, 0, 0]), -1);
+}

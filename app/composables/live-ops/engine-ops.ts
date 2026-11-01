@@ -13,6 +13,16 @@ registerLiveOp<{ bpm: number }>('engine.bpm', {
   },
 });
 
+// Tap alignment from another client: nudge our beat grid onto the same tap.
+registerLiveOp<{ tapMs: number }>('engine.beatAlign', {
+  scope: 'shared',
+  throttle: 'immediate',
+  merge: 'append',
+  apply: ({ tapMs }, _userId, ctx) => {
+    ctx.engineStore.alignBeat(tapMs);
+  },
+});
+
 registerLiveOp<{ multiplier: number }>('engine.speed', {
   scope: 'shared',
   throttle: 'immediate',
@@ -20,6 +30,17 @@ registerLiveOp<{ multiplier: number }>('engine.speed', {
   persistent: true,
   apply: ({ multiplier }, _userId, ctx) => {
     ctx.engineStore.setSpeedMultiplier(multiplier);
+  },
+});
+
+// Master dimmer fader: rig-wide intensity layer in the engine (see utils/engine/intensity.ts).
+registerLiveOp<{ level: number }>('engine.master', {
+  scope: 'shared',
+  throttle: 'immediate',
+  merge: 'replace',
+  persistent: true,
+  apply: ({ level }, _userId, ctx) => {
+    ctx.engineStore.setMasterLevel(level);
   },
 });
 

@@ -27,7 +27,8 @@ export function provideRootScopes(): void {
     id: currentProjectId.value,
     // The project name is not loaded into the engine store yet.
     name: '',
-    bpm: engineStore.engine.globalBpm.value,
+    // Base tempo (the music); the speed multiplier is not part of it.
+    bpm: engineStore.baseBpm,
     requires: requires.value.map(r => ({ ...r })),
     fixtures: fixtureSummaries(flatFixtures.value),
   }));

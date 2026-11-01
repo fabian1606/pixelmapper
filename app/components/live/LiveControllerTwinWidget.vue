@@ -11,7 +11,7 @@ import { registerTwinState } from '~/composables/live-ops/twin-state-hub';
 import { SetSectionMembersCommand } from '~/components/engine/commands/live-widget-commands';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { findBoundPreset, sectionPress, sectionRelease } from '~/composables/live-ops/use-section-binding';
-import { applyMapping, createDimmerState } from '~/composables/live-ops/apply-mapping';
+import { applyMapping } from '~/composables/live-ops/apply-mapping';
 import { hasPendingLongPress, isButtonActive, longPressProgress, pressButton, releaseButton } from '~/composables/live-ops/button-runtime';
 import { appearanceLevel, autoColor, autoLabel, isAnimatedLook, sectionTrigger } from '~/utils/live/button-actions';
 import { getPresetMainColor } from '~/utils/engine/preset-color';
@@ -56,12 +56,9 @@ function getChild(id: string) {
   return props.widget.controllerChildren?.find(c => c.controlId === id);
 }
 
-// Per-instance virtual-dimmer base-value tracking (shared dispatcher, namespaced by controlId).
-const dimmerState = createDimmerState();
-
 /** Build the shared mapping context for a control. */
 function mappingCtx(controlId: string, value?: number) {
-  return { key: `${props.widget.id}::${controlId}`, value, controlId, dimmerState };
+  return { key: `${props.widget.id}::${controlId}`, value };
 }
 
 /** Button-runtime key of a pad (same key the section / flash stacks use). */
@@ -72,11 +69,11 @@ function padKey(controlId: string): string {
 /** Pad press / release: section membership wins, otherwise the pad's actions run. */
 function padPress(controlId: string) {
   if (sectionPress({ widgetId: props.widget.id, controlId })) return;
-  pressButton(getChild(controlId)?.actions, { key: padKey(controlId), dimmerState });
+  pressButton(getChild(controlId)?.actions, { key: padKey(controlId) });
 }
 function padRelease(controlId: string) {
   if (sectionRelease({ widgetId: props.widget.id, controlId })) return;
-  releaseButton(getChild(controlId)?.actions, { key: padKey(controlId), dimmerState });
+  releaseButton(getChild(controlId)?.actions, { key: padKey(controlId) });
 }
 
 /** Whether a pad looks active: held, latched section slot, or a running action. */
@@ -227,6 +224,7 @@ function applyButtonFill(id: string) {
 function knobValue(id: string): number {
   const mapping = getChild(id)?.mapping;
   if (mapping?.type === 'speed') return speedToFader(engineStore.speedMultiplier, mapping.speedMode ?? 'continuous');
+  if (mapping?.type === 'master-dimmer') return engineStore.masterLevel;
   return faderValues.value.get(id) ?? 0;
 }
 
@@ -890,7 +888,7 @@ watch(pressedControls, () => {
 }, { deep: true });
 
 // Fader positions, the speed multiplier (speed faders) and fader mappings all move knobs / readouts.
-watch([faderValues, () => engineStore.speedMultiplier, () => props.widget.controllerChildren], () => {
+watch([faderValues, () => engineStore.speedMultiplier, () => engineStore.masterLevel, () => props.widget.controllerChildren], () => {
   for (const id of rigs.keys()) {
     const rig = rigs.get(id);
     if (rig?.kind === 'slider') applyKnob(id);

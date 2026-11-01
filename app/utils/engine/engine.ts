@@ -17,6 +17,21 @@ export type PluginEvent =
   | { type: 'plugin-error'; instance: number; hash: string; message: string; reason: string }
   | { type: 'plugin-log'; hash: string; message: string };
 
+/**
+ * Tempo layers of a rendered frame (architecture/engine.md): base beat (the
+ * music, incl. tap nudges) → speed multiplier → effective beat / speed time.
+ */
+export interface FrameClock {
+  /** Effective beats since the epoch (beat-mode modifiers). */
+  beatTime: number;
+  /** Base beats since the epoch (the music; beat indicators). */
+  baseBeat: number;
+  /** Wall time scaled by the multiplier, ms (time-mode modifiers). */
+  speedTimeMs: number;
+  /** Active speed multiplier (switches on the next common beat). */
+  speed: number;
+}
+
 export class EffectEngine {
   /** The modifier list (shared with the engine store's `modifiers`). */
   public modifiers = reactive<ModifierInstance[]>([]);
@@ -29,6 +44,11 @@ export class EffectEngine {
   public dmxBuffer: Uint8Array = new Uint8Array(512);
   /** Wall-clock time (ms) of the latest frame; 0 before the first one. */
   public lastFrameAt = 0;
+  /** Tempo layers the worker reported with the latest frame. */
+  private lastClock: FrameClock = { beatTime: 0, baseBeat: 0, speedTimeMs: 0, speed: 1 };
+  /** Base tempo / speed multiplier last sent to the worker. */
+  private baseBpm = 120;
+  private speed = 1;
 
   /** Resolves when the (first) worker WASM engine is ready. */
   public readonly ready: Promise<void>;
@@ -92,7 +112,7 @@ export class EffectEngine {
   private spawn(): void {
     const worker = new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (e: MessageEvent) => {
-      const m = e.data as { type: string; dmx?: Uint8Array; elapsedMs?: number; signatures?: SignatureFrame };
+      const m = e.data as { type: string; dmx?: Uint8Array; elapsedMs?: number; clock?: FrameClock; signatures?: SignatureFrame };
       if (m.type === 'ready') {
         this.readyResolve();
         this.watchdog?.beat();
@@ -101,6 +121,7 @@ export class EffectEngine {
         this.watchdog?.beat();
         this.dmxBuffer = m.dmx;
         this.lastFrameAt = Date.now();
+        if (m.clock) this.lastClock = m.clock;
         this.onFrame?.(m.dmx, m.elapsedMs, m.signatures);
       }
       else if (m.type === 'canvas.captured') {
@@ -157,7 +178,8 @@ export class EffectEngine {
     const w = this.worker;
     if (!w) return;
     if (this.epoch !== null) w.postMessage({ type: 'epoch', epoch: this.epoch });
-    w.postMessage({ type: 'bpm', bpm: this.globalBpm.value });
+    w.postMessage({ type: 'bpm', bpm: this.baseBpm });
+    w.postMessage({ type: 'speed', speed: this.speed });
     w.postMessage({ type: 'plugins-suspend', hashes: this.suspendedPlugins.value });
     for (const [hash, wasm] of this.plugins) this.postPlugin(hash, wasm);
     for (const [packetType, data] of this.packets) this.postPacket(packetType, data);
@@ -186,13 +208,54 @@ export class EffectEngine {
     return 0;
   }
 
+  /** Sends the base tempo (the music; the multiplier is applied in the engine). */
   public postBpm(bpm: number): void {
+    this.baseBpm = bpm;
     this.worker?.postMessage({ type: 'bpm', bpm });
+  }
+
+  /** Requests a speed multiplier; the engine switches on the next common beat. */
+  public postSpeed(speed: number): void {
+    this.speed = speed;
+    this.worker?.postMessage({ type: 'speed', speed });
   }
 
   public postEpoch(epoch: number): void {
     this.epoch = epoch;
     this.worker?.postMessage({ type: 'epoch', epoch });
+  }
+
+  /** Nudges the beat grid onto a tap at `tapMs` (wall clock) without a phase jump. */
+  public postBeatAlign(tapMs: number): void {
+    this.worker?.postMessage({ type: 'beat-align', tapMs });
+  }
+
+  /**
+   * Tempo layers at `nowMs` (wall clock), as the engine renders them: the
+   * worker's values of the latest frame, extrapolated at the frame's tempo
+   * (a frame is only a few ms old). Before the first frame: constant tempo
+   * since the epoch.
+   */
+  public clockAt(nowMs: number = Date.now()): FrameClock {
+    const c = this.lastClock;
+    if (this.lastFrameAt === 0) {
+      const dt = Math.max(0, nowMs - (this.epoch ?? nowMs));
+      const base = (dt * this.baseBpm) / 60000;
+      return { beatTime: base * this.speed, baseBeat: base, speedTimeMs: dt * this.speed, speed: this.speed };
+    }
+    const dt = nowMs - this.lastFrameAt;
+    const base = c.baseBeat + (dt * this.baseBpm) / 60000;
+    return {
+      beatTime: Math.max(0, c.beatTime + ((dt * this.baseBpm) / 60000) * c.speed),
+      baseBeat: Math.max(0, base),
+      speedTimeMs: Math.max(0, c.speedTimeMs + dt * c.speed),
+      speed: c.speed,
+    };
+  }
+
+  /** Effective beats (base beat × speed) since the epoch at `nowMs`. */
+  public beatTimeAt(nowMs: number = Date.now()): number {
+    return this.clockAt(nowMs).beatTime;
   }
 
   public reset(): void {

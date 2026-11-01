@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { computed } from 'vue';
 import type { LiveWidget } from '~/utils/live/types';
 import { useEngineStore } from '~/stores/engine-store';
-import { useLiveBusStore } from '~/stores/live-bus-store';
-import { recordLiveStep } from '~/composables/live-ops/live-history';
+import { useBeatPulse } from '~/composables/engine/use-beat-pulse';
+import { alignBeatToTap, applyTapBpm } from '~/composables/live-ops/tap-tempo';
 import Replaceable from '~/components/extension-host/Replaceable.vue';
 
 const props = defineProps<{
@@ -13,71 +13,22 @@ const props = defineProps<{
 }>();
 
 const engineStore = useEngineStore();
-const liveBus = useLiveBusStore();
 
-const bpm = computed(() => engineStore.engine?.globalBpm.value ?? 120);
+// Base tempo (the music); the speed multiplier is shown on the speed controls.
+const bpm = computed(() => engineStore.baseBpm);
 const displayColor = computed(() => props.widget.color ?? '#1e293b');
 
-// Beat pulse animation
-const beatActive = ref(false);
-let intervalId: ReturnType<typeof setInterval> | null = null;
-let beatTimeout: ReturnType<typeof setTimeout> | null = null;
+// Beat pulse: lights on every whole beat of the engine's beat clock.
+const beatActive = useBeatPulse();
 
-function pulse() {
-  beatActive.value = true;
-  setTimeout(() => { beatActive.value = false; }, 120);
-}
-
-function startBeatInterval() {
-  if (intervalId) clearInterval(intervalId);
-  if (beatTimeout) clearTimeout(beatTimeout);
-  const ms = 60000 / (bpm.value || 120);
-  const elapsed = Date.now() - engineStore.clockEpoch;
-  const phase = ((elapsed % ms) + ms) % ms;
-  const delay = ms - phase;
-  beatTimeout = setTimeout(() => {
-    pulse();
-    intervalId = setInterval(pulse, ms);
-  }, delay);
-}
-
-onMounted(() => {
-  watch([bpm, () => engineStore.clockEpoch], startBeatInterval, { immediate: true });
-});
-onUnmounted(() => {
-  if (intervalId) clearInterval(intervalId);
-  if (beatTimeout) clearTimeout(beatTimeout);
-  if (tapResetTimer) clearTimeout(tapResetTimer);
-});
-
-// Tap tempo: pm.tapTempo derives the BPM; the first tap of the series anchors
-// the clock epoch so all clients stay phase-aligned.
-const tapTimes: number[] = [];
-let tapResetTimer: ReturnType<typeof setTimeout> | null = null;
-
-function applyBpm(newBpm: number, epochMs?: number) {
-  const clamped = Math.max(20, Math.min(300, Math.round(newBpm)));
-  if (!engineStore.engine) return;
-  // A tap series is one step: Step back returns to the tempo before it.
-  recordLiveStep({ coalesce: 'bpm' });
-  engineStore.baseBpm = clamped;
-  const epoch = epochMs ?? Date.now();
-  engineStore.setClockEpoch(epoch);
-  liveBus.dispatch('engine.bpm', { bpm: clamped });
-  if (epochMs !== undefined) liveBus.dispatch('engine.clock', { epochMs: epoch });
-}
-
-/** Records tap times (same 2.5 s reset / 8-tap window as the input). */
+/** Every tap slides the beat grid onto it (smooth nudge, no jump). */
 function onTap() {
-  if (tapResetTimer) clearTimeout(tapResetTimer);
-  tapResetTimer = setTimeout(() => { tapTimes.length = 0; }, 2500);
-  tapTimes.push(Date.now());
-  if (tapTimes.length > 8) tapTimes.shift();
+  alignBeatToTap();
 }
 
-/** New tempo from the tap input. */
+/** New tempo from the tap input (pm.tapTempo derives it; the clock epoch stays put). */
 function onBpm(newBpm: number) {
-  applyBpm(newBpm, tapTimes[0]);
+  applyTapBpm(newBpm);
 }
 </script>
 

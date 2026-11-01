@@ -8,7 +8,7 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory, setPersistenceHooks, lastSeenSequenceNumber, clearHistory } from '~/components/engine/composables/use-history';
 import { useConnectionsStore } from '~/stores/connections-store';
 import {
-  TYPE_LAYOUT_BIN, TYPE_CHAN_BIN,
+  TYPE_LAYOUT_BIN, TYPE_CHAN_BIN, TYPE_INTENSITY_BIN,
   buildLayoutBin, buildChannelsBin, buildModifiersBin,
 } from '~/utils/connectors/binary-encoder';
 import {
@@ -23,6 +23,7 @@ import { useControllerStore } from '~/stores/controller-store';
 import { SetModifiersCommand } from '~/components/engine/commands/set-modifiers-command';
 import { cloneModifiers } from '~/utils/engine/modifiers';
 import { applyHighlight, buildHighlightSlots, type HighlightSlot } from '~/utils/engine/highlight-overlay';
+import { buildIntensityEntries, encodeIntensity, type GroupLevel } from '~/utils/engine/intensity';
 import { getManifest, loadWasm, resolve as resolvePlugin, resolveErrors } from '~/utils/plugins/plugin-store';
 import { BUILTIN_PLUGINS } from '~/utils/plugins/builtin-index';
 import { registerCommand } from '~/components/engine/commands/serializable-command';
@@ -666,6 +667,37 @@ export const useEngineStore = defineStore('engine', () => {
     if (highlightedFixtureIds.value.size > 0) highlightedFixtureIds.value = new Set();
   }
 
+  // ── Master / group dimmers (intensity layer) ──────────────────────────────
+
+  /** Rig-wide intensity 0..1 (master dimmer fader); not persisted. */
+  const masterLevel = ref(1);
+  /** Group dimmer faders by target key (`group:<id>` / `fixture:<id>`); not persisted. */
+  const groupLevels = shallowRef(new Map<string, GroupLevel>());
+  /** Bumped when the intensity packet must be rebuilt (levels or patch changed). */
+  const intensityRevision = ref(0);
+  watch([masterLevel, groupLevels, layoutRevision], () => { intensityRevision.value++; });
+
+  function setMasterLevel(level: number) {
+    masterLevel.value = Math.min(1, Math.max(0, level));
+  }
+
+  /** Sets one group dimmer (the last fader moved on a target wins). */
+  function setGroupLevel(key: string, fixtureIds: readonly (string | number)[], level: number) {
+    const next = new Map(groupLevels.value);
+    next.set(key, { fixtureIds: [...fixtureIds], level: Math.min(1, Math.max(0, level)) });
+    groupLevels.value = next;
+  }
+
+  /** Drops all group dimmers (project load: their targets belong to the old patch). */
+  function clearGroupLevels() {
+    if (groupLevels.value.size > 0) groupLevels.value = new Map();
+  }
+
+  /** The 0x17 payload for the current levels (engine scales after modifiers). */
+  function buildIntensityPayload(): Uint8Array {
+    return encodeIntensity(buildIntensityEntries(flatFixtures.value, masterLevel.value, groupLevels.value.values()));
+  }
+
   // ── Render loop state ─────────────────────────────────────────────────────
 
   // Extension scope views re-project when the (mostly non-reactive) model changes.
@@ -673,6 +705,14 @@ export const useEngineStore = defineStore('engine', () => {
 
   const clockEpoch = ref(Date.now());
   function setClockEpoch(ms: number) { clockEpoch.value = ms; engine.postEpoch(ms); }
+  /** Nudges the beat grid onto a tap at `tapMs` (wall clock); presets keep running, no jump. */
+  function alignBeat(tapMs: number = Date.now()) { engine.postBeatAlign(tapMs); }
+  /** Effective beats (base × speed) since the epoch at `nowMs`, as rendered. */
+  function beatTimeAt(nowMs: number = Date.now()): number { return engine.beatTimeAt(nowMs); }
+  /** Base beats (the music, incl. tap nudges) since the epoch at `nowMs`. */
+  function baseBeatAt(nowMs: number = Date.now()): number { return engine.clockAt(nowMs).baseBeat; }
+  /** Speed time (ms, scaled by the multiplier) at `nowMs` — time-mode modifier phase. */
+  function speedTimeAt(nowMs: number = Date.now()): number { return engine.clockAt(nowMs).speedTimeMs; }
 
   /** True once `initEngine` was called (flushes are dispatched from then on). */
   let initialized = false;
@@ -682,6 +722,7 @@ export const useEngineStore = defineStore('engine', () => {
   let lastDispatchedLayout   = -1;
   let lastDispatchedChannels = -1;
   let lastDispatchedEffects  = -1;
+  let lastDispatchedIntensity = -1;
   /** Cheap fingerprint of layout-relevant fixture data — used to skip buildLayoutBin
    *  when only channel values changed (the common case during preset/flash transitions).
    *  `null` = no layout packet built yet: an empty project's fingerprint is
@@ -847,10 +888,12 @@ export const useEngineStore = defineStore('engine', () => {
       channelsRevision.value++;
     }, { deep: true });
 
-    // Sync BPM changes to the worker engine
-    watch(engine.globalBpm, (bpm) => engine.postBpm(bpm));
+    // Tempo layers to the worker: base tempo (the music) and the speed
+    // multiplier separately — the engine switches speed on the next common beat.
+    watch(baseBpm, (bpm) => engine.postBpm(bpm));
+    watch(speedMultiplier, (m) => engine.postSpeed(m));
 
-    // Derive effective BPM from base × multiplier (multiplier === 0 → freeze)
+    // Effective BPM (base × multiplier, 0 → freeze) for preview math and chasers on the main thread.
     watch([baseBpm, speedMultiplier], ([base, mult]) => {
       engine.globalBpm.value = base * mult;
     });
@@ -893,7 +936,8 @@ export const useEngineStore = defineStore('engine', () => {
         const ch = fixture?.channels[channelIndex];
         return fixture && ch ? fixture.startAddress + ch.addressOffset : null;
       },
-      beatSource: () => ({ bpm: engine.globalBpm.value, clockEpoch: clockEpoch.value }),
+      // Extensions get the music: base tempo and base beat.
+      beatSource: nowMs => ({ bpm: baseBpm.value, beatTime: engine.clockAt(nowMs).baseBeat }),
       // Signature tuples are read by the worker; fixtures map to their layout
       // group index (position in flatFixtures).
       requestSignatures(targets, generation) {
@@ -937,7 +981,7 @@ export const useEngineStore = defineStore('engine', () => {
       connectionsStore.notifyEngineState({
         bpm: engine.globalBpm.value,
         elapsedMs,
-        beatTime: Math.max(0, (elapsedMs * engine.globalBpm.value) / 60000),
+        beatTime: engine.beatTimeAt(),
         dmxBuffer: outputBuffer,
       });
     };
@@ -949,9 +993,11 @@ export const useEngineStore = defineStore('engine', () => {
       const lr = layoutRevision.value;
       const cr = channelsRevision.value;
       const er = effectsRevision.value;
+      const ir = intensityRevision.value;
       if (lr !== lastDispatchedLayout)   { engine.dispatch(TYPE_LAYOUT_BIN,  layoutPacket.subarray(5));  lastDispatchedLayout   = lr; }
       if (cr !== lastDispatchedChannels) { engine.dispatch(TYPE_CHAN_BIN,     channelsPacket.subarray(5)); lastDispatchedChannels = cr; }
       if (er !== lastDispatchedEffects)  { engine.syncModifiers(modifiersPacket.subarray(5), modifierPlugins); lastDispatchedEffects = er; }
+      if (ir !== lastDispatchedIntensity) { engine.dispatch(TYPE_INTENSITY_BIN, buildIntensityPayload()); lastDispatchedIntensity = ir; }
       animFrameId = requestAnimationFrame(renderLoop);
     };
 
@@ -1055,12 +1101,13 @@ export const useEngineStore = defineStore('engine', () => {
     engine.modifiers = modifiers.value;
     selectedPresetId.value = restoredPresetId;
     // Restore global engine state captured in the snapshot (BPM + shared clock).
-    // Snapshot stores the effective BPM at save time; treat it as the base.
-    // The persistent `engine.speed` live-op will re-apply any latched multiplier.
+    // Snapshot stores the base BPM; the persistent `engine.speed` live-op
+    // re-applies any latched multiplier.
     baseBpm.value = restoredBpm;
     speedMultiplier.value = 1;
     engine.globalBpm.value = restoredBpm;
     engine.postBpm(restoredBpm);
+    engine.postSpeed(1);
     clockEpoch.value = restoredEpoch;
     engine.postEpoch(restoredEpoch);
     triggerRef(sceneNodes);
@@ -1114,7 +1161,7 @@ export const useEngineStore = defineStore('engine', () => {
       liveStore.pages,
       liveStore.liveControllers,
       selectedPresetId.value,
-      engine.globalBpm.value,
+      baseBpm.value,
       clockEpoch.value,
       Object.fromEntries(
         [...liveStore.activeSectionMembers.entries()].map(([k, v]) => [k, [...v]]),
@@ -1241,6 +1288,7 @@ export const useEngineStore = defineStore('engine', () => {
     currentProjectId.value = projectId;
     // Highlight is a transient identify aid; it never carries into another project.
     clearHighlight();
+    clearGroupLevels();
     projectLoading.value = true;
     projectError.value = null;
     // Installed extension bundles must be registered before fixtures (kinds)
@@ -1483,6 +1531,10 @@ export const useEngineStore = defineStore('engine', () => {
     clearOverwriteStack,
     clockEpoch,
     setClockEpoch,
+    alignBeat,
+    beatTimeAt,
+    baseBeatAt,
+    speedTimeAt,
     baseBpm,
     speedMultiplier,
     setSpeedMultiplier,
@@ -1510,6 +1562,9 @@ export const useEngineStore = defineStore('engine', () => {
     isHighlighted,
     toggleHighlight,
     clearHighlight,
+    masterLevel,
+    setMasterLevel,
+    setGroupLevel,
     getOutputBuffer,
     initEngine,
     triggerCanvasSync,

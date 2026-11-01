@@ -27,7 +27,7 @@ export interface LiveControllerInstance {
   definitionKey: string
 }
 
-export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'position-recall' | 'speed' | 'none'
+export type LiveMappingType = 'preset' | 'channel' | 'effect-param' | 'page-switch' | 'global-function' | 'dimmer-group' | 'position-recall' | 'speed' | 'master-dimmer' | 'none'
 
 /**
  * How a `speed` fader maps onto the speed multiplier (see utils/live/speed-fader.ts):
@@ -49,8 +49,12 @@ export interface MovingHeadPosition {
 /**
  * `stop-all` is instant: clears preset, flashes, overwrites, toggles and speed.
  * `step-back` is instant: returns to the look before the last lasting change (live-history).
+ * `tap-tempo` ("Beat") is instant: one tap of the tap tempo (live-ops/tap-tempo).
+ * `speed-double` / `speed-half` are instant: current speed ×2 / ÷2 (¼×–4×);
+ * `speed-reset` is instant: back to 1× (the tapped BPM), latched speed buttons off.
  */
-export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed' | 'stop-all' | 'step-back'
+export type GlobalFunctionType = 'strobe' | 'blind' | 'blackout' | 'speed' | 'stop-all' | 'step-back' | 'tap-tempo'
+  | 'speed-double' | 'speed-half' | 'speed-reset'
 
 export interface StrobeConfig {
   frequency: number

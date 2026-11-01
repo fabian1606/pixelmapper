@@ -9,6 +9,7 @@ import { controlParamValue } from '~/utils/live/control-param-value';
 import { setEffectTrigger } from './effect-trigger';
 import { setEffectParam } from './effect-param';
 import { faderToSpeed } from '~/utils/live/speed-fader';
+import { INSTANT_GLOBAL_FUNCTIONS } from '~/utils/live/button-actions';
 
 /**
  * Shared runtime dispatcher for a {@link LiveMapping}. Used by canvas buttons,
@@ -24,18 +25,6 @@ import { faderToSpeed } from '~/utils/live/speed-fader';
  * this module is only for a control's *own* (child / widget) mapping.
  */
 
-/** Per-instance virtual-dimmer base-value tracking (no real DIMMER channel). */
-export interface DimmerState {
-  /** Key: `${stateKey}:${fixtureId}:${channelIndex}` → captured base value. */
-  baseValues: Map<string, number>;
-  /** Key: stateKey → last mapping target, to detect target changes. */
-  lastTarget: Map<string, string>;
-}
-
-export function createDimmerState(): DimmerState {
-  return { baseValues: new Map(), lastTarget: new Map() };
-}
-
 export interface MappingContext {
   /** Tracking key for overwrite / flash presets (widget.id or `${widgetId}::${controlId}`). */
   key: string;
@@ -43,10 +32,6 @@ export interface MappingContext {
   value?: number;
   /** 0..1 y axis of an xy pad (drives `point` params together with `value`). */
   value2?: number;
-  /** Namespaces virtual-dimmer base values (controlId on twins, falls back to key). */
-  controlId?: string;
-  /** Per-instance dimmer state; pass the same object across a component's lifetime. */
-  dimmerState?: DimmerState;
 }
 
 /** Key of the `trigger` param an `effect-param` mapping targets (ABI 1.3), else null. */
@@ -114,49 +99,16 @@ export function getFixturesForDimmerGroup(mapping: LiveMapping): any[] {
   return [];
 }
 
-function applyDimmerGroup(mapping: LiveMapping, value: number, active: boolean, ctx: MappingContext) {
-  const engineStore = useEngineStore();
-  const fixtures = getFixturesForDimmerGroup(mapping);
-  const v = value !== undefined ? value : (active ? 1 : 0);
-  const stateKey = ctx.controlId ?? ctx.key;
-  const state = ctx.dimmerState;
-
-  // Clear base values if the mapping target has changed.
-  if (state) {
-    const targetKey = `${mapping.groupId ?? ''}:${mapping.fixtureId ?? ''}`;
-    if (state.lastTarget.get(stateKey) !== targetKey) {
-      for (const k of [...state.baseValues.keys()]) {
-        if (k.startsWith(`${stateKey}:`)) state.baseValues.delete(k);
-      }
-      state.lastTarget.set(stateKey, targetKey);
-    }
-  }
-
-  for (const fixture of fixtures) {
-    const dimmerChannels = fixture.channels.filter((ch: any) => ch.role === 'DIMMER');
-    if (dimmerChannels.length > 0) {
-      for (const ch of dimmerChannels) {
-        ch.chaserConfig.stepValues = [Math.round(v * 255)];
-      }
-    } else {
-      // Virtual dimmer → scale COLOR channels from captured base values.
-      for (let i = 0; i < fixture.channels.length; i++) {
-        const ch = fixture.channels[i];
-        if (ch.role !== 'COLOR') continue;
-        const key = `${stateKey}:${fixture.id}:${i}`;
-        if (state) {
-          if (!state.baseValues.has(key)) {
-            state.baseValues.set(key, ch.chaserConfig.stepValues[0] ?? 255);
-          }
-          const base = state.baseValues.get(key)!;
-          ch.chaserConfig.stepValues = [Math.round(v * base)];
-        } else {
-          ch.chaserConfig.stepValues = [Math.round(v * 255)];
-        }
-      }
-    }
-  }
-  engineStore.triggerCanvasSync?.();
+/**
+ * Group dimmer: sets the group's level in the engine's intensity layer (see
+ * utils/engine/intensity.ts). It scales the output — DIMMER channels, or the
+ * COLOR channels of fixtures without one — and never rewrites programmed
+ * values, so presets, chasers and color variants keep running underneath.
+ */
+function applyDimmerGroup(mapping: LiveMapping, value: number) {
+  const targetKey = mapping.groupId ? `group:${mapping.groupId}` : `fixture:${mapping.fixtureId ?? ''}`;
+  const fixtureIds = getFixturesForDimmerGroup(mapping).map((f: any) => f.id);
+  useEngineStore().setGroupLevel(targetKey, fixtureIds, value);
 }
 
 /**
@@ -169,8 +121,8 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
   const liveBus = useLiveBusStore();
   const { key, value } = ctx;
 
-  // "Stop all" / "Step back" are handled by the button runtime (they also touch button state).
-  if (mapping.type === 'global-function' && (mapping.globalFunction === 'stop-all' || mapping.globalFunction === 'step-back')) return;
+  // Instant global functions (Stop all, Step back, Beat, speed steps) are handled by the button runtime.
+  if (mapping.type === 'global-function' && mapping.globalFunction && INSTANT_GLOBAL_FUNCTIONS.has(mapping.globalFunction)) return;
 
   if (mapping.type === 'preset' && mapping.presetId) {
     const preset = engineStore.savedPresets.find((p: any) => p.id === mapping.presetId);
@@ -211,7 +163,7 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
       }
     }
   } else if (mapping.type === 'dimmer-group') {
-    applyDimmerGroup(mapping, value ?? (active ? 1 : 0), active, ctx);
+    applyDimmerGroup(mapping, value ?? (active ? 1 : 0));
   } else if (mapping.type === 'effect-param' && triggerParamKey(mapping)) {
     // Trigger param (ABI 1.3): buttons send press/release; sliders press above half.
     setEffectTrigger(mapping.effectId!, triggerParamKey(mapping)!, value !== undefined ? value >= 0.5 : active);
@@ -234,6 +186,12 @@ export function applyMapping(mapping: LiveMapping, active: boolean, ctx: Mapping
     if (multiplier !== engineStore.speedMultiplier) {
       engineStore.setSpeedMultiplier(multiplier);
       queueMicrotask(() => liveBus.dispatch('engine.speed', { multiplier }));
+    }
+  } else if (mapping.type === 'master-dimmer' && value !== undefined) {
+    // Master dimmer fader: scales the whole rig on the output, so presets can't reset it.
+    if (value !== engineStore.masterLevel) {
+      engineStore.setMasterLevel(value);
+      queueMicrotask(() => liveBus.dispatch('engine.master', { level: value }));
     }
   } else if (mapping.type === 'position-recall' && mapping.positionId && active) {
     const position = store.savedPositions.find((p: any) => p.id === mapping.positionId);
