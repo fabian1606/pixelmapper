@@ -52,7 +52,7 @@ const TRIGGER_HINTS: Record<SectionTrigger, string> = {
 /** Natural RGB of the active preset — the base for color-variant palettes. */
 function activePresetRGB(): RGB | null {
   return engineStore.selectedPresetId
-    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+    ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets, engineStore.flatFixtures)
     : null;
 }
 

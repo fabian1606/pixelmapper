@@ -164,7 +164,7 @@ function onMouseDown(e: MouseEvent) {
     let nextColors: ReturnType<typeof growColorVariants> | undefined;
     if (sec.source === 'color-variants' || (sec.source as string) === 'auto-color-variants') {
       const baseRGB = engineStore.selectedPresetId
-        ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets)
+        ? getPresetNaturalRGB(engineStore.selectedPresetId, engineStore.savedPresets, engineStore.flatFixtures)
         : null;
       nextColors = growColorVariants(sec.colorVariants, next.length, baseRGB);
     }

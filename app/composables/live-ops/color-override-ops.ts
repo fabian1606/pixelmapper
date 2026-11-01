@@ -1,58 +1,23 @@
+import { reactive } from 'vue';
 import { registerLiveOp, useLiveBusStore } from '~/stores/live-bus-store';
 import { colorOverrideKey } from './coalesce-keys';
 import { useEngineStore } from '~/stores/engine-store';
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import { applyRGBOverride } from '~/components/engine/composables/preset-apply';
+import { getPresetNaturalRGB } from '~/utils/live/color-utils';
 import type { RGB } from '~/utils/live/color-utils';
 import type { Preset } from '~/utils/engine/preset-types';
 import { mark, measure, trace } from '~/utils/perf';
 
-/**
- * Reads the actual step-0 RGB currently driving the FIRST pixel of the FIRST
- * fixture of the preset's primary RGB category. Reflects whatever is currently
- * live — natural after preset apply, overridden after wheel drag or slot press.
- * Returns null if the preset has no RGB-controlling category.
- */
-export function getEffectiveRGB(preset: Preset, fixtures: any[]): RGB | null {
-  const resolved = resolvePreset(preset, useEngineStore().savedPresets);
-  for (const cat of resolved.categories) {
-    let hasRGB = false;
-    for (const snap of cat.channels) {
-      if (snap.channelType === 'RED' || snap.channelType === 'GREEN' || snap.channelType === 'BLUE') {
-        hasRGB = true;
-        break;
-      }
-    }
-    if (!hasRGB) continue;
-    const fixtureId = cat.fixtureIds[0];
-    if (fixtureId === undefined) continue;
-    const fixture = fixtures.find((f: any) => f.id === fixtureId);
-    if (!fixture) continue;
-    // First-occurrence wins so we read pixel 0 (multi-pixel fixtures have
-    // multiple R/G/B channel snapshots in the same category).
-    let r: number | null = null, g: number | null = null, b: number | null = null;
-    for (const snap of cat.channels) {
-      const ch = fixture.channels[snap.channelIndex];
-      if (!ch) continue;
-      const v = ch.chaserConfig?.stepValues?.[0] ?? 0;
-      if (snap.channelType === 'RED'   && r === null) r = v;
-      if (snap.channelType === 'GREEN' && g === null) g = v;
-      if (snap.channelType === 'BLUE'  && b === null) b = v;
-      if (r !== null && g !== null && b !== null) break;
-    }
-    return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
-  }
-  return null;
-}
-
-// ── Override tracking (for Step back) ────────────────────────────────────────
+// ── Override tracking ────────────────────────────────────────────────────────
 
 /**
- * Color override per preset ID that is currently on the fixtures. Only for
- * Step back (live-history): the override itself is a fixture mutation, so
- * this map is the only record of it. Cleared when a preset is (re)applied.
+ * Color override per preset ID that is currently on the fixtures. The
+ * override itself is a fixture mutation, so this (reactive) map is the only
+ * record of it: color wheel / variant slots display it and Step back
+ * restores it. Cleared when a preset is (re)applied.
  */
-const overrides = new Map<string, RGB>();
+const overrides = reactive(new Map<string, RGB>());
 
 function trackOverride(key: string, rgb: RGB | null): void {
   if (rgb) overrides.set(key, { ...rgb });
@@ -62,6 +27,18 @@ function trackOverride(key: string, rgb: RGB | null): void {
 /** The override currently applied to a preset, or null when it shows its own colors. */
 export function getColorOverride(presetId: string | null): RGB | null {
   return presetId ? overrides.get(presetId) ?? null : null;
+}
+
+/**
+ * The color a preset currently shows: its tracked override, else its natural
+ * reference color. Reactive (reads the reactive override map). Not read back
+ * from the fixtures — the recolor keeps every sample's brightness, so no
+ * fixture sample has to equal the picked color.
+ */
+export function getEffectiveRGB(preset: Preset): RGB | null {
+  const engineStore = useEngineStore();
+  return getColorOverride(preset.id)
+    ?? getPresetNaturalRGB(preset.id, engineStore.savedPresets, engineStore.flatFixtures);
 }
 
 /** A preset was (re)applied, which reloads its snapshot and drops the override. */

@@ -4,7 +4,7 @@ import type { Preset } from '~/utils/engine/preset-types';
 import { cloneModifier, newModifierId } from '~/utils/engine/modifiers';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import type { RGB } from '~/utils/live/color-utils';
-import { rgbToHsv, hsvToRgb } from '~/utils/live/color-utils';
+import { recolorPreset } from '~/utils/live/preset-recolor';
 import { getCategoryType, getEffectCategoryType } from './preset-helpers';
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
@@ -52,159 +52,6 @@ function clearPresetEffects(preset: Preset, effects: ModifierInstance[]): void {
   }
 }
 
-/** Index of the first category in this preset that has any RGB channels, or -1. */
-function primaryRGBCategoryIndex(preset: Preset): number {
-  for (let i = 0; i < preset.categories.length; i++) {
-    const cat = preset.categories[i];
-    if (!cat) continue;
-    for (const snap of cat.channels) {
-      if (snap.channelType === 'RED' || snap.channelType === 'GREEN' || snap.channelType === 'BLUE') {
-        return i;
-      }
-    }
-  }
-  return -1;
-}
-
-/**
- * Read the FIRST pixel's natural RGB triple at step 0. A multi-pixel fixture
- * has multiple RED/GREEN/BLUE channels in the same category snapshot; we take
- * the first occurrence of each type so this is "pixel 0's color".
- */
-function categoryNaturalRGBAtStep0(category: Preset['categories'][number]): RGB | null {
-  let r: number | null = null, g: number | null = null, b: number | null = null;
-  for (const snap of category.channels) {
-    if (snap.channelType === 'RED'   && r === null) r = snap.stepValues[0] ?? 0;
-    if (snap.channelType === 'GREEN' && g === null) g = snap.stepValues[0] ?? 0;
-    if (snap.channelType === 'BLUE'  && b === null) b = snap.stepValues[0] ?? 0;
-    if (r !== null && g !== null && b !== null) break;
-  }
-  if (r === null && g === null && b === null) return null;
-  return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
-}
-
-/** Below this HSV saturation a sample counts as achromatic (white/gray/black). */
-const ACHROMATIC_EPS = 0.001;
-
-/**
- * How a color override transforms every natural sample of a preset. Derived
- * once from (primary natural pixel-0/step-0 color → override color).
- */
-export interface ColorShift {
-  /** Hue delta in degrees added to every chromatic sample. */
-  hueDelta: number;
-  /** Factor applied to every chromatic sample's saturation (clamped to 1). */
-  satScale: number;
-  /**
-   * Set when the primary natural color is achromatic: achromatic samples are
-   * tinted to this hue/saturation (keeping their value), since a hue delta
-   * relative to a gray reference is meaningless.
-   */
-  tint: { h: number; s: number } | null;
-}
-
-/**
- * Builds the shift that maps `primaryNatural` onto `override` in hue AND
- * saturation. Pure hue rotation can't reach white/gray overrides (saturation
- * stays as-is), so the saturation ratio override.s / primary.s is applied to
- * every chromatic sample: picking white desaturates the whole composition
- * while every step keeps its brightness.
- */
-export function buildColorShift(primaryNatural: RGB, override: RGB): ColorShift {
-  const prim = rgbToHsv(primaryNatural.r, primaryNatural.g, primaryNatural.b);
-  const ov = rgbToHsv(override.r, override.g, override.b);
-  if (prim.s < ACHROMATIC_EPS) {
-    return { hueDelta: ov.h - prim.h, satScale: 1, tint: { h: ov.h, s: ov.s } };
-  }
-  return { hueDelta: ov.h - prim.h, satScale: ov.s / prim.s, tint: null };
-}
-
-/** Applies a `ColorShift` to one natural RGB sample, keeping its HSV value. */
-export function shiftSample(rgb: RGB, shift: ColorShift): RGB {
-  const { h, s, v } = rgbToHsv(rgb.r, rgb.g, rgb.b);
-  if (s < ACHROMATIC_EPS) {
-    // Achromatic samples only change when the reference itself was achromatic.
-    return shift.tint ? hsvToRgb(shift.tint.h, shift.tint.s, v) : { ...rgb };
-  }
-  const hue = ((h + shift.hueDelta) % 360 + 360) % 360;
-  return hsvToRgb(hue, Math.min(1, s * shift.satScale), v);
-}
-
-/**
- * For one category, build shifted stepValues arrays for ALL its R/G/B channels.
- *
- * Multi-pixel fixtures have multiple (RED, GREEN, BLUE) channel snapshots in
- * the same category snapshot — one triple per pixel, in channel-order. Each
- * pixel is rotated independently using its own natural hue.
- *
- * Every step of every pixel of every category gets the same `ColorShift`
- * (hue delta + saturation scale, see `buildColorShift`), keeping each step's
- * natural value, so multi-step / multi-color / multi-pixel presets keep their
- * composition — and white/gray overrides desaturate it instead of being ignored.
- *
- * Special case (isPrimary && pixel === 0 && step === 0): use the override RGB
- * verbatim, so the wheel's exact picked color appears at the focal point.
- *
- * Returns Map<channelIndex, number[]> or null if the category has no RGB channels.
- */
-function rotateCategorySteps(
-  category: Preset['categories'][number],
-  override: RGB,
-  shift: ColorShift,
-  isPrimary: boolean,
-): Map<number, number[]> | null {
-  type Snap = typeof category.channels[number];
-  const redSnaps: Snap[] = [];
-  const greenSnaps: Snap[] = [];
-  const blueSnaps: Snap[] = [];
-  for (const snap of category.channels) {
-    if (snap.channelType === 'RED')   redSnaps.push(snap);
-    else if (snap.channelType === 'GREEN') greenSnaps.push(snap);
-    else if (snap.channelType === 'BLUE')  blueSnaps.push(snap);
-  }
-  if (redSnaps.length === 0 && greenSnaps.length === 0 && blueSnaps.length === 0) return null;
-
-  const pixelCount = Math.max(redSnaps.length, greenSnaps.length, blueSnaps.length);
-
-  const result = new Map<number, number[]>();
-
-  for (let p = 0; p < pixelCount; p++) {
-    const redSnap = redSnaps[p];
-    const greenSnap = greenSnaps[p];
-    const blueSnap = blueSnaps[p];
-
-    const stepCount = Math.max(
-      redSnap?.stepValues.length ?? 0,
-      greenSnap?.stepValues.length ?? 0,
-      blueSnap?.stepValues.length ?? 0,
-    );
-    if (stepCount === 0) continue;
-
-    const redOut: number[] = [];
-    const greenOut: number[] = [];
-    const blueOut: number[] = [];
-
-    for (let i = 0; i < stepCount; i++) {
-      const r = redSnap?.stepValues[i] ?? 0;
-      const g = greenSnap?.stepValues[i] ?? 0;
-      const b = blueSnap?.stepValues[i] ?? 0;
-
-      const rotated: RGB = (isPrimary && p === 0 && i === 0)
-        ? override
-        : shiftSample({ r, g, b }, shift);
-      redOut.push(rotated.r);
-      greenOut.push(rotated.g);
-      blueOut.push(rotated.b);
-    }
-
-    if (redSnap)   result.set(redSnap.channelIndex, redOut);
-    if (greenSnap) result.set(greenSnap.channelIndex, greenOut);
-    if (blueSnap)  result.set(blueSnap.channelIndex, blueOut);
-  }
-
-  return result;
-}
-
 /** Applies channel snapshots and reconstructs modifier effects from a preset. */
 function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: ModifierInstance[]): void {
   const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
@@ -247,47 +94,13 @@ function applyPresetToFixtures(preset: Preset, fixtures: Fixture[], effects: Mod
 }
 
 /**
- * Mutates fixture R/G/B channel step values to apply (or revert) a color
- * override. The wheel's exact color is applied to the preset's primary RGB
- * category at step 0; every other step (in primary and in any other RGB
- * category) gets the same hue + saturation shift so multi-step / multi-color
- * presets keep their composition (white overrides desaturate it). Passing `rgb=null` writes the natural
- * snapshot stepValues back — the fast-path "revert".
- *
- * No state is stored — the override is purely a fixture-state mutation. Any
- * subsequent preset (re-)activation reloads the snapshot via
- * `applyPresetToFixtures` and naturally clears the override.
+ * Applies (or reverts, `rgb = null`) a live color override to the preset's
+ * fixtures. See `recolorPreset` for the color model. No state is stored here —
+ * the override is a fixture-state mutation (tracked for display/Step back in
+ * `color-override-ops.ts`); any preset (re-)activation reloads the snapshot.
  */
 export function applyRGBOverride(preset: Preset, fixtures: Fixture[], rgb: RGB | null): void {
-  const fixtureMap = new Map<string | number, Fixture>(fixtures.map((f) => [f.id, f]));
-  const primaryIdx = rgb ? primaryRGBCategoryIndex(preset) : -1;
-  const primaryNatural = (rgb && primaryIdx >= 0)
-    ? categoryNaturalRGBAtStep0(preset.categories[primaryIdx]!)
-    : null;
-  const shift = (rgb && primaryNatural) ? buildColorShift(primaryNatural, rgb) : null;
-
-  for (let catIdx = 0; catIdx < preset.categories.length; catIdx++) {
-    const category = preset.categories[catIdx];
-    if (!category) continue;
-    const isPrimary = catIdx === primaryIdx;
-    const rotated = (rgb && shift)
-      ? rotateCategorySteps(category, rgb, shift, isPrimary)
-      : null;
-
-    for (const fixtureId of category.fixtureIds) {
-      const fixture = fixtureMap.get(fixtureId);
-      if (!fixture) continue;
-      for (const snap of category.channels) {
-        if (snap.channelType !== 'RED' && snap.channelType !== 'GREEN' && snap.channelType !== 'BLUE') continue;
-        const ch = fixture.channels[snap.channelIndex];
-        if (!ch || ch.type !== snap.channelType) continue;
-        const stepValuesOut = rotated?.get(snap.channelIndex) ?? [...snap.stepValues];
-        ch.chaserConfig.stepValues = stepValuesOut;
-        ch.chaserConfig.stepsCount = stepValuesOut.length;
-        ch.currentBaseValue = stepValuesOut[0] ?? ch.defaultValue;
-      }
-    }
-  }
+  recolorPreset(preset, fixtures, rgb);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

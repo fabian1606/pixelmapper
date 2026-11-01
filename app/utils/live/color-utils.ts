@@ -1,38 +1,26 @@
 import { resolvePreset } from '~/components/engine/composables/preset-resolve';
 import type { Preset } from '~/utils/engine/preset-types';
+import { findPresetReferenceColor, type RecolorFixture } from '~/utils/live/preset-recolor';
 
 export interface RGB { r: number; g: number; b: number }
 
 /** Returns hue in 0–360, or null if the preset has no RGB color channels. */
-export function getPresetDominantHue(presetId: string, savedPresets: Preset[]): number | null {
-  const rgb = getPresetNaturalRGB(presetId, savedPresets);
+export function getPresetDominantHue(presetId: string, savedPresets: Preset[], fixtures: readonly RecolorFixture[] = []): number | null {
+  const rgb = getPresetNaturalRGB(presetId, savedPresets, fixtures);
   if (!rgb) return null;
   return rgbToHsv(rgb.r, rgb.g, rgb.b).h;
 }
 
 /**
- * The FIRST pixel's natural RGB triple in the preset's primary RGB category.
- * Used as the "reference" color for hue-rotation, wheel handle position, and
- * "is this preset natural?" comparisons. Multi-pixel fixtures have multiple
- * (R, G, B) triples per category — we take the first of each type so this is
- * pixel 0's color, not "the last pixel's".
+ * The preset's natural reference color (see `findPresetReferenceColor`): the
+ * anchor for color-variant shifts, the color wheel's natural position and
+ * the "Preset" slot. Pass the live fixtures so RGB heads follow the fixture
+ * layout; without them the snapshot order is used.
  */
-export function getPresetNaturalRGB(presetId: string, savedPresets: Preset[]): RGB | null {
+export function getPresetNaturalRGB(presetId: string, savedPresets: Preset[], fixtures: readonly RecolorFixture[] = []): RGB | null {
   const preset = savedPresets.find(p => p.id === presetId);
   if (!preset) return null;
-  const resolved = resolvePreset(preset, savedPresets);
-  for (const cat of resolved.categories) {
-    let r: number | null = null, g: number | null = null, b: number | null = null;
-    for (const ch of cat.channels) {
-      const v = ch.stepValues[0] ?? 0;
-      if (ch.channelType === 'RED'   && r === null) r = v;
-      if (ch.channelType === 'GREEN' && g === null) g = v;
-      if (ch.channelType === 'BLUE'  && b === null) b = v;
-      if (r !== null && g !== null && b !== null) break;
-    }
-    if (r !== null || g !== null || b !== null) return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
-  }
-  return null;
+  return findPresetReferenceColor(resolvePreset(preset, savedPresets), fixtures);
 }
 
 /** hsv ∈ ([0,360], [0,1], [0,1]) → rgb ∈ [0,255]³ */

@@ -28,11 +28,11 @@ const activePreset = computed(() => engineStore.savedPresets.find(p => p.id === 
 
 /** Preset color without overrides. */
 const naturalRGB = computed<RGB | null>(() =>
-  activePresetId.value ? getPresetNaturalRGB(activePresetId.value, engineStore.savedPresets) : null);
+  activePresetId.value ? getPresetNaturalRGB(activePresetId.value, engineStore.savedPresets, engineStore.flatFixtures) : null);
 
 /** Current color derived from the live fixture state. */
 const effectiveRGB = computed<RGB | null>(() =>
-  activePreset.value ? getEffectiveRGB(activePreset.value, engineStore.flatFixtures) : null);
+  activePreset.value ? getEffectiveRGB(activePreset.value) : null);
 
 /** True when the live color differs from the preset's natural color. */
 const hasOverride = computed(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildColorShift, shiftSample } from './preset-apply';
+import { buildColorShift, shiftSample } from './color-shift';
 
 // ── Color override shift (live color variants) ────────────────────────────────
 
@@ -16,6 +16,11 @@ describe('buildColorShift / shiftSample', () => {
     const shift = buildColorShift(RED, WHITE);
     expect(shiftSample({ r: 0, g: 0, b: 255 }, shift)).toEqual(WHITE);
     expect(shiftSample({ r: 0, g: 128, b: 0 }, shift)).toEqual({ r: 128, g: 128, b: 128 });
+  });
+
+  it('keeps the sample brightness, not the override brightness', () => {
+    const shift = buildColorShift({ r: 128, g: 0, b: 128 }, { r: 0, g: 255, b: 0 });
+    expect(shiftSample({ r: 128, g: 0, b: 128 }, shift)).toEqual({ r: 0, g: 128, b: 0 });
   });
 
   it('leaves achromatic steps untouched when the reference is chromatic', () => {

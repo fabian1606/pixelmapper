@@ -139,6 +139,7 @@ function boundPresetFor(controlId: string) {
     controlId,
     engineStore.savedPresets,
     engineStore.selectedPresetId,
+    engineStore.flatFixtures,
   );
 }
 

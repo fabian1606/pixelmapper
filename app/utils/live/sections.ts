@@ -1,11 +1,14 @@
 import type { LivePage, LiveSection, LiveWidget, SectionColorEntry, SectionMember, SectionSource } from './types';
 import type { Preset } from '~/utils/engine/preset-types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
+import type { RecolorFixture } from '~/utils/live/preset-recolor';
 import { colorNameFor, getPresetNaturalRGB, growColorVariants, type RGB } from '~/utils/live/color-utils';
 
 export interface SectionResolveContext {
   savedPresets: Preset[];
   selectedPresetId: string | null;
+  /** Live fixtures, so the natural preset color follows the fixture layout. */
+  fixtures?: readonly RecolorFixture[];
   /** Number of section slots. Only used by 'color-variants'. */
   slotCount?: number;
   /** For 'color-variants' sections, the section's stored static color list. */
@@ -71,7 +74,7 @@ export function resolveSectionSource(source: SectionSource | string, ctx: Sectio
       if (!active) return [];
       const n = Math.max(0, ctx.slotCount ?? 0);
       if (n === 0) return [];
-      const base = getPresetNaturalRGB(activeId, ctx.savedPresets);
+      const base = getPresetNaturalRGB(activeId, ctx.savedPresets, ctx.fixtures);
       // If no stored list yet, fall back to a freshly-generated palette so the
       // section is usable until the user (or a follow-up command) persists it.
       const entries = ctx.storedColorVariants && ctx.storedColorVariants.length > 0
