@@ -121,7 +121,7 @@ export interface LiveMapping {
 /** When a button action fires. */
 export type ButtonTrigger = 'press' | 'double' | 'long' | 'hold' | 'release' | 'toggle';
 
-/** MIDI note or controller that presses a button (any input port). */
+/** MIDI note or controller (address of the `midi` input source). */
 export interface MidiTrigger {
   type: 'note' | 'cc';
   /** MIDI channel 1–16. */
@@ -156,13 +156,14 @@ export interface ButtonAction {
 }
 
 /**
- * Outside inputs that press the button like a click / pad hit: key down or
- * note-on presses, key up or note-off releases, so every trigger works.
+ * One outside input that presses a button like a click / pad hit (a key, a
+ * MIDI note, a Stream Deck key, …): down presses, up releases, so every
+ * trigger works. `source` names the `InputSource` (`utils/live/inputs/`),
+ * `address` is that source's own value, e.g. `"KeyB"` or a `MidiTrigger`.
  */
-export interface ButtonInputs {
-  /** `KeyboardEvent.code`, e.g. "KeyB", "Space". */
-  key?: string;
-  midi?: MidiTrigger;
+export interface InputBinding {
+  source: string;
+  address: unknown;
 }
 
 /** How a button looks while active. */
@@ -191,8 +192,8 @@ export interface ControllerChildBinding {
   /** Pad script (pads only). */
   actions?: ButtonAction[]
   appearance?: ButtonAppearance
-  /** Keyboard / MIDI that also press this pad. */
-  inputs?: ButtonInputs
+  /** Outside inputs that also press this pad. */
+  inputs?: InputBinding[]
 }
 
 export interface LiveWidget {
@@ -209,8 +210,8 @@ export interface LiveWidget {
   /** Button script (button widgets only). */
   actions?: ButtonAction[]
   appearance?: ButtonAppearance
-  /** Keyboard / MIDI that also press this button. */
-  inputs?: ButtonInputs
+  /** Outside inputs that also press this button. */
+  inputs?: InputBinding[]
   // controller-twin specific
   controllerKey?: string
   /** ID of the specific LiveControllerInstance this twin is bound to. */

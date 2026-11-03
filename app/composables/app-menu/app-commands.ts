@@ -3,6 +3,7 @@
  * (`src-tauri/src/menu.rs`) emits these ids; in the browser the subset in
  * `WEB_SHORTCUTS` is reachable by keyboard. Ids MUST match the Rust side.
  */
+import type { KeyBinding } from '~/utils/shortcuts/key-binding';
 
 /** Prefix of "Open Recent" entries: `recent:<project id>`. */
 export const RECENT_PREFIX = 'recent:';
@@ -66,7 +67,7 @@ export function runAppCommand(id: string, ctx: AppCommandContext): boolean {
  * pages themselves. In the desktop app the menu shows the same keys.
  */
 export const WEB_SHORTCUTS = [
-  { key: 'o', ctrl: true, label: 'Open…', command: 'file.open' },
-  { key: 'e', ctrl: true, shift: true, label: 'Export…', command: 'file.export' },
-  { key: ',', ctrl: true, label: 'Settings…', command: 'app.settings' },
-] as const;
+  { keys: [{ key: 'o', mod: true }], label: 'Open…', command: 'file.open' },
+  { keys: [{ key: 'e', mod: true, shift: true }], label: 'Export…', command: 'file.export' },
+  { keys: [{ key: ',', mod: true }], label: 'Settings…', command: 'app.settings' },
+] satisfies { keys: KeyBinding[]; label: string; command: string }[];

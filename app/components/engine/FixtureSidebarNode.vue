@@ -5,6 +5,7 @@ import { Fixture } from '~/utils/engine/core/fixture';
 import { ChevronRight, ChevronDown, Spotlight, Folder } from 'lucide-vue-next';
 import { useHistory } from '~/components/engine/composables/use-history';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
+import { shortcutLabel } from '~/composables/use-shortcut-bindings';
 import { RenameNodeCommand } from '~/components/engine/commands/rename-command';
 import {
   SidebarMenuItem,
@@ -146,7 +147,7 @@ function onContextMenu(e: MouseEvent) {
     },
     {
       label: 'Group Selection',
-      shortcut: '⌘G',
+      shortcut: shortcutLabel('edit.group'),
       action: () => emit('group'),
     },
   ];
@@ -154,14 +155,14 @@ function onContextMenu(e: MouseEvent) {
   if (isGroup.value) {
     options.push({
       label: 'Ungroup',
-      shortcut: '⇧⌘G',
+      shortcut: shortcutLabel('edit.ungroup'),
       action: () => emit('ungroup', props.node as FixtureGroup),
     });
   }
 
   options.push({
     label: 'Rename',
-    shortcut: 'F2',
+    shortcut: shortcutLabel('design.renameFixture'),
     action: () => startEditing(),
   });
 
@@ -175,7 +176,6 @@ function onContextMenu(e: MouseEvent) {
     options.push({ isSeparator: true });
     options.push({
       label: 'Edit Fixture Type',
-      shortcut: 'E',
       action: () => emit('editType', props.node),
     });
   }
@@ -185,7 +185,7 @@ function onContextMenu(e: MouseEvent) {
     label: 'Delete',
     variant: 'destructive',
     icon: Trash2,
-    shortcut: 'Del',
+    shortcut: shortcutLabel('edit.delete'),
     action: () => emit('delete', props.node),
   });
 
@@ -194,7 +194,7 @@ function onContextMenu(e: MouseEvent) {
 
 // F2 triggers rename only when this node is the single selection
 useShortcuts([
-  { key: 'F2', label: 'Rename', handler: () => { if (isSelected.value) startEditing(); } },
+  { id: 'design.renameFixture', handler: () => { if (isSelected.value) startEditing(); } },
 ]);
 </script>
 

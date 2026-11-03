@@ -143,7 +143,7 @@ describe('button actions input', () => {
             { trigger: 'hold', action: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'hit' } },
           ],
           appearance: { active: 'pulse', inactive: 'off' },
-          inputs: { key: 'KeyB', midi: { type: 'note', channel: 1, number: 36 } },
+          inputs: [{ source: 'key', address: 'KeyB' }, { source: 'midi', address: { type: 'note', channel: 1, number: 36 } }],
         },
       },
       { op: 'live.listPages', input: {} },
@@ -156,7 +156,7 @@ describe('button actions input', () => {
     expect(stored.actions![0]).toMatchObject({ trigger: 'press', duration: { mode: 'beats', beats: 4 }, triggerTouched: true });
     expect(stored.actions![1]).toMatchObject({ trigger: 'long', hold: { mode: 'time', ms: 1500 }, action: { globalFunction: 'stop-all' } });
     expect(stored.appearance).toEqual({ active: 'pulse', inactive: 'off' });
-    expect(stored.inputs).toEqual({ key: 'KeyB', midi: { type: 'note', channel: 1, number: 36 } });
+    expect(stored.inputs).toEqual([{ source: 'key', address: 'KeyB' }, { source: 'midi', address: { type: 'note', channel: 1, number: 36 } }]);
 
     const { pages } = res.results[1]!.value as { pages: Array<{ widgets: Array<Record<string, unknown>> }> };
     const view = pages[0]!.widgets.find(w => w.id === widgetId)!;
@@ -165,7 +165,7 @@ describe('button actions input', () => {
       { id: expect.any(String), trigger: 'long', action: { type: 'global-function', function: 'stop-all', config: {} }, hold: { mode: 'time', ms: 1500 } },
       { id: expect.any(String), trigger: 'hold', action: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'hit' } },
     ]);
-    expect(view).toMatchObject({ appearance: { active: 'pulse', inactive: 'off' }, inputs: { key: 'KeyB' } });
+    expect(view).toMatchObject({ appearance: { active: 'pulse', inactive: 'off' }, inputs: [{ source: 'key', address: 'KeyB' }, { source: 'midi', address: { type: 'note', channel: 1, number: 36 } }] });
     expect(view.mappingSummary).toBe('press → preset: warm; long → global-function: stop-all; hold → effect-param: modifier mod-1 → hit');
 
     useHistory().undo();
@@ -173,8 +173,8 @@ describe('button actions input', () => {
   });
 
   it('updates appearance / inputs and clears them with null', async () => {
-    await apply([{ op: 'live.updateWidget', input: { pageId: 'page-1', widgetId: 'w-btn', appearance: { active: 'blink' }, inputs: { key: 'Space' } } }]);
-    expect(widget('w-btn')).toMatchObject({ appearance: { active: 'blink' }, inputs: { key: 'Space' } });
+    await apply([{ op: 'live.updateWidget', input: { pageId: 'page-1', widgetId: 'w-btn', appearance: { active: 'blink' }, inputs: [{ source: 'key', address: 'Space' }] } }]);
+    expect(widget('w-btn')).toMatchObject({ appearance: { active: 'blink' }, inputs: [{ source: 'key', address: 'Space' }] });
     const res = await apply([{ op: 'live.updateWidget', input: { pageId: 'page-1', widgetId: 'w-btn', appearance: null, inputs: null } }]);
     expect(res.results[0]!.value).toEqual({ widgetId: 'w-btn', changed: ['appearance', 'inputs'] });
     expect(widget('w-btn')!.appearance).toBeUndefined();

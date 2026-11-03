@@ -25,6 +25,7 @@ import {
   type SectionSource,
 } from '~/utils/live/types';
 import { getControllerDefinition } from '~/utils/controllers/catalog';
+import { nativeInputLabel } from '~/utils/live/inputs/registry';
 import { sectionDisplayName } from '~/utils/live/sections';
 import MappingEditor from './MappingEditor.vue';
 import LiveSectionEditor from './LiveSectionEditor.vue';
@@ -280,6 +281,9 @@ const singleMemberSection = computed<LiveSection | null>(() =>
 /** Selected pad (twin sub-control of type button), edited with the button panel. */
 const selectedPad = computed(() => (selectedControl.value?.type === 'button' ? selectedControl.value : null));
 
+/** What the selected pad already sends in hardware (e.g. its MIDI note), shown read-only. */
+const selectedPadNativeInput = computed(() => nativeInputLabel(twinDefinition.value, selectedPad.value));
+
 // "Section" chosen while sections exist: the user still has to pick one.
 const pendingSectionChoice = ref(false);
 watch(() => singleMember.value && memberMatchKey(singleMember.value), () => {
@@ -517,6 +521,7 @@ function renamePosition(id: string, name: string) {
           :actions="selectedChild?.actions"
           :appearance="selectedChild?.appearance"
           :inputs="selectedChild?.inputs"
+          :native-input="selectedPadNativeInput"
           :section="singleMemberSection"
           :sections="availableSections"
           :section-pending="pendingSectionChoice"

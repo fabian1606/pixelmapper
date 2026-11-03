@@ -1,31 +1,29 @@
 import { onMounted, onUnmounted } from 'vue';
+import type { ShortcutId } from '~/utils/shortcuts/shortcut-registry';
+import { matchesBinding, type KeyBinding } from '~/utils/shortcuts/key-binding';
+import { getBindings } from '~/composables/use-shortcut-bindings';
 
 /**
- * Defines a single keyboard shortcut.
- * If `key` is a string, it matches `event.key`.
+ * A keyboard shortcut handler. Rebindable shortcuts name a registry `id`
+ * (keys come from Settings → Shortcuts); fixed ones pass their `keys`.
  */
-interface ShortcutDef {
-  /** The value of `event.key` to match (case-sensitive). */
-  key: string;
-  ctrl?: boolean;
-  shift?: boolean;
-  /** Human-readable label shown in UI (optional, e.g. for a shortcut cheat-sheet). */
-  label?: string;
-  handler: () => void;
-}
+type ShortcutDef =
+  | { id: ShortcutId; handler: () => void }
+  | { keys: readonly KeyBinding[]; label?: string; handler: () => void };
 
 /**
  * Central keyboard shortcut manager.
  *
  * Usage:
  *   useShortcuts([
- *     { key: 'z', ctrl: true, label: 'Undo', handler: history.undo },
- *     { key: 'Delete', label: 'Delete Selection', handler: deleteSelected },
+ *     { id: 'edit.undo', handler: history.undo },
+ *     { keys: [{ key: 'o', mod: true }], handler: openFile },
  *   ]);
  *
  * The composable registers a single `keydown` listener and handles
- * all shortcuts in one place. Shortcuts are automatically unregistered
- * when the component unmounts.
+ * all shortcuts in one place. Bindings are looked up on every keydown, so
+ * changes in Settings apply immediately. Shortcuts are automatically
+ * unregistered when the component unmounts.
  */
 export function useShortcuts(shortcuts: ShortcutDef[]): void {
   function onKeyDown(e: KeyboardEvent) {
@@ -33,15 +31,9 @@ export function useShortcuts(shortcuts: ShortcutDef[]): void {
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-    const ctrl = e.ctrlKey || e.metaKey;
-    const shift = e.shiftKey;
-
     for (const shortcut of shortcuts) {
-      const ctrlMatch = (shortcut.ctrl ?? false) === ctrl;
-      const shiftMatch = (shortcut.shift ?? false) === shift;
-      const keyMatch = e.key.toLowerCase() === shortcut.key.toLowerCase();
-
-      if (ctrlMatch && shiftMatch && keyMatch) {
+      const keys = 'id' in shortcut ? getBindings(shortcut.id) : shortcut.keys;
+      if (keys.some(b => matchesBinding(e, b))) {
         e.preventDefault();
         shortcut.handler();
         // Stop after first match so nothing double-fires

@@ -92,7 +92,7 @@ export function useAppMenu(): void {
   };
 
   activeCtx = ctx;
-  useShortcuts(WEB_SHORTCUTS.map(s => ({ ...s, handler: () => runAppCommand(s.command, ctx) })));
+  useShortcuts(WEB_SHORTCUTS.map(s => ({ keys: s.keys, label: s.label, handler: () => runAppCommand(s.command, ctx) })));
 
   let offMenu: (() => void) | undefined;
   onMounted(() => {

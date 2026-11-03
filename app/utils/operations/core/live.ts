@@ -103,7 +103,7 @@ const LiveWidgetInfoSchema = z.object({
   mapping: z.record(z.string(), z.unknown()).optional().describe('Mapping in the input shape of live.addWidget (effect-param uses modifierId). Not for buttons (they use actions).'),
   actions: z.array(z.record(z.string(), z.unknown())).optional().describe('Button script in the input shape of live.addWidget `actions` (buttons only).'),
   appearance: z.record(z.string(), z.unknown()).optional().describe('Button look (buttons only, when set).'),
-  inputs: z.record(z.string(), z.unknown()).optional().describe('Keyboard / MIDI inputs (buttons only, when set).'),
+  inputs: z.array(z.object({ source: z.string(), address: z.unknown() })).optional().describe('Input bindings, e.g. key / MIDI (buttons only, when set).'),
   mappingSummary: z.string().describe('One-line summary, e.g. "effect-param: modifier m1 → speed"; buttons: "<trigger> → <action>" per action, joined by "; ".'),
 });
 
@@ -247,7 +247,7 @@ export function liveWidgetView(w: LiveWidget): z.infer<typeof LiveWidgetInfoSche
       ? {
           actions: (w.actions ?? []).map(fromButtonAction),
           ...(w.appearance ? { appearance: { ...w.appearance } } : {}),
-          ...(w.inputs ? { inputs: JSON.parse(JSON.stringify(w.inputs)) as Record<string, unknown> } : {}),
+          ...(w.inputs ? { inputs: JSON.parse(JSON.stringify(w.inputs)) as { source: string; address: unknown }[] } : {}),
           mappingSummary: actionsSummary(w.actions),
         }
       : { mapping: fromLiveMapping(w.mapping), mappingSummary: mappingSummary(w.mapping) }),
@@ -362,7 +362,7 @@ export const liveAddWidget = defineCoreOperation({
     { input: { pageId: 'page-1', type: 'button', label: 'Strobe', color: '#ffffff', mapping: { type: 'global-function', function: 'strobe' } } },
     { input: { pageId: 'page-1', type: 'xy', label: 'Center', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'center' } }, note: 'XY pad driving the point param "center" (x/y 0–1).' },
     { input: { pageId: 'page-1', type: 'button', label: 'Invert', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'invert', behavior: 'hold' } }, note: 'Button setting the bool param "invert" while held (stored as one "hold" action).' },
-    { input: { pageId: 'page-1', type: 'button', label: 'Hit', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'hit' }, inputs: { key: 'Space' } }, note: 'Button pressing / releasing the trigger param "hit" (one "hold" action), also played with the space bar.' },
+    { input: { pageId: 'page-1', type: 'button', label: 'Hit', mapping: { type: 'effect-param', modifierId: 'mod-1', paramKey: 'hit' }, inputs: [{ source: 'key', address: 'Space' }] }, note: 'Button pressing / releasing the trigger param "hit" (one "hold" action), also played with the space bar.' },
     {
       input: {
         pageId: 'page-1',

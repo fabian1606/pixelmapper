@@ -3,6 +3,7 @@
  * the shape the core live-mode twin and the controller store use. Replaces
  * the former `controllers/` folder glob.
  */
+import type { MidiPortInfo } from '@pixelmapper/extension-api';
 import type { ControllerDefinition } from './types';
 import { getContributions } from '~/utils/extensions/registry';
 
@@ -17,6 +18,7 @@ export function listControllerDefinitions(): ControllerDefinition[] {
     viewBox: d.viewBox ?? { w: 100, h: 100 },
     defaultGridSize: d.defaultGridSize ?? { w: 8, h: 8 },
     controls: (d.controls ?? []).map(c => ({ ...c, defaultMapping: c.defaultMapping as ControllerDefinition['controls'][number]['defaultMapping'] })),
+    matches: d.matches?.bind(d),
     driverFactory: d.createDriver as ControllerDefinition['driverFactory'],
   }));
 }
@@ -24,4 +26,9 @@ export function listControllerDefinitions(): ControllerDefinition[] {
 /** A controller by key (null when its extension is not installed). */
 export function getControllerDefinition(key: string): ControllerDefinition | null {
   return listControllerDefinitions().find(d => d.key === key) ?? null;
+}
+
+/** The controller that claims a MIDI port (its messages belong to that twin), if any. */
+export function controllerForPort(port: MidiPortInfo): ControllerDefinition | null {
+  return listControllerDefinitions().find(d => d.matches?.(port)) ?? null;
 }

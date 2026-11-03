@@ -1,14 +1,16 @@
 import { createPlatform } from '#platform';
-import type { MidiApi } from '@pixelmapper/extension-api';
+import type { MidiApi, MidiPortInfo } from '@pixelmapper/extension-api';
+import { controllerForPort } from '~/utils/controllers/catalog';
+import type { ControllerDefinition } from '~/utils/controllers/types';
 
 /**
  * Shared MIDI input for button triggers ("On MIDI trigger") and MIDI learn.
  * Listens on every input port (hot-plug aware) and fans raw messages out to
- * subscribers. Access is requested lazily on the first subscription, so the
+ * subscribers together with the port they came from. Access is requested lazily on the first subscription, so the
  * browser only asks for MIDI permission once something actually needs it.
  */
 
-type Listener = (data: Uint8Array) => void;
+type Listener = (data: Uint8Array, source: MidiPortInfo) => void;
 
 const listeners = new Set<Listener>();
 const portOffs = new Map<string, () => void>();
@@ -26,8 +28,17 @@ export function isMidiAvailable(): boolean {
   return platformMidi() !== null;
 }
 
-function dispatch(data: Uint8Array) {
-  for (const l of listeners) l(data);
+function dispatch(data: Uint8Array, source: MidiPortInfo) {
+  for (const l of listeners) l(data, source);
+}
+
+/**
+ * Controller that owns a port. Its messages belong to that controller's
+ * twin, not to free MIDI learn / triggers. Not cached: controller
+ * extensions can be installed while the port stays connected.
+ */
+export function midiSourceOwner(source: MidiPortInfo): ControllerDefinition | null {
+  return controllerForPort(source);
 }
 
 async function start(): Promise<void> {
@@ -36,7 +47,8 @@ async function start(): Promise<void> {
   const access = await midi.requestAccess();
   const attachInputs = () => {
     for (const port of access.inputs()) {
-      if (!portOffs.has(port.id)) portOffs.set(port.id, port.onMessage(dispatch));
+      const source: MidiPortInfo = { id: port.id, name: port.name, manufacturer: port.manufacturer };
+      if (!portOffs.has(port.id)) portOffs.set(port.id, port.onMessage(data => dispatch(data, source)));
     }
   };
   attachInputs();
@@ -50,7 +62,7 @@ async function start(): Promise<void> {
   });
 }
 
-/** Subscribes to raw MIDI input from all ports; returns the unsubscribe function. */
+/** Subscribes to raw MIDI input from all ports (with its source port); returns the unsubscribe function. */
 export function onMidiInput(cb: Listener): () => void {
   listeners.add(cb);
   starting ??= start().catch((e) => {

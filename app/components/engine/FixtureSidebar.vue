@@ -6,6 +6,7 @@ import type { ModifierInstance } from '~/utils/engine/types';
 import FixtureSidebarNode from './FixtureSidebarNode.vue';
 import PresetsSidebar from './PresetsSidebar.vue';
 import SelectionInfoSection from './SelectionInfoSection.vue';
+import { shortcutLabel } from '~/composables/use-shortcut-bindings';
 import { Lightbulb, Plus, Spotlight, SquareFunction } from 'lucide-vue-next';
 import {
   Sidebar,
@@ -103,7 +104,7 @@ const selectedFixtures = computed(() =>
           variant="ghost"
           size="icon"
           class="size-7 text-muted-foreground hover:text-foreground"
-          title="Add Fixture (Shift+A)"
+          :title="`Add Fixture (${shortcutLabel('design.addFixture') ?? 'no shortcut'})`"
           @click="emit('requestAddFixture')"
         >
           <Plus class="size-4" />

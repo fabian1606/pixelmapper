@@ -5,8 +5,8 @@
  */
 import { ref } from 'vue';
 
-/** Sections the dialog can scroll to when opened. */
-export type SettingsSection = 'mcp';
+/** Tabs the dialog can open at. */
+export type SettingsSection = 'mcp' | 'shortcuts';
 
 /** Whether the dialog is open. */
 export const settingsOpen = ref(false);

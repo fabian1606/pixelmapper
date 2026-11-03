@@ -246,17 +246,15 @@ function handleUpdateFixtureType(newOfl: import('~/utils/ofl/types').OflFixture)
 }
 
 useShortcuts([
-  { key: 'z',         ctrl: true,               label: 'Undo',           handler: () => history.undo() },
-  { key: 'z',         ctrl: true, shift: true,  label: 'Redo',           handler: () => history.redo() },
-  { key: 'y',         ctrl: true,               label: 'Redo',           handler: () => history.redo() },
-  { key: 'a',         ctrl: true,               label: 'Select All',     handler: handleSelectAll },
-  { key: 'g',         ctrl: true,               label: 'Group',          handler: handleGroup },
-  { key: 'g',         ctrl: true, shift: true,  label: 'Ungroup',        handler: handleUngroupSelected },
-  { key: 'Delete',                              label: 'Delete Selected', handler: handleDeleteSelected },
-  { key: 'Backspace',                           label: 'Delete Selected', handler: handleDeleteSelected },
-  { key: 'a',         shift: true,              label: 'Add Fixture',    handler: () => { addDialogOpen.value = true } },
-  { key: 'p',         shift: true,              label: 'Save as Preset', handler: () => fixtureSidebarRef.value?.quickSave() },
-  { key: 's',         ctrl: true,               label: 'Force Snapshot', handler: () => triggerSaveSnapshot() },
+  { id: 'edit.undo',          handler: () => history.undo() },
+  { id: 'edit.redo',          handler: () => history.redo() },
+  { id: 'edit.selectAll',     handler: handleSelectAll },
+  { id: 'edit.group',         handler: handleGroup },
+  { id: 'edit.ungroup',       handler: handleUngroupSelected },
+  { id: 'edit.delete',        handler: handleDeleteSelected },
+  { id: 'design.addFixture',  handler: () => { addDialogOpen.value = true } },
+  // design.savePreset / design.overwritePreset are bound by PresetsSidebar
+  { id: 'edit.save',          handler: () => triggerSaveSnapshot() },
 ])
 </script>
 

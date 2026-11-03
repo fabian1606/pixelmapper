@@ -1,4 +1,5 @@
-import type { LiveMapping } from '~/utils/live/types';
+import type { MidiPortInfo } from '@pixelmapper/extension-api';
+import type { InputBinding, LiveMapping } from '~/utils/live/types';
 import type { BaseControllerDriver } from './base-controller-driver';
 
 export type ControllerControlType = 'button' | 'slider' | 'encoder' | 'xy-pad';
@@ -19,6 +20,8 @@ export interface ControllerControl {
   svgId?: string;
   /** Optional default mapping suggestion when a twin is freshly added. */
   defaultMapping?: Partial<LiveMapping>;
+  /** What the control sends in hardware (e.g. the note of a pad); shown read-only. */
+  input?: InputBinding;
 }
 
 export interface ControllerDefinition {
@@ -33,6 +36,8 @@ export interface ControllerDefinition {
   /** Default footprint of the twin on the live-mode grid. */
   defaultGridSize: { w: number; h: number };
   controls: ControllerControl[];
+  /** Claims MIDI ports for this controller (they are not free MIDI input). */
+  matches?: (port: MidiPortInfo) => boolean;
   driverFactory: (id: string) => BaseControllerDriver;
 }
 

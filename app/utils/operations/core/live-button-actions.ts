@@ -21,7 +21,7 @@ import type { Finding } from '@pixelmapper/agent-kit';
 import { getManifest } from '~/utils/plugins/plugin-store';
 import { isTriggerParam } from '~/utils/plugins/trigger-param';
 import { defaultTriggerFor, durationModesFor, withMapping } from '~/utils/live/button-actions';
-import { defaultButtonAction, type ButtonAction, type ButtonAppearance, type ButtonInputs, type LiveMapping } from '~/utils/live/types';
+import { defaultButtonAction, type ButtonAction, type ButtonAppearance, type InputBinding, type LiveMapping } from '~/utils/live/types';
 import { DEFAULT_BUTTON_BEHAVIOR, paramTypeOfValue } from '~/utils/live/control-param-value';
 import type { Preset } from '~/utils/engine/preset-types';
 import type { CoreReadApi } from '../read-api';
@@ -67,15 +67,24 @@ export const ButtonAppearanceSchema = z.object({
   inactive: z.enum(['dim', 'off', 'full']).optional().describe('Look while inactive (default dim).'),
 }).describe('Button look while active / inactive.');
 
-/** Keyboard / MIDI inputs that press a button. */
-export const ButtonInputsSchema = z.object({
-  key: z.string().min(1).optional().describe('KeyboardEvent.code, e.g. "KeyB", "Digit1", "Space". Key down presses, key up releases.'),
-  midi: z.object({
-    type: z.enum(['note', 'cc']),
-    channel: z.number().int().min(1).max(16).describe('MIDI channel 1–16.'),
-    number: z.number().int().min(0).max(127).describe('Note or controller number 0–127.'),
-  }).optional().describe('MIDI note / CC (any input port): note-on or CC > 0 presses, note-off or CC 0 releases.'),
-}).describe('Outside inputs that press the button like a click.');
+/** One outside input that presses a button (see `utils/live/inputs/`). */
+export const InputBindingSchema = z.union([
+  z.object({
+    source: z.literal('key'),
+    address: z.string().min(1).describe('KeyboardEvent.code, e.g. "KeyB", "Digit1", "Space". Key down presses, key up releases.'),
+  }),
+  z.object({
+    source: z.literal('midi'),
+    address: z.object({
+      type: z.enum(['note', 'cc']),
+      channel: z.number().int().min(1).max(16).describe('MIDI channel 1–16.'),
+      number: z.number().int().min(0).max(127).describe('Note or controller number 0–127.'),
+    }).describe('MIDI note / CC (any port no controller claims): note-on or CC > 0 presses, note-off or CC 0 releases.'),
+  }),
+]);
+
+/** Outside inputs that press a button like a click. */
+export const ButtonInputsSchema = z.array(InputBindingSchema).describe('Outside inputs (keys, MIDI) that press the button like a click.');
 
 /** Explanation shared by the operation descriptions. */
 export const BUTTON_ACTIONS_DOC = [
@@ -157,9 +166,9 @@ export function toAppearance(input: z.infer<typeof ButtonAppearanceSchema>): But
   return Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as ButtonAppearance;
 }
 
-/** Stored inputs from the input (drops absent fields). */
-export function toInputs(input: z.infer<typeof ButtonInputsSchema>): ButtonInputs {
-  return Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as ButtonInputs;
+/** Stored inputs from the input (copied; an empty list clears them). */
+export function toInputs(input: z.infer<typeof ButtonInputsSchema>): InputBinding[] | undefined {
+  return input.length ? input.map(b => ({ source: b.source, address: structuredClone(b.address) })) : undefined;
 }
 
 // ── Views ───────────────────────────────────────

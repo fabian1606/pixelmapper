@@ -18,7 +18,8 @@ function cloneWidget(w: LiveWidget): LiveWidget {
 }
 
 /**
- * Registers the standard live-mode keyboard shortcuts:
+ * Registers the standard live-mode keyboard shortcuts (default keys; all
+ * rebindable in Settings → Shortcuts, see `shortcut-registry.ts`):
  *   Cmd/Ctrl+Z         → Undo
  *   Cmd/Ctrl+Shift+Z   → Redo
  *   Cmd/Ctrl+Y         → Redo
@@ -189,20 +190,18 @@ export function useLiveShortcuts() {
   }
 
   useShortcuts([
-    { key: 'z', ctrl: true,              label: 'Undo',          handler: () => history.undo() },
-    { key: 'z', ctrl: true, shift: true, label: 'Redo',          handler: () => history.redo() },
-    { key: 'y', ctrl: true,              label: 'Redo',          handler: () => history.redo() },
-    { key: 'c', ctrl: true,              label: 'Copy',          handler: copySelected },
-    { key: 'v', ctrl: true,              label: 'Paste',         handler: paste },
-    { key: 'x', ctrl: true,              label: 'Cut',           handler: cutSelected },
-    { key: 'd', ctrl: true,              label: 'Duplicate',     handler: duplicateSelected },
-    { key: 'a', ctrl: true,              label: 'Select All',    handler: selectAll },
-    { key: 'g', ctrl: true,              label: 'Group',         handler: groupSelected },
-    { key: 'g', ctrl: true, shift: true, label: 'Ungroup',       handler: ungroupSelected },
-    { key: 'Delete',                     label: 'Delete',        handler: deleteSelected },
-    { key: 'Backspace',                  label: 'Delete',        handler: deleteSelected },
-    { key: 'Escape',                     label: 'Clear Sel.',    handler: clearSelection },
-    { key: 's', ctrl: true,              label: 'Force Snapshot', handler: () => triggerSaveSnapshot() },
+    { id: 'edit.undo',            handler: () => history.undo() },
+    { id: 'edit.redo',            handler: () => history.redo() },
+    { id: 'live.copy',            handler: copySelected },
+    { id: 'live.paste',           handler: paste },
+    { id: 'live.cut',             handler: cutSelected },
+    { id: 'live.duplicate',       handler: duplicateSelected },
+    { id: 'edit.selectAll',       handler: selectAll },
+    { id: 'edit.group',           handler: groupSelected },
+    { id: 'edit.ungroup',         handler: ungroupSelected },
+    { id: 'edit.delete',          handler: deleteSelected },
+    { id: 'live.clearSelection',  handler: clearSelection },
+    { id: 'edit.save',            handler: () => triggerSaveSnapshot() },
   ]);
 
   return {

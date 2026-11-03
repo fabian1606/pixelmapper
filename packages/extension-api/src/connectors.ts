@@ -211,6 +211,12 @@ export interface ControllerControlDef {
   svgId?: string;
   /** Default live mapping suggested when a twin is added (core `LiveMapping` shape). */
   defaultMapping?: Record<string, unknown>;
+  /**
+   * What the control sends in hardware, as a live input binding (e.g.
+   * `{ source: 'midi', address: { type: 'note', channel: 1, number: 3 } }`).
+   * Shown read-only in the twin's sidebar.
+   */
+  input?: { source: string; address: unknown };
 }
 
 /** A hardware controller contributed by an extension. */
@@ -221,7 +227,10 @@ export interface ControllerDefinition {
   description: string;
   vendor?: string;
   model?: string;
-  /** Auto-detection by MIDI port (optional). */
+  /**
+   * Auto-detection by MIDI port (optional). Matching ports belong to this
+   * controller: free MIDI learn / triggers on canvas buttons ignore them.
+   */
   matches?(port: MidiPortInfo): boolean;
   /** Create a driver instance. */
   createDriver(id: string): ControllerDriver;

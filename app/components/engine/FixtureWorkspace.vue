@@ -10,6 +10,7 @@ import { FixtureGroup, type SceneNode } from '~/utils/engine/core/group';
 import { useHistory } from './composables/use-history';
 import { Button } from '@/components/ui/button';
 import { useGlobalContextMenu, type ContextMenuItemOption } from '~/composables/useGlobalContextMenu';
+import { shortcutLabel } from '~/composables/use-shortcut-bindings';
 import {
   Trash2,
   AlignHorizontalDistributeCenter,
@@ -131,7 +132,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
   if (selectedIds.value.size > 0) {
     options.push({
       label: 'Group Selection',
-      shortcut: '⌘G',
+      shortcut: shortcutLabel('edit.group'),
       action: handleGroup,
     });
 
@@ -144,7 +145,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
     if (hasSelectedGroup.value) {
       options.push({
         label: 'Ungroup',
-        shortcut: '⇧⌘G',
+        shortcut: shortcutLabel('edit.ungroup'),
         action: handleUngroupSelected,
       });
     }
@@ -163,7 +164,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
   if (hasUnsavedChanges.value) {
     options.push({
       label: 'Create Preset',
-      shortcut: '⇧P',
+      shortcut: shortcutLabel('design.savePreset'),
       action: () => emit('quick-save'),
     });
   }
@@ -178,7 +179,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
   if (selectedPresetId.value && hasUnsavedChanges.value) {
     options.push({
       label: 'Overwrite Active Preset',
-      shortcut: '⇧S',
+      shortcut: shortcutLabel('design.overwritePreset'),
       action: () => emit('overwrite-active-preset'),
     });
   }
@@ -189,7 +190,7 @@ function onWorkspaceContextMenu(e: MouseEvent) {
       label: 'Delete',
       variant: 'destructive',
       icon: Trash2,
-      shortcut: 'Del',
+      shortcut: shortcutLabel('edit.delete'),
       action: handleDeleteSelected,
     });
   }

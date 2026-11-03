@@ -8,6 +8,7 @@ import { setActivePreset, toggleActivePreset } from '~/components/engine/composa
 import { useHistory } from '~/components/engine/composables/use-history';
 import type { SceneNode } from '~/utils/engine/core/group';
 import { useShortcuts } from '~/components/engine/composables/use-shortcuts';
+import { shortcutLabel } from '~/composables/use-shortcut-bindings';
 import { SavePresetCommand, DeletePresetCommand, OverwritePresetCommand } from '~/components/engine/commands/preset-commands';
 import { UpdatePresetMetadataCommand } from '~/components/engine/commands/update-preset-metadata-command';
 import type { Preset, PresetCategory, PresetCategoryType } from '~/utils/engine/preset-types';
@@ -90,8 +91,8 @@ function resetAll() {
 
 // Shortcuts
 useShortcuts([
-  { key: 'P', shift: true, label: 'Save Preset', handler: () => quickSave() },
-  { key: 'S', shift: true, label: 'Overwrite Preset', handler: () => overwriteActivePreset() }
+  { id: 'design.savePreset', handler: () => quickSave() },
+  { id: 'design.overwritePreset', handler: () => overwriteActivePreset() },
 ]);
 
 // ─── Unsaved changes (reactive, recomputed on fixture changes) ────────────────
@@ -417,7 +418,6 @@ function onPresetContextMenu(e: MouseEvent, preset: Preset) {
       label: preset.basePresetId ? 'Delete Variant' : 'Delete Preset',
       icon: Trash2,
       variant: 'destructive',
-      shortcut: 'Del',
       action: () => handleDeletePreset(preset),
     },
   ];
@@ -629,7 +629,7 @@ defineExpose({
                     v-if="selectedPresetId === preset.id && hasUnsaved"
                     class="flex items-center justify-center p-1.5 text-xs font-medium hover:opacity-100 opacity-60 transition-opacity"
                     @click.stop="handleOverwrite(preset)"
-                    title="Overwrite Preset with current changes (Shift+S)"
+                    :title="`Overwrite Preset with current changes (${shortcutLabel('design.overwritePreset') ?? 'no shortcut'})`"
                   >
                     <Save class="size-3.5 shrink-0 text-foreground" />
                   </button>
@@ -814,10 +814,10 @@ defineExpose({
             class="mt-5 h-7 text-[10px] uppercase tracking-widest font-semibold gap-1.5"
             :disabled="!hasUnsaved"
             @click="quickSave"
-            title="Save as new preset (Shift+P)"
+            :title="`Save as new preset (${shortcutLabel('design.savePreset') ?? 'no shortcut'})`"
           >
             <Save class="size-3" />
-            Create Preset <span class="opacity-50 ml-1 font-normal capitalize tracking-normal">(Shift+P)</span>
+            Create Preset <span v-if="shortcutLabel('design.savePreset')" class="opacity-50 ml-1 font-normal capitalize tracking-normal">({{ shortcutLabel('design.savePreset') }})</span>
           </Button>
         </div>
       </div>

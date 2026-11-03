@@ -45,6 +45,7 @@ for (let row = 0; row < 8; row++) {
       type:  'button',
       label: `Pad ${row},${col}`,
       svgId: hexId(note),
+      input: { source: 'midi', address: { type: 'note', channel: 1, number: note } },
       rect:  { x: PAD_COL_RIGHTS[col]! - PAD_W, y: PAD_ROW_TOPS[row]!, w: PAD_W, h: PAD_H },
     });
   }
@@ -57,6 +58,7 @@ for (let i = 0; i < 8; i++) {
     type:  'button',
     label: `Track ${i + 1}`,
     svgId: hexId(TRACK_NOTE_BASE + i),
+    input: { source: 'midi', address: { type: 'note', channel: 1, number: TRACK_NOTE_BASE + i } },
     rect:  { x: TRACK_RIGHTS[i]! - TRACK_W, y: TRACK_Y, w: TRACK_W, h: TRACK_H },
   });
 }
@@ -68,6 +70,7 @@ for (let i = 0; i < 8; i++) {
     type:  'button',
     label: `Scene ${i + 1}`,
     svgId: hexId(SCENE_NOTE_BASE + i),
+    input: { source: 'midi', address: { type: 'note', channel: 1, number: SCENE_NOTE_BASE + i } },
     rect:  { x: SCENE_RIGHTS[i]! - SCENE_W, y: SCENE_YS[i]!, w: SCENE_W, h: SCENE_H },
   });
 }
@@ -78,6 +81,7 @@ controls.push({
   type:  'button',
   label: 'Shift',
   svgId: hexId(SHIFT_NOTE),
+  input: { source: 'midi', address: { type: 'note', channel: 1, number: SHIFT_NOTE } },
   rect:  { x: 406.225 - 10.811, y: 250.298, w: 10.811, h: 10.811 },
 });
 
@@ -88,6 +92,7 @@ for (let i = 0; i < 9; i++) {
     type:  'slider',
     label: i < 8 ? `Fader ${i + 1}` : 'Master',
     svgId: faderId(FADER_CC_BASE + i),
+    input: { source: 'midi', address: { type: 'cc', channel: 1, number: FADER_CC_BASE + i } },
     rect:  { x: FADER_RIGHTS[i]! - FADER_W, y: FADER_Y, w: FADER_W, h: FADER_H },
   });
 }

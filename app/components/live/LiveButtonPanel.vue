@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useEngineStore } from '~/stores/engine-store';
-import type { ButtonAction, ButtonAppearance, ButtonInputs, LiveSection } from '~/utils/live/types';
+import type { ButtonAction, ButtonAppearance, InputBinding, LiveSection } from '~/utils/live/types';
 import { autoLabel } from '~/utils/live/button-actions';
 import SegmentedControl from '~/components/engine/SegmentedControl.vue';
 import LiveButtonAppearance from './LiveButtonAppearance.vue';
 import LiveActionList from './LiveActionList.vue';
 import LiveSectionAssignment from './LiveSectionAssignment.vue';
-import LiveTriggerLearn from './LiveTriggerLearn.vue';
+import LiveInputList from './LiveInputList.vue';
 
 /**
  * Sidebar panel of one button (canvas button or controller pad). Order:
@@ -18,15 +18,17 @@ import LiveTriggerLearn from './LiveTriggerLearn.vue';
  * look of its own. Section membership itself lives on the page; the panel
  * only emits intents and the sidebar runs the commands.
  */
-type ButtonPatch = { label?: string; color?: string; actions?: ButtonAction[]; appearance?: ButtonAppearance; inputs?: ButtonInputs };
+type ButtonPatch = { label?: string; color?: string; actions?: ButtonAction[]; appearance?: ButtonAppearance; inputs?: InputBinding[] };
 
 const props = defineProps<{
   label?: string;
   color?: string;
   actions?: ButtonAction[];
   appearance?: ButtonAppearance;
-  /** Keyboard / MIDI that also press this button. */
-  inputs?: ButtonInputs;
+  /** Outside inputs (key, MIDI, …) that also press this button. */
+  inputs?: InputBinding[];
+  /** What a controller pad already sends in hardware (read-only). */
+  nativeInput?: string | null;
   /** Section this button belongs to, if any. */
   section: LiveSection | null;
   /** All sections of the page (for the section picker). */
@@ -104,20 +106,13 @@ function onSectionAppearance(patch: { color?: string; appearance?: ButtonAppeara
       />
     </div>
 
-    <!-- ── Input: key / MIDI press this button like a click ─────────────── -->
-    <div class="flex flex-col gap-3 pt-4 border-t border-border">
-      <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Input</span>
-      <LiveTriggerLearn
-        kind="key"
-        :key-code="inputs?.key"
-        @update:key-code="(key) => emit('patch', { inputs: { ...inputs, key } })"
-      />
-      <LiveTriggerLearn
-        kind="midi"
-        :midi="inputs?.midi"
-        @update:midi="(midi) => emit('patch', { inputs: { ...inputs, midi } })"
-      />
-    </div>
+    <!-- ── Input: keys / MIDI / … press this button like a click ───────── -->
+    <LiveInputList
+      class="pt-4 border-t border-border"
+      :inputs="inputs"
+      :native="nativeInput"
+      @update="(next) => emit('patch', { inputs: next.length ? next : undefined })"
+    />
 
     <!-- ── Actions / Section ───────────────────────────────────────────── -->
     <div class="flex flex-col gap-3 pt-4 border-t border-border">
